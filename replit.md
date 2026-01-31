@@ -119,6 +119,17 @@ shared/
 - `PAYSTACK_SECRET_KEY` - Paystack secret (for production)
 
 ## Recent Changes
+- January 31, 2026: Fixed role-based routing bug where admin/lawyer users were incorrectly redirected to founder dashboard (removed registerAuthRoutes() to use custom /api/auth/user endpoint that returns roles)
+- January 2026: Enhanced platform with advanced features
+  - Payment state transitions (released_to_lawyer, refunded_partial, refunded_full, chargeback)
+  - Verification receipts management (issue/revoke)
+  - Execution declarations for lawyers
+  - Clarification requests with AI draft composer
+  - Offline draft sync with IndexedDB
+  - Document quality check UI
+  - AI events log viewer for admin
+  - New feature flags: offline_drafting, document_quality_check, ai_clarifications, execution_declarations, verification_receipts, readiness_scoring
+  - 18 audit log action types throughout the system
 - January 2026: Initial build with complete frontend/backend implementation
 - Database schema with 15+ tables
 - Three-role authentication system

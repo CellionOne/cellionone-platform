@@ -254,7 +254,7 @@ export type InsertConsentGrant = z.infer<typeof insertConsentGrantSchema>;
 export const auditLogs = pgTable("audit_logs", {
   id: serial("id").primaryKey(),
   actorUserId: varchar("actor_user_id"),
-  action: varchar("action", { length: 100 }).notNull(), // login, logout, view_application, upload_document, download_document, change_status, request_clarification, admin_override
+  action: varchar("action", { length: 100 }).notNull(), // Actions: create_application, submit_application, upload_document, change_status, create_declaration, quality_override, create_clarification, send_clarification, resolve_clarification, generate_ai_draft, sync_offline_draft, admin_override, issue_receipt, revoke_receipt
   entityType: varchar("entity_type", { length: 100 }),
   entityId: varchar("entity_id", { length: 100 }),
   details: json("details").$type<Record<string, any>>(),

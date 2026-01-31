@@ -29,30 +29,37 @@ export async function seedDatabase() {
 
     // Seed demo users if in development
     if (process.env.NODE_ENV !== "production") {
-      const existingUsers = await db.select().from(users).limit(1);
+      // Insert demo users (always sync)
+      const demoUsers = [
+        { id: "demo-admin-001", username: "admin@celion.ng", email: "admin@celion.ng", firstName: "Admin", lastName: "User" },
+        { id: "demo-lawyer-001", username: "lawyer@celion.ng", email: "lawyer@celion.ng", firstName: "Chinedu", lastName: "Okonkwo" },
+        { id: "demo-lawyer-002", username: "lawyer2@celion.ng", email: "lawyer2@celion.ng", firstName: "Amaka", lastName: "Nwachukwu" },
+        { id: "demo-founder-001", username: "founder@celion.ng", email: "founder@celion.ng", firstName: "Emeka", lastName: "Okoro" },
+        { id: "demo-founder-002", username: "founder2@celion.ng", email: "founder2@celion.ng", firstName: "Ngozi", lastName: "Adeyemi" },
+      ];
       
-      if (existingUsers.length === 0) {
-        // Insert demo users
-        for (const user of [
-          { id: "demo-admin-001", username: "admin@celion.ng", email: "admin@celion.ng", firstName: "Admin", lastName: "User" },
-          { id: "demo-lawyer-001", username: "lawyer@celion.ng", email: "lawyer@celion.ng", firstName: "Chinedu", lastName: "Okonkwo" },
-          { id: "demo-lawyer-002", username: "lawyer2@celion.ng", email: "lawyer2@celion.ng", firstName: "Amaka", lastName: "Nwachukwu" },
-          { id: "demo-founder-001", username: "founder@celion.ng", email: "founder@celion.ng", firstName: "Emeka", lastName: "Okoro" },
-          { id: "demo-founder-002", username: "founder2@celion.ng", email: "founder2@celion.ng", firstName: "Ngozi", lastName: "Adeyemi" },
-        ]) {
-          await db.insert(users).values(user).onConflictDoNothing();
-        }
-        console.log("Seeded demo users");
+      for (const user of demoUsers) {
+        await db.insert(users).values(user).onConflictDoNothing();
+      }
+      console.log("Synced demo users");
 
-        // Assign roles
-        await db.insert(userRoles).values([
-          { userId: "demo-admin-001", role: "admin" },
-          { userId: "demo-lawyer-001", role: "lawyer" },
-          { userId: "demo-lawyer-002", role: "lawyer" },
-          { userId: "demo-founder-001", role: "founder" },
-          { userId: "demo-founder-002", role: "founder" },
-        ]);
-        console.log("Seeded user roles");
+      // Always sync roles (in case they're missing)
+      const demoRoles = [
+        { userId: "demo-admin-001", role: "admin" },
+        { userId: "demo-lawyer-001", role: "lawyer" },
+        { userId: "demo-lawyer-002", role: "lawyer" },
+        { userId: "demo-founder-001", role: "founder" },
+        { userId: "demo-founder-002", role: "founder" },
+      ];
+      
+      for (const role of demoRoles) {
+        await db.insert(userRoles).values(role).onConflictDoNothing();
+      }
+      console.log("Synced demo user roles");
+      
+      // Check for and seed sample data if needed
+      const existingApps = await db.select().from(companyApplications).limit(1);
+      if (existingApps.length === 0) {
 
         // Seed sample applications
         await db.insert(companyApplications).values({

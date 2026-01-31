@@ -66,6 +66,24 @@ function ProtectedRoute({
   return <Component />;
 }
 
+function RoleBasedRedirect() {
+  const { user, isLoading } = useAuth();
+  
+  if (isLoading) {
+    return <LoadingPage />;
+  }
+  
+  const roles = user?.roles || [];
+  
+  if (roles.includes("admin")) {
+    return <Redirect to="/admin/dashboard" />;
+  } else if (roles.includes("lawyer")) {
+    return <Redirect to="/lawyer/dashboard" />;
+  } else {
+    return <Redirect to="/founder/dashboard" />;
+  }
+}
+
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
   
@@ -75,7 +93,7 @@ function Router() {
         {isLoading ? (
           <LoadingPage />
         ) : isAuthenticated ? (
-          <Redirect to="/founder/dashboard" />
+          <RoleBasedRedirect />
         ) : (
           <LandingPage />
         )}

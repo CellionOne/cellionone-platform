@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
+import { setupAuth, isAuthenticated } from "./replit_integrations/auth";
 import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_integrations/object_storage";
 import OpenAI from "openai";
 import crypto from "crypto";
@@ -158,9 +158,8 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Setup authentication
+  // Setup authentication (don't call registerAuthRoutes - we have our own /api/auth/user that includes roles)
   await setupAuth(app);
-  registerAuthRoutes(app);
   
   // Setup object storage routes
   registerObjectStorageRoutes(app);
@@ -710,6 +709,15 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         lawyerId: userId,
         submissionType: parsed.data.declarationType === "cac_filed" ? "digital" : "physical",
         notes: `Declaration type: ${parsed.data.declarationType}`,
+      });
+      
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "create_declaration",
+        entityType: "execution_declaration",
+        entityId: declaration.id.toString(),
+        details: { applicationId, declarationType: parsed.data.declarationType },
+        ipAddress: req.ip,
       });
       
       res.json(declaration);

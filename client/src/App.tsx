@@ -17,6 +17,7 @@ import NewApplication from "@/pages/applications/new";
 import ApplicationDetails from "@/pages/applications/[id]";
 import LawyerDashboard from "@/pages/lawyer/dashboard";
 import LawyerApplications from "@/pages/lawyer/applications";
+import LawyerApplicationDetail from "@/pages/lawyer/application-detail";
 import LawyerPayouts from "@/pages/lawyer/payouts";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminUsers from "@/pages/admin/users";
@@ -105,7 +106,7 @@ function Router() {
         <ProtectedRoute component={LawyerApplications} roles={["lawyer"]} />
       </Route>
       <Route path="/lawyer/applications/:id">
-        <ProtectedRoute component={LawyerApplications} roles={["lawyer"]} />
+        <ProtectedRoute component={LawyerApplicationDetail} roles={["lawyer"]} />
       </Route>
       <Route path="/lawyer/payouts">
         <ProtectedRoute component={LawyerPayouts} roles={["lawyer"]} />

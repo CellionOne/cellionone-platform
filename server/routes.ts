@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
+import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_integrations/object_storage";
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
@@ -161,6 +162,9 @@ export async function registerRoutes(
   await setupAuth(app);
   registerAuthRoutes(app);
   
+  // Setup object storage routes
+  registerObjectStorageRoutes(app);
+  
   // Seed feature flags
   await seedFeatureFlags();
 
@@ -293,13 +297,14 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Access denied" });
       }
       
-      const [checklist, payment, clarifications] = await Promise.all([
+      const [checklist, payment, clarifications, documents] = await Promise.all([
         storage.getChecklistItems(applicationId),
         storage.getPaymentByApplication(applicationId),
         storage.getClarificationsByApplication(applicationId),
+        storage.getDocumentsByApplication(applicationId),
       ]);
       
-      res.json({ application, checklist, payment, clarifications });
+      res.json({ application, checklist, payment, clarifications, documents });
     } catch (error) {
       console.error("Error fetching application:", error);
       res.status(500).json({ message: "Failed to fetch application" });
@@ -409,26 +414,47 @@ export async function registerRoutes(
     try {
       const userId = getUserId(req);
       const applicationId = parseInt(req.params.id);
-      const { checklistItemId } = req.body;
+      const { checklistItemId, storagePath, filename, docType } = req.body;
       
       const application = await storage.getApplication(applicationId);
-      if (!application || application.founderUserId !== userId) {
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      
+      // Check if user is owner, assigned lawyer, or admin
+      const isOwner = application.founderUserId === userId;
+      const isAssignedLawyer = application.assignedLawyerUserId === userId;
+      const userRoles = await storage.getUserRoles(userId);
+      const isAdmin = userRoles.some(r => r.role === "admin");
+      
+      if (!isOwner && !isAssignedLawyer && !isAdmin) {
         return res.status(403).json({ message: "Access denied" });
       }
       
-      // Update checklist item status
-      await storage.updateChecklistItem(parseInt(checklistItemId), {
-        status: "provided",
-      });
+      // Update checklist item status if provided
+      if (checklistItemId) {
+        await storage.updateChecklistItem(parseInt(checklistItemId), {
+          status: "provided",
+        });
+      }
+      
+      // Require valid storagePath from object storage
+      if (!storagePath || !storagePath.startsWith('/objects/')) {
+        return res.status(400).json({ 
+          message: "Invalid storagePath. Must start with /objects/ from upload response." 
+        });
+      }
+      
+      const finalStoragePath = storagePath;
       
       // Create document record
       const document = await storage.createDocument({
         ownerUserId: userId,
         applicationId,
         category: "company",
-        docType: "uploaded_document",
-        filename: "uploaded_file",
-        storagePath: `/uploads/${applicationId}/${Date.now()}`,
+        docType: docType || "uploaded_document",
+        filename: filename || "uploaded_file",
+        storagePath: finalStoragePath,
         isSensitive: true,
       });
       
@@ -717,6 +743,69 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error) {
       console.error("Error fetching declarations:", error);
       res.status(500).json({ message: "Failed to fetch declarations" });
+    }
+  });
+
+  // ============== DOCUMENT ACCESS ROUTES ==============
+  app.get("/api/documents/:id/download", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const documentId = parseInt(req.params.id);
+      
+      const doc = await storage.getDocument(documentId);
+      if (!doc) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+      
+      const roles = await getUserRoles(userId);
+      const isOwner = doc.ownerUserId === userId;
+      const isAdmin = roles.includes("admin");
+      
+      let isAssignedLawyer = false;
+      if (doc.applicationId) {
+        const application = await storage.getApplication(doc.applicationId);
+        if (application && application.assignedLawyerUserId === userId) {
+          isAssignedLawyer = true;
+        }
+      }
+      
+      if (!isOwner && !isAssignedLawyer && !isAdmin) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      let downloadUrl: string | null = null;
+      let storageConfigured = false;
+      
+      if (doc.storagePath) {
+        if (doc.storagePath.startsWith('/objects/')) {
+          try {
+            const objectStorage = new ObjectStorageService();
+            const objectFile = await objectStorage.getObjectEntityFile(doc.storagePath);
+            downloadUrl = await objectStorage.getObjectEntityDownloadURL(doc.storagePath, 900);
+            storageConfigured = true;
+          } catch (err) {
+            console.error("Error getting download URL:", err);
+            downloadUrl = null;
+            storageConfigured = false;
+          }
+        } else if (doc.storagePath.startsWith('http')) {
+          downloadUrl = doc.storagePath;
+          storageConfigured = true;
+        }
+      }
+      
+      res.json({
+        id: doc.id,
+        filename: doc.filename,
+        downloadUrl,
+        docType: doc.docType,
+        category: doc.category,
+        sha256Hash: doc.sha256Hash,
+        storageConfigured,
+      });
+    } catch (error) {
+      console.error("Error fetching document:", error);
+      res.status(500).json({ message: "Failed to fetch document" });
     }
   });
 

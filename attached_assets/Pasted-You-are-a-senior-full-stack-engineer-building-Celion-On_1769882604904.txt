@@ -1,0 +1,330 @@
+You are a senior full-stack engineer building Celion One V1 for Cellion Platforms.
+
+GOAL (V1)
+Build a production-ready web app MVP called “Celion One” that helps users (founders) complete a single digital intake for Nigeria company incorporation + post-incorporation, verify identity/documents once, and route execution to a lawyer portal. Even if final filing is physical, the user experience must be seamless, tracked, and auditable. Lawyers upload stamped originals after completion and handle courier shipment of originals to the user. The platform stores a reusable “Company Vault” for future workflows (TIN, bank account opening referrals) – these can be marked “Coming Soon” but the data structures and UI scaffolding should exist.
+
+IMPORTANT: V1 MUST ALSO BE AN INSTALLABLE PROGRESSIVE WEB APP (PWA) with offline-resilient drafting and upload queuing (details below). Do NOT promise offline final submission. Offline is for drafting + resilient uploads only.
+
+STACK (RECOMMENDED)
+- Backend: Python Flask
+- ORM: SQLAlchemy + Flask-Migrate
+- Auth: Flask-Login (session-based)
+- Security: Flask-Talisman + CSRF protection + rate limiting (Flask-Limiter)
+- Storage: Local filesystem for dev, abstraction layer for S3-compatible storage later
+- Frontend: Jinja templates + Tailwind (preferred) or Bootstrap 5 with clean UI
+- Background jobs: APScheduler optional; keep synchronous for V1 unless needed
+- Payments: Paystack (Nigeria) for user checkout + split payout to lawyers (Paystack subaccounts).
+  If split payout isn’t feasible in sandbox, implement the full ledger + webhook handling and stub transfer behind an interface.
+- AI: OpenAI API for “Legal AI” mapping business description -> CAC activity suggestions
+- PWA: service worker + manifest + IndexedDB for offline drafts and upload queue.
+
+NON-NEGOTIABLES
+1) Strong separation: Founders submit data; lawyers cannot modify founder identity/critical fields; lawyers can only request changes or add notes.
+2) Audit everything: view/download/upload/status-change actions logged.
+3) Sensitive data security: strict access control; private file links; no public URLs; no sensitive docs cached offline by default.
+4) Consent model: user must explicitly consent for a lawyer to access their application.
+5) Feature flags: allow enabling/disabling “Coming Soon” modules without code changes.
+
+CORE V1 USER ROLES
+- Founder (end user)
+- Lawyer (processing agent)
+- Admin (platform operator)
+
+PRIMARY V1 WORKFLOWS
+A) Founder onboarding -> Identity verification -> Create application -> Upload documents -> Pay -> Submit -> Track status -> Receive completion + digital vault
+B) Lawyer portal -> View assigned applications -> Review checklist -> Request clarification -> Mark “Filed (Physical/Digital)” -> Upload stamped originals -> Create courier shipment -> Mark complete
+C) Admin portal -> Manage lawyers, assignments, pricing, feature flags, view audit logs
+
+DATA MODEL (CREATE THESE TABLES)
+1) User
+   - id, email, phone, password_hash
+   - role: founder/lawyer/admin
+   - is_active, created_at, last_login_at
+   - mfa_enabled (future), failed_login_count, locked_until
+2) FounderProfile
+   - user_id (FK), full_name, dob (optional), nationality (optional)
+   - address fields (structured)
+3) LawyerProfile
+   - user_id (FK), firm_name, bar_id/registration (optional), payout_subaccount_id (Paystack)
+   - service_regions (JSON), active_case_capacity
+4) IdentityVerification
+   - founder_user_id (FK)
+   - status: not_started/pending/verified/rejected
+   - method: manual/automated
+   - selfie_file_id (FK DocumentFile)
+   - id_doc_file_id (FK DocumentFile)
+   - liveness_score (nullable), notes
+   - verified_at
+   NOTE: In V1, implement as “manual verification” with UI + placeholder for vendor integration.
+5) CompanyApplication
+   - id, founder_user_id (FK)
+   - application_type: incorporation / post_incorporation
+   - status: draft/submitted/under_review/clarification_requested/filed/pending_originals/courier_in_transit/completed/rejected
+   - company_name_1, company_name_2, company_name_3 (optional)
+   - business_description (text)
+   - legal_ai_activity_suggestions (JSON)
+   - selected_activities (JSON)
+   - company_type (LLC etc)
+   - registered_address (structured or FK to Address table)
+   - directors/shareholders data (JSON for V1; normalize later)
+   - assigned_lawyer_user_id (FK User)
+   - submitted_at, completed_at
+6) ApplicationChecklistItem
+   - id, application_id (FK)
+   - key (e.g. "passport_photo", "id_doc", "address_proof", "director_details")
+   - label, required (bool)
+   - status: missing/provided/accepted/rejected
+   - reviewer_notes
+7) DocumentFile
+   - id, owner_user_id (FK)
+   - application_id (nullable FK)
+   - category: identity/company/filing/stamped_originals/courier
+   - doc_type: passport, nin, utility_bill, cac_form, stamped_certificate, etc
+   - filename, storage_path, sha256_hash
+   - size_bytes, mime_type
+   - is_sensitive (bool default true)
+   - created_at
+8) Payment
+   - id, application_id (FK)
+   - provider: paystack
+   - amount_total_kobo, currency
+   - breakdown_json: platform_fee, lawyer_fee, government_fee, courier_fee
+   - status: initialized/success/failed/refunded
+   - paystack_reference, paid_at
+9) PayoutLedger
+   - id, payment_id (FK)
+   - lawyer_user_id (FK)
+   - amount_kobo
+   - status: pending/queued/sent/failed
+   - provider_ref (nullable)
+10) CourierShipment
+   - id, application_id (FK)
+   - courier_name, tracking_number
+   - ship_from (lawyer firm address), ship_to (user provided)
+   - status: not_started/label_created/dispatched/in_transit/delivered
+   - updated_at
+11) ConsentGrant
+   - id, founder_user_id (FK)
+   - lawyer_user_id (FK)
+   - application_id (FK)
+   - scope: view_documents/view_identity/process_application
+   - granted_at, revoked_at
+12) AuditLog
+   - id, actor_user_id (FK)
+   - action: login/logout/view_application/upload_document/download_document/change_status/request_clarification/admin_override etc
+   - entity_type, entity_id
+   - ip_address, user_agent
+   - created_at
+13) FeatureFlag
+   - id, key, is_enabled, description
+14) OfflineDraft
+   - id, founder_user_id (FK)
+   - application_id (nullable FK)
+   - client_draft_id (string UUID from browser)
+   - draft_json (JSON)  [non-sensitive form fields only; do NOT store doc blobs]
+   - last_synced_at
+   NOTE: IndexedDB is primary offline store; this server table is for optional sync and recovery.
+
+FEATURE FLAGS (DEFAULT OFF)
+- enable_tin_registration (coming soon)
+- enable_bank_referrals (coming soon)
+- enable_registered_address_service (coming soon)
+- enable_mail_forwarding (coming soon)
+- enable_compliance_reminders (coming soon)
+
+ROUTES / PAGES (MUST IMPLEMENT)
+Public
+- / (landing)
+- /pricing
+- /login, /register, /logout
+- /offline (offline fallback page)
+Founder
+- /founder/dashboard
+- /founder/identity (upload selfie + ID doc; show status)
+- /applications/new (wizard)
+- /applications/<id> (view + status + checklist + upload docs)
+- /applications/<id>/submit (requires identity verified + required docs + payment)
+- /vault (completed applications + downloadable receipts + docs metadata)
+Lawyer
+- /lawyer/dashboard (assigned queue, filters by status)
+- /lawyer/applications/<id> (read-only key fields, checklist, docs; request clarification; change status; upload stamped originals; create courier shipment)
+- /lawyer/payouts (ledger)
+Admin
+- /admin/dashboard
+- /admin/users (create/disable lawyers, reset passwords)
+- /admin/applications (assign lawyer, override status)
+- /admin/feature-flags
+- /admin/audit-logs
+
+PAYMENTS (PAYSTACK)
+Implement:
+- POST /payments/initiate/<application_id>
+  Creates Payment row, calls Paystack initialize, returns authorization_url.
+- POST /webhooks/paystack
+  Validates signature, updates Payment status, creates PayoutLedger entries.
+- Split payout approach:
+  - LawyerProfile.payout_subaccount_id stored.
+  - On success: create payout ledger record.
+  - If transfer feasible: initiate transfer; else mark “queued”.
+- UI must show breakdown and payment status.
+
+LEGAL AI (OPENAI)
+Implement “Suggest CAC Activities” action:
+- Input: business_description + company_type
+- Output: JSON list of suggested activities + confidence + plain-English rationale
+- Store on CompanyApplication. Lawyer can accept/modify.
+- Add content safeguards (basic moderation check) and show “classification suggestions” disclaimer (NOT legal advice).
+
+DOCUMENT HANDLING (PRIVATE)
+- Uploads stored under /private_uploads (not served as static).
+- Download route:
+  GET /documents/<id>/download
+  Verify RBAC + ownership + consent + assignment.
+- Compute sha256 on upload.
+- Add placeholder hook for malware scanning (coming soon), but not required.
+
+PWA REQUIREMENTS (CLEAN IMPLEMENTATION)
+V1 MUST BE INSTALLABLE:
+- Provide /static/manifest.json with:
+  - name: "Celion One"
+  - short_name: "Celion"
+  - start_url: "/"
+  - display: "standalone"
+  - background_color/theme_color
+  - icons (192, 512) in /static/icons/
+- Provide service worker at /static/sw.js
+- Register service worker from base layout for authenticated and public pages.
+- Cache strategy (app shell only):
+  - Cache static assets: CSS/JS/icons/offline page
+  - Network-first for HTML routes
+  - Never cache authenticated HTML responses that include sensitive data as “offline pages”
+- Offline fallback:
+  - If navigation fails, serve /offline with guidance and “Retry” button.
+
+OFFLINE DRAFTING (HIGH VALUE)
+- Implement IndexedDB (preferred) for offline drafts:
+  - Autosave application wizard fields every ~5s and on blur/change.
+  - Store: non-sensitive form inputs only (NO documents, NO ID images, NO signatures).
+  - Display “Saved locally” and “Synced” indicators.
+- Sync model:
+  - When online and user is authenticated, POST draft_json to:
+    POST /api/drafts/sync
+  - Server stores in OfflineDraft table and returns last_synced_at.
+  - On load, merge server draft + local draft with “latest wins”.
+
+UPLOAD QUEUE (RESILIENT DOC UPLOADS)
+- Client-side upload manager:
+  - If offline or upload fails, queue file metadata and retry when online.
+  - IMPORTANT SECURITY RULE: Do NOT store sensitive file blobs in cache storage by default.
+  - V1 approach:
+    - Keep queued uploads in memory and prompt user to retry upon reconnection.
+    - Also implement optional “upload retry list” that stores only filenames + doc types (no blobs).
+  - If you choose to store blobs for convenience, it MUST be opt-in with a warning (“Do not use on shared devices”) and disabled by default.
+- UI must show:
+  - upload status: uploaded / failed / queued
+  - retry button
+
+SECURITY REQUIREMENTS
+- Password hashing using werkzeug.security
+- CSRF on all forms
+- Rate limit login and key endpoints
+- Session security: secure cookies, HTTPOnly, SameSite
+- Flask-Talisman headers
+- Strict RBAC checks on every route
+- Audit logs for:
+  - any document view/download
+  - any status change
+  - admin overrides
+- Never expose file paths; never log sensitive data
+- By default, do NOT store offline copies of sensitive docs.
+
+UX REQUIREMENTS (WORLD-CLASS FEEL)
+- Wizard style application creation
+- Checklist completeness bar + “missing items”
+- Status timeline with timestamps
+- “What happens next” panel by status
+- “Coming Soon” modules cards controlled by feature flags:
+  - TIN registration
+  - Bank account opening (referrals)
+  - Registered address service
+  - Mail forwarding
+  - Compliance reminders
+- In-app notifications (simple):
+  - Implement Notification table optional OR render from audit/status history
+- Email sending interface:
+  - Console backend for dev; pluggable SMTP later
+  - Status updates, clarification requests, completion + courier tracking
+
+BUSINESS RULES (ENFORCE STRICTLY)
+- Founder can submit application only if:
+  - IdentityVerification.status == verified
+  - Required checklist items provided (status provided/accepted)
+  - Payment.status == success
+  - ConsentGrant exists for assigned lawyer with required scopes
+- Lawyer cannot mark application completed unless:
+  - stamped originals uploaded
+  - courier shipment created (unless founder opted out of courier)
+- Lawyers are responsible for courier dispatch; platform stores tracking and shipment status.
+- Lawyer cannot edit founder identity or core company fields; only request clarification.
+
+ADMIN CONTROLS
+- Assign lawyers to applications
+- Toggle feature flags
+- View audit logs
+- Override status (must write a reason; logged)
+
+SEED DATA
+Provide a seed script:
+- 1 admin user
+- 2 lawyer users (with payout_subaccount_id placeholders)
+- 1 founder user
+- Example applications across key statuses for UI testing
+
+TESTING
+- Unit tests for:
+  - RBAC access control (founder cannot access others)
+  - document download permissions
+  - webhook signature validation
+- /health route returns OK with db connectivity
+
+DELIVERABLES
+- Working Flask app with clean UI + PWA installability
+- SQLite for dev; config for Postgres in prod
+- Migrations via Flask-Migrate
+- README with:
+  - setup steps
+  - env vars
+  - Paystack webhook setup
+  - OpenAI key setup
+  - PWA notes (manifest, service worker) and local testing steps
+  - how to run migrations and seed
+
+ENV VARS
+- SECRET_KEY
+- DATABASE_URL
+- OPENAI_API_KEY
+- PAYSTACK_SECRET_KEY
+- PAYSTACK_PUBLIC_KEY
+- PAYSTACK_WEBHOOK_SECRET (or signature config)
+- STORAGE_DRIVER=local|s3 (default local)
+- APP_BASE_URL
+
+BUILD PLAN (DO IN ORDER)
+1) Scaffold Flask app structure + blueprints by role (public/founder/lawyer/admin/api).
+2) Implement auth + RBAC + base layout + security headers + CSRF.
+3) Implement models + migrations.
+4) Implement PWA assets:
+   - manifest.json
+   - icons
+   - service worker sw.js
+   - offline page + registration
+5) Founder: identity verification upload flow (manual verify placeholder).
+6) Founder: application wizard + checklist + document upload + draft autosave (IndexedDB).
+7) Implement draft sync endpoint /api/drafts/sync.
+8) Payments init + webhook + ledger.
+9) Lawyer portal queue + application view + clarification + status changes + stamped originals upload + courier shipment.
+10) Vault: founder receipts + downloads (metadata visible; secure downloads).
+11) Admin portal: users, assignments, feature flags, audit logs.
+12) Harden security + tests + README.
+
+Now implement Celion One V1 end-to-end in Replit as specified.

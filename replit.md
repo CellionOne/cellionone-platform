@@ -118,8 +118,17 @@ shared/
 - `OPENAI_API_KEY` - OpenAI API key (optional, falls back to defaults)
 - `PAYSTACK_SECRET_KEY` - Paystack secret (for production)
 
+## Testing
+- **Backend Regression Tests**: Run with `npx vitest run`
+- Test file: `server/__tests__/auth.regression.test.ts` (6 tests for role-based auth)
+- vitest.config.ts configured for Node environment
+
 ## Recent Changes
-- January 31, 2026: Fixed role-based routing bug where admin/lawyer users were incorrectly redirected to founder dashboard (removed registerAuthRoutes() to use custom /api/auth/user endpoint that returns roles)
+- January 31, 2026: Hardening phase complete
+  - Fixed critical role-based routing bug (removed registerAuthRoutes() override)
+  - Added 7 hardening safeguards: auth route ownership, frontend routing guards, payment state validation, AI safety labels, offline data validation, audit logging
+  - Created regression test suite (6 tests, all passing)
+  - Enhanced audit logging with 21+ action types including login, view_dashboard, payment_state_changed
 - January 2026: Enhanced platform with advanced features
   - Payment state transitions (released_to_lawyer, refunded_partial, refunded_full, chargeback)
   - Verification receipts management (issue/revoke)

@@ -18,6 +18,9 @@ import {
   offlineDrafts, type OfflineDraft, type InsertOfflineDraft,
   clarificationRequests, type ClarificationRequest, type InsertClarificationRequest,
   notifications, type Notification, type InsertNotification,
+  verificationReceipts, type VerificationReceipt, type InsertVerificationReceipt,
+  executionDeclarations, type ExecutionDeclaration, type InsertExecutionDeclaration,
+  applicationAIEvents, type ApplicationAIEvent, type InsertApplicationAIEvent,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -89,6 +92,28 @@ export interface IStorage {
   getNotificationsByUser(userId: string): Promise<Notification[]>;
   createNotification(data: InsertNotification): Promise<Notification>;
   markNotificationRead(id: number): Promise<void>;
+
+  // Verification Receipts
+  getReceipt(id: number): Promise<VerificationReceipt | undefined>;
+  getReceiptByNumber(receiptNumber: string): Promise<VerificationReceipt | undefined>;
+  getReceiptsByApplication(applicationId: number): Promise<VerificationReceipt[]>;
+  getReceiptsByFounder(founderId: string): Promise<VerificationReceipt[]>;
+  createReceipt(data: InsertVerificationReceipt): Promise<VerificationReceipt>;
+  updateReceipt(id: number, data: Partial<InsertVerificationReceipt>): Promise<VerificationReceipt | undefined>;
+
+  // Execution Declarations
+  getExecutionDeclaration(id: number): Promise<ExecutionDeclaration | undefined>;
+  getExecutionDeclarationsByApplication(applicationId: number): Promise<ExecutionDeclaration[]>;
+  getExecutionDeclarationsByLawyer(lawyerId: string): Promise<ExecutionDeclaration[]>;
+  createExecutionDeclaration(data: InsertExecutionDeclaration): Promise<ExecutionDeclaration>;
+
+  // AI Events
+  getAIEventsByApplication(applicationId: number): Promise<ApplicationAIEvent[]>;
+  getAIEventsByFeature(feature: string, limit?: number): Promise<ApplicationAIEvent[]>;
+  createAIEvent(data: InsertApplicationAIEvent): Promise<ApplicationAIEvent>;
+
+  // Documents - extended
+  updateDocument(id: number, data: Partial<InsertDocumentFile>): Promise<DocumentFile | undefined>;
 
   // Stats
   getFounderStats(founderUserId: string): Promise<{ total: number; draft: number; inProgress: number; completed: number }>;
@@ -379,6 +404,79 @@ export class DatabaseStorage implements IStorage {
       completedApplications: allApps.filter(a => a.status === "completed").length,
       pendingReview: allApps.filter(a => a.status === "submitted").length,
     };
+  }
+
+  // Verification Receipts
+  async getReceipt(id: number): Promise<VerificationReceipt | undefined> {
+    const [receipt] = await db.select().from(verificationReceipts).where(eq(verificationReceipts.id, id));
+    return receipt;
+  }
+
+  async getReceiptByNumber(receiptNumber: string): Promise<VerificationReceipt | undefined> {
+    const [receipt] = await db.select().from(verificationReceipts).where(eq(verificationReceipts.receiptNumber, receiptNumber));
+    return receipt;
+  }
+
+  async getReceiptsByApplication(applicationId: number): Promise<VerificationReceipt[]> {
+    return db.select().from(verificationReceipts).where(eq(verificationReceipts.applicationId, applicationId));
+  }
+
+  async getReceiptsByFounder(founderId: string): Promise<VerificationReceipt[]> {
+    return db.select().from(verificationReceipts).where(eq(verificationReceipts.founderId, founderId));
+  }
+
+  async createReceipt(data: InsertVerificationReceipt): Promise<VerificationReceipt> {
+    const [receipt] = await db.insert(verificationReceipts).values(data).returning();
+    return receipt;
+  }
+
+  async updateReceipt(id: number, data: Partial<InsertVerificationReceipt>): Promise<VerificationReceipt | undefined> {
+    const [receipt] = await db.update(verificationReceipts).set(data).where(eq(verificationReceipts.id, id)).returning();
+    return receipt;
+  }
+
+  // Execution Declarations
+  async getExecutionDeclaration(id: number): Promise<ExecutionDeclaration | undefined> {
+    const [declaration] = await db.select().from(executionDeclarations).where(eq(executionDeclarations.id, id));
+    return declaration;
+  }
+
+  async getExecutionDeclarationsByApplication(applicationId: number): Promise<ExecutionDeclaration[]> {
+    return db.select().from(executionDeclarations).where(eq(executionDeclarations.applicationId, applicationId));
+  }
+
+  async getExecutionDeclarationsByLawyer(lawyerId: string): Promise<ExecutionDeclaration[]> {
+    return db.select().from(executionDeclarations).where(eq(executionDeclarations.lawyerId, lawyerId));
+  }
+
+  async createExecutionDeclaration(data: InsertExecutionDeclaration): Promise<ExecutionDeclaration> {
+    const [declaration] = await db.insert(executionDeclarations).values(data).returning();
+    return declaration;
+  }
+
+  // AI Events
+  async getAIEventsByApplication(applicationId: number): Promise<ApplicationAIEvent[]> {
+    return db.select().from(applicationAIEvents)
+      .where(eq(applicationAIEvents.applicationId, applicationId))
+      .orderBy(desc(applicationAIEvents.createdAt));
+  }
+
+  async getAIEventsByFeature(feature: string, limit = 100): Promise<ApplicationAIEvent[]> {
+    return db.select().from(applicationAIEvents)
+      .where(eq(applicationAIEvents.feature, feature))
+      .orderBy(desc(applicationAIEvents.createdAt))
+      .limit(limit);
+  }
+
+  async createAIEvent(data: InsertApplicationAIEvent): Promise<ApplicationAIEvent> {
+    const [event] = await db.insert(applicationAIEvents).values(data).returning();
+    return event;
+  }
+
+  // Documents - extended
+  async updateDocument(id: number, data: Partial<InsertDocumentFile>): Promise<DocumentFile | undefined> {
+    const [doc] = await db.update(documentFiles).set(data).where(eq(documentFiles.id, id)).returning();
+    return doc;
   }
 }
 

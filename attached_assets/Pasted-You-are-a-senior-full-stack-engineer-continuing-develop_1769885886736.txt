@@ -1,0 +1,372 @@
+You are a senior full-stack engineer continuing development on Celion One (already running successfully in Replit).
+
+CURRENT STATE (DO NOT REBUILD)
+- React + TypeScript + Vite + Tailwind + shadcn/ui frontend
+- Express.js backend with PostgreSQL
+- Replit Auth (OIDC)
+- Zod validation on API endpoints
+- Roles: Founder, Lawyer, Admin with RBAC
+- Application wizard (4-step), document vault, Paystack integration scaffold, PWA, offline drafting (currently localStorage), feature flags, audit logs.
+
+GOAL (THIS ITERATION)
+Implement the 5 critical gaps + 4 AI features:
+GAPS:
+1) Verification Receipt object (first-class artifact)
+2) Lawyer Execution Declaration (chain-of-custody)
+3) Offline drafts moved from localStorage -> IndexedDB (non-sensitive only)
+4) AI guardrails + audit trail (provenance, explainability, overrides)
+5) Payment state machine (logical escrow/release/refund readiness)
+
+AI FEATURES:
+A) CAC Activity Mapping (already exists but harden with versioning/audit + lawyer override tracking)
+B) Document quality checks (blur/crop/missing pages) with actionable feedback
+C) Readiness score + smart checklist (dynamic, explains what’s missing)
+D) Clarification message generator for lawyers (consistent, prefilled, editable)
+
+CONSTRAINTS / NON-NEGOTIABLES
+- Do NOT store sensitive document file blobs offline by default.
+- Do NOT remove existing auth/RBAC; extend it.
+- Every new automated decision is “suggest/flag”, not an automatic rejection.
+- Add full audit logs for: AI actions, quality checks, receipt issuance, execution declaration, payment transitions.
+- All new server endpoints must be validated with Zod.
+- Add migration scripts for new DB tables/columns.
+
+========================================
+PART 1 — DATABASE CHANGES (Postgres)
+========================================
+
+1) VerificationReceipt table (NEW)
+- id (uuid)
+- applicationId (uuid FK)
+- founderId (uuid FK User)
+- issuedBy: 'celion' | 'lawyer_proxy' | 'agency' (enum/text)
+- scope: 'identity' | 'incorporation' | 'post_incorporation' | 'document_bundle' (enum/text)
+- status: 'issued' | 'revoked' | 'expired' (enum/text)
+- receiptNumber (string unique, human-friendly e.g. CEL-YYYY-XXXXXX)
+- receiptJson (jsonb)  // includes summary, hashes of key docs, timestamps
+- verificationHash (string) // sha256 of canonicalized receiptJson
+- issuedAt (timestamp)
+- expiresAt (timestamp nullable)
+- revokedAt (timestamp nullable)
+- revocationReason (text nullable)
+
+2) ExecutionDeclaration table (NEW)
+- id (uuid)
+- applicationId (uuid FK)
+- lawyerId (uuid FK User)
+- submissionType: 'physical' | 'digital' (enum/text)
+- submissionLocation (text)
+- submittedAt (timestamp)
+- declarationAccepted (boolean)
+- declarationTextVersion (string) // version of standard wording used
+- notes (text nullable)
+- createdAt (timestamp)
+
+3) ApplicationAIEvent table (NEW) — AI provenance + guardrails
+- id (uuid)
+- applicationId (uuid FK)
+- actorUserId (uuid FK User) // who triggered AI
+- feature: 'cac_activity_mapping' | 'clarification_generator' | 'readiness_explainer' | 'doc_quality' (enum/text)
+- model (text)
+- promptVersion (text)
+- inputHash (text) // sha256 of the input payload (do NOT store raw sensitive text here)
+- outputJson (jsonb)
+- createdAt (timestamp)
+
+4) CompanyApplication updates (ADD COLUMNS)
+- readinessScore (int default 0)
+- readinessBreakdown (jsonb nullable)
+- paymentState: 'unpaid' | 'paid_escrowed' | 'released_to_lawyer' | 'refunded_partial' | 'refunded_full' | 'chargeback' (enum/text)
+- paymentStateUpdatedAt (timestamp)
+- aiSuggestionVersion (text nullable)  // for CAC activity mapping
+- aiLastSuggestedAt (timestamp nullable)
+
+5) DocumentFile updates (ADD COLUMNS)
+- qualityStatus: 'not_checked' | 'pass' | 'needs_attention' (enum/text default 'not_checked')
+- qualityReport (jsonb nullable) // blur score, crop warnings, missing pages hints, etc
+- lastQualityCheckedAt (timestamp nullable)
+
+6) Payment updates (ADD COLUMNS)
+- state: same as CompanyApplication.paymentState OR keep Payment.state and derive application
+- escrowedAt, releasedAt, refundedAt (timestamps nullable)
+- refundReason (text nullable)
+
+7) ClarificationRequest table (NEW)
+- id (uuid)
+- applicationId (uuid FK)
+- lawyerId (uuid FK)
+- founderId (uuid FK)
+- status: 'open' | 'sent' | 'resolved' | 'cancelled'
+- subject (text)
+- message (text) // final message sent to founder
+- aiDraftJson (jsonb nullable) // AI suggested draft and rationale
+- createdAt, sentAt, resolvedAt
+
+MIGRATIONS
+- Create migrations for all above.
+- Backfill:
+  - Set CompanyApplication.paymentState based on existing payment records:
+    success => paid_escrowed, otherwise unpaid.
+  - Existing apps get readinessScore computed by a job or on first load.
+
+========================================
+PART 2 — BACKEND API (Express)
+========================================
+
+Create/extend services with clean separation:
+- aiService.ts (OpenAI calls + prompt versioning)
+- receiptService.ts (issue receipts + hashing)
+- paymentStateService.ts (transitions + audit)
+- qualityService.ts (document quality checks)
+- readinessService.ts (score calc + breakdown)
+- clarificationService.ts (AI draft + send + resolve)
+
+ALL ENDPOINTS MUST:
+- be RBAC-protected
+- validate input with Zod
+- write AuditLog records
+
+A) Verification Receipts
+1) POST /api/receipts/issue
+- Role: admin or lawyer (assigned) — lawyer can issue only after completion requirements
+- Input: { applicationId, scope, issuedBy }
+- Behavior:
+  - Build receiptJson with:
+    - application summary (company name, type, founders)
+    - status timeline timestamps
+    - document hashes for key docs (sha256 from DocumentFile)
+    - execution declaration reference (if exists)
+    - payment state
+  - Canonicalize JSON and compute verificationHash
+  - Generate receiptNumber
+  - Insert VerificationReceipt
+  - AuditLog: receipt_issued
+- Output: receipt summary
+
+2) GET /api/receipts/:id
+- Role: founder (owner), assigned lawyer, admin
+- Output: receipt + hash
+
+3) GET /api/receipts/:id/verify?hash=...
+- Public verify endpoint (NO sensitive details):
+  - Return: valid/invalid + scope + issuedAt + status
+  - Do NOT expose personal data.
+
+B) Execution Declaration
+1) POST /api/execution-declarations
+- Role: assigned lawyer only
+- Input: { applicationId, submissionType, submissionLocation, submittedAt, declarationAccepted, notes }
+- Behavior:
+  - Create record
+  - Update application status to 'filed' if appropriate
+  - AuditLog: execution_declared
+
+2) GET /api/execution-declarations/:applicationId
+- Role: founder(owner), assigned lawyer, admin
+
+C) Offline Draft Sync (server-side recovery; IndexedDB remains primary)
+1) POST /api/drafts/sync
+- Role: founder only
+- Input: { applicationId?, clientDraftId, draftJson, lastLocalUpdatedAt }
+- IMPORTANT: draftJson must be non-sensitive (no file blobs, no ID images).
+- Store/update OfflineDraft
+- AuditLog: draft_synced
+
+2) GET /api/drafts/:applicationId
+- Role: founder only
+
+D) Payment State Machine
+Define allowed transitions in paymentStateService:
+- unpaid -> paid_escrowed (on Paystack success)
+- paid_escrowed -> released_to_lawyer (when lawyer marks "filed" OR admin triggers release)
+- paid_escrowed -> refunded_partial/full (admin only)
+- released_to_lawyer -> chargeback (admin only, record)
+Rules:
+- V1: “escrowed” is logical only; keep ledger entries.
+Endpoints:
+1) POST /api/payments/:paymentId/transition
+- Role: admin only
+- Input: { toState, reason? }
+- AuditLog: payment_state_changed
+
+Also update Paystack webhook handler:
+- On success: set application.paymentState = paid_escrowed, Payment.state = paid_escrowed
+- Create ledger entries but do not auto-transfer unless enabled by feature flag enable_auto_payouts.
+
+E) Document Quality Checks (AI + basic CV heuristics)
+Implement as two-step:
+1) Basic heuristics (no AI):
+- Check image dimensions, file size, aspect ratio
+- Detect likely blur using variance of Laplacian (server-side using a lightweight image lib)
+- Detect if document edges are missing (basic contour detection if feasible)
+2) AI vision check (optional if OpenAI vision available):
+- “Is this readable?” “Is the full doc captured?” “Are pages missing?” “Is it expired?”
+Return structured JSON report.
+
+Endpoints:
+1) POST /api/documents/:id/quality-check
+- Role: assigned lawyer or admin
+- Input: { mode: 'basic' | 'ai' }
+- Output: qualityReport
+- Update DocumentFile.qualityStatus and timestamps
+- Create ApplicationAIEvent if ai mode
+- AuditLog: document_quality_checked
+
+F) Readiness Score + Smart Checklist
+Implement readinessService:
+- Calculate readinessScore 0-100 based on:
+  - identity verification status (weight high)
+  - required checklist completeness
+  - doc quality status
+  - payment state (paid_escrowed or higher)
+  - selected CAC activities set
+- readinessBreakdown JSON:
+  - missingItems[], warnings[], blockers[], nextActions[]
+Endpoints:
+1) GET /api/applications/:id/readiness
+- Role: founder(owner), assigned lawyer, admin
+- Returns readinessScore + breakdown
+- Also update CompanyApplication.readinessScore/breakdown.
+
+G) Clarification Message Generator for Lawyers
+- AI drafts a message to founder based on:
+  - missing checklist items
+  - failed doc quality checks
+  - inconsistent fields
+- Must produce:
+  - subject
+  - bullet list of required actions
+  - friendly tone
+  - no legal advice, no guarantees
+Endpoints:
+1) POST /api/clarifications/draft
+- Role: assigned lawyer only
+- Input: { applicationId }
+- Output: aiDraftJson { subject, message, rationale, requiredActions[] }
+- Create ApplicationAIEvent(feature=clarification_generator)
+- AuditLog: clarification_drafted
+
+2) POST /api/clarifications/send
+- Role: assigned lawyer only
+- Input: { applicationId, subject, message }
+- Create ClarificationRequest(status=sent)
+- Update application status => clarification_requested
+- Trigger notification/email (stub OK)
+- AuditLog: clarification_sent
+
+3) POST /api/clarifications/:id/resolve
+- Role: assigned lawyer or admin
+- Marks resolved; optional notes
+- AuditLog: clarification_resolved
+
+========================================
+PART 3 — FRONTEND (React)
+========================================
+
+A) Founder UX updates
+1) Application Readiness Panel (on application detail)
+- Show readiness score ring/bar + status
+- Show blockers and “Next actions”
+- Show smart checklist grouped:
+  - Identity
+  - Company details
+  - Documents
+  - Payment
+- Each checklist item shows:
+  - missing/provided/accepted/rejected
+  - quality status badge (pass/needs attention)
+  - “Fix” action link
+
+2) Verification Receipts in Vault
+- New “Receipts” tab:
+  - list receipts by scope
+  - view receipt summary
+  - download “receipt PDF” later (for now download JSON and show hash)
+  - include “Verify” UI with receiptNumber + hash
+
+3) Offline Drafting upgrade
+- Replace localStorage with IndexedDB using a small helper (idb)
+- Provide:
+  - “Saved locally” indicator
+  - “Sync now” button
+  - On reconnect: auto sync
+- Ensure drafts exclude sensitive fields (no document blobs)
+
+B) Lawyer UX updates
+1) Execution Declaration step
+- In lawyer application view:
+  - add “Declare Submission” modal/form
+  - require acceptance of standard declaration text
+  - require location + date/time + physical/digital
+- After saving, show a “Chain of custody” card
+
+2) Document quality checks
+- For each doc:
+  - “Run quality check” button
+  - show report results + “what to fix” list
+  - allow marking doc as accepted/rejected with notes
+
+3) Clarification generator
+- Button “Generate clarification”
+- Opens composer with AI draft prefilled
+- Lawyer can edit and send
+- Show history of clarifications
+
+C) Admin UX updates
+- Payment state transition controls (with reason)
+- Receipt issuance controls (issue/revoke)
+- AI events log view (filter by feature + date)
+- Feature flags:
+  - enable_auto_payouts
+  - enable_ai_doc_quality
+
+========================================
+PART 4 — AUDIT LOGGING
+========================================
+Ensure every action writes AuditLog with:
+- actor
+- action
+- entity_type/entity_id
+- metadata JSON (non-sensitive)
+
+New AuditLog actions to add:
+- receipt_issued, receipt_viewed, receipt_verified
+- execution_declared
+- payment_state_changed
+- document_quality_checked
+- readiness_computed
+- clarification_drafted, clarification_sent, clarification_resolved
+- draft_synced
+
+========================================
+PART 5 — SECURITY / PRIVACY RULES
+========================================
+- Public verify endpoint must reveal no PII. Only receiptNumber, scope, issuedAt, status.
+- No offline caching of sensitive docs. IndexedDB only stores draftJson (text fields).
+- AI: store inputHash only (not raw sensitive input). OutputJson can be stored but must exclude PII where possible; store minimal.
+- Rate limit AI endpoints and webhook endpoints.
+- Access control on every endpoint.
+
+========================================
+PART 6 — TESTS
+========================================
+Add tests (backend) for:
+- RBAC for receipts, declarations, clarifications
+- Payment state transition rules
+- Public receipt verification returns no PII
+- Readiness score computation correctness for sample app states
+- Document download still protected
+
+========================================
+DELIVERABLES
+========================================
+- Migrations applied successfully
+- UI shows readiness + smart checklist
+- Lawyers can run quality checks and send AI clarifications
+- Execution declaration enforced before completion
+- Receipts issued and visible in Vault + public verification endpoint
+- Offline drafting uses IndexedDB + sync endpoint
+- Payment state machine implemented with admin transitions
+- README updated with new env vars (if any) and how to test AI/doc quality
+
+Now implement all of the above as a coherent V1.1 iteration without breaking existing functionality.

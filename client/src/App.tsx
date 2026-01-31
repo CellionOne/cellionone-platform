@@ -73,14 +73,30 @@ function RoleBasedRedirect() {
     return <LoadingPage />;
   }
   
-  const roles = user?.roles || [];
+  const roles = user?.roles;
+  
+  // SECURITY GUARD: Never guess a dashboard if roles are missing
+  // Roles must come from database (single source of truth)
+  if (!roles || !Array.isArray(roles) || roles.length === 0) {
+    console.error("RoleBasedRedirect: No roles found for user - redirecting to login", { 
+      userId: user?.id, 
+      roles 
+    });
+    window.location.href = "/api/login";
+    return <LoadingPage />;
+  }
   
   if (roles.includes("admin")) {
     return <Redirect to="/admin/dashboard" />;
   } else if (roles.includes("lawyer")) {
     return <Redirect to="/lawyer/dashboard" />;
-  } else {
+  } else if (roles.includes("founder")) {
     return <Redirect to="/founder/dashboard" />;
+  } else {
+    // Unknown role - log error and redirect to login
+    console.error("RoleBasedRedirect: Unknown role type - redirecting to login", { roles });
+    window.location.href = "/api/login";
+    return <LoadingPage />;
   }
 }
 

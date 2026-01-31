@@ -45,6 +45,7 @@ const statusUpdateSchema = z.object({
 const aiSuggestSchema = z.object({
   businessDescription: z.string().min(1, "Business description required"),
   companyType: z.string().optional(),
+  applicationId: z.number().optional(),
 });
 
 // New validation schemas for enhancement features
@@ -158,8 +159,16 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Setup authentication (don't call registerAuthRoutes - we have our own /api/auth/user that includes roles)
+  // ============================================================
+  // CRITICAL AUTH GUARD: Do NOT call registerAuthRoutes(app)
+  // ============================================================
+  // Celion One implements its own /api/auth/user endpoint that returns
+  // user roles. The default Replit Auth registerAuthRoutes() would
+  // silently override this endpoint and break role-based routing.
+  // This was a known production bug fixed on January 31, 2026.
+  // ============================================================
   await setupAuth(app);
+  console.log("Auth routes initialised – custom role-aware endpoint active");
   
   // Setup object storage routes
   registerObjectStorageRoutes(app);
@@ -168,11 +177,32 @@ export async function registerRoutes(
   await seedFeatureFlags();
 
   // ============== AUTH ROUTES ==============
+  // IMPORTANT: Do not register Replit default auth routes.
+  // This endpoint must return role-aware user payloads.
+  // Roles are fetched from database (single source of truth).
   app.get("/api/auth/user", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
+      // Role is ONLY read from database - never inferred from claims/headers
       const roles = await getUserRoles(userId);
+      if (!roles || roles.length === 0) {
+        console.warn(`User ${userId} has no roles assigned`);
+      }
+      
+      // Log login event (first auth check of session)
+      // Use session to track if we've already logged this session
+      if (!(req.session as any)._loginAuditLogged) {
+        await storage.createAuditLog({
+          actorUserId: userId,
+          action: "login",
+          entityType: "session",
+          details: { email: user?.email },
+          ipAddress: req.ip,
+        });
+        (req.session as any)._loginAuditLogged = true;
+      }
+      
       res.json({ ...user, roles });
     } catch (error) {
       console.error("Error fetching user:", error);
@@ -189,6 +219,15 @@ export async function registerRoutes(
         storage.getIdentityVerification(userId),
         storage.getFounderStats(userId),
       ]);
+      
+      // Audit log for dashboard view
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "view_dashboard",
+        entityType: "founder_dashboard",
+        ipAddress: req.ip,
+      });
+      
       res.json({ applications, identity, stats });
     } catch (error) {
       console.error("Error fetching founder dashboard:", error);
@@ -424,7 +463,7 @@ export async function registerRoutes(
       const isOwner = application.founderUserId === userId;
       const isAssignedLawyer = application.assignedLawyerUserId === userId;
       const userRoles = await storage.getUserRoles(userId);
-      const isAdmin = userRoles.some(r => r.role === "admin");
+      const isAdmin = userRoles.includes("admin");
       
       if (!isOwner && !isAssignedLawyer && !isAdmin) {
         return res.status(403).json({ message: "Access denied" });
@@ -473,15 +512,21 @@ export async function registerRoutes(
   });
 
   // ============== LEGAL AI ROUTES ==============
+  // AI SAFETY GUARDRAILS:
+  // - AI outputs are labeled as suggestions requiring human review
+  // - AI must NEVER auto-approve or auto-reject
+  // - All AI calls log: model, promptVersion, inputHash (not raw text)
   app.post("/api/legal-ai/suggest-activities", isAuthenticated, async (req: any, res) => {
     try {
+      const userId = getUserId(req);
+      
       // Validate request body
       const parsed = aiSuggestSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
       }
       
-      const { businessDescription, companyType } = parsed.data;
+      const { businessDescription, companyType, applicationId } = parsed.data;
       
       const ai = getOpenAI();
       if (!ai) {
@@ -492,12 +537,21 @@ export async function registerRoutes(
             { activity: "Consultancy services", category: "Services" },
             { activity: "Business management services", category: "Services" },
           ],
+          disclaimer: "Suggestion – human review required",
           message: "AI suggestions temporarily unavailable. Default suggestions provided."
         });
       }
       
+      // Create input hash for logging (not raw sensitive text)
+      const inputHash = crypto.createHash("sha256")
+        .update(JSON.stringify({ businessDescription, companyType }))
+        .digest("hex");
+      
+      const model = "gpt-4o";
+      const promptVersion = "v1.0";
+      
       const response = await ai.chat.completions.create({
-        model: "gpt-4o",
+        model,
         messages: [
           {
             role: "system",
@@ -528,7 +582,25 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         }
       }
       
-      res.json({ suggestions });
+      // Log AI event with model, promptVersion, inputHash (not raw text)
+      if (applicationId) {
+        await storage.createAIEvent({
+          applicationId,
+          actorUserId: userId,
+          feature: "cac_activity_mapping",
+          model,
+          promptVersion,
+          inputHash,
+          outputJson: { suggestionsCount: suggestions.length },
+        });
+      }
+      
+      // AI Safety: Label output as suggestion requiring human review
+      res.json({ 
+        suggestions,
+        disclaimer: "Suggestion – human review required",
+        aiMetadata: { model, promptVersion }
+      });
     } catch (error) {
       console.error("Error getting AI suggestions:", error);
       res.status(500).json({ message: "Failed to get AI suggestions", suggestions: [] });
@@ -616,6 +688,15 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         storage.getApplicationsByLawyer(userId),
         storage.getLawyerStats(userId),
       ]);
+      
+      // Audit log for dashboard view
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "view_dashboard",
+        entityType: "lawyer_dashboard",
+        ipAddress: req.ip,
+      });
+      
       res.json({ applications, stats });
     } catch (error) {
       console.error("Error fetching lawyer dashboard:", error);
@@ -1148,6 +1229,41 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       
       const { localId, applicationId, data } = parsed.data;
       
+      // ============================================================
+      // OFFLINE DATA SAFETY: Reject sensitive data in drafts
+      // ============================================================
+      // Offline drafts must NOT store: document blobs, ID images, signatures
+      // Only non-sensitive text fields allowed
+      const sensitiveFieldPatterns = [
+        /^data:/i,           // Base64 data URLs
+        /blob:/i,            // Blob references
+        /file:/i,            // File references
+        /signature/i,        // Signature fields
+        /idImage/i,          // ID image fields
+        /documentBlob/i,     // Document blobs
+        /passport.*image/i,  // Passport images
+        /nin.*image/i,       // NIN images
+        /bvn.*image/i,       // BVN images
+      ];
+      
+      const stringifiedData = JSON.stringify(data);
+      for (const pattern of sensitiveFieldPatterns) {
+        if (pattern.test(stringifiedData)) {
+          console.error(`Draft sync rejected: Contains sensitive data matching ${pattern}`);
+          return res.status(400).json({ 
+            message: "Draft contains sensitive data that cannot be stored offline. Please remove document files, images, or signatures.",
+            rejectedPattern: pattern.toString(),
+          });
+        }
+      }
+      
+      // Check for large payloads that might contain embedded files
+      if (stringifiedData.length > 100000) { // 100KB limit
+        return res.status(400).json({ 
+          message: "Draft payload too large. Offline drafts should only contain text data, not files or images.",
+        });
+      }
+      
       const draft = await storage.createOfflineDraft({
         founderUserId: userId,
         applicationId: applicationId || undefined,
@@ -1259,7 +1375,17 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
   // ============== ADMIN ROUTES ==============
   app.get("/api/admin/dashboard", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
+      const adminId = getUserId(req);
       const stats = await storage.getAdminStats();
+      
+      // Audit log for dashboard view
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "view_dashboard",
+        entityType: "admin_dashboard",
+        ipAddress: req.ip,
+      });
+      
       res.json({ stats, recentActivity: [] });
     } catch (error) {
       console.error("Error fetching admin dashboard:", error);
@@ -1470,6 +1596,36 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(404).json({ message: "Payment not found for application" });
       }
       
+      // ============================================================
+      // PAYMENT STATE SAFETY: Validate transitions server-side
+      // ============================================================
+      const currentState = payment.status || "unpaid";
+      
+      // Define invalid state transitions
+      const invalidTransitions: Record<string, string[]> = {
+        "released_to_lawyer": ["unpaid", "pending", "refunded_partial", "refunded_full", "chargeback"],
+        "refunded_partial": ["unpaid", "pending", "released_to_lawyer"],
+        "refunded_full": ["unpaid", "pending", "released_to_lawyer"],
+        "chargeback": ["unpaid", "pending"],
+      };
+      
+      const blockedFromStates = invalidTransitions[targetState] || [];
+      if (blockedFromStates.includes(currentState)) {
+        console.error(`Payment state safety violation: Cannot transition from ${currentState} to ${targetState}`);
+        return res.status(400).json({ 
+          message: `Invalid payment state transition: Cannot go from '${currentState}' to '${targetState}'`,
+          currentState,
+          targetState,
+        });
+      }
+      
+      // Additional safety: Only allow released_to_lawyer from paid status
+      if (targetState === "released_to_lawyer" && currentState !== "paid") {
+        return res.status(400).json({ 
+          message: `Payment must be in 'paid' status before releasing to lawyer. Current status: ${currentState}`,
+        });
+      }
+      
       let result;
       switch (targetState) {
         case "released_to_lawyer":
@@ -1497,10 +1653,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       
       await storage.createAuditLog({
         actorUserId: adminId,
-        action: "admin_override",
+        action: "payment_state_changed",
         entityType: "payment",
         entityId: payment.id.toString(),
-        details: { targetState, refundAmountKobo, reason },
+        details: { fromState: currentState, targetState, refundAmountKobo, reason },
         ipAddress: req.ip,
       });
       

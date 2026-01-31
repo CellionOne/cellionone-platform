@@ -1,0 +1,73 @@
+FINAL HARDENING & REGRESSION GUARDS (MANDATORY)
+
+This application has a known integration pitfall with Replit Auth that MUST be permanently guarded against.
+
+AUTH ROUTE GUARARD (CRITICAL)
+- DO NOT call registerAuthRoutes(app) anywhere in the codebase.
+- Celion One implements its OWN /api/auth/user endpoint that MUST return user roles.
+- If registerAuthRoutes(app) is reintroduced, it will silently override the role-aware endpoint and break role-based routing.
+
+IMPLEMENT THE FOLLOWING SAFEGUARDS:
+
+1) Explicit Auth Route Ownership
+- Add a comment above the /api/auth/user route:
+  "// IMPORTANT: Do not register Replit default auth routes. This endpoint must return role-aware user payloads."
+
+2) Regression Test (Required)
+Add a backend test that asserts:
+- GET /api/auth/user returns a `role` field
+- role ∈ ['admin', 'lawyer', 'founder']
+- Test fails if role is missing or null
+
+3) Frontend Routing Guard
+- Before routing, assert role exists.
+- If role is missing:
+  - log error
+  - redirect to /login
+  - do NOT guess a dashboard
+
+4) Audit Logging Enforcement
+Ensure AuditLog entries are written for:
+- login
+- create_application
+- view_dashboard
+- role_based_redirect
+- payment_state_changed
+- receipt_issued
+- execution_declared
+- clarification_sent
+
+5) Payment State Safety
+- paymentState transitions MUST be validated server-side.
+- Disallow:
+  - unpaid -> released_to_lawyer
+  - refunded -> released_to_lawyer
+- Add a defensive check with explicit error message.
+
+6) AI Safety Guardrails
+- AI outputs MUST be labeled "Suggestion – human review required"
+- AI must NEVER auto-approve or auto-reject anything.
+- All AI calls must:
+  - store model + promptVersion
+  - store inputHash (not raw sensitive text)
+  - log ApplicationAIEvent
+
+7) Offline Data Safety
+- Offline drafts MUST NOT store:
+  - document blobs
+  - ID images
+  - signatures
+- Only non-sensitive text fields allowed.
+- Add assertion in draft sync endpoint to reject payloads containing files.
+
+8) Single Source of Truth for Roles
+- Role must only be read from database User.role
+- Never infer role from frontend state, token claims, or request headers.
+
+9) Startup Check (Optional but Recommended)
+On server boot:
+- Log once: "Auth routes initialised – custom role-aware endpoint active"
+- This helps detect accidental overrides in logs.
+
+DO NOT ADD NEW FEATURES IN THIS PASS.
+FOCUS ONLY ON STABILITY, SECURITY, AND REGRESSION PREVENTION.

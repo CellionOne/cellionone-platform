@@ -1,0 +1,426 @@
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { useMutation } from "@tanstack/react-query";
+import { DashboardLayout } from "@/components/dashboard-layout";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { LoadingSpinner } from "@/components/loading-spinner";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import {
+  Building2,
+  ArrowRight,
+  ArrowLeft,
+  CheckCircle2,
+  Sparkles,
+} from "lucide-react";
+
+const steps = [
+  { id: 1, title: "Company Type", description: "Choose your company structure" },
+  { id: 2, title: "Company Names", description: "Propose up to 3 name options" },
+  { id: 3, title: "Business Details", description: "Describe your business activities" },
+  { id: 4, title: "Address", description: "Registered office address" },
+];
+
+const companyTypes = [
+  { value: "LLC", label: "Limited Liability Company (LLC)", description: "Most common for small to medium businesses" },
+  { value: "PLC", label: "Public Limited Company (PLC)", description: "For companies planning to go public" },
+  { value: "LLP", label: "Limited Liability Partnership (LLP)", description: "For professional service firms" },
+  { value: "Sole_Proprietorship", label: "Sole Proprietorship", description: "For individual business owners" },
+];
+
+const nigerianStates = [
+  "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue", "Borno",
+  "Cross River", "Delta", "Ebonyi", "Edo", "Ekiti", "Enugu", "FCT", "Gombe", "Imo",
+  "Jigawa", "Kaduna", "Kano", "Katsina", "Kebbi", "Kogi", "Kwara", "Lagos", "Nasarawa",
+  "Niger", "Ogun", "Ondo", "Osun", "Oyo", "Plateau", "Rivers", "Sokoto", "Taraba",
+  "Yobe", "Zamfara"
+];
+
+export default function NewApplicationPage() {
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const [currentStep, setCurrentStep] = useState(1);
+  const [formData, setFormData] = useState({
+    applicationType: "incorporation",
+    companyType: "",
+    companyName1: "",
+    companyName2: "",
+    companyName3: "",
+    businessDescription: "",
+    registeredAddress: {
+      line1: "",
+      line2: "",
+      city: "",
+      state: "",
+      postalCode: "",
+    },
+  });
+  const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
+  const [isLoadingAi, setIsLoadingAi] = useState(false);
+
+  const createMutation = useMutation({
+    mutationFn: async (data: typeof formData) => {
+      return apiRequest("POST", "/api/applications", data);
+    },
+    onSuccess: async (response) => {
+      const app = await response.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/dashboard"] });
+      toast({
+        title: "Application created",
+        description: "Your application has been saved as a draft.",
+      });
+      navigate(`/applications/${app.id}`);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create application. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const fetchAiSuggestions = async () => {
+    if (!formData.businessDescription.trim()) return;
+    
+    setIsLoadingAi(true);
+    try {
+      const response = await apiRequest("POST", "/api/legal-ai/suggest-activities", {
+        businessDescription: formData.businessDescription,
+        companyType: formData.companyType,
+      });
+      const data = await response.json();
+      setAiSuggestions(data.suggestions || []);
+    } catch (error) {
+      console.error("AI suggestions error:", error);
+    } finally {
+      setIsLoadingAi(false);
+    }
+  };
+
+  const updateFormData = (field: string, value: any) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const updateAddress = (field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      registeredAddress: {
+        ...prev.registeredAddress,
+        [field]: value,
+      },
+    }));
+  };
+
+  const canProceed = () => {
+    switch (currentStep) {
+      case 1:
+        return !!formData.companyType;
+      case 2:
+        return !!formData.companyName1;
+      case 3:
+        return !!formData.businessDescription;
+      case 4:
+        return !!formData.registeredAddress.line1 && !!formData.registeredAddress.city && !!formData.registeredAddress.state;
+      default:
+        return false;
+    }
+  };
+
+  const handleNext = () => {
+    if (currentStep < 4) {
+      setCurrentStep(currentStep + 1);
+    } else {
+      createMutation.mutate(formData);
+    }
+  };
+
+  const handleBack = () => {
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
+  return (
+    <DashboardLayout 
+      role="founder" 
+      breadcrumbs={[
+        { label: "Dashboard", href: "/founder/dashboard" },
+        { label: "Applications", href: "/founder/applications" },
+        { label: "New Application" }
+      ]}
+    >
+      <div className="max-w-3xl mx-auto space-y-8">
+        <div>
+          <h1 className="text-2xl font-bold">New Company Registration</h1>
+          <p className="text-muted-foreground">
+            Complete the following steps to start your company incorporation
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {steps.map((step, index) => (
+            <div key={step.id} className="flex items-center flex-1">
+              <div className={`flex items-center gap-2 ${index > 0 ? "flex-1" : ""}`}>
+                {index > 0 && (
+                  <div className={`h-0.5 flex-1 ${currentStep > step.id - 1 ? "bg-primary" : "bg-muted"}`} />
+                )}
+                <div
+                  className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-medium shrink-0 ${
+                    currentStep > step.id
+                      ? "bg-primary text-primary-foreground"
+                      : currentStep === step.id
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {currentStep > step.id ? <CheckCircle2 className="h-4 w-4" /> : step.id}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{steps[currentStep - 1].title}</CardTitle>
+            <CardDescription>{steps[currentStep - 1].description}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {currentStep === 1 && (
+              <div className="grid gap-4">
+                {companyTypes.map((type) => (
+                  <div
+                    key={type.value}
+                    className={`p-4 rounded-lg border-2 cursor-pointer transition-all hover-elevate ${
+                      formData.companyType === type.value
+                        ? "border-primary bg-primary/5"
+                        : "border-transparent bg-muted/50"
+                    }`}
+                    onClick={() => updateFormData("companyType", type.value)}
+                    data-testid={`company-type-${type.value}`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${
+                        formData.companyType === type.value ? "bg-primary/20" : "bg-muted"
+                      }`}>
+                        <Building2 className={`h-5 w-5 ${
+                          formData.companyType === type.value ? "text-primary" : "text-muted-foreground"
+                        }`} />
+                      </div>
+                      <div>
+                        <h3 className="font-medium">{type.label}</h3>
+                        <p className="text-sm text-muted-foreground">{type.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {currentStep === 2 && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="companyName1">Preferred Company Name *</Label>
+                  <Input
+                    id="companyName1"
+                    placeholder="e.g., TechVentures Nigeria"
+                    value={formData.companyName1}
+                    onChange={(e) => updateFormData("companyName1", e.target.value)}
+                    data-testid="input-company-name-1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="companyName2">Alternative Name 1 (Optional)</Label>
+                  <Input
+                    id="companyName2"
+                    placeholder="Second choice"
+                    value={formData.companyName2}
+                    onChange={(e) => updateFormData("companyName2", e.target.value)}
+                    data-testid="input-company-name-2"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="companyName3">Alternative Name 2 (Optional)</Label>
+                  <Input
+                    id="companyName3"
+                    placeholder="Third choice"
+                    value={formData.companyName3}
+                    onChange={(e) => updateFormData("companyName3", e.target.value)}
+                    data-testid="input-company-name-3"
+                  />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  CAC will check name availability and register the first available option.
+                </p>
+              </div>
+            )}
+
+            {currentStep === 3 && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="businessDescription">Business Description *</Label>
+                  <Textarea
+                    id="businessDescription"
+                    placeholder="Describe what your company will do..."
+                    rows={4}
+                    value={formData.businessDescription}
+                    onChange={(e) => updateFormData("businessDescription", e.target.value)}
+                    data-testid="input-business-description"
+                  />
+                </div>
+                
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={fetchAiSuggestions}
+                  disabled={!formData.businessDescription.trim() || isLoadingAi}
+                  className="gap-2"
+                  data-testid="button-ai-suggest"
+                >
+                  {isLoadingAi ? (
+                    <LoadingSpinner size="sm" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  Suggest CAC Activities
+                </Button>
+
+                {aiSuggestions.length > 0 && (
+                  <Card className="bg-primary/5 border-primary/20">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        AI-Suggested CAC Activities
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        These are suggestions only, not legal advice. Your lawyer will review.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2 text-sm">
+                        {aiSuggestions.map((suggestion, index) => (
+                          <li key={index} className="flex items-start gap-2">
+                            <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                            <span>{suggestion.activity || suggestion}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+
+            {currentStep === 4 && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="line1">Street Address *</Label>
+                  <Input
+                    id="line1"
+                    placeholder="123 Business Street"
+                    value={formData.registeredAddress.line1}
+                    onChange={(e) => updateAddress("line1", e.target.value)}
+                    data-testid="input-address-line1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="line2">Address Line 2</Label>
+                  <Input
+                    id="line2"
+                    placeholder="Suite, floor, building name (optional)"
+                    value={formData.registeredAddress.line2}
+                    onChange={(e) => updateAddress("line2", e.target.value)}
+                    data-testid="input-address-line2"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="city">City *</Label>
+                    <Input
+                      id="city"
+                      placeholder="Lagos"
+                      value={formData.registeredAddress.city}
+                      onChange={(e) => updateAddress("city", e.target.value)}
+                      data-testid="input-address-city"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="state">State *</Label>
+                    <Select
+                      value={formData.registeredAddress.state}
+                      onValueChange={(value) => updateAddress("state", value)}
+                    >
+                      <SelectTrigger data-testid="select-address-state">
+                        <SelectValue placeholder="Select state" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {nigerianStates.map((state) => (
+                          <SelectItem key={state} value={state}>
+                            {state}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="postalCode">Postal Code</Label>
+                  <Input
+                    id="postalCode"
+                    placeholder="100001"
+                    value={formData.registeredAddress.postalCode}
+                    onChange={(e) => updateAddress("postalCode", e.target.value)}
+                    data-testid="input-address-postal"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleBack}
+                disabled={currentStep === 1}
+                data-testid="button-back"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back
+              </Button>
+              <Button
+                type="button"
+                onClick={handleNext}
+                disabled={!canProceed() || createMutation.isPending}
+                data-testid="button-next"
+              >
+                {createMutation.isPending ? (
+                  <>
+                    <LoadingSpinner size="sm" className="mr-2" />
+                    Creating...
+                  </>
+                ) : currentStep === 4 ? (
+                  "Create Application"
+                ) : (
+                  <>
+                    Next
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </DashboardLayout>
+  );
+}

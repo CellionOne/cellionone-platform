@@ -1,16 +1,132 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "@/components/theme-provider";
+import { useAuth } from "@/hooks/use-auth";
+import { LoadingPage } from "@/components/loading-spinner";
+
 import NotFound from "@/pages/not-found";
+import LandingPage from "@/pages/landing";
+import FounderDashboard from "@/pages/founder/dashboard";
+import FounderIdentity from "@/pages/founder/identity";
+import FounderApplications from "@/pages/founder/applications";
+import FounderVault from "@/pages/founder/vault";
+import NewApplication from "@/pages/applications/new";
+import ApplicationDetails from "@/pages/applications/[id]";
+import LawyerDashboard from "@/pages/lawyer/dashboard";
+import LawyerApplications from "@/pages/lawyer/applications";
+import LawyerPayouts from "@/pages/lawyer/payouts";
+import AdminDashboard from "@/pages/admin/dashboard";
+import AdminUsers from "@/pages/admin/users";
+import AdminApplications from "@/pages/admin/applications";
+import AdminFeatureFlags from "@/pages/admin/feature-flags";
+import AdminAuditLogs from "@/pages/admin/audit-logs";
+
+function ProtectedRoute({ 
+  component: Component, 
+  roles 
+}: { 
+  component: React.ComponentType; 
+  roles?: string[];
+}) {
+  const { user, isLoading, isAuthenticated } = useAuth();
+  
+  if (isLoading) {
+    return <LoadingPage />;
+  }
+  
+  if (!isAuthenticated) {
+    window.location.href = "/api/login";
+    return <LoadingPage />;
+  }
+  
+  // Check role-based access
+  if (roles && roles.length > 0) {
+    const userRoles = user?.roles || [];
+    const hasRequiredRole = roles.some(role => userRoles.includes(role));
+    
+    if (!hasRequiredRole) {
+      // Redirect to appropriate dashboard based on user role
+      if (userRoles.includes("admin")) {
+        window.location.href = "/admin/dashboard";
+      } else if (userRoles.includes("lawyer")) {
+        window.location.href = "/lawyer/dashboard";
+      } else {
+        window.location.href = "/founder/dashboard";
+      }
+      return <LoadingPage />;
+    }
+  }
+  
+  return <Component />;
+}
 
 function Router() {
+  const { isAuthenticated, isLoading } = useAuth();
+  
   return (
     <Switch>
-      {/* Add pages below */}
-      {/* <Route path="/" component={Home}/> */}
-      {/* Fallback to 404 */}
+      <Route path="/">
+        {isLoading ? (
+          <LoadingPage />
+        ) : isAuthenticated ? (
+          <Redirect to="/founder/dashboard" />
+        ) : (
+          <LandingPage />
+        )}
+      </Route>
+      
+      <Route path="/founder/dashboard">
+        <ProtectedRoute component={FounderDashboard} />
+      </Route>
+      <Route path="/founder/identity">
+        <ProtectedRoute component={FounderIdentity} />
+      </Route>
+      <Route path="/founder/applications">
+        <ProtectedRoute component={FounderApplications} />
+      </Route>
+      <Route path="/founder/vault">
+        <ProtectedRoute component={FounderVault} />
+      </Route>
+      
+      <Route path="/applications/new">
+        <ProtectedRoute component={NewApplication} />
+      </Route>
+      <Route path="/applications/:id">
+        <ProtectedRoute component={ApplicationDetails} />
+      </Route>
+      
+      <Route path="/lawyer/dashboard">
+        <ProtectedRoute component={LawyerDashboard} roles={["lawyer"]} />
+      </Route>
+      <Route path="/lawyer/applications">
+        <ProtectedRoute component={LawyerApplications} roles={["lawyer"]} />
+      </Route>
+      <Route path="/lawyer/applications/:id">
+        <ProtectedRoute component={LawyerApplications} roles={["lawyer"]} />
+      </Route>
+      <Route path="/lawyer/payouts">
+        <ProtectedRoute component={LawyerPayouts} roles={["lawyer"]} />
+      </Route>
+      
+      <Route path="/admin/dashboard">
+        <ProtectedRoute component={AdminDashboard} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/users">
+        <ProtectedRoute component={AdminUsers} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/applications">
+        <ProtectedRoute component={AdminApplications} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/feature-flags">
+        <ProtectedRoute component={AdminFeatureFlags} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/audit-logs">
+        <ProtectedRoute component={AdminAuditLogs} roles={["admin"]} />
+      </Route>
+      
       <Route component={NotFound} />
     </Switch>
   );
@@ -19,10 +135,12 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <ThemeProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

@@ -253,6 +253,25 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/founder/receipts", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applications = await storage.getApplicationsByFounder(userId);
+      const applicationIds = applications.map(a => a.id);
+      
+      const allReceipts: any[] = [];
+      for (const appId of applicationIds) {
+        const receipts = await storage.getReceiptsByApplication(appId);
+        allReceipts.push(...receipts);
+      }
+      
+      res.json(allReceipts);
+    } catch (error) {
+      console.error("Error fetching receipts:", error);
+      res.status(500).json({ message: "Failed to fetch receipts" });
+    }
+  });
+
   // ============== APPLICATION ROUTES ==============
   app.get("/api/applications/:id", isAuthenticated, async (req: any, res) => {
     try {
@@ -1011,6 +1030,46 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error: any) {
       console.error("Error refreshing readiness:", error);
       res.status(500).json({ message: error.message || "Failed to refresh readiness" });
+    }
+  });
+
+  // ============== OFFLINE DRAFTS SYNC ==============
+  const draftSyncSchema = z.object({
+    localId: z.string().min(1, "Local ID is required"),
+    applicationId: z.number().optional(),
+    data: z.record(z.unknown()),
+  });
+
+  app.post("/api/drafts/sync", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      
+      const parsed = draftSyncSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+      
+      const { localId, applicationId, data } = parsed.data;
+      
+      const draft = await storage.createOfflineDraft({
+        founderUserId: userId,
+        applicationId: applicationId || undefined,
+        clientDraftId: localId,
+        draftJson: data as Record<string, any>,
+      });
+      
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "sync_offline_draft",
+        entityType: "offline_draft",
+        entityId: draft.id.toString(),
+        ipAddress: req.ip,
+      });
+      
+      res.json({ success: true, draftId: draft.id });
+    } catch (error: any) {
+      console.error("Error syncing draft:", error);
+      res.status(500).json({ message: error.message || "Failed to sync draft" });
     }
   });
 

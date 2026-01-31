@@ -112,6 +112,10 @@ export interface IStorage {
   getAIEventsByFeature(feature: string, limit?: number): Promise<ApplicationAIEvent[]>;
   createAIEvent(data: InsertApplicationAIEvent): Promise<ApplicationAIEvent>;
 
+  // Offline Drafts
+  createOfflineDraft(data: InsertOfflineDraft): Promise<OfflineDraft>;
+  getOfflineDraftsByUser(userId: string): Promise<OfflineDraft[]>;
+
   // Documents - extended
   updateDocument(id: number, data: Partial<InsertDocumentFile>): Promise<DocumentFile | undefined>;
 
@@ -471,6 +475,16 @@ export class DatabaseStorage implements IStorage {
   async createAIEvent(data: InsertApplicationAIEvent): Promise<ApplicationAIEvent> {
     const [event] = await db.insert(applicationAIEvents).values(data).returning();
     return event;
+  }
+
+  // Offline Drafts
+  async createOfflineDraft(data: InsertOfflineDraft): Promise<OfflineDraft> {
+    const [draft] = await db.insert(offlineDrafts).values(data).returning();
+    return draft;
+  }
+
+  async getOfflineDraftsByUser(userId: string): Promise<OfflineDraft[]> {
+    return await db.select().from(offlineDrafts).where(eq(offlineDrafts.founderUserId, userId));
   }
 
   // Documents - extended

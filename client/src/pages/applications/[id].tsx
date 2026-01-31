@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingSpinner, LoadingPage } from "@/components/loading-spinner";
+import { ReadinessPanel } from "@/components/readiness-panel";
+import { OfflineSyncStatus } from "@/components/offline-sync-status";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
@@ -204,6 +206,8 @@ export default function ApplicationDetailsPage() {
           </Card>
         )}
 
+        <OfflineSyncStatus />
+
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             <Card>
@@ -306,6 +310,10 @@ export default function ApplicationDetailsPage() {
           </div>
 
           <div className="space-y-6">
+            {application.status === "draft" && (
+              <ReadinessPanel applicationId={parseInt(applicationId!)} />
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">

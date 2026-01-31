@@ -26,13 +26,15 @@ export async function seedDatabase() {
       
       if (existingUsers.length === 0) {
         // Insert demo users
-        await db.insert(users).values([
+        for (const user of [
           { id: "demo-admin-001", username: "admin@celion.ng", email: "admin@celion.ng", firstName: "Admin", lastName: "User" },
           { id: "demo-lawyer-001", username: "lawyer@celion.ng", email: "lawyer@celion.ng", firstName: "Chinedu", lastName: "Okonkwo" },
           { id: "demo-lawyer-002", username: "lawyer2@celion.ng", email: "lawyer2@celion.ng", firstName: "Amaka", lastName: "Nwachukwu" },
           { id: "demo-founder-001", username: "founder@celion.ng", email: "founder@celion.ng", firstName: "Emeka", lastName: "Okoro" },
           { id: "demo-founder-002", username: "founder2@celion.ng", email: "founder2@celion.ng", firstName: "Ngozi", lastName: "Adeyemi" },
-        ]);
+        ]) {
+          await db.insert(users).values(user).onConflictDoNothing();
+        }
         console.log("Seeded demo users");
 
         // Assign roles
@@ -46,42 +48,44 @@ export async function seedDatabase() {
         console.log("Seeded user roles");
 
         // Seed sample applications
-        await db.insert(companyApplications).values([
+        for (const app of [
           {
             founderUserId: "demo-founder-001",
-            applicationType: "incorporation",
+            applicationType: "incorporation" as const,
             companyType: "LLC",
             companyName1: "TechHub Nigeria Limited",
             companyName2: "TechHub Africa Ltd",
             companyName3: "TechHub Solutions",
             businessDescription: "Software development, IT consulting, and digital transformation services for Nigerian businesses",
             registeredAddress: "12 Marina Street, Lagos Island, Lagos, Nigeria",
-            status: "under_review",
+            status: "under_review" as const,
             assignedLawyerUserId: "demo-lawyer-001",
           },
           {
             founderUserId: "demo-founder-001",
-            applicationType: "incorporation",
+            applicationType: "incorporation" as const,
             companyType: "LLC",
             companyName1: "GreenFarm Agritech",
             companyName2: "GreenFarm Nigeria",
             companyName3: "GreenFarm Solutions",
             businessDescription: "Agricultural technology, farm produce distribution, and agribusiness consulting",
             registeredAddress: "45 Ahmadu Bello Way, Kaduna, Nigeria",
-            status: "draft",
+            status: "draft" as const,
           },
           {
             founderUserId: "demo-founder-002",
-            applicationType: "incorporation",
+            applicationType: "incorporation" as const,
             companyType: "PLC",
             companyName1: "NaijaFinance PLC",
             companyName2: "Nigerian Finance Holdings",
             companyName3: "NaijaFin Group",
             businessDescription: "Financial services, investment management, and wealth advisory for high-net-worth individuals",
             registeredAddress: "78 Awolowo Road, Ikoyi, Lagos, Nigeria",
-            status: "submitted",
+            status: "submitted" as const,
           },
-        ]);
+        ]) {
+          await db.insert(companyApplications).values(app);
+        }
         console.log("Seeded sample applications");
 
         // Seed audit logs

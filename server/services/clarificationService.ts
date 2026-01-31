@@ -17,7 +17,12 @@ export interface CreateClarificationInput {
   subject: string;
   message: string;
   useAIDraft?: boolean;
-  issueDescription?: string;
+  aiDraftJson?: {
+    subject?: string;
+    message?: string;
+    rationale?: string;
+    requiredActions?: string[];
+  };
 }
 
 export async function createClarificationRequest(
@@ -41,6 +46,7 @@ export async function createClarificationRequest(
     subject: input.subject,
     message: input.message,
     status: "open",
+    aiDraftJson: input.aiDraftJson,
   };
 
   const [clarification] = await db.insert(clarificationRequests)

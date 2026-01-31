@@ -6,6 +6,7 @@ import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
 import { insertCompanyApplicationSchema, insertClarificationRequestSchema } from "@shared/schema";
+import * as services from "./services";
 
 // Validation schemas
 const createApplicationSchema = insertCompanyApplicationSchema.pick({
@@ -43,6 +44,40 @@ const statusUpdateSchema = z.object({
 const aiSuggestSchema = z.object({
   businessDescription: z.string().min(1, "Business description required"),
   companyType: z.string().optional(),
+});
+
+// New validation schemas for enhancement features
+const executionDeclarationSchema = z.object({
+  declarationType: z.enum(["document_verified", "application_reviewed", "cac_filed", "originals_received"]),
+});
+
+const documentQualitySchema = z.object({
+  qualityStatus: z.enum(["pass", "needs_attention", "rejected"]),
+  qualityNotes: z.string().optional(),
+});
+
+const clarificationRequestSchema = z.object({
+  subject: z.string().min(1, "Subject required"),
+  body: z.string().min(1, "Body required"),
+  useAiDraft: z.boolean().optional(),
+});
+
+const paymentTransitionSchema = z.object({
+  targetState: z.enum(["released_to_lawyer", "refunded_partial", "refunded_full", "chargeback"]),
+  refundAmountKobo: z.number().optional(),
+  reason: z.string().optional(),
+});
+
+const receiptIssueSchema = z.object({
+  applicationId: z.number(),
+  transactionType: z.enum(["payment_received", "document_issued", "filing_completed"]),
+  dataJson: z.record(z.any()).optional(),
+});
+
+const aiDraftSchema = z.object({
+  category: z.enum(["missing_docs", "wrong_format", "info_mismatch", "legal_question"]).optional(),
+  issue: z.string().min(1, "Issue description required"),
+  existingDocuments: z.array(z.string()).optional(),
 });
 
 // Lazy initialization of OpenAI to avoid startup errors
@@ -513,7 +548,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const allApps = await storage.getAllApplications();
       for (const app of allApps) {
         const payment = await storage.getPaymentByApplication(app.id);
-        if (payment?.paystackReference === reference) {
+        if (payment && payment.paystackReference === reference) {
           await storage.updatePayment(payment.id, {
             status: "success",
             paidAt: new Date(),
@@ -606,6 +641,462 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error) {
       console.error("Error updating status:", error);
       res.status(500).json({ message: "Failed to update status" });
+    }
+  });
+
+  // ============== EXECUTION DECLARATION ROUTES (Lawyer) ==============
+  app.post("/api/lawyer/applications/:id/execution-declaration", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      
+      const parsed = executionDeclarationSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+      
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const declaration = await services.createExecutionDeclaration({
+        applicationId,
+        lawyerId: userId,
+        submissionType: parsed.data.declarationType === "cac_filed" ? "digital" : "physical",
+        notes: `Declaration type: ${parsed.data.declarationType}`,
+      });
+      
+      res.json(declaration);
+    } catch (error: any) {
+      console.error("Error creating execution declaration:", error);
+      res.status(500).json({ message: error.message || "Failed to create declaration" });
+    }
+  });
+
+  app.get("/api/applications/:id/execution-declarations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      
+      const application = await storage.getApplication(applicationId);
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      
+      const roles = await getUserRoles(userId);
+      const isOwner = application.founderUserId === userId;
+      const isAssignedLawyer = application.assignedLawyerUserId === userId;
+      const isAdmin = roles.includes("admin");
+      
+      if (!isOwner && !isAssignedLawyer && !isAdmin) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const declarations = await services.getDeclarationsByApplication(applicationId);
+      res.json(declarations);
+    } catch (error) {
+      console.error("Error fetching declarations:", error);
+      res.status(500).json({ message: "Failed to fetch declarations" });
+    }
+  });
+
+  // ============== DOCUMENT QUALITY ROUTES (Lawyer) ==============
+  app.patch("/api/lawyer/documents/:id/quality", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const documentId = parseInt(req.params.id);
+      
+      const parsed = documentQualitySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+      
+      const doc = await storage.getDocument(documentId);
+      if (!doc) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+      
+      if (!doc.applicationId) {
+        return res.status(400).json({ message: "Document not associated with an application" });
+      }
+      
+      const application = await storage.getApplication(doc.applicationId);
+      if (!application || application.assignedLawyerUserId !== userId) {
+        return res.status(403).json({ message: "Access denied - you are not assigned to this application" });
+      }
+      
+      const { qualityStatus, qualityNotes } = parsed.data;
+      
+      const updated = await services.manualQualityOverride(
+        documentId,
+        qualityStatus,
+        qualityNotes
+      );
+      
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "quality_override",
+        entityType: "document_file",
+        entityId: documentId.toString(),
+        details: { qualityStatus, qualityNotes },
+        ipAddress: req.ip,
+      });
+      
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating document quality:", error);
+      res.status(500).json({ message: error.message || "Failed to update quality" });
+    }
+  });
+
+  app.post("/api/lawyer/documents/:id/analyze", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const documentId = parseInt(req.params.id);
+      
+      const doc = await storage.getDocument(documentId);
+      if (!doc) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+      
+      if (!doc.applicationId) {
+        return res.status(400).json({ message: "Document not associated with an application" });
+      }
+      
+      const application = await storage.getApplication(doc.applicationId);
+      if (!application || application.assignedLawyerUserId !== userId) {
+        return res.status(403).json({ message: "Access denied - you are not assigned to this application" });
+      }
+      
+      const result = await services.analyzeDocumentQuality(
+        doc.applicationId,
+        userId,
+        {
+          fileName: doc.filename || "unknown",
+          fileType: doc.storagePath?.split(".").pop() || "unknown",
+          fileSize: 0,
+          documentType: doc.docType || "unknown",
+        }
+      );
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error analyzing document:", error);
+      res.status(500).json({ message: error.message || "Failed to analyze document" });
+    }
+  });
+
+  // ============== CLARIFICATION ROUTES (Lawyer) ==============
+  app.post("/api/lawyer/applications/:id/clarifications", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      
+      const parsed = clarificationRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+      
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const { subject, body, useAiDraft } = parsed.data;
+      
+      let aiDraftJson;
+      if (useAiDraft) {
+        const founder = await storage.getUser(application.founderUserId);
+        const documents = await storage.getDocumentsByApplication(applicationId);
+        
+        const aiResult = await services.generateClarificationDraft(
+          applicationId,
+          userId,
+          {
+            companyName: application.companyName1 || "Unknown Company",
+            founderName: founder ? `${founder.firstName} ${founder.lastName}` : "Founder",
+            issue: subject,
+            existingDocuments: documents.map(d => d.docType || "unknown"),
+          }
+        );
+        
+        if (aiResult.draft) {
+          aiDraftJson = {
+            subject: aiResult.draft.subject,
+            message: aiResult.draft.message,
+            rationale: aiResult.draft.rationale,
+            requiredActions: aiResult.draft.suggestedDocuments,
+          };
+        }
+      }
+      
+      const clarification = await services.createClarificationRequest({
+        applicationId,
+        lawyerId: userId,
+        founderUserId: application.founderUserId,
+        subject: aiDraftJson?.subject || subject,
+        message: aiDraftJson?.message || body,
+        useAIDraft: useAiDraft,
+        aiDraftJson,
+      });
+      
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "create_clarification",
+        entityType: "clarification_request",
+        entityId: clarification.id.toString(),
+        details: { useAiDraft: !!useAiDraft },
+        ipAddress: req.ip,
+      });
+      
+      res.json(clarification);
+    } catch (error: any) {
+      console.error("Error creating clarification:", error);
+      res.status(500).json({ message: error.message || "Failed to create clarification" });
+    }
+  });
+
+  app.post("/api/lawyer/clarifications/:id/send", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const clarificationId = parseInt(req.params.id);
+      
+      const clarification = await services.sendClarificationRequest(clarificationId, userId);
+      
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "send_clarification",
+        entityType: "clarification_request",
+        entityId: clarificationId.toString(),
+        ipAddress: req.ip,
+      });
+      
+      res.json(clarification);
+    } catch (error: any) {
+      console.error("Error sending clarification:", error);
+      res.status(500).json({ message: error.message || "Failed to send clarification" });
+    }
+  });
+
+  app.post("/api/lawyer/clarifications/:id/resolve", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const clarificationId = parseInt(req.params.id);
+      
+      const clarification = await services.resolveClarification(clarificationId, userId);
+      
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "resolve_clarification",
+        entityType: "clarification_request",
+        entityId: clarificationId.toString(),
+        ipAddress: req.ip,
+      });
+      
+      res.json(clarification);
+    } catch (error: any) {
+      console.error("Error resolving clarification:", error);
+      res.status(500).json({ message: error.message || "Failed to resolve clarification" });
+    }
+  });
+
+  app.get("/api/lawyer/clarifications", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const clarifications = await services.getClarificationsByLawyer(userId);
+      res.json(clarifications);
+    } catch (error) {
+      console.error("Error fetching clarifications:", error);
+      res.status(500).json({ message: "Failed to fetch clarifications" });
+    }
+  });
+
+  // AI Draft for clarification
+  app.post("/api/lawyer/applications/:id/clarifications/ai-draft", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      
+      const parsed = aiDraftSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+      
+      const { category, issue, existingDocuments } = parsed.data;
+      
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const founder = await storage.getUser(application.founderUserId);
+      const documents = await storage.getDocumentsByApplication(applicationId);
+      
+      const draft = await services.generateClarificationDraft(
+        applicationId,
+        userId,
+        {
+          companyName: application.companyName1 || "Unknown Company",
+          founderName: founder ? `${founder.firstName} ${founder.lastName}` : "Founder",
+          issue: issue,
+          existingDocuments: existingDocuments || documents.map(d => d.docType || "unknown"),
+        }
+      );
+      
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "generate_ai_draft",
+        entityType: "company_application",
+        entityId: applicationId.toString(),
+        details: { category, issue },
+        ipAddress: req.ip,
+      });
+      
+      res.json(draft);
+    } catch (error: any) {
+      console.error("Error generating AI draft:", error);
+      res.status(500).json({ message: error.message || "Failed to generate draft" });
+    }
+  });
+
+  // ============== READINESS ROUTES ==============
+  app.get("/api/applications/:id/readiness", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      
+      const application = await storage.getApplication(applicationId);
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      
+      const roles = await getUserRoles(userId);
+      const isOwner = application.founderUserId === userId;
+      const isAssignedLawyer = application.assignedLawyerUserId === userId;
+      const isAdmin = roles.includes("admin");
+      
+      if (!isOwner && !isAssignedLawyer && !isAdmin) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const readiness = await services.getApplicationReadiness(applicationId);
+      res.json(readiness);
+    } catch (error: any) {
+      console.error("Error fetching readiness:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch readiness" });
+    }
+  });
+
+  app.post("/api/applications/:id/readiness/refresh", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      
+      const application = await storage.getApplication(applicationId);
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      
+      const roles = await getUserRoles(userId);
+      const isOwner = application.founderUserId === userId;
+      const isAssignedLawyer = application.assignedLawyerUserId === userId;
+      const isAdmin = roles.includes("admin");
+      
+      if (!isOwner && !isAssignedLawyer && !isAdmin) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const updated = await services.updateApplicationReadiness(applicationId);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error refreshing readiness:", error);
+      res.status(500).json({ message: error.message || "Failed to refresh readiness" });
+    }
+  });
+
+  // ============== RECEIPT ROUTES ==============
+  app.get("/api/applications/:id/receipts", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      
+      const application = await storage.getApplication(applicationId);
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      
+      const roles = await getUserRoles(userId);
+      const isOwner = application.founderUserId === userId;
+      const isAdmin = roles.includes("admin");
+      
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const receipts = await services.getReceiptsByApplication(applicationId);
+      res.json(receipts);
+    } catch (error) {
+      console.error("Error fetching receipts:", error);
+      res.status(500).json({ message: "Failed to fetch receipts" });
+    }
+  });
+
+  app.get("/api/receipts/:receiptNumber", async (req: any, res) => {
+    try {
+      const { receiptNumber } = req.params;
+      
+      const receipt = await services.getReceipt(receiptNumber);
+      if (!receipt) {
+        return res.status(404).json({ message: "Receipt not found" });
+      }
+      
+      res.json(receipt);
+    } catch (error) {
+      console.error("Error fetching receipt:", error);
+      res.status(500).json({ message: "Failed to fetch receipt" });
+    }
+  });
+
+  app.post("/api/receipts/verify", async (req: any, res) => {
+    try {
+      const { receiptNumber } = req.body;
+      
+      if (!receiptNumber) {
+        return res.status(400).json({ message: "Receipt number required" });
+      }
+      
+      const result = await services.verifyReceipt(receiptNumber);
+      res.json(result);
+    } catch (error) {
+      console.error("Error verifying receipt:", error);
+      res.status(500).json({ message: "Failed to verify receipt" });
+    }
+  });
+
+  // ============== AI EVENTS ROUTES ==============
+  app.get("/api/applications/:id/ai-events", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      
+      const application = await storage.getApplication(applicationId);
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      
+      const roles = await getUserRoles(userId);
+      const isAdmin = roles.includes("admin");
+      const isAssignedLawyer = application.assignedLawyerUserId === userId;
+      
+      if (!isAdmin && !isAssignedLawyer) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const events = await storage.getAIEventsByApplication(applicationId);
+      res.json(events);
+    } catch (error) {
+      console.error("Error fetching AI events:", error);
+      res.status(500).json({ message: "Failed to fetch AI events" });
     }
   });
 
@@ -802,6 +1293,165 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error) {
       console.error("Error fetching audit logs:", error);
       res.status(500).json({ message: "Failed to fetch audit logs" });
+    }
+  });
+
+  // ============== ADMIN PAYMENT STATE ROUTES ==============
+  app.post("/api/admin/applications/:id/payment-state", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      
+      const parsed = paymentTransitionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+      
+      const { targetState, refundAmountKobo, reason } = parsed.data;
+      
+      const payment = await storage.getPaymentByApplication(applicationId);
+      if (!payment) {
+        return res.status(404).json({ message: "Payment not found for application" });
+      }
+      
+      let result;
+      switch (targetState) {
+        case "released_to_lawyer":
+          const app = await storage.getApplication(applicationId);
+          if (!app?.assignedLawyerUserId) {
+            return res.status(400).json({ message: "No lawyer assigned to release payment to" });
+          }
+          const lawyerFeeKobo = (payment.breakdownJson as any)?.lawyerFee || Math.floor(payment.amountTotalKobo * 0.5);
+          result = await services.releaseToLawyer(applicationId, app.assignedLawyerUserId, lawyerFeeKobo);
+          break;
+        case "refunded_partial":
+          result = await services.processRefund(applicationId, reason || "Admin initiated partial refund", true);
+          break;
+        case "refunded_full":
+        case "chargeback":
+          result = await services.processRefund(applicationId, reason || "Admin initiated full refund", false);
+          break;
+        default:
+          return res.status(400).json({ message: `Invalid target state: ${targetState}` });
+      }
+      
+      if (!result.success) {
+        return res.status(400).json({ message: result.error });
+      }
+      
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_override",
+        entityType: "payment",
+        entityId: payment.id.toString(),
+        details: { targetState, refundAmountKobo, reason },
+        ipAddress: req.ip,
+      });
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error transitioning payment state:", error);
+      res.status(500).json({ message: error.message || "Failed to transition payment state" });
+    }
+  });
+
+  // ============== ADMIN RECEIPT ROUTES ==============
+  app.post("/api/admin/receipts", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      
+      const parsed = receiptIssueSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+      
+      const { applicationId, transactionType, dataJson } = parsed.data;
+      
+      const application = await storage.getApplication(applicationId);
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      
+      const scopeMap: Record<string, "identity" | "incorporation" | "post_incorporation" | "document_bundle"> = {
+        payment_received: "identity",
+        document_issued: "incorporation",
+        filing_completed: "post_incorporation",
+      };
+      
+      const receipt = await services.issueReceipt(
+        applicationId,
+        application.founderUserId,
+        scopeMap[transactionType] || "identity",
+        "celion"
+      );
+      
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "issue_receipt",
+        entityType: "verification_receipt",
+        entityId: receipt.id.toString(),
+        details: { transactionType },
+        ipAddress: req.ip,
+      });
+      
+      res.json(receipt);
+    } catch (error: any) {
+      console.error("Error issuing receipt:", error);
+      res.status(500).json({ message: error.message || "Failed to issue receipt" });
+    }
+  });
+
+  app.post("/api/admin/receipts/:id/revoke", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const receiptId = parseInt(req.params.id);
+      const { reason } = req.body;
+      
+      if (!reason) {
+        return res.status(400).json({ message: "Revocation reason required" });
+      }
+      
+      const receipt = await services.revokeReceipt(receiptId, reason);
+      if (!receipt) {
+        return res.status(404).json({ message: "Receipt not found" });
+      }
+      
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "revoke_receipt",
+        entityType: "verification_receipt",
+        entityId: receiptId.toString(),
+        details: { reason },
+        ipAddress: req.ip,
+      });
+      
+      res.json(receipt);
+    } catch (error: any) {
+      console.error("Error revoking receipt:", error);
+      res.status(500).json({ message: error.message || "Failed to revoke receipt" });
+    }
+  });
+
+  // ============== ADMIN AI EVENTS ROUTES ==============
+  app.get("/api/admin/ai-events", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { applicationId } = req.query;
+      
+      if (applicationId) {
+        const events = await storage.getAIEventsByApplication(parseInt(applicationId as string));
+        res.json(events);
+      } else {
+        const allApps = await storage.getAllApplications();
+        const allEvents = [];
+        for (const app of allApps.slice(0, 50)) {
+          const events = await storage.getAIEventsByApplication(app.id);
+          allEvents.push(...events);
+        }
+        res.json(allEvents.sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()));
+      }
+    } catch (error) {
+      console.error("Error fetching AI events:", error);
+      res.status(500).json({ message: "Failed to fetch AI events" });
     }
   });
 

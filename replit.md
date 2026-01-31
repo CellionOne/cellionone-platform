@@ -10,6 +10,7 @@ Celion One is a comprehensive legal tech platform for Nigeria company incorporat
 - **Authentication**: Replit Auth (OIDC)
 - **AI**: OpenAI GPT-4o for CAC activity suggestions
 - **Payments**: Paystack (Nigeria)
+- **PWA**: Service worker with offline support, web app manifest
 
 ## User Roles
 1. **Founder**: Can create applications, upload documents, make payments, track status

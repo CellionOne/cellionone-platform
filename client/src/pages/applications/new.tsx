@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
@@ -8,15 +8,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { saveDraft, getDraft, deleteDraft, isOnline, onOnlineStatusChange, type ApplicationDraft } from "@/lib/offline-storage";
 import {
   Building2,
   ArrowRight,
   ArrowLeft,
   CheckCircle2,
   Sparkles,
+  Wifi,
+  WifiOff,
+  Save,
 } from "lucide-react";
 
 const steps = [
@@ -41,10 +46,14 @@ const nigerianStates = [
   "Yobe", "Zamfara"
 ];
 
+const DRAFT_ID = "new-application-draft";
+
 export default function NewApplicationPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(1);
+  const [online, setOnline] = useState(isOnline());
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [formData, setFormData] = useState({
     applicationType: "incorporation",
     companyType: "",
@@ -63,12 +72,90 @@ export default function NewApplicationPage() {
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
   const [isLoadingAi, setIsLoadingAi] = useState(false);
 
+  // Load draft from localStorage on mount
+  useEffect(() => {
+    const savedDraft = getDraft(DRAFT_ID);
+    if (savedDraft && savedDraft.data) {
+      let restoredAddress = formData.registeredAddress;
+      if (savedDraft.data.registeredAddress) {
+        try {
+          restoredAddress = typeof savedDraft.data.registeredAddress === 'string'
+            ? JSON.parse(savedDraft.data.registeredAddress)
+            : savedDraft.data.registeredAddress;
+        } catch {
+          restoredAddress = formData.registeredAddress;
+        }
+      }
+      
+      setFormData(prev => ({
+        ...prev,
+        applicationType: savedDraft.data.applicationType || prev.applicationType,
+        companyType: savedDraft.data.companyType || prev.companyType,
+        companyName1: savedDraft.data.companyName1 || prev.companyName1,
+        companyName2: savedDraft.data.companyName2 || prev.companyName2,
+        companyName3: savedDraft.data.companyName3 || prev.companyName3,
+        businessDescription: savedDraft.data.businessDescription || prev.businessDescription,
+        registeredAddress: restoredAddress,
+      }));
+      setCurrentStep(savedDraft.step);
+      toast({
+        title: "Draft restored",
+        description: "Your previous draft has been loaded.",
+      });
+    }
+  }, []);
+
+  // Track online status
+  useEffect(() => {
+    return onOnlineStatusChange((isOnline) => {
+      setOnline(isOnline);
+      if (isOnline) {
+        toast({
+          title: "Back online",
+          description: "Your connection has been restored.",
+        });
+      } else {
+        toast({
+          title: "You're offline",
+          description: "Changes will be saved locally.",
+          variant: "destructive",
+        });
+      }
+    });
+  }, []);
+
+  // Auto-save draft when form data or step changes
+  const autoSave = useCallback(() => {
+    saveDraft({
+      id: DRAFT_ID,
+      step: currentStep,
+      data: {
+        applicationType: formData.applicationType,
+        companyType: formData.companyType,
+        companyName1: formData.companyName1,
+        companyName2: formData.companyName2,
+        companyName3: formData.companyName3,
+        businessDescription: formData.businessDescription,
+        registeredAddress: JSON.stringify(formData.registeredAddress),
+      },
+      updatedAt: new Date().toISOString(),
+      synced: false,
+    });
+    setLastSaved(new Date());
+  }, [formData, currentStep]);
+
+  useEffect(() => {
+    const timer = setTimeout(autoSave, 1000);
+    return () => clearTimeout(timer);
+  }, [formData, currentStep, autoSave]);
+
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
       return apiRequest("POST", "/api/applications", data);
     },
     onSuccess: async (response) => {
       const app = await response.json();
+      deleteDraft(DRAFT_ID);
       queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/dashboard"] });
       toast({
@@ -160,11 +247,27 @@ export default function NewApplicationPage() {
       ]}
     >
       <div className="max-w-3xl mx-auto space-y-8">
-        <div>
-          <h1 className="text-2xl font-bold">New Company Registration</h1>
-          <p className="text-muted-foreground">
-            Complete the following steps to start your company incorporation
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">New Company Registration</h1>
+            <p className="text-muted-foreground">
+              Complete the following steps to start your company incorporation
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {!online && (
+              <Badge variant="destructive" className="flex items-center gap-1" data-testid="badge-offline">
+                <WifiOff className="h-3 w-3" />
+                Offline
+              </Badge>
+            )}
+            {lastSaved && (
+              <Badge variant="secondary" className="flex items-center gap-1" data-testid="badge-saved">
+                <Save className="h-3 w-3" />
+                Saved
+              </Badge>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">

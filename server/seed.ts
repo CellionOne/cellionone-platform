@@ -4,21 +4,28 @@ import { featureFlags, users, userRoles, companyApplications, auditLogs } from "
 export async function seedDatabase() {
   try {
     // Seed feature flags
-    const existingFlags = await db.select().from(featureFlags).limit(1);
+    const allFlags = [
+      { key: "kyc_verification", isEnabled: true, description: "Enable KYC identity verification" },
+      { key: "ai_suggestions", isEnabled: true, description: "Enable AI-powered CAC activity suggestions" },
+      { key: "paystack_payments", isEnabled: true, description: "Enable Paystack payment processing" },
+      { key: "lawyer_payout", isEnabled: true, description: "Enable lawyer payout processing" },
+      { key: "document_vault", isEnabled: true, description: "Enable document vault feature" },
+      { key: "courier_tracking", isEnabled: false, description: "Enable courier tracking for document delivery" },
+      { key: "multi_director", isEnabled: true, description: "Allow multiple directors per application" },
+      { key: "bulk_applications", isEnabled: false, description: "Allow bulk application submissions" },
+      { key: "offline_drafting", isEnabled: true, description: "Enable offline draft saving with IndexedDB sync" },
+      { key: "document_quality_check", isEnabled: true, description: "Enable AI-powered document quality analysis" },
+      { key: "ai_clarifications", isEnabled: true, description: "Enable AI-assisted clarification drafting" },
+      { key: "execution_declarations", isEnabled: true, description: "Enable execution declaration tracking" },
+      { key: "verification_receipts", isEnabled: true, description: "Enable verification receipt issuance" },
+      { key: "readiness_scoring", isEnabled: true, description: "Enable application readiness scoring" },
+    ];
     
-    if (existingFlags.length === 0) {
-      await db.insert(featureFlags).values([
-        { key: "kyc_verification", isEnabled: true, description: "Enable KYC identity verification" },
-        { key: "ai_suggestions", isEnabled: true, description: "Enable AI-powered CAC activity suggestions" },
-        { key: "paystack_payments", isEnabled: true, description: "Enable Paystack payment processing" },
-        { key: "lawyer_payout", isEnabled: true, description: "Enable lawyer payout processing" },
-        { key: "document_vault", isEnabled: true, description: "Enable document vault feature" },
-        { key: "courier_tracking", isEnabled: false, description: "Enable courier tracking for document delivery" },
-        { key: "multi_director", isEnabled: true, description: "Allow multiple directors per application" },
-        { key: "bulk_applications", isEnabled: false, description: "Allow bulk application submissions" },
-      ]);
-      console.log("Seeded feature flags");
+    // Always insert any missing feature flags
+    for (const flag of allFlags) {
+      await db.insert(featureFlags).values(flag).onConflictDoNothing();
     }
+    console.log("Synced feature flags");
 
     // Seed demo users if in development
     if (process.env.NODE_ENV !== "production") {

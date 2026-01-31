@@ -27,6 +27,8 @@ import {
   LogOut,
   Wallet,
   Scale,
+  Brain,
+  Receipt,
 } from "lucide-react";
 
 interface NavItem {
@@ -52,6 +54,8 @@ const adminItems: NavItem[] = [
   { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
   { title: "Users", url: "/admin/users", icon: Users },
   { title: "Applications", url: "/admin/applications", icon: FileText },
+  { title: "Receipts", url: "/admin/receipts", icon: Receipt },
+  { title: "AI Events", url: "/admin/ai-events", icon: Brain },
   { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },
   { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },
 ];

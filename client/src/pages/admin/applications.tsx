@@ -15,6 +15,7 @@ import {
   Search,
   Filter,
   UserPlus,
+  CreditCard,
 } from "lucide-react";
 import {
   Dialog,
@@ -24,19 +25,30 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import type { CompanyApplication, LawyerProfile } from "@shared/schema";
 
 interface ApplicationWithLawyer extends CompanyApplication {
   lawyerName?: string;
 }
 
+const paymentTransitionOptions = [
+  { value: "released_to_lawyer", label: "Release to Lawyer", description: "Release escrowed funds to assigned lawyer" },
+  { value: "refunded_partial", label: "Partial Refund", description: "Process a partial refund to the founder" },
+  { value: "refunded_full", label: "Full Refund", description: "Process a full refund to the founder" },
+  { value: "chargeback", label: "Chargeback", description: "Record a payment chargeback" },
+];
+
 export default function AdminApplications() {
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [selectedApp, setSelectedApp] = useState<ApplicationWithLawyer | null>(null);
   const [selectedLawyer, setSelectedLawyer] = useState<string>("");
+  const [selectedPaymentState, setSelectedPaymentState] = useState<string>("");
+  const [paymentReason, setPaymentReason] = useState<string>("");
 
   const { data: applications, isLoading } = useQuery<ApplicationWithLawyer[]>({
     queryKey: ["/api/admin/applications"],
@@ -59,6 +71,23 @@ export default function AdminApplications() {
     },
     onError: () => {
       toast({ title: "Failed to assign lawyer", variant: "destructive" });
+    },
+  });
+
+  const paymentTransitionMutation = useMutation({
+    mutationFn: async ({ applicationId, targetState, reason }: { applicationId: number; targetState: string; reason: string }) => {
+      return apiRequest("POST", `/api/admin/applications/${applicationId}/payment-state`, { targetState, reason });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/applications"] });
+      toast({ title: "Payment transition completed successfully" });
+      setPaymentDialogOpen(false);
+      setSelectedApp(null);
+      setSelectedPaymentState("");
+      setPaymentReason("");
+    },
+    onError: () => {
+      toast({ title: "Failed to complete payment transition", variant: "destructive" });
     },
   });
 
@@ -146,8 +175,21 @@ export default function AdminApplications() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 sm:shrink-0">
+                    <div className="flex items-center gap-4 sm:shrink-0 flex-wrap">
                       <StatusBadge status={app.status || "draft"} />
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => {
+                          setSelectedApp(app);
+                          setSelectedPaymentState(app.paymentState || "unpaid");
+                          setPaymentDialogOpen(true);
+                        }}
+                        data-testid={`button-payment-${app.id}`}
+                      >
+                        <CreditCard className="h-4 w-4 mr-1" />
+                        {app.paymentState || "unpaid"}
+                      </Button>
                       {!app.assignedLawyerUserId && app.status !== "draft" && (
                         <Button 
                           variant="outline" 
@@ -210,6 +252,73 @@ export default function AdminApplications() {
               data-testid="button-confirm-assign"
             >
               {assignMutation.isPending ? <LoadingSpinner size="sm" /> : "Assign"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Payment Action</DialogTitle>
+            <DialogDescription>
+              Process payment for "{selectedApp?.companyName1 || 'this application'}"
+              <br />
+              <span className="text-sm">Current state: {selectedApp?.paymentState || "unpaid"}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="payment-transition">Action</Label>
+              <Select value={selectedPaymentState} onValueChange={setSelectedPaymentState}>
+                <SelectTrigger data-testid="select-payment-state">
+                  <SelectValue placeholder="Select payment action" />
+                </SelectTrigger>
+                <SelectContent>
+                  {paymentTransitionOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <div className="flex flex-col">
+                        <span>{option.label}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedPaymentState && (
+                <p className="text-xs text-muted-foreground">
+                  {paymentTransitionOptions.find(o => o.value === selectedPaymentState)?.description}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="payment-reason">Reason (optional)</Label>
+              <Input
+                id="payment-reason"
+                placeholder="e.g., Application completed, customer request"
+                value={paymentReason}
+                onChange={(e) => setPaymentReason(e.target.value)}
+                data-testid="input-payment-reason"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPaymentDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => {
+                if (selectedApp && selectedPaymentState) {
+                  paymentTransitionMutation.mutate({ 
+                    applicationId: selectedApp.id, 
+                    targetState: selectedPaymentState,
+                    reason: paymentReason 
+                  });
+                }
+              }}
+              disabled={!selectedPaymentState || paymentTransitionMutation.isPending}
+              data-testid="button-confirm-payment"
+            >
+              {paymentTransitionMutation.isPending ? <LoadingSpinner size="sm" /> : "Execute"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -94,6 +94,7 @@ export interface IStorage {
   markNotificationRead(id: number): Promise<void>;
 
   // Verification Receipts
+  getReceipts(): Promise<VerificationReceipt[]>;
   getReceipt(id: number): Promise<VerificationReceipt | undefined>;
   getReceiptByNumber(receiptNumber: string): Promise<VerificationReceipt | undefined>;
   getReceiptsByApplication(applicationId: number): Promise<VerificationReceipt[]>;
@@ -411,6 +412,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Verification Receipts
+  async getReceipts(): Promise<VerificationReceipt[]> {
+    return db.select().from(verificationReceipts).orderBy(desc(verificationReceipts.issuedAt));
+  }
+
   async getReceipt(id: number): Promise<VerificationReceipt | undefined> {
     const [receipt] = await db.select().from(verificationReceipts).where(eq(verificationReceipts.id, id));
     return receipt;

@@ -1504,6 +1504,16 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
   });
 
   // ============== ADMIN RECEIPT ROUTES ==============
+  app.get("/api/admin/receipts", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const receipts = await storage.getReceipts();
+      res.json(receipts);
+    } catch (error: any) {
+      console.error("Error fetching receipts:", error);
+      res.status(500).json({ message: "Failed to fetch receipts" });
+    }
+  });
+
   app.post("/api/admin/receipts", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const adminId = getUserId(req);

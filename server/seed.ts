@@ -48,44 +48,37 @@ export async function seedDatabase() {
         console.log("Seeded user roles");
 
         // Seed sample applications
-        for (const app of [
-          {
-            founderUserId: "demo-founder-001",
-            applicationType: "incorporation" as const,
-            companyType: "LLC",
-            companyName1: "TechHub Nigeria Limited",
-            companyName2: "TechHub Africa Ltd",
-            companyName3: "TechHub Solutions",
-            businessDescription: "Software development, IT consulting, and digital transformation services for Nigerian businesses",
-            registeredAddress: "12 Marina Street, Lagos Island, Lagos, Nigeria",
-            status: "under_review" as const,
-            assignedLawyerUserId: "demo-lawyer-001",
-          },
-          {
-            founderUserId: "demo-founder-001",
-            applicationType: "incorporation" as const,
-            companyType: "LLC",
-            companyName1: "GreenFarm Agritech",
-            companyName2: "GreenFarm Nigeria",
-            companyName3: "GreenFarm Solutions",
-            businessDescription: "Agricultural technology, farm produce distribution, and agribusiness consulting",
-            registeredAddress: "45 Ahmadu Bello Way, Kaduna, Nigeria",
-            status: "draft" as const,
-          },
-          {
-            founderUserId: "demo-founder-002",
-            applicationType: "incorporation" as const,
-            companyType: "PLC",
-            companyName1: "NaijaFinance PLC",
-            companyName2: "Nigerian Finance Holdings",
-            companyName3: "NaijaFin Group",
-            businessDescription: "Financial services, investment management, and wealth advisory for high-net-worth individuals",
-            registeredAddress: "78 Awolowo Road, Ikoyi, Lagos, Nigeria",
-            status: "submitted" as const,
-          },
-        ]) {
-          await db.insert(companyApplications).values(app);
-        }
+        await db.insert(companyApplications).values({
+          founderUserId: "demo-founder-001",
+          companyType: "LLC",
+          companyName1: "TechHub Nigeria Limited",
+          companyName2: "TechHub Africa Ltd",
+          companyName3: "TechHub Solutions",
+          businessDescription: "Software development, IT consulting, and digital transformation services for Nigerian businesses",
+          registeredAddress: { line1: "12 Marina Street", city: "Lagos Island", state: "Lagos" },
+          status: "under_review",
+          assignedLawyerUserId: "demo-lawyer-001",
+        });
+        await db.insert(companyApplications).values({
+          founderUserId: "demo-founder-001",
+          companyType: "LLC",
+          companyName1: "GreenFarm Agritech",
+          companyName2: "GreenFarm Nigeria",
+          companyName3: "GreenFarm Solutions",
+          businessDescription: "Agricultural technology, farm produce distribution, and agribusiness consulting",
+          registeredAddress: { line1: "45 Ahmadu Bello Way", city: "Kaduna", state: "Kaduna" },
+          status: "draft",
+        });
+        await db.insert(companyApplications).values({
+          founderUserId: "demo-founder-002",
+          companyType: "PLC",
+          companyName1: "NaijaFinance PLC",
+          companyName2: "Nigerian Finance Holdings",
+          companyName3: "NaijaFin Group",
+          businessDescription: "Financial services, investment management, and wealth advisory for high-net-worth individuals",
+          registeredAddress: { line1: "78 Awolowo Road", city: "Ikoyi", state: "Lagos" },
+          status: "submitted",
+        });
         console.log("Seeded sample applications");
 
         // Seed audit logs

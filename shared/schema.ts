@@ -102,6 +102,17 @@ export const companyApplications = pgTable("company_applications", {
   assignedLawyerUserId: varchar("assigned_lawyer_user_id"),
   submittedAt: timestamp("submitted_at"),
   completedAt: timestamp("completed_at"),
+  readinessScore: integer("readiness_score").default(0),
+  readinessBreakdown: json("readiness_breakdown").$type<{
+    missingItems?: string[];
+    warnings?: string[];
+    blockers?: string[];
+    nextActions?: string[];
+  }>(),
+  paymentState: varchar("payment_state", { length: 50 }).default("unpaid"), // unpaid, paid_escrowed, released_to_lawyer, refunded_partial, refunded_full, chargeback
+  paymentStateUpdatedAt: timestamp("payment_state_updated_at"),
+  aiSuggestionVersion: varchar("ai_suggestion_version", { length: 50 }),
+  aiLastSuggestedAt: timestamp("ai_last_suggested_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -144,6 +155,15 @@ export const documentFiles = pgTable("document_files", {
   sizeBytes: integer("size_bytes"),
   mimeType: varchar("mime_type", { length: 100 }),
   isSensitive: boolean("is_sensitive").default(true),
+  qualityStatus: varchar("quality_status", { length: 50 }).default("not_checked"), // not_checked, pass, needs_attention
+  qualityReport: json("quality_report").$type<{
+    blurScore?: number;
+    cropWarnings?: string[];
+    missingPagesHints?: string[];
+    isExpired?: boolean;
+    overallScore?: number;
+  }>(),
+  lastQualityCheckedAt: timestamp("last_quality_checked_at"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   index("idx_documents_owner").on(table.ownerUserId),
@@ -168,8 +188,13 @@ export const payments = pgTable("payments", {
     courierFee?: number;
   }>(),
   status: varchar("status", { length: 50 }).default("initialized"), // initialized, success, failed, refunded
+  state: varchar("state", { length: 50 }).default("unpaid"), // unpaid, paid_escrowed, released_to_lawyer, refunded_partial, refunded_full, chargeback
   paystackReference: varchar("paystack_reference", { length: 255 }),
   paidAt: timestamp("paid_at"),
+  escrowedAt: timestamp("escrowed_at"),
+  releasedAt: timestamp("released_at"),
+  refundedAt: timestamp("refunded_at"),
+  refundReason: text("refund_reason"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [index("idx_payments_application").on(table.applicationId)]);
 
@@ -280,8 +305,17 @@ export const clarificationRequests = pgTable("clarification_requests", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id").notNull(),
   lawyerUserId: varchar("lawyer_user_id").notNull(),
-  message: text("message").notNull(),
-  status: varchar("status", { length: 50 }).default("pending"), // pending, resolved
+  founderUserId: varchar("founder_user_id").notNull(),
+  status: varchar("status", { length: 50 }).default("open"), // open, sent, resolved, cancelled
+  subject: text("subject"),
+  message: text("message"),
+  aiDraftJson: json("ai_draft_json").$type<{
+    subject?: string;
+    message?: string;
+    rationale?: string;
+    requiredActions?: string[];
+  }>(),
+  sentAt: timestamp("sent_at"),
   resolvedAt: timestamp("resolved_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -305,3 +339,75 @@ export const notifications = pgTable("notifications", {
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 export type Notification = typeof notifications.$inferSelect;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+
+// ============== VERIFICATION RECEIPT ==============
+export const verificationReceipts = pgTable("verification_receipts", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  founderId: varchar("founder_id").notNull(),
+  issuedBy: varchar("issued_by", { length: 50 }).notNull(), // celion, lawyer_proxy, agency
+  scope: varchar("scope", { length: 50 }).notNull(), // identity, incorporation, post_incorporation, document_bundle
+  status: varchar("status", { length: 50 }).default("issued"), // issued, revoked, expired
+  receiptNumber: varchar("receipt_number", { length: 50 }).notNull().unique(),
+  receiptJson: json("receipt_json").$type<{
+    companySummary?: { name: string; type: string; founders: string[] };
+    statusTimeline?: { status: string; timestamp: string }[];
+    documentHashes?: { docType: string; sha256: string }[];
+    executionDeclarationRef?: number;
+    paymentState?: string;
+  }>(),
+  verificationHash: varchar("verification_hash", { length: 64 }).notNull(),
+  issuedAt: timestamp("issued_at").defaultNow(),
+  expiresAt: timestamp("expires_at"),
+  revokedAt: timestamp("revoked_at"),
+  revocationReason: text("revocation_reason"),
+}, (table) => [
+  index("idx_receipts_application").on(table.applicationId),
+  index("idx_receipts_founder").on(table.founderId),
+]);
+
+export const insertVerificationReceiptSchema = createInsertSchema(verificationReceipts).omit({ id: true, issuedAt: true });
+export type VerificationReceipt = typeof verificationReceipts.$inferSelect;
+export type InsertVerificationReceipt = z.infer<typeof insertVerificationReceiptSchema>;
+
+// ============== EXECUTION DECLARATION ==============
+export const executionDeclarations = pgTable("execution_declarations", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  lawyerId: varchar("lawyer_id").notNull(),
+  submissionType: varchar("submission_type", { length: 50 }).notNull(), // physical, digital
+  submissionLocation: text("submission_location"),
+  submittedAt: timestamp("submitted_at").notNull(),
+  declarationAccepted: boolean("declaration_accepted").default(false),
+  declarationTextVersion: varchar("declaration_text_version", { length: 50 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_execution_application").on(table.applicationId),
+  index("idx_execution_lawyer").on(table.lawyerId),
+]);
+
+export const insertExecutionDeclarationSchema = createInsertSchema(executionDeclarations).omit({ id: true, createdAt: true });
+export type ExecutionDeclaration = typeof executionDeclarations.$inferSelect;
+export type InsertExecutionDeclaration = z.infer<typeof insertExecutionDeclarationSchema>;
+
+// ============== APPLICATION AI EVENT ==============
+export const applicationAIEvents = pgTable("application_ai_events", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  actorUserId: varchar("actor_user_id").notNull(),
+  feature: varchar("feature", { length: 50 }).notNull(), // cac_activity_mapping, clarification_generator, readiness_explainer, doc_quality
+  model: varchar("model", { length: 100 }),
+  promptVersion: varchar("prompt_version", { length: 50 }),
+  inputHash: varchar("input_hash", { length: 64 }), // sha256 of input payload
+  outputJson: json("output_json").$type<Record<string, any>>(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_ai_events_application").on(table.applicationId),
+  index("idx_ai_events_actor").on(table.actorUserId),
+  index("idx_ai_events_feature").on(table.feature),
+]);
+
+export const insertApplicationAIEventSchema = createInsertSchema(applicationAIEvents).omit({ id: true, createdAt: true });
+export type ApplicationAIEvent = typeof applicationAIEvents.$inferSelect;
+export type InsertApplicationAIEvent = z.infer<typeof insertApplicationAIEventSchema>;

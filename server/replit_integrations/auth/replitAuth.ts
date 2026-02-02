@@ -27,8 +27,10 @@ export function getSession() {
     ttl: sessionTtl,
     tableName: "sessions",
   });
-  // For Replit deployment: trust proxy is set, so req.secure reflects X-Forwarded-Proto
-  // We rely on sameSite: "lax" for CSRF protection
+  // For Replit deployment behind reverse proxy:
+  // - sameSite: "lax" provides CSRF protection
+  // - secure: false allows cookies to work with Replit's proxy setup
+  // - proxy: true tells express-session to trust X-Forwarded-* headers
   return session({
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
@@ -36,7 +38,7 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: false,
       sameSite: "lax",
       maxAge: sessionTtl,
     },

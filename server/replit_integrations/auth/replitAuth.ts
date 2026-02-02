@@ -27,9 +27,8 @@ export function getSession() {
     ttl: sessionTtl,
     tableName: "sessions",
   });
-  // In development, cookies work over HTTP. In production (Replit), always use secure cookies.
-  // Replit proxies HTTPS to HTTP internally, so we trust proxy and use secure cookies.
-  const isProduction = process.env.NODE_ENV === "production";
+  // For Replit deployment: trust proxy is set, so req.secure reflects X-Forwarded-Proto
+  // We rely on sameSite: "lax" for CSRF protection
   return session({
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
@@ -37,10 +36,11 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: isProduction,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: sessionTtl,
     },
+    proxy: true,
   });
 }
 

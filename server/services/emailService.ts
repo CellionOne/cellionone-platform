@@ -27,9 +27,11 @@ async function getCredentials() {
   if (!connectionSettings || (!connectionSettings.settings.api_key)) {
     throw new Error('Resend not connected');
   }
+  const fromEmail = connectionSettings.settings.from_email || 'noreply@send.cellionone.com';
+  console.log(`[Email] Using from_email: ${fromEmail}`);
   return {
     apiKey: connectionSettings.settings.api_key, 
-    fromEmail: connectionSettings.settings.from_email || 'noreply@cellionone.com'
+    fromEmail
   };
 }
 
@@ -44,6 +46,8 @@ export async function getResendClient() {
 export async function sendVerificationEmail(to: string, token: string, baseUrl: string) {
   const { client, fromEmail } = await getResendClient();
   const verificationLink = `${baseUrl}/verify-email?token=${token}`;
+  
+  console.log(`[Email] Sending verification email to: ${to}, from: ${fromEmail}`);
   
   const result = await client.emails.send({
     from: fromEmail,
@@ -99,6 +103,7 @@ export async function sendVerificationEmail(to: string, token: string, baseUrl: 
     `
   });
   
+  console.log(`[Email] Verification email result:`, JSON.stringify(result));
   return result;
 }
 

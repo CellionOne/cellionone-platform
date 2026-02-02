@@ -52,7 +52,7 @@ export function ReadinessPanel({ applicationId }: ReadinessPanelProps) {
     );
   }
 
-  if (!data) {
+  if (!data || !data.checklist) {
     return null;
   }
 

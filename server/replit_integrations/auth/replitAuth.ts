@@ -65,6 +65,7 @@ async function upsertUser(claims: any) {
 }
 
 export async function setupAuth(app: Express) {
+  console.log("[Auth] Setting up auth, NODE_ENV:", process.env.NODE_ENV);
   app.set("trust proxy", 1);
   app.use(getSession());
   app.use(passport.initialize());
@@ -137,12 +138,16 @@ export async function setupAuth(app: Express) {
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
   const user = req.user as any;
 
+  // Debug logging for production
+  console.log("[isAuthenticated] sessionID:", req.sessionID, "isAuth:", req.isAuthenticated(), "hasUser:", !!user, "proto:", req.protocol, "secure:", req.secure);
+
   if (!req.isAuthenticated() || !user) {
     return res.status(401).json({ message: "Unauthorized" });
   }
 
   // Check if session has expiry
   if (!user.expires_at) {
+    console.log("[isAuthenticated] No expires_at on user");
     return res.status(401).json({ message: "Unauthorized" });
   }
 

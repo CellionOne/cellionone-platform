@@ -288,6 +288,8 @@ export async function registerRoutes(
           return res.status(500).json({ message: "Login failed" });
         }
         
+        console.log("[Login] Success - sessionID:", req.sessionID, "isAuth:", req.isAuthenticated(), "proto:", req.protocol, "secure:", req.secure);
+        
         // Log login event
         storage.createAuditLog({
           actorUserId: user.id,

@@ -27,6 +27,8 @@ export function getSession() {
     ttl: sessionTtl,
     tableName: "sessions",
   });
+  // In development, cookies work over HTTP. In production (Replit), always use secure cookies.
+  // Replit proxies HTTPS to HTTP internally, so we trust proxy and use secure cookies.
   const isProduction = process.env.NODE_ENV === "production";
   return session({
     secret: process.env.SESSION_SECRET!,
@@ -35,7 +37,7 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: true,
+      secure: isProduction,
       sameSite: "lax",
       maxAge: sessionTtl,
     },
@@ -135,21 +137,31 @@ export async function setupAuth(app: Express) {
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
   const user = req.user as any;
 
-  if (!req.isAuthenticated() || !user.expires_at) {
+  if (!req.isAuthenticated() || !user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  // Check if session has expiry
+  if (!user.expires_at) {
     return res.status(401).json({ message: "Unauthorized" });
   }
 
   const now = Math.floor(Date.now() / 1000);
+  
+  // Session still valid
   if (now <= user.expires_at) {
     return next();
   }
 
+  // Session expired - check if we have a refresh token (OIDC auth)
   const refreshToken = user.refresh_token;
   if (!refreshToken) {
-    res.status(401).json({ message: "Unauthorized" });
-    return;
+    // For custom email/password auth without refresh tokens,
+    // if expired, require re-login
+    return res.status(401).json({ message: "Session expired" });
   }
 
+  // Try to refresh OIDC token
   try {
     const config = await getOidcConfig();
     const tokenResponse = await client.refreshTokenGrant(config, refreshToken);

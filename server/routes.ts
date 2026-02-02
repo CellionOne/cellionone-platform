@@ -208,7 +208,9 @@ export async function registerRoutes(
         (req.session as any)._loginAuditLogged = true;
       }
       
-      res.json({ ...user, roles });
+      // Return user without sensitive fields
+      const { passwordHash, verificationToken, verificationTokenExpiry, resetToken, resetTokenExpiry, ...safeUser } = user || {};
+      res.json({ ...safeUser, roles });
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
@@ -275,10 +277,12 @@ export async function registerRoutes(
       
       // Set up session for the authenticated user
       const user = result.user;
-      req.login({ 
+      const sessionUser = { 
         claims: { sub: user.id, email: user.email, first_name: user.firstName, last_name: user.lastName },
         expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 1 week
-      }, (err: any) => {
+      };
+      
+      req.login(sessionUser, (err: any) => {
         if (err) {
           console.error("Session login error:", err);
           return res.status(500).json({ message: "Login failed" });

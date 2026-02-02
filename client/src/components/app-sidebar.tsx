@@ -29,6 +29,7 @@ import {
   Scale,
   Brain,
   Receipt,
+  UserPlus,
 } from "lucide-react";
 
 interface NavItem {
@@ -54,6 +55,7 @@ const adminItems: NavItem[] = [
   { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
   { title: "Users", url: "/admin/users", icon: Users },
   { title: "Applications", url: "/admin/applications", icon: FileText },
+  { title: "Lawyer Applications", url: "/admin/lawyer-applications", icon: UserPlus },
   { title: "Receipts", url: "/admin/receipts", icon: Receipt },
   { title: "AI Events", url: "/admin/ai-events", icon: Brain },
   { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },

@@ -21,15 +21,32 @@ import {
   verificationReceipts, type VerificationReceipt, type InsertVerificationReceipt,
   executionDeclarations, type ExecutionDeclaration, type InsertExecutionDeclaration,
   applicationAIEvents, type ApplicationAIEvent, type InsertApplicationAIEvent,
+  lawyerApplications, type LawyerApplication, type InsertLawyerApplication,
 } from "@shared/schema";
 
 export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByVerificationToken(token: string): Promise<User | undefined>;
+  getUserByResetToken(token: string): Promise<User | undefined>;
   getAllUsers(): Promise<User[]>;
   getUserRoles(userId: string): Promise<string[]>;
-  addUserRole(data: InsertUserRole): Promise<UserRole>;
+  addUserRole(userId: string, role: string): Promise<UserRole>;
   removeUserRole(userId: string, role: string): Promise<void>;
+  createUserWithPassword(data: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    passwordHash: string;
+    verificationToken: string;
+    verificationTokenExpiry: Date;
+    emailVerified: boolean;
+  }): Promise<User>;
+  markEmailVerified(userId: string): Promise<void>;
+  updateVerificationToken(userId: string, token: string, expiry: Date): Promise<void>;
+  updateResetToken(userId: string, token: string, expiry: Date): Promise<void>;
+  updatePassword(userId: string, passwordHash: string): Promise<void>;
 
   // Founder Profiles
   getFounderProfile(userId: string): Promise<FounderProfile | undefined>;
@@ -124,12 +141,35 @@ export interface IStorage {
   getFounderStats(founderUserId: string): Promise<{ total: number; draft: number; inProgress: number; completed: number }>;
   getLawyerStats(lawyerUserId: string): Promise<{ assigned: number; underReview: number; clarificationPending: number; completed: number }>;
   getAdminStats(): Promise<{ totalUsers: number; totalApplications: number; totalLawyers: number; activeApplications: number; completedApplications: number; pendingReview: number }>;
+
+  // Lawyer Applications (for onboarding)
+  getLawyerApplication(id: number): Promise<LawyerApplication | undefined>;
+  getLawyerApplicationByEmail(email: string): Promise<LawyerApplication | undefined>;
+  getAllLawyerApplications(): Promise<LawyerApplication[]>;
+  getPendingLawyerApplications(): Promise<LawyerApplication[]>;
+  createLawyerApplication(data: InsertLawyerApplication): Promise<LawyerApplication>;
+  updateLawyerApplication(id: number, data: Partial<LawyerApplication>): Promise<LawyerApplication | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
   // Users
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+    return user;
+  }
+
+  async getUserByVerificationToken(token: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.verificationToken, token));
+    return user;
+  }
+
+  async getUserByResetToken(token: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.resetToken, token));
     return user;
   }
 
@@ -142,13 +182,68 @@ export class DatabaseStorage implements IStorage {
     return roles.map(r => r.role);
   }
 
-  async addUserRole(data: InsertUserRole): Promise<UserRole> {
-    const [role] = await db.insert(userRoles).values(data).returning();
-    return role;
+  async addUserRole(userId: string, role: string): Promise<UserRole> {
+    const [newRole] = await db.insert(userRoles).values({ userId, role }).returning();
+    return newRole;
   }
 
   async removeUserRole(userId: string, role: string): Promise<void> {
     await db.delete(userRoles).where(and(eq(userRoles.userId, userId), eq(userRoles.role, role)));
+  }
+
+  async createUserWithPassword(data: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    passwordHash: string;
+    verificationToken: string;
+    verificationTokenExpiry: Date;
+    emailVerified: boolean;
+  }): Promise<User> {
+    const [user] = await db.insert(users).values({
+      email: data.email.toLowerCase(),
+      firstName: data.firstName,
+      lastName: data.lastName,
+      passwordHash: data.passwordHash,
+      verificationToken: data.verificationToken,
+      verificationTokenExpiry: data.verificationTokenExpiry,
+      emailVerified: data.emailVerified,
+    }).returning();
+    return user;
+  }
+
+  async markEmailVerified(userId: string): Promise<void> {
+    await db.update(users).set({
+      emailVerified: true,
+      verificationToken: null,
+      verificationTokenExpiry: null,
+      updatedAt: new Date(),
+    }).where(eq(users.id, userId));
+  }
+
+  async updateVerificationToken(userId: string, token: string, expiry: Date): Promise<void> {
+    await db.update(users).set({
+      verificationToken: token,
+      verificationTokenExpiry: expiry,
+      updatedAt: new Date(),
+    }).where(eq(users.id, userId));
+  }
+
+  async updateResetToken(userId: string, token: string, expiry: Date): Promise<void> {
+    await db.update(users).set({
+      resetToken: token,
+      resetTokenExpiry: expiry,
+      updatedAt: new Date(),
+    }).where(eq(users.id, userId));
+  }
+
+  async updatePassword(userId: string, passwordHash: string): Promise<void> {
+    await db.update(users).set({
+      passwordHash,
+      resetToken: null,
+      resetTokenExpiry: null,
+      updatedAt: new Date(),
+    }).where(eq(users.id, userId));
   }
 
   // Founder Profiles
@@ -496,6 +591,43 @@ export class DatabaseStorage implements IStorage {
   async updateDocument(id: number, data: Partial<InsertDocumentFile>): Promise<DocumentFile | undefined> {
     const [doc] = await db.update(documentFiles).set(data).where(eq(documentFiles.id, id)).returning();
     return doc;
+  }
+
+  // Lawyer Applications (for onboarding)
+  async getLawyerApplication(id: number): Promise<LawyerApplication | undefined> {
+    const [app] = await db.select().from(lawyerApplications).where(eq(lawyerApplications.id, id));
+    return app;
+  }
+
+  async getLawyerApplicationByEmail(email: string): Promise<LawyerApplication | undefined> {
+    const [app] = await db.select().from(lawyerApplications).where(eq(lawyerApplications.email, email.toLowerCase()));
+    return app;
+  }
+
+  async getAllLawyerApplications(): Promise<LawyerApplication[]> {
+    return db.select().from(lawyerApplications).orderBy(desc(lawyerApplications.createdAt));
+  }
+
+  async getPendingLawyerApplications(): Promise<LawyerApplication[]> {
+    return db.select().from(lawyerApplications)
+      .where(eq(lawyerApplications.status, "pending"))
+      .orderBy(desc(lawyerApplications.createdAt));
+  }
+
+  async createLawyerApplication(data: InsertLawyerApplication): Promise<LawyerApplication> {
+    const [app] = await db.insert(lawyerApplications).values({
+      ...data,
+      email: data.email.toLowerCase(),
+    }).returning();
+    return app;
+  }
+
+  async updateLawyerApplication(id: number, data: Partial<LawyerApplication>): Promise<LawyerApplication | undefined> {
+    const [app] = await db.update(lawyerApplications)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(lawyerApplications.id, id))
+      .returning();
+    return app;
   }
 }
 

@@ -411,3 +411,43 @@ export const applicationAIEvents = pgTable("application_ai_events", {
 export const insertApplicationAIEventSchema = createInsertSchema(applicationAIEvents).omit({ id: true, createdAt: true });
 export type ApplicationAIEvent = typeof applicationAIEvents.$inferSelect;
 export type InsertApplicationAIEvent = z.infer<typeof insertApplicationAIEventSchema>;
+
+// ============== LAWYER APPLICATION (for new lawyer onboarding) ==============
+export const lawyerApplications = pgTable("lawyer_applications", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 255 }).notNull(),
+  firstName: varchar("first_name", { length: 100 }).notNull(),
+  lastName: varchar("last_name", { length: 100 }).notNull(),
+  phone: varchar("phone", { length: 50 }).notNull(),
+  barId: varchar("bar_id", { length: 100 }).notNull(),
+  scnNumber: varchar("scn_number", { length: 100 }), // Supreme Court Number
+  firmName: varchar("firm_name", { length: 255 }),
+  firmAddress: text("firm_address"),
+  yearsOfExperience: integer("years_of_experience"),
+  specializations: json("specializations").$type<string[]>().default([]),
+  serviceRegions: json("service_regions").$type<string[]>().default([]),
+  statementOfInterest: text("statement_of_interest"),
+  status: varchar("status", { length: 50 }).default("pending"), // pending, approved, rejected
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  rejectionReason: text("rejection_reason"),
+  createdUserId: varchar("created_user_id"), // user ID if application is approved
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_lawyer_applications_email").on(table.email),
+  index("idx_lawyer_applications_status").on(table.status),
+]);
+
+export const insertLawyerApplicationSchema = createInsertSchema(lawyerApplications).omit({ 
+  id: true, 
+  status: true, 
+  reviewedBy: true, 
+  reviewedAt: true, 
+  rejectionReason: true,
+  createdUserId: true,
+  createdAt: true, 
+  updatedAt: true 
+});
+export type LawyerApplication = typeof lawyerApplications.$inferSelect;
+export type InsertLawyerApplication = z.infer<typeof insertLawyerApplicationSchema>;

@@ -26,8 +26,15 @@ import AdminFeatureFlags from "@/pages/admin/feature-flags";
 import AdminAuditLogs from "@/pages/admin/audit-logs";
 import AdminAIEvents from "@/pages/admin/ai-events";
 import AdminReceipts from "@/pages/admin/receipts";
+import AdminLawyerApplications from "@/pages/admin/lawyer-applications";
+import ApplyLawyerPage from "@/pages/apply-lawyer";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
+import LoginPage from "@/pages/auth/login";
+import RegisterPage from "@/pages/auth/register";
+import ForgotPasswordPage from "@/pages/auth/forgot-password";
+import ResetPasswordPage from "@/pages/auth/reset-password";
+import VerifyEmailPage from "@/pages/auth/verify-email";
 
 function ProtectedRoute({ 
   component: Component, 
@@ -43,7 +50,7 @@ function ProtectedRoute({
   }
   
   if (!isAuthenticated) {
-    window.location.href = "/api/login";
+    window.location.href = "/login";
     return <LoadingPage />;
   }
   
@@ -84,7 +91,7 @@ function RoleBasedRedirect() {
       userId: user?.id, 
       roles 
     });
-    window.location.href = "/api/login";
+    window.location.href = "/login";
     return <LoadingPage />;
   }
   
@@ -97,7 +104,7 @@ function RoleBasedRedirect() {
   } else {
     // Unknown role - log error and redirect to login
     console.error("RoleBasedRedirect: Unknown role type - redirecting to login", { roles });
-    window.location.href = "/api/login";
+    window.location.href = "/login";
     return <LoadingPage />;
   }
 }
@@ -171,9 +178,20 @@ function Router() {
       <Route path="/admin/receipts">
         <ProtectedRoute component={AdminReceipts} roles={["admin"]} />
       </Route>
+      <Route path="/admin/lawyer-applications">
+        <ProtectedRoute component={AdminLawyerApplications} roles={["admin"]} />
+      </Route>
+      
+      <Route path="/apply-lawyer" component={ApplyLawyerPage} />
       
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
+      
+      <Route path="/login" component={LoginPage} />
+      <Route path="/register" component={RegisterPage} />
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password" component={ResetPasswordPage} />
+      <Route path="/verify-email" component={VerifyEmailPage} />
       
       <Route component={NotFound} />
     </Switch>

@@ -6,7 +6,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema } from "@shared/schema";
 import * as services from "./services";
 
 // Validation schemas
@@ -80,6 +80,11 @@ const aiDraftSchema = z.object({
   category: z.enum(["missing_docs", "wrong_format", "info_mismatch", "legal_question"]).optional(),
   issue: z.string().min(1, "Issue description required"),
   existingDocuments: z.array(z.string()).optional(),
+});
+
+const lawyerApplicationReviewSchema = z.object({
+  action: z.enum(["approve", "reject"]),
+  rejectionReason: z.string().optional(),
 });
 
 // Lazy initialization of OpenAI to avoid startup errors
@@ -208,6 +213,141 @@ export async function registerRoutes(
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
     }
+  });
+
+  // ============== CUSTOM EMAIL/PASSWORD AUTH ROUTES ==============
+  // These routes allow users to register and login with email/password
+  // instead of using Replit Auth, removing third-party branding
+  
+  const authService = await import("./services/authService");
+  
+  // Register a new user with email/password
+  app.post("/api/auth/register", async (req: any, res) => {
+    try {
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const result = await authService.registerUser(req.body, baseUrl);
+      
+      if (!result.success) {
+        return res.status(400).json({ message: result.message });
+      }
+      
+      res.json({ message: result.message, user: result.user });
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({ message: "Registration failed. Please try again." });
+    }
+  });
+  
+  // Login with email/password
+  app.post("/api/auth/login", async (req: any, res) => {
+    try {
+      const result = await authService.loginUser(req.body);
+      
+      if (!result.success) {
+        const status = result.requiresVerification ? 403 : 401;
+        return res.status(status).json({ 
+          message: result.message, 
+          requiresVerification: result.requiresVerification 
+        });
+      }
+      
+      // Set up session for the authenticated user
+      const user = result.user;
+      req.login({ 
+        claims: { sub: user.id, email: user.email, first_name: user.firstName, last_name: user.lastName },
+        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 1 week
+      }, (err: any) => {
+        if (err) {
+          console.error("Session login error:", err);
+          return res.status(500).json({ message: "Login failed" });
+        }
+        
+        // Log login event
+        storage.createAuditLog({
+          actorUserId: user.id,
+          action: "login",
+          entityType: "session",
+          details: { email: user.email, method: "email_password" },
+          ipAddress: req.ip,
+        });
+        
+        res.json({ message: result.message, user });
+      });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ message: "Login failed. Please try again." });
+    }
+  });
+  
+  // Verify email address
+  app.post("/api/auth/verify-email", async (req: any, res) => {
+    try {
+      const { token } = req.body;
+      const result = await authService.verifyEmail(token);
+      
+      if (!result.success) {
+        return res.status(400).json({ message: result.message });
+      }
+      
+      res.json({ message: result.message });
+    } catch (error) {
+      console.error("Email verification error:", error);
+      res.status(500).json({ message: "Verification failed. Please try again." });
+    }
+  });
+  
+  // Resend verification email
+  app.post("/api/auth/resend-verification", async (req: any, res) => {
+    try {
+      const { email } = req.body;
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const result = await authService.resendVerificationEmail(email, baseUrl);
+      
+      res.json({ message: result.message });
+    } catch (error) {
+      console.error("Resend verification error:", error);
+      res.status(500).json({ message: "Failed to resend verification email." });
+    }
+  });
+  
+  // Request password reset
+  app.post("/api/auth/forgot-password", async (req: any, res) => {
+    try {
+      const { email } = req.body;
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const result = await authService.requestPasswordReset(email, baseUrl);
+      
+      res.json({ message: result.message });
+    } catch (error) {
+      console.error("Forgot password error:", error);
+      res.status(500).json({ message: "Failed to send reset email." });
+    }
+  });
+  
+  // Reset password with token
+  app.post("/api/auth/reset-password", async (req: any, res) => {
+    try {
+      const { token, password } = req.body;
+      const result = await authService.resetPassword(token, password);
+      
+      if (!result.success) {
+        return res.status(400).json({ message: result.message });
+      }
+      
+      res.json({ message: result.message });
+    } catch (error) {
+      console.error("Reset password error:", error);
+      res.status(500).json({ message: "Password reset failed. Please try again." });
+    }
+  });
+  
+  // Logout (works for both email/password and Replit auth)
+  app.post("/api/auth/logout", (req: any, res) => {
+    req.logout(() => {
+      req.session.destroy(() => {
+        res.json({ message: "Logged out successfully" });
+      });
+    });
   });
 
   // ============== FOUNDER ROUTES ==============
@@ -1423,7 +1563,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const adminId = getUserId(req);
       
       if (action === "add") {
-        await storage.addUserRole({ userId, role });
+        await storage.addUserRole(userId, role);
         
         // Create lawyer profile if adding lawyer role
         if (role === "lawyer") {
@@ -1774,6 +1914,176 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error) {
       console.error("Error fetching AI events:", error);
       res.status(500).json({ message: "Failed to fetch AI events" });
+    }
+  });
+
+  // ============== LAWYER APPLICATION ROUTES ==============
+  // Public endpoint - no auth required for lawyers to apply
+  app.post("/api/lawyer-applications", async (req: any, res) => {
+    try {
+      const parsed = insertLawyerApplicationSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+      
+      // Check if application already exists for this email
+      const existing = await storage.getLawyerApplicationByEmail(parsed.data.email);
+      if (existing) {
+        if (existing.status === "pending") {
+          return res.status(400).json({ message: "An application with this email is already under review" });
+        }
+        if (existing.status === "approved") {
+          return res.status(400).json({ message: "This email is already associated with an approved lawyer account" });
+        }
+      }
+      
+      const application = await storage.createLawyerApplication(parsed.data);
+      
+      await storage.createAuditLog({
+        actorUserId: "system",
+        action: "lawyer_application_submitted",
+        entityType: "lawyer_application",
+        entityId: application.id.toString(),
+        details: { email: application.email, barId: application.barId },
+        ipAddress: req.ip,
+      });
+      
+      res.json({ message: "Application submitted successfully. We will review your application and get back to you.", application });
+    } catch (error) {
+      console.error("Error submitting lawyer application:", error);
+      res.status(500).json({ message: "Failed to submit application" });
+    }
+  });
+
+  // Admin endpoints for lawyer applications
+  app.get("/api/admin/lawyer-applications", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { status } = req.query;
+      
+      if (status === "pending") {
+        const applications = await storage.getPendingLawyerApplications();
+        res.json(applications);
+      } else {
+        const applications = await storage.getAllLawyerApplications();
+        res.json(applications);
+      }
+    } catch (error) {
+      console.error("Error fetching lawyer applications:", error);
+      res.status(500).json({ message: "Failed to fetch applications" });
+    }
+  });
+
+  app.get("/api/admin/lawyer-applications/:id", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const applicationId = parseInt(req.params.id);
+      const application = await storage.getLawyerApplication(applicationId);
+      
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      
+      res.json(application);
+    } catch (error) {
+      console.error("Error fetching lawyer application:", error);
+      res.status(500).json({ message: "Failed to fetch application" });
+    }
+  });
+
+  app.post("/api/admin/lawyer-applications/:id/review", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const applicationId = parseInt(req.params.id);
+      const adminId = getUserId(req);
+      
+      const parsed = lawyerApplicationReviewSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+      
+      const { action, rejectionReason } = parsed.data;
+      const application = await storage.getLawyerApplication(applicationId);
+      
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      
+      if (application.status !== "pending") {
+        return res.status(400).json({ message: "This application has already been reviewed" });
+      }
+      
+      if (action === "reject") {
+        const updated = await storage.updateLawyerApplication(applicationId, {
+          status: "rejected",
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+          rejectionReason: rejectionReason || "Application did not meet requirements",
+        });
+        
+        await storage.createAuditLog({
+          actorUserId: adminId,
+          action: "lawyer_application_rejected",
+          entityType: "lawyer_application",
+          entityId: applicationId.toString(),
+          details: { email: application.email, reason: rejectionReason },
+          ipAddress: req.ip,
+        });
+        
+        res.json({ message: "Application rejected", application: updated });
+      } else {
+        // Approve: Create user account and lawyer profile
+        const authService = await import("./services/authService");
+        const tempPassword = crypto.randomBytes(8).toString("hex");
+        
+        // Register the user with a temporary password
+        const registerResult = await authService.registerUser({
+          email: application.email,
+          password: tempPassword,
+          firstName: application.firstName,
+          lastName: application.lastName,
+        }, `${req.protocol}://${req.get("host")}`);
+        
+        if (!registerResult.success || !registerResult.user) {
+          return res.status(500).json({ message: "Failed to create lawyer user account" });
+        }
+        
+        const userId = registerResult.user.id;
+        
+        // Add lawyer role
+        await storage.addUserRole(userId, "lawyer");
+        
+        // Create lawyer profile
+        await storage.upsertLawyerProfile({
+          userId,
+          firmName: application.firmName || undefined,
+          barId: application.barId,
+          serviceRegions: application.serviceRegions || [],
+          isActive: true,
+        });
+        
+        // Update application as approved
+        const updated = await storage.updateLawyerApplication(applicationId, {
+          status: "approved",
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+          createdUserId: userId,
+        });
+        
+        await storage.createAuditLog({
+          actorUserId: adminId,
+          action: "lawyer_application_approved",
+          entityType: "lawyer_application",
+          entityId: applicationId.toString(),
+          details: { email: application.email, userId },
+          ipAddress: req.ip,
+        });
+        
+        res.json({ 
+          message: "Application approved. Lawyer account created and verification email sent.",
+          application: updated,
+        });
+      }
+    } catch (error: any) {
+      console.error("Error reviewing lawyer application:", error);
+      res.status(500).json({ message: error.message || "Failed to review application" });
     }
   });
 

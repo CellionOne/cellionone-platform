@@ -7,7 +7,7 @@ Celion One is a comprehensive legal tech platform for Nigeria company incorporat
 - **Frontend**: React + TypeScript + Vite + Tailwind CSS + shadcn/ui
 - **Backend**: Express.js + TypeScript
 - **Database**: PostgreSQL (Neon-backed via Replit)
-- **Authentication**: Replit Auth (OIDC)
+- **Authentication**: Custom email/password auth (bcryptjs) + Resend email integration
 - **AI**: OpenAI GPT-4o for CAC activity suggestions
 - **Payments**: Paystack (Nigeria)
 - **PWA**: Service worker with offline support, web app manifest
@@ -106,6 +106,12 @@ shared/
 - `GET /api/admin/feature-flags` - List flags
 - `PATCH /api/admin/feature-flags/:key` - Toggle flag
 - `GET /api/admin/audit-logs` - Activity logs
+- `GET /api/admin/lawyer-applications` - List lawyer applications
+- `GET /api/admin/lawyer-applications/:id` - Get lawyer application details
+- `POST /api/admin/lawyer-applications/:id/review` - Approve/reject lawyer application
+
+### Lawyer Onboarding (Public)
+- `POST /api/lawyer-applications` - Submit lawyer application (no auth required)
 
 ## Design System
 - **Primary Color**: Green/Teal (hsl(156 72% 35%)) - Nigerian legal theme
@@ -124,6 +130,12 @@ shared/
 - vitest.config.ts configured for Node environment
 
 ## Recent Changes
+- February 2, 2026: Lawyer onboarding system
+  - Public lawyer application form (/apply-lawyer)
+  - Admin review workflow for lawyer applications
+  - Auto-creation of lawyer accounts upon approval
+  - Email notifications for application status
+  - "Join as Lawyer" link in landing page footer
 - January 31, 2026: Hardening phase complete
   - Fixed critical role-based routing bug (removed registerAuthRoutes() override)
   - Added 7 hardening safeguards: auth route ownership, frontend routing guards, payment state validation, AI safety labels, offline data validation, audit logging

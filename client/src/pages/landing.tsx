@@ -74,10 +74,10 @@ export default function LandingPage() {
             <div className="flex items-center gap-2">
               <ThemeToggle />
               <Button variant="ghost" asChild data-testid="link-login">
-                <a href="/api/login">Sign In</a>
+                <a href="/login">Sign In</a>
               </Button>
               <Button asChild data-testid="link-get-started">
-                <a href="/api/login">Get Started</a>
+                <a href="/register">Get Started</a>
               </Button>
             </div>
           </div>
@@ -111,7 +111,7 @@ export default function LandingPage() {
                 
                 <div className="flex flex-col sm:flex-row gap-4">
                   <Button size="lg" asChild className="gap-2" data-testid="button-start-incorporation">
-                    <a href="/api/login">
+                    <a href="/register">
                       Start Incorporation
                       <ArrowRight className="h-4 w-4" />
                     </a>
@@ -270,7 +270,7 @@ export default function LandingPage() {
               Join thousands of entrepreneurs who have successfully registered their Nigerian companies through Celion One.
             </p>
             <Button size="lg" asChild className="gap-2" data-testid="button-cta-start">
-              <a href="/api/login">
+              <a href="/register">
                 Get Started Today
                 <ArrowRight className="h-4 w-4" />
               </a>
@@ -289,7 +289,10 @@ export default function LandingPage() {
                 </div>
                 <span className="font-bold">Celion One</span>
               </div>
-              <div className="flex items-center gap-6">
+              <div className="flex flex-wrap items-center gap-6">
+                <a href="/apply-lawyer" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-apply-lawyer">
+                  Join as Lawyer
+                </a>
                 <a href="/terms" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-terms">
                   Terms & Conditions
                 </a>

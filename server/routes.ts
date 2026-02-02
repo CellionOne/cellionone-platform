@@ -220,6 +220,28 @@ export async function registerRoutes(
   // instead of using Replit Auth, removing third-party branding
   
   const authService = await import("./services/authService");
+  const emailService = await import("./services/emailService");
+  
+  // Debug endpoint to test email sending (temporary)
+  app.get("/api/test-email", async (req, res) => {
+    try {
+      const testEmail = req.query.email as string || "test@example.com";
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      
+      console.log(`[Test] Attempting to send test email to: ${testEmail}`);
+      const result = await emailService.sendVerificationEmail(testEmail, "test-token-123", baseUrl);
+      console.log(`[Test] Email result:`, JSON.stringify(result));
+      
+      res.json({ success: true, result });
+    } catch (error: any) {
+      console.error(`[Test] Email error:`, error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message,
+        details: error.toString()
+      });
+    }
+  });
   
   // Register a new user with email/password
   app.post("/api/auth/register", async (req: any, res) => {

@@ -23,8 +23,13 @@ export function useAuth(): AuthContextValue {
     staleTime: 1000 * 60 * 5,
   });
 
-  const logout = () => {
-    window.location.href = "/api/logout";
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch (e) {
+      // Ignore errors
+    }
+    window.location.href = "/login";
   };
 
   return {

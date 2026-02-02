@@ -281,16 +281,34 @@ export default function LandingPage() {
 
       <footer className="border-t py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center">
-                <Building2 className="h-5 w-5 text-primary-foreground" />
+          <div className="flex flex-col gap-8">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center">
+                  <Building2 className="h-5 w-5 text-primary-foreground" />
+                </div>
+                <span className="font-bold">Celion One</span>
               </div>
-              <span className="font-bold">Celion One</span>
+              <div className="flex items-center gap-6">
+                <a href="/terms" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-terms">
+                  Terms & Conditions
+                </a>
+                <a href="/privacy" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-privacy">
+                  Privacy Policy
+                </a>
+                <a href="mailto:service@cellionone.com" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-contact">
+                  Contact
+                </a>
+              </div>
             </div>
-            <p className="text-sm text-muted-foreground">
-              &copy; {new Date().getFullYear()} Cellion Platforms. All rights reserved.
-            </p>
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4 pt-4 border-t">
+              <p className="text-sm text-muted-foreground">
+                &copy; {new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                UK Partner: Disslio Limited
+              </p>
+            </div>
           </div>
         </div>
       </footer>

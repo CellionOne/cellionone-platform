@@ -26,6 +26,8 @@ import AdminFeatureFlags from "@/pages/admin/feature-flags";
 import AdminAuditLogs from "@/pages/admin/audit-logs";
 import AdminAIEvents from "@/pages/admin/ai-events";
 import AdminReceipts from "@/pages/admin/receipts";
+import TermsPage from "@/pages/terms";
+import PrivacyPage from "@/pages/privacy";
 
 function ProtectedRoute({ 
   component: Component, 
@@ -169,6 +171,9 @@ function Router() {
       <Route path="/admin/receipts">
         <ProtectedRoute component={AdminReceipts} roles={["admin"]} />
       </Route>
+      
+      <Route path="/terms" component={TermsPage} />
+      <Route path="/privacy" component={PrivacyPage} />
       
       <Route component={NotFound} />
     </Switch>

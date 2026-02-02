@@ -47,6 +47,13 @@ export interface IStorage {
   updateVerificationToken(userId: string, token: string, expiry: Date): Promise<void>;
   updateResetToken(userId: string, token: string, expiry: Date): Promise<void>;
   updatePassword(userId: string, passwordHash: string): Promise<void>;
+  updateUser(userId: string, data: Partial<{
+    firstName: string;
+    lastName: string;
+    passwordHash: string;
+    verificationToken: string;
+    verificationTokenExpiry: Date;
+  }>): Promise<User>;
 
   // Founder Profiles
   getFounderProfile(userId: string): Promise<FounderProfile | undefined>;
@@ -244,6 +251,20 @@ export class DatabaseStorage implements IStorage {
       resetTokenExpiry: null,
       updatedAt: new Date(),
     }).where(eq(users.id, userId));
+  }
+
+  async updateUser(userId: string, data: Partial<{
+    firstName: string;
+    lastName: string;
+    passwordHash: string;
+    verificationToken: string;
+    verificationTokenExpiry: Date;
+  }>): Promise<User> {
+    const [user] = await db.update(users).set({
+      ...data,
+      updatedAt: new Date(),
+    }).where(eq(users.id, userId)).returning();
+    return user;
   }
 
   // Founder Profiles

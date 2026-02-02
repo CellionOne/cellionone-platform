@@ -25,27 +25,44 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
   const { email, password, firstName, lastName } = validation.data;
 
   const existingUser = await storage.getUserByEmail(email.toLowerCase());
-  if (existingUser) {
-    return { success: false, message: "An account with this email already exists" };
-  }
-
+  
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
   const verificationToken = crypto.randomBytes(32).toString("hex");
   const verificationTokenExpiry = new Date(
     Date.now() + VERIFICATION_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000
   );
 
-  const user = await storage.createUserWithPassword({
-    email: email.toLowerCase(),
-    firstName,
-    lastName,
-    passwordHash,
-    verificationToken,
-    verificationTokenExpiry,
-    emailVerified: false,
-  });
+  let user;
+  
+  if (existingUser) {
+    // If the account exists but is NOT verified, allow re-registration
+    if (existingUser.emailVerified) {
+      return { success: false, message: "An account with this email already exists" };
+    }
+    
+    // Update the existing unverified account with new details
+    user = await storage.updateUser(existingUser.id, {
+      firstName,
+      lastName,
+      passwordHash,
+      verificationToken,
+      verificationTokenExpiry,
+    });
+    console.log(`[Auth] Re-registration for unverified account: ${email}`);
+  } else {
+    // Create new user
+    user = await storage.createUserWithPassword({
+      email: email.toLowerCase(),
+      firstName,
+      lastName,
+      passwordHash,
+      verificationToken,
+      verificationTokenExpiry,
+      emailVerified: false,
+    });
 
-  await storage.addUserRole(user.id, "founder");
+    await storage.addUserRole(user.id, "founder");
+  }
 
   try {
     await sendVerificationEmail(email, verificationToken, baseUrl);

@@ -165,7 +165,7 @@ export default function AdminApplications() {
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground mt-1">
                           <span>#{app.id}</span>
                           <span>&bull;</span>
-                          <span>{app.companyType || "LLC"}</span>
+                          <span>{app.companyType || "LTD"}</span>
                           {app.lawyerName && (
                             <>
                               <span>&bull;</span>

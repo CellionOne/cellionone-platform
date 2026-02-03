@@ -32,10 +32,10 @@ const steps = [
 ];
 
 const companyTypes = [
-  { value: "LLC", label: "Limited Liability Company (LLC)", description: "Most common for small to medium businesses" },
+  { value: "LTD", label: "Private Limited Company (LTD)", description: "Most common for small to medium businesses" },
   { value: "PLC", label: "Public Limited Company (PLC)", description: "For companies planning to go public" },
   { value: "LLP", label: "Limited Liability Partnership (LLP)", description: "For professional service firms" },
-  { value: "Sole_Proprietorship", label: "Sole Proprietorship", description: "For individual business owners" },
+  { value: "Sole_Proprietorship", label: "Business Name (Sole Proprietorship)", description: "For individual business owners" },
 ];
 
 const nigerianStates = [

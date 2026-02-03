@@ -180,7 +180,7 @@ export default function FounderDashboard() {
                             <p className="text-sm text-muted-foreground">
                               {app.applicationType === "incorporation" ? "Company Incorporation" : "Post-Incorporation"} 
                               {" "}&bull;{" "}
-                              {app.companyType || "LLC"}
+                              {app.companyType || "LTD"}
                             </p>
                           </div>
                         </div>

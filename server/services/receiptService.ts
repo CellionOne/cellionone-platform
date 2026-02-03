@@ -66,7 +66,7 @@ export async function issueReceipt(
   const receiptJson: ReceiptJson = {
     companySummary: {
       name: application.companyName1 || "Unknown",
-      type: application.companyType || "LLC",
+      type: application.companyType || "LTD",
       founders: founderNames.length > 0 ? founderNames : ["Founder information pending"], 
     },
     statusTimeline: [

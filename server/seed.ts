@@ -64,7 +64,7 @@ export async function seedDatabase() {
         // Seed sample applications
         await db.insert(companyApplications).values({
           founderUserId: "demo-founder-001",
-          companyType: "LLC",
+          companyType: "LTD",
           companyName1: "TechHub Nigeria Limited",
           companyName2: "TechHub Africa Ltd",
           companyName3: "TechHub Solutions",
@@ -75,7 +75,7 @@ export async function seedDatabase() {
         });
         await db.insert(companyApplications).values({
           founderUserId: "demo-founder-001",
-          companyType: "LLC",
+          companyType: "LTD",
           companyName1: "GreenFarm Agritech",
           companyName2: "GreenFarm Nigeria",
           companyName3: "GreenFarm Solutions",

@@ -131,7 +131,7 @@ export default function LawyerDashboard() {
                               {app.companyName1 || "Untitled Application"}
                             </h3>
                             <p className="text-sm text-muted-foreground">
-                              {app.companyType || "LLC"} &bull; Application #{app.id}
+                              {app.companyType || "LTD"} &bull; Application #{app.id}
                             </p>
                           </div>
                         </div>

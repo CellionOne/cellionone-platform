@@ -731,7 +731,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           },
           {
             role: "user",
-            content: `Business description: ${businessDescription}\nCompany type: ${companyType || "LLC"}`
+            content: `Business description: ${businessDescription}\nCompany type: ${companyType || "LTD"}`
           }
         ],
         response_format: { type: "json_object" },
@@ -790,7 +790,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       let payment = await storage.getPaymentByApplication(applicationId);
       
       if (!payment) {
-        // Create new payment (₦150,000 = 15,000,000 kobo for LLC incorporation)
+        // Create new payment (₦150,000 = 15,000,000 kobo for company incorporation)
         payment = await storage.createPayment({
           applicationId,
           amountTotalKobo: 15000000,

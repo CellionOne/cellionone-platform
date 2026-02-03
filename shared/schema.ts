@@ -89,7 +89,7 @@ export const companyApplications = pgTable("company_applications", {
   businessDescription: text("business_description"),
   legalAiActivitySuggestions: json("legal_ai_activity_suggestions").$type<any[]>(),
   selectedActivities: json("selected_activities").$type<string[]>(),
-  companyType: varchar("company_type", { length: 100 }).default("LLC"), // LLC, PLC, etc.
+  companyType: varchar("company_type", { length: 100 }).default("LTD"), // LTD, PLC, LLP, etc.
   registeredAddress: json("registered_address").$type<{
     line1?: string;
     line2?: string;

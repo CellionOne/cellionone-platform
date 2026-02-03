@@ -86,7 +86,7 @@ export default function FounderApplications() {
                             {app.applicationType === "incorporation" ? "Company Incorporation" : "Post-Incorporation"}
                           </span>
                           <span>&bull;</span>
-                          <span>{app.companyType || "LLC"}</span>
+                          <span>{app.companyType || "LTD"}</span>
                           <span>&bull;</span>
                           <span className="flex items-center gap-1">
                             <Calendar className="h-3.5 w-3.5" />

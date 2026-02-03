@@ -148,7 +148,7 @@ export default function ApplicationDetailsPage() {
               <p className="text-muted-foreground">
                 {application.applicationType === "incorporation" ? "Company Incorporation" : "Post-Incorporation"} 
                 {" "}&bull;{" "}
-                {application.companyType || "LLC"}
+                {application.companyType || "LTD"}
               </p>
             </div>
           </div>

@@ -22,6 +22,11 @@ import {
   executionDeclarations, type ExecutionDeclaration, type InsertExecutionDeclaration,
   applicationAIEvents, type ApplicationAIEvent, type InsertApplicationAIEvent,
   lawyerApplications, type LawyerApplication, type InsertLawyerApplication,
+  serviceAddresses, type ServiceAddress,
+  registeredOfficeSubscriptions, type RegisteredOfficeSubscription,
+  mailHandlingPreferences, type MailHandlingPreference,
+  mailItems, type MailItem,
+  mailApprovalRequests, type MailApprovalRequest,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -649,6 +654,144 @@ export class DatabaseStorage implements IStorage {
       .where(eq(lawyerApplications.id, id))
       .returning();
     return app;
+  }
+
+  // Service Addresses
+  async getServiceAddresses(): Promise<ServiceAddress[]> {
+    return db.select().from(serviceAddresses).where(eq(serviceAddresses.isActive, true));
+  }
+
+  async getServiceAddressById(id: number): Promise<ServiceAddress | undefined> {
+    const [address] = await db.select().from(serviceAddresses).where(eq(serviceAddresses.id, id));
+    return address;
+  }
+
+  // Registered Office Subscriptions
+  async createRegisteredOfficeSubscription(data: Omit<RegisteredOfficeSubscription, "id" | "createdAt" | "updatedAt">): Promise<RegisteredOfficeSubscription> {
+    const [sub] = await db.insert(registeredOfficeSubscriptions).values(data).returning();
+    return sub;
+  }
+
+  async getRegisteredOfficeSubscriptionById(id: number): Promise<RegisteredOfficeSubscription | undefined> {
+    const [sub] = await db.select().from(registeredOfficeSubscriptions).where(eq(registeredOfficeSubscriptions.id, id));
+    return sub;
+  }
+
+  async getUserActiveRegisteredOfficeSubscription(userId: string): Promise<RegisteredOfficeSubscription | undefined> {
+    const [sub] = await db.select().from(registeredOfficeSubscriptions)
+      .where(and(
+        eq(registeredOfficeSubscriptions.founderId, userId),
+        eq(registeredOfficeSubscriptions.status, "active")
+      ));
+    return sub;
+  }
+
+  async getUserRegisteredOfficeSubscriptions(userId: string): Promise<RegisteredOfficeSubscription[]> {
+    return db.select().from(registeredOfficeSubscriptions)
+      .where(eq(registeredOfficeSubscriptions.founderId, userId))
+      .orderBy(desc(registeredOfficeSubscriptions.createdAt));
+  }
+
+  async getApplicationRegisteredOfficeSubscription(applicationId: number): Promise<RegisteredOfficeSubscription | undefined> {
+    const [sub] = await db.select().from(registeredOfficeSubscriptions)
+      .where(eq(registeredOfficeSubscriptions.applicationId, applicationId));
+    return sub;
+  }
+
+  async updateRegisteredOfficeSubscription(id: number, data: Partial<RegisteredOfficeSubscription>): Promise<RegisteredOfficeSubscription | undefined> {
+    const [sub] = await db.update(registeredOfficeSubscriptions)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(registeredOfficeSubscriptions.id, id))
+      .returning();
+    return sub;
+  }
+
+  async getAllRegisteredOfficeSubscriptions(): Promise<RegisteredOfficeSubscription[]> {
+    return db.select().from(registeredOfficeSubscriptions).orderBy(desc(registeredOfficeSubscriptions.createdAt));
+  }
+
+  async getActiveMailSubscriptions(): Promise<RegisteredOfficeSubscription[]> {
+    return db.select().from(registeredOfficeSubscriptions)
+      .where(and(
+        eq(registeredOfficeSubscriptions.status, "active"),
+        eq(registeredOfficeSubscriptions.tier, "office_plus_mail")
+      ));
+  }
+
+  // Mail Handling Preferences
+  async createMailHandlingPreference(data: Omit<MailHandlingPreference, "id" | "createdAt" | "updatedAt">): Promise<MailHandlingPreference> {
+    const [pref] = await db.insert(mailHandlingPreferences).values(data).returning();
+    return pref;
+  }
+
+  async getMailHandlingPreference(subscriptionId: number): Promise<MailHandlingPreference | undefined> {
+    const [pref] = await db.select().from(mailHandlingPreferences)
+      .where(eq(mailHandlingPreferences.subscriptionId, subscriptionId));
+    return pref;
+  }
+
+  async updateMailHandlingPreference(id: number, data: Partial<MailHandlingPreference>): Promise<MailHandlingPreference | undefined> {
+    const [pref] = await db.update(mailHandlingPreferences)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(mailHandlingPreferences.id, id))
+      .returning();
+    return pref;
+  }
+
+  // Mail Items
+  async createMailItem(data: Omit<MailItem, "id" | "createdAt" | "updatedAt">): Promise<MailItem> {
+    const [item] = await db.insert(mailItems).values(data).returning();
+    return item;
+  }
+
+  async getMailItemById(id: number): Promise<MailItem | undefined> {
+    const [item] = await db.select().from(mailItems).where(eq(mailItems.id, id));
+    return item;
+  }
+
+  async getMailItemsBySubscription(subscriptionId: number): Promise<MailItem[]> {
+    return db.select().from(mailItems)
+      .where(eq(mailItems.subscriptionId, subscriptionId))
+      .orderBy(desc(mailItems.receivedAt));
+  }
+
+  async getMailItemsByStatus(status: string): Promise<MailItem[]> {
+    return db.select().from(mailItems).where(eq(mailItems.status, status));
+  }
+
+  async getAllMailItems(): Promise<MailItem[]> {
+    return db.select().from(mailItems).orderBy(desc(mailItems.receivedAt));
+  }
+
+  async updateMailItem(id: number, data: Partial<MailItem>): Promise<MailItem | undefined> {
+    const [item] = await db.update(mailItems)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(mailItems.id, id))
+      .returning();
+    return item;
+  }
+
+  // Mail Approval Requests
+  async createMailApprovalRequest(data: Omit<MailApprovalRequest, "id" | "createdAt">): Promise<MailApprovalRequest> {
+    const [req] = await db.insert(mailApprovalRequests).values(data).returning();
+    return req;
+  }
+
+  async getMailApprovalRequestsByUser(userId: string): Promise<MailApprovalRequest[]> {
+    return db.select().from(mailApprovalRequests)
+      .where(and(
+        eq(mailApprovalRequests.founderId, userId),
+        sql`${mailApprovalRequests.decision} IS NULL`
+      ))
+      .orderBy(desc(mailApprovalRequests.createdAt));
+  }
+
+  async updateMailApprovalRequest(id: number, data: Partial<MailApprovalRequest>): Promise<MailApprovalRequest | undefined> {
+    const [req] = await db.update(mailApprovalRequests)
+      .set(data)
+      .where(eq(mailApprovalRequests.id, id))
+      .returning();
+    return req;
   }
 }
 

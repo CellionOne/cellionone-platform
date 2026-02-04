@@ -2542,5 +2542,260 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // GET /api/admin/mailroom/stats - Get mailroom statistics
+  app.get("/api/admin/mailroom/stats", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const [
+        activeSubscriptions,
+        pendingMailItems,
+        approvalItems,
+        scanItems,
+        forwardItems
+      ] = await Promise.all([
+        storage.getActiveMailSubscriptions(),
+        storage.getMailItemsByStatus("received"),
+        storage.getMailItemsByStatus("pending_approval"),
+        storage.getMailItemsByStatus("approved_scan"),
+        storage.getMailItemsByStatus("approved_forward"),
+      ]);
+
+      res.json({
+        totalActive: activeSubscriptions.length,
+        pendingIntake: pendingMailItems.length,
+        pendingApproval: approvalItems.length,
+        pendingScan: scanItems.length,
+        pendingForward: forwardItems.length + pendingMailItems.filter(m => m.status === "received").length,
+      });
+    } catch (error: any) {
+      console.error("Error fetching mailroom stats:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch stats" });
+    }
+  });
+
+  // GET /api/admin/mailroom/items - Get all mail items for admin
+  app.get("/api/admin/mailroom/items", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const mailItems = await storage.getAllMailItems();
+      
+      // Enrich with subscription/user data
+      const enrichedItems = await Promise.all(mailItems.map(async (item) => {
+        const subscription = await storage.getRegisteredOfficeSubscriptionById(item.subscriptionId);
+        if (subscription) {
+          const user = await storage.getUser(subscription.founderId);
+          return {
+            ...item,
+            subscription: {
+              userId: subscription.founderId,
+              userEmail: user?.email || "unknown",
+              userName: user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email : "Unknown",
+            }
+          };
+        }
+        return { ...item, subscription: null };
+      }));
+
+      res.json(enrichedItems);
+    } catch (error: any) {
+      console.error("Error fetching mailroom items:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch items" });
+    }
+  });
+
+  // GET /api/admin/mailroom/subscriptions - Get all registered office subscriptions
+  app.get("/api/admin/mailroom/subscriptions", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const subscriptions = await storage.getAllRegisteredOfficeSubscriptions();
+      
+      // Enrich with user data
+      const enrichedSubs = await Promise.all(subscriptions.map(async (sub) => {
+        const user = await storage.getUser(sub.founderId);
+        return {
+          id: sub.id,
+          userId: sub.founderId,
+          tier: sub.tier,
+          status: sub.status,
+          userEmail: user?.email || "unknown",
+          userName: user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email : "Unknown",
+        };
+      }));
+
+      res.json(enrichedSubs);
+    } catch (error: any) {
+      console.error("Error fetching subscriptions:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch subscriptions" });
+    }
+  });
+
+  // POST /api/admin/mailroom/intake - Record new mail item
+  app.post("/api/admin/mailroom/intake", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { subscriptionId, senderLabel, itemType, isSensitive, notes } = req.body;
+      
+      const mailItem = await mailroomService.intakeMail(
+        subscriptionId,
+        senderLabel || null,
+        itemType || "letter",
+        isSensitive || false,
+        notes || null
+      );
+
+      await storage.createAuditLog({
+        userId: req.user.id,
+        action: "mail_intake",
+        entityType: "mail_item",
+        entityId: mailItem.id.toString(),
+        details: { senderLabel, itemType, isSensitive },
+        ipAddress: req.ip || null,
+      });
+
+      res.json(mailItem);
+    } catch (error: any) {
+      console.error("Error recording mail intake:", error);
+      res.status(500).json({ message: error.message || "Failed to record mail" });
+    }
+  });
+
+  // POST /api/admin/mailroom/:id/scan - Record scanned document
+  app.post("/api/admin/mailroom/:id/scan", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const mailItemId = parseInt(req.params.id);
+      const { fileUrl } = req.body;
+
+      if (!fileUrl) {
+        return res.status(400).json({ message: "File URL is required" });
+      }
+
+      const mailItem = await mailroomService.uploadScan(mailItemId, fileUrl);
+
+      await storage.createAuditLog({
+        userId: req.user.id,
+        action: "mail_scan_complete",
+        entityType: "mail_item",
+        entityId: mailItemId.toString(),
+        details: { fileUrl },
+        ipAddress: req.ip || null,
+      });
+
+      res.json(mailItem);
+    } catch (error: any) {
+      console.error("Error recording scan:", error);
+      res.status(500).json({ message: error.message || "Failed to record scan" });
+    }
+  });
+
+  // POST /api/admin/mailroom/:id/forward - Record mail forwarding
+  app.post("/api/admin/mailroom/:id/forward", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const mailItemId = parseInt(req.params.id);
+      const { trackingNumber, notes } = req.body;
+
+      const mailItem = await mailroomService.markForwarded(mailItemId, "Courier", trackingNumber || null);
+
+      await storage.createAuditLog({
+        userId: req.user.id,
+        action: "mail_forwarded",
+        entityType: "mail_item",
+        entityId: mailItemId.toString(),
+        details: { trackingNumber, notes },
+        ipAddress: req.ip || null,
+      });
+
+      res.json(mailItem);
+    } catch (error: any) {
+      console.error("Error recording forward:", error);
+      res.status(500).json({ message: error.message || "Failed to record forward" });
+    }
+  });
+
+  // POST /api/admin/mailroom/:id/discard - Discard mail item
+  app.post("/api/admin/mailroom/:id/discard", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const mailItemId = parseInt(req.params.id);
+      
+      await storage.updateMailItem(mailItemId, { status: "discarded" });
+
+      await storage.createAuditLog({
+        userId: req.user.id,
+        action: "mail_discarded",
+        entityType: "mail_item",
+        entityId: mailItemId.toString(),
+        details: {},
+        ipAddress: req.ip || null,
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error discarding mail:", error);
+      res.status(500).json({ message: error.message || "Failed to discard mail" });
+    }
+  });
+
+  // GET /api/registered-office/mail - Get founder's mail data
+  app.get("/api/registered-office/mail", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      
+      const subscription = await storage.getUserActiveRegisteredOfficeSubscription(userId);
+      if (!subscription || subscription.tier !== "office_plus_mail") {
+        return res.status(403).json({ message: "Mail handling requires an active Office + Mail subscription" });
+      }
+
+      const [preferences, mailItems, pendingApprovals] = await Promise.all([
+        storage.getMailHandlingPreference(subscription.id),
+        mailroomService.getMailItemsForFounder(userId),
+        mailroomService.getPendingApprovals(userId),
+      ]);
+
+      res.json({
+        preferences,
+        mailItems,
+        pendingApprovals,
+      });
+    } catch (error: any) {
+      console.error("Error fetching founder mail:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch mail" });
+    }
+  });
+
+  // POST /api/registered-office/mail/:id/approve - Founder approval decision
+  app.post("/api/registered-office/mail/:id/approve", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const mailItemId = parseInt(req.params.id);
+      const { action } = req.body;
+
+      // Verify the mail item belongs to the user's subscription
+      const subscription = await storage.getUserActiveRegisteredOfficeSubscription(userId);
+      if (!subscription) {
+        return res.status(403).json({ message: "No active subscription" });
+      }
+
+      const mailItem = await mailroomService.getMailItemById(mailItemId);
+      if (!mailItem || mailItem.subscriptionId !== subscription.id) {
+        return res.status(403).json({ message: "Mail item not found or unauthorized" });
+      }
+
+      let decision = "scan";
+      if (action === "forward") decision = "forward";
+      if (action === "discard") decision = "discard";
+
+      const result = await mailroomService.decideApproval(mailItemId, decision, `Founder decision: ${action}`);
+
+      await storage.createAuditLog({
+        userId,
+        action: "mail_approval_decision",
+        entityType: "mail_item",
+        entityId: mailItemId.toString(),
+        details: { action },
+        ipAddress: req.ip || null,
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error processing approval:", error);
+      res.status(500).json({ message: error.message || "Failed to process approval" });
+    }
+  });
+
   return httpServer;
 }

@@ -62,6 +62,11 @@ shared/
 - **audit_logs**: Activity tracking
 - **feature_flags**: Feature toggles
 - **notifications**: User notifications
+- **service_addresses**: Office locations (Ikoyi)
+- **registered_office_subscriptions**: User subscriptions to registered office service
+- **mail_handling_preferences**: User mail handling preferences (scan_all, approve_before_scan, forward_only)
+- **mail_items**: Individual mail items received at registered office
+- **mail_approval_requests**: Approval workflow for mail scanning/forwarding
 
 ## API Endpoints
 
@@ -113,6 +118,25 @@ shared/
 ### Lawyer Onboarding (Public)
 - `POST /api/lawyer-applications` - Submit lawyer application (no auth required)
 
+### Registered Office
+- `GET /api/registered-office/options` - Get available tiers and location info
+- `POST /api/registered-office/select` - Select registered office during wizard
+- `POST /api/registered-office/subscribe` - Subscribe to standalone service
+- `GET /api/registered-office/subscription` - Get current subscription and address
+- `POST /api/registered-office/preferences` - Set mail handling preferences
+- `GET /api/registered-office/mail` - Get founder's mail items
+- `POST /api/registered-office/mail/:id/approve` - Approve mail action
+
+### Admin Mailroom
+- `GET /api/admin/mailroom/stats` - Mailroom statistics
+- `GET /api/admin/mailroom/items` - All mail items
+- `GET /api/admin/mailroom/subscriptions` - All subscriptions
+- `POST /api/admin/mailroom/intake` - Record new mail
+- `POST /api/admin/mailroom/:id/scan` - Record scan
+- `POST /api/admin/mailroom/:id/forward` - Record forwarding
+- `POST /api/admin/mailroom/:id/discard` - Discard mail
+- `POST /api/admin/registered-office/:id/beta-activate` - Beta activate subscription
+
 ## Design System
 - **Primary Color**: Green/Teal (hsl(156 72% 35%)) - Nigerian legal theme
 - **Dark Mode**: Fully supported with automatic theme switching
@@ -130,6 +154,18 @@ shared/
 - vitest.config.ts configured for Node environment
 
 ## Recent Changes
+- February 4, 2026: Registered Office + Mail Handling feature
+  - Registered office address service with Ikoyi, Lagos location
+  - Two tiers: Office Only (₦75,000/year) and Office + Mail (₦150,000/year)
+  - Mail handling preferences: scan_all, approve_before_scan, forward_only
+  - Sensitive mail auto-escalation option
+  - Full address gating (only revealed after payment/activation)
+  - Integration with incorporation wizard Address step
+  - Standalone /founder/registered-office subscription page
+  - /founder/mail inbox for mail handling
+  - Admin /admin/mailroom for intake, scanning, forwarding
+  - Beta activation for testing without payment
+  - Feature flags: registered_office, mail_handling
 - February 2, 2026: Lawyer onboarding system
   - Public lawyer application form (/apply-lawyer)
   - Admin review workflow for lawyer applications

@@ -147,13 +147,65 @@ shared/
 - `SESSION_SECRET` - Session encryption key
 - `OPENAI_API_KEY` - OpenAI API key (optional, falls back to defaults)
 - `PAYSTACK_SECRET_KEY` - Paystack secret (for production)
+- `MAIL_ITEMS_INCLUDED` - Monthly mail items included per subscription (default: 5)
+- `MAIL_STORAGE_DAYS` - Days to retain mail items (default: 30)
+- `MAIL_OFFICIAL_ONLY` - Accept only official mail: government, bank, legal, commercial (default: true)
 
 ## Testing
 - **Backend Regression Tests**: Run with `npx vitest run`
 - Test file: `server/__tests__/auth.regression.test.ts` (6 tests for role-based auth)
 - vitest.config.ts configured for Node environment
 
+## Registered Office Service Architecture
+
+### Service Tiers
+- **Office Only** (₦75,000/year): Registered address for CAC filings only
+- **Office + Mail** (₦150,000/year): Address + mail receiving, scanning, forwarding
+
+### Service Limits (Configurable via Environment)
+- **Mail Items**: 5 items/month included (overage tracked with reason)
+- **Storage**: 30 days retention before auto-deletion
+- **Official Mail Only**: Government, bank, legal, commercial mail accepted; personal mail returned
+
+### Subscription Lifecycle
+1. **Pending**: Created but not paid
+2. **Active**: Paid and in service period
+3. **Beta Activated**: Admin-activated for testing
+4. **Expired**: Past expiration date (auto-detected by scheduler)
+
+### Daily Scheduler (server/services/subscriptionScheduler.ts)
+- Runs daily with 5-second initial delay
+- Expires subscriptions past their expiresAt date
+- Sends renewal nudges (30 days and 7 days before expiry)
+- Creates audit logs and notifications
+
+### Address Gating
+- Full address (line1, line2, postal code) only revealed for active/beta_activated subscriptions
+- Pending/expired subscriptions show location only (city, state, country)
+- Lawyer view shows Celion One badge with subscription status
+
+### Mail Intake Validation
+- Blocks intake for expired subscriptions (returns to sender)
+- Validates official mail type for MAIL_OFFICIAL_ONLY mode
+- Tracks overage with reason when exceeding monthly limit
+- Sends founder notifications for overages
+
+### API Endpoints
+- `GET /api/registered-office/service-policy` - Service limits for founders
+- `GET /api/admin/mailroom/service-limits` - Service limits for admin
+
 ## Recent Changes
+- February 4, 2026: Launch-Readiness Hardening
+  - Service limits with configurable environment variables
+  - Subscription expiry scheduler with daily processing
+  - Renewal nudge notifications (30-day and 7-day)
+  - Official mail validation for mail intake
+  - Overage tracking with admin-provided reasons
+  - Expired subscription blocking (mail returned to sender)
+  - Service policy display in founder mail/registered office pages
+  - Registered office status badge in lawyer application view
+  - Address gating for pending/expired subscriptions
+  - Comprehensive audit logging for subscription lifecycle
 - February 4, 2026: Registered Office + Mail Handling feature
   - Registered office address service with Ikoyi, Lagos location
   - Two tiers: Office Only (₦75,000/year) and Office + Mail (₦150,000/year)

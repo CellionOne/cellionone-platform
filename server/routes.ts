@@ -547,14 +547,31 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Access denied" });
       }
       
-      const [checklist, payment, clarifications, documents] = await Promise.all([
+      const [checklist, payment, clarifications, documents, registeredOfficeSubscription] = await Promise.all([
         storage.getChecklistItems(applicationId),
         storage.getPaymentByApplication(applicationId),
         storage.getClarificationsByApplication(applicationId),
         storage.getDocumentsByApplication(applicationId),
+        storage.getApplicationRegisteredOfficeSubscription(applicationId),
       ]);
       
-      res.json({ application, checklist, payment, clarifications, documents });
+      // Get address for registered office if subscription exists and is active
+      let registeredOfficeAddress = null;
+      if (registeredOfficeSubscription && (registeredOfficeSubscription.status === "active" || registeredOfficeSubscription.status === "beta_activated")) {
+        registeredOfficeAddress = await storage.getServiceAddressById(registeredOfficeSubscription.serviceAddressId);
+      }
+      
+      res.json({ 
+        application, 
+        checklist, 
+        payment, 
+        clarifications, 
+        documents,
+        registeredOffice: registeredOfficeSubscription ? {
+          subscription: registeredOfficeSubscription,
+          address: registeredOfficeAddress,
+        } : null
+      });
     } catch (error) {
       console.error("Error fetching application:", error);
       res.status(500).json({ message: "Failed to fetch application" });

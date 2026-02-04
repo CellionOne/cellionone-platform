@@ -36,6 +36,8 @@ import {
   ThumbsUp,
   ThumbsDown,
   AlertTriangle,
+  MapPin,
+  Mail,
 } from "lucide-react";
 import type { 
   CompanyApplication, 
@@ -47,12 +49,32 @@ import type {
 } from "@shared/schema";
 import { insertClarificationRequestSchema } from "@shared/schema";
 
+interface RegisteredOfficeInfo {
+  subscription: {
+    id: number;
+    tier: string;
+    status: string;
+    startsAt: string | null;
+    expiresAt: string | null;
+  };
+  address: {
+    label: string;
+    line1: string;
+    line2: string | null;
+    city: string;
+    state: string;
+    postalCode: string | null;
+    country: string;
+  } | null;
+}
+
 interface ApplicationDetailData {
   application: CompanyApplication;
   checklist: ApplicationChecklistItem[];
   payment: Payment | null;
   clarifications: ClarificationRequest[];
   documents: DocumentFile[];
+  registeredOffice: RegisteredOfficeInfo | null;
 }
 
 export default function LawyerApplicationDetail() {
@@ -101,7 +123,7 @@ export default function LawyerApplicationDetail() {
     );
   }
 
-  const { application, checklist, payment, clarifications, documents } = data;
+  const { application, checklist, payment, clarifications, documents, registeredOffice } = data;
 
   return (
     <DashboardLayout 
@@ -166,7 +188,8 @@ export default function LawyerApplicationDetail() {
             <OverviewTab 
               application={application} 
               checklist={checklist} 
-              payment={payment} 
+              payment={payment}
+              registeredOffice={registeredOffice}
             />
           </TabsContent>
 
@@ -201,14 +224,38 @@ export default function LawyerApplicationDetail() {
 function OverviewTab({ 
   application, 
   checklist, 
-  payment 
+  payment,
+  registeredOffice
 }: { 
   application: CompanyApplication; 
   checklist: ApplicationChecklistItem[];
   payment: Payment | null;
+  registeredOffice: RegisteredOfficeInfo | null;
 }) {
   const completedDocs = checklist.filter(item => item.status === "provided" || item.status === "accepted").length;
   const totalDocs = checklist.length;
+
+  const getRegisteredOfficeBadge = (status: string) => {
+    switch (status) {
+      case "active":
+      case "beta_activated":
+        return <Badge className="bg-primary gap-1"><CheckCircle2 className="h-3 w-3" />Active</Badge>;
+      case "pending":
+        return <Badge variant="secondary" className="gap-1"><Clock className="h-3 w-3" />Pending</Badge>;
+      case "expired":
+        return <Badge variant="destructive" className="gap-1"><AlertTriangle className="h-3 w-3" />Expired</Badge>;
+      default:
+        return <Badge variant="secondary">{status}</Badge>;
+    }
+  };
+
+  const getTierLabel = (tier: string) => {
+    switch (tier) {
+      case "office_only": return "Office Only";
+      case "office_plus_mail": return "Office + Mail";
+      default: return tier;
+    }
+  };
 
   return (
     <div className="grid lg:grid-cols-2 gap-6">
@@ -246,9 +293,55 @@ function OverviewTab({
                 </div>
               </div>
             )}
-            {application.registeredAddress && (
+            {registeredOffice?.address ? (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-4" data-testid="registered-office-section">
+                <div className="flex items-start justify-between mb-2">
+                  <Label className="text-muted-foreground text-sm flex items-center gap-1">
+                    <MapPin className="h-3 w-3" />
+                    Registered Office (Celion One)
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    {registeredOffice.subscription.tier === "office_plus_mail" && (
+                      <Badge variant="outline" className="gap-1 text-xs">
+                        <Mail className="h-3 w-3" />
+                        Mail
+                      </Badge>
+                    )}
+                    {getRegisteredOfficeBadge(registeredOffice.subscription.status)}
+                  </div>
+                </div>
+                <p className="font-medium">{registeredOffice.address.label}</p>
+                <p className="text-sm text-muted-foreground">
+                  {registeredOffice.address.line1}
+                  {registeredOffice.address.line2 && `, ${registeredOffice.address.line2}`}
+                  <br />
+                  {registeredOffice.address.city}, {registeredOffice.address.state} {registeredOffice.address.postalCode}
+                  <br />
+                  {registeredOffice.address.country}
+                </p>
+                <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                  <span>Tier: {getTierLabel(registeredOffice.subscription.tier)}</span>
+                  {registeredOffice.subscription.expiresAt && (
+                    <span>Expires: {new Date(registeredOffice.subscription.expiresAt).toLocaleDateString()}</span>
+                  )}
+                </div>
+              </div>
+            ) : registeredOffice?.subscription ? (
+              <div className="rounded-lg border border-yellow-500/30 bg-yellow-50 dark:bg-yellow-950/20 p-4" data-testid="registered-office-pending">
+                <div className="flex items-start justify-between mb-2">
+                  <Label className="text-muted-foreground text-sm flex items-center gap-1">
+                    <MapPin className="h-3 w-3" />
+                    Registered Office (Celion One)
+                  </Label>
+                  {getRegisteredOfficeBadge(registeredOffice.subscription.status)}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Address details will be available once subscription is activated
+                </p>
+              </div>
+            ) : application.registeredAddress ? (
               <div>
-                <Label className="text-muted-foreground text-sm">Registered Address</Label>
+                <Label className="text-muted-foreground text-sm">Registered Address (Custom)</Label>
                 <p className="font-medium">
                   {[
                     application.registeredAddress.line1,
@@ -259,7 +352,7 @@ function OverviewTab({
                   ].filter(Boolean).join(", ")}
                 </p>
               </div>
-            )}
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -351,7 +444,8 @@ function DocumentFileDetails({
   
   const downloadMutation = useMutation({
     mutationFn: async (): Promise<DocumentDownloadResponse> => {
-      return apiRequest("GET", `/api/documents/${docFile.id}/download`);
+      const res = await apiRequest("GET", `/api/documents/${docFile.id}/download`);
+      return res.json();
     },
     onSuccess: (data) => {
       setDownloadData(data);

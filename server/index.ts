@@ -49,6 +49,48 @@ app.post(
   }
 );
 
+// ============== PAYSTACK WEBHOOK ROUTE ==============
+// CRITICAL: Must be registered BEFORE express.json() middleware
+// Paystack webhooks need raw body for signature verification (HMAC SHA512)
+app.post(
+  '/api/payments/paystack/webhook',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    const signature = req.headers['x-paystack-signature'];
+
+    if (!signature) {
+      return res.status(400).json({ error: 'Missing x-paystack-signature' });
+    }
+
+    try {
+      const sig = Array.isArray(signature) ? signature[0] : signature;
+
+      // Validate that req.body is a Buffer
+      if (!Buffer.isBuffer(req.body)) {
+        const errorMsg = '[Paystack Webhook] req.body is not a Buffer. Webhook route may be registered after express.json()';
+        console.error(errorMsg);
+        return res.status(500).json({ error: 'Webhook processing error' });
+      }
+
+      const payload = req.body.toString('utf8');
+
+      // Dynamically import webhook handler
+      const { default: paystackWebhookHandler } = await import('./services/paystackWebhookHandler');
+      const result = await paystackWebhookHandler.processWebhook(payload, sig);
+
+      if (!result.processed) {
+        console.error('[Paystack Webhook] Failed to process:', result.error);
+        return res.status(400).json({ error: result.error });
+      }
+
+      res.status(200).json({ received: true, event: result.event });
+    } catch (error: any) {
+      console.error('[Paystack Webhook] Error:', error.message);
+      res.status(400).json({ error: 'Webhook processing error' });
+    }
+  }
+);
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {

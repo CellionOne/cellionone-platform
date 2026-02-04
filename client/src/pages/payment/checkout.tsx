@@ -68,6 +68,16 @@ interface CheckoutSessionResponse {
   secondStepItems?: CheckoutItem[];
 }
 
+interface PaystackConfigResponse {
+  isConfigured: boolean;
+}
+
+interface PaystackInitResponse {
+  authorizationUrl: string;
+  accessCode: string;
+  reference: string;
+}
+
 export default function CheckoutPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -102,12 +112,16 @@ export default function CheckoutPage() {
     queryKey: ["/api/payments/stripe/config"],
   });
 
+  const { data: paystackConfig, isLoading: paystackLoading } = useQuery<PaystackConfigResponse>({
+    queryKey: ["/api/payments/paystack/config"],
+  });
+
   const { data: priceBook, isLoading: pricesLoading } = useQuery<PriceBookResponse>({
     queryKey: ["/api/payments/pricebook", selectedProvider],
     queryFn: () => fetch(`/api/payments/pricebook?provider=${selectedProvider}`).then(r => r.json()),
   });
 
-  const checkoutMutation = useMutation({
+  const stripeCheckoutMutation = useMutation({
     mutationFn: async (payload: { items: CheckoutItem[]; context: CheckoutContext }) => {
       const response = await apiRequest("POST", "/api/payments/stripe/checkout", payload);
       return response.json() as Promise<CheckoutSessionResponse>;
@@ -128,6 +142,24 @@ export default function CheckoutPage() {
       toast({
         title: "Checkout Error",
         description: error.message || "Failed to create checkout session",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const paystackCheckoutMutation = useMutation({
+    mutationFn: async (payload: { items: CheckoutItem[]; context: CheckoutContext }) => {
+      const response = await apiRequest("POST", "/api/payments/paystack/initialize", payload);
+      return response.json() as Promise<PaystackInitResponse>;
+    },
+    onSuccess: (data) => {
+      setIsRedirecting(true);
+      window.location.href = data.authorizationUrl;
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Checkout Error",
+        description: error.message || "Failed to initialize payment",
         variant: "destructive",
       });
     },
@@ -179,18 +211,19 @@ export default function CheckoutPage() {
       return;
     }
 
+    const payload = {
+      items: checkoutState.items,
+      context: checkoutState.context || {},
+    };
+
     if (selectedProvider === "stripe") {
-      checkoutMutation.mutate({
-        items: checkoutState.items,
-        context: checkoutState.context || {},
-      });
+      stripeCheckoutMutation.mutate(payload);
     } else {
-      toast({
-        title: "Coming Soon",
-        description: "Paystack payments will be available soon for Nigerian customers",
-      });
+      paystackCheckoutMutation.mutate(payload);
     }
   };
+
+  const isCheckoutPending = stripeCheckoutMutation.isPending || paystackCheckoutMutation.isPending;
 
   if (!checkoutState?.items?.length) {
     return (
@@ -273,7 +306,6 @@ export default function CheckoutPage() {
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Badge variant="outline">Coming Soon</Badge>
                           <Badge variant="secondary">NGN ₦</Badge>
                         </div>
                       </div>
@@ -379,10 +411,10 @@ export default function CheckoutPage() {
                   className="w-full" 
                   size="lg"
                   onClick={handleCheckout}
-                  disabled={checkoutMutation.isPending || isRedirecting || selectedProvider === "paystack"}
+                  disabled={isCheckoutPending || isRedirecting}
                   data-testid="button-pay-now"
                 >
-                  {(checkoutMutation.isPending || isRedirecting) ? (
+                  {(isCheckoutPending || isRedirecting) ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       Processing...
@@ -397,7 +429,7 @@ export default function CheckoutPage() {
 
                 <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
                   <ShieldCheck className="h-4 w-4" />
-                  Secure payment via Stripe
+                  Secure payment via {selectedProvider === "stripe" ? "Stripe" : "Paystack"}
                 </div>
               </CardContent>
               <CardFooter className="flex flex-col text-xs text-muted-foreground space-y-1">

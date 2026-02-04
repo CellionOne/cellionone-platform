@@ -28,6 +28,7 @@ import {
   mailItems, type MailItem,
   mailApprovalRequests, type MailApprovalRequest,
   stripeCheckoutSessions, type StripeCheckoutSession, type InsertStripeCheckoutSession,
+  paystackTransactions, type PaystackTransaction, type InsertPaystackTransaction,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -169,6 +170,13 @@ export interface IStorage {
   getStripeCheckoutSessionsByUser(userId: string): Promise<StripeCheckoutSession[]>;
   createStripeCheckoutSession(data: InsertStripeCheckoutSession): Promise<StripeCheckoutSession>;
   updateStripeCheckoutSession(id: number, data: Partial<InsertStripeCheckoutSession>): Promise<StripeCheckoutSession | undefined>;
+
+  // Paystack Transactions
+  getPaystackTransaction(id: number): Promise<PaystackTransaction | undefined>;
+  getPaystackTransactionByReference(reference: string): Promise<PaystackTransaction | undefined>;
+  getPaystackTransactionsByUser(userId: string): Promise<PaystackTransaction[]>;
+  createPaystackTransaction(data: InsertPaystackTransaction): Promise<PaystackTransaction>;
+  updatePaystackTransaction(id: number, data: Partial<InsertPaystackTransaction>): Promise<PaystackTransaction | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -830,6 +838,36 @@ export class DatabaseStorage implements IStorage {
       .where(eq(stripeCheckoutSessions.id, id))
       .returning();
     return session;
+  }
+
+  // Paystack Transactions
+  async getPaystackTransaction(id: number): Promise<PaystackTransaction | undefined> {
+    const [transaction] = await db.select().from(paystackTransactions).where(eq(paystackTransactions.id, id));
+    return transaction;
+  }
+
+  async getPaystackTransactionByReference(reference: string): Promise<PaystackTransaction | undefined> {
+    const [transaction] = await db.select().from(paystackTransactions).where(eq(paystackTransactions.reference, reference));
+    return transaction;
+  }
+
+  async getPaystackTransactionsByUser(userId: string): Promise<PaystackTransaction[]> {
+    return db.select().from(paystackTransactions)
+      .where(eq(paystackTransactions.userId, userId))
+      .orderBy(desc(paystackTransactions.createdAt));
+  }
+
+  async createPaystackTransaction(data: InsertPaystackTransaction): Promise<PaystackTransaction> {
+    const [transaction] = await db.insert(paystackTransactions).values(data).returning();
+    return transaction;
+  }
+
+  async updatePaystackTransaction(id: number, data: Partial<InsertPaystackTransaction>): Promise<PaystackTransaction | undefined> {
+    const [transaction] = await db.update(paystackTransactions)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(paystackTransactions.id, id))
+      .returning();
+    return transaction;
   }
 }
 

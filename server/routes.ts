@@ -556,6 +556,128 @@ export async function registerRoutes(
     }
   });
 
+  // ============== PAYSTACK PAYMENT ROUTES ==============
+  const paystackPaymentService = await import("./services/paystackPaymentService");
+  const paystackWebhookHandler = await import("./services/paystackWebhookHandler");
+
+  // Check if Paystack is configured (public endpoint)
+  app.get("/api/payments/paystack/config", async (req, res) => {
+    try {
+      const isConfigured = paystackPaymentService.isPaystackConfigured();
+      res.json({ isConfigured });
+    } catch (error) {
+      console.error("Error getting Paystack config:", error);
+      res.status(500).json({ message: "Failed to get Paystack configuration" });
+    }
+  });
+
+  // Initialize Paystack transaction (authenticated)
+  app.post("/api/payments/paystack/initialize", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { items, context } = req.body;
+
+      // Validate items
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "Items are required" });
+      }
+
+      // Validate each item has serviceType
+      for (const item of items) {
+        if (!item.serviceType) {
+          return res.status(400).json({ message: "Each item must have a serviceType" });
+        }
+        if (item.serviceType === "registered_office" && !item.tier) {
+          return res.status(400).json({ message: "Registered office items must have a tier" });
+        }
+      }
+
+      // Check if Paystack is configured
+      const isConfigured = paystackPaymentService.isPaystackConfigured();
+      if (!isConfigured) {
+        return res.status(503).json({ message: "Paystack payments are not available" });
+      }
+
+      // Check feature flag
+      const paystackEnabled = await storage.getFeatureFlag("enable_paystack_payments");
+      if (!paystackEnabled?.isEnabled) {
+        return res.status(503).json({ message: "Paystack payments are currently disabled" });
+      }
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+      const result = await paystackPaymentService.initializeTransaction(
+        userId,
+        items,
+        context || {},
+        baseUrl
+      );
+
+      // Audit log
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "paystack_transaction_initiated",
+        entityType: "paystack_transaction",
+        entityId: result.reference,
+        details: { items, reference: result.reference },
+        ipAddress: req.ip,
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error initializing Paystack transaction:", error);
+      res.status(500).json({ message: error.message || "Failed to initialize transaction" });
+    }
+  });
+
+  // Verify Paystack transaction (authenticated)
+  app.get("/api/payments/paystack/verify/:reference", isAuthenticated, async (req: any, res) => {
+    try {
+      const { reference } = req.params;
+      const userId = getUserId(req);
+
+      // Get our database record
+      const transaction = await storage.getPaystackTransactionByReference(reference);
+      if (!transaction) {
+        return res.status(404).json({ message: "Transaction not found" });
+      }
+
+      // Verify ownership
+      if (transaction.userId !== userId) {
+        return res.status(403).json({ message: "Unauthorized" });
+      }
+
+      // If already completed, return cached status
+      if (transaction.status === "success" || transaction.status === "failed") {
+        return res.json({
+          status: transaction.status,
+          amount: transaction.amountTotal,
+          currency: transaction.currency,
+          completedAt: transaction.completedAt,
+        });
+      }
+
+      // Verify with Paystack
+      const verification = await paystackPaymentService.verifyTransaction(reference);
+      res.json(verification);
+    } catch (error: any) {
+      console.error("Error verifying Paystack transaction:", error);
+      res.status(500).json({ message: error.message || "Failed to verify transaction" });
+    }
+  });
+
+  // Get user's Paystack transactions (authenticated)
+  app.get("/api/payments/paystack/transactions", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const transactions = await storage.getPaystackTransactionsByUser(userId);
+      res.json({ transactions });
+    } catch (error) {
+      console.error("Error fetching Paystack transactions:", error);
+      res.status(500).json({ message: "Failed to fetch transactions" });
+    }
+  });
+
   // ============== FOUNDER ROUTES ==============
   app.get("/api/founder/dashboard", isAuthenticated, async (req: any, res) => {
     try {

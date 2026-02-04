@@ -243,6 +243,41 @@ export const insertStripeCheckoutSessionSchema = createInsertSchema(stripeChecko
 export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
 export type InsertStripeCheckoutSession = z.infer<typeof insertStripeCheckoutSessionSchema>;
 
+// ============== PAYSTACK TRANSACTION ==============
+export const paystackTransactions = pgTable("paystack_transactions", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull(),
+  reference: varchar("reference", { length: 255 }).notNull().unique(),
+  accessCode: varchar("access_code", { length: 255 }),
+  paystackTransactionId: varchar("paystack_transaction_id", { length: 255 }),
+  status: varchar("status", { length: 50 }).default("pending"), // pending, success, failed
+  currency: varchar("currency", { length: 10 }).default("NGN"),
+  amountTotal: integer("amount_total"), // in kobo
+  lineItems: json("line_items").$type<{
+    serviceType: string;
+    tier?: string;
+    amount: number;
+    description: string;
+  }[]>(),
+  contextJson: json("context_json").$type<{
+    applicationId?: number;
+    subscriptionId?: number;
+  }>(),
+  gatewayResponse: varchar("gateway_response", { length: 255 }),
+  channel: varchar("channel", { length: 50 }), // card, bank, ussd, etc.
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_paystack_transactions_user").on(table.userId),
+  index("idx_paystack_transactions_status").on(table.status),
+  index("idx_paystack_transactions_reference").on(table.reference),
+]);
+
+export const insertPaystackTransactionSchema = createInsertSchema(paystackTransactions).omit({ id: true, createdAt: true, updatedAt: true });
+export type PaystackTransaction = typeof paystackTransactions.$inferSelect;
+export type InsertPaystackTransaction = z.infer<typeof insertPaystackTransactionSchema>;
+
 // ============== PAYOUT LEDGER ==============
 export const payoutLedger = pgTable("payout_ledger", {
   id: serial("id").primaryKey(),

@@ -1,0 +1,224 @@
+You are a senior full-stack engineer extending the existing Celion One application (React/TS/Vite/Tailwind/shadcn, Express + Postgres, Replit Auth, Zod, RBAC, audit logs, feature flags).
+
+GOAL
+Implement Registered Office Address + Mail Handling as:
+1) A built-in option inside the Incorporation Wizard (Address step), AND
+2) A standalone post-build module (“Registered Office Service”) for users who want only the address/mail service.
+
+Both entry points must use the SAME backend subscription model and enforce:
+- Identity verification prerequisite for standalone purchases
+- Gated address disclosure (full address revealed only after payment/activation)
+- Mail handling preferences (standing instructions)
+- Admin mail intake + approval flow for sensitive mail
+- Audit logging + tests
+
+FEATURE FLAGS
+- enable_registered_office_service (default ON)
+- enable_mail_handling (default ON)
+- enable_mail_approval_flow (default ON)
+- enable_registered_office_payment_required (default false for beta)
+- enable_verification_required_for_registered_office (default true)
+
+PRICING CONFIG
+- office_only_ngn = 75000
+- office_plus_mail_ngn = 150000
+- registered_office_term_months = 12
+- show_full_address_after = "subscription_active_only"
+
+PRIVATE REGISTERED OFFICE ADDRESS (DO NOT SHOW PRE-PAYMENT)
+51 Raymond Njoku Street, Off Awolowo Road, Ikoyi, Lagos, First Floor.
+
+========================================
+PART 1 — DATABASE CHANGES
+========================================
+
+A) ServiceAddress (NEW)
+- id (uuid)
+- label: "Celion One Registered Office (Ikoyi)"
+- city/state/country (public)
+- line1/line2/floorDetails (private)
+- isActive (bool)
+Seed with the full Ikoyi address.
+
+B) RegisteredOfficeSubscription (NEW)
+- id (uuid)
+- founderId (FK User)
+- applicationId (nullable FK CompanyApplication)   // if purchased via wizard
+- companyId (nullable FK Company/Entity if exists) // if you have a company table; otherwise keep applicationId nullable
+- tier: 'office_only' | 'office_plus_mail'
+- serviceAddressId (FK ServiceAddress)
+- status: 'selected' | 'pending_payment' | 'active' | 'expired' | 'cancelled'
+- startDate, endDate
+- paymentId (nullable FK Payment)
+- createdAt, updatedAt
+
+RULE: one active subscription per founder per application/company (enforce unique constraint).
+
+C) MailHandlingPreference (NEW)
+- id (uuid)
+- subscriptionId (FK RegisteredOfficeSubscription)
+- founderId
+- preferenceType: 'scan_all' | 'approve_before_scan' | 'forward_only'
+- isSensitiveAutoEscalationEnabled (bool default true)
+- updatedAt
+
+D) MailItem + MailApprovalRequest + Notification
+(Use the same schema as previously defined: intake, approval, scanned doc upload, forwarding status)
+
+MIGRATIONS + SEED
+- Create all tables and seed ServiceAddress.
+- Ensure serializers never return full address unless subscription.status == 'active'.
+
+========================================
+PART 2 — SHARED BACKEND SERVICES (NO DUPLICATION)
+========================================
+
+Create a registeredOfficeService with functions:
+- getOptions()
+- selectForApplication(applicationId, founderId, tier)
+- subscribeStandalone(founderId, tier)   // applicationId=null
+- getSubscription({applicationId?, founderId})
+- activateFromPayment(paymentId) OR activateBeta(subscriptionId, adminId, reason)
+- getMaskedAddress() vs getFullAddress() based on status
+- ensureVerificationIfRequired(founderId)
+
+Create a mailroomService:
+- setPreference(subscriptionId, preferenceType, sensitiveAutoEscalation)
+- intakeMail(subscriptionId, senderName, senderType, envelopePhotoDocId?)
+- decideApproval(mailItemId, decision)
+- uploadScan(mailItemId, scannedDocId)
+- markForwarded(mailItemId, courier/tracking)
+
+All endpoints call these services.
+
+========================================
+PART 3 — API ENDPOINTS (Express + Zod + RBAC)
+========================================
+
+A) Shared/Founder
+1) GET /api/registered-office/options
+- returns tiers, pricing, masked location, policy text
+
+2) POST /api/registered-office/select (Wizard path)
+- Input: { applicationId, tier }
+- Creates/updates subscription linked to applicationId
+- Sets status pending_payment
+- Audit: registered_office_selected
+
+3) POST /api/registered-office/subscribe (Standalone path)
+- Input: { tier }
+- Enforce verification prerequisite if flag enabled:
+  - if founder not verified => return 409 with { code: "VERIFICATION_REQUIRED" }
+- Create subscription with applicationId=null, status pending_payment
+- Audit: registered_office_selected_standalone
+
+4) GET /api/registered-office/subscription
+- Query: applicationId? or standalone=true
+- Returns masked/full address depending on status
+
+5) POST /api/registered-office/preferences
+- Input: { subscriptionId, preferenceType, isSensitiveAutoEscalationEnabled }
+- Only allowed if tier=office_plus_mail and status=active
+- Audit: mail_preferences_updated
+
+B) Admin
+6) POST /api/admin/registered-office/:subscriptionId/activate-beta
+- Admin-only; reason required
+- Sets status active, sets dates
+- Audit: registered_office_activated_beta
+
+7) Admin mailroom endpoints:
+- /api/admin/mail/intake
+- /api/admin/mail/:id/upload-scan
+- /api/admin/mail/:id/mark-forwarded
+(All with approval gating + audit + notifications)
+
+C) Lawyer visibility
+- Ensure lawyer application view API returns:
+  - masked address if subscription not active
+  - full address if active
+- Audit: registered_office_address_viewed when full address is accessed.
+
+D) Payment integration hook
+- When payments are live:
+  - treat registered office as its own line item
+  - on payment success, activate subscription.
+- Until then, keep beta activation.
+
+========================================
+PART 4 — FRONTEND UX
+========================================
+
+A) Wizard integration (Address Step)
+- Add “Use Celion Registered Office (Ikoyi, Lagos)” option + tier selection cards
+- Show note: “Full address is provided after payment to prevent misuse.”
+- Save selection -> POST /api/registered-office/select
+- On application summary: show masked/full based on status
+
+B) Standalone module
+- Add navigation item: Founder Dashboard → “Registered Office Service”
+Route: /founder/registered-office
+- Page states:
+  1) Not verified => show verification CTA and block subscribe
+     - If API returns VERIFICATION_REQUIRED, display:
+       “Identity verification is required before activating registered office services.”
+       Button: “Start verification”
+  2) Verified => show tier selection + subscribe flow
+  3) Pending payment => show masked address + instructions
+  4) Active => reveal full address + subscription details + renewal date
+
+C) Mail Handling Preferences flow
+- If tier=office_plus_mail and active and preference not set:
+  - show blocking banner: “Choose how we handle your mail”
+- Provide radio options:
+  - Scan & email all official mail
+  - Notify me first; scan only after approval
+  - Do not open/scan; forward only
+- Toggle: Sensitive auto escalation ON by default
+
+D) Mail Inbox
+- /founder/mail shows mail items + approvals
+- approval actions update status
+
+E) Admin Mailroom
+- /admin/mail intake + queues + scan upload
+
+========================================
+PART 5 — AUDIT LOGS
+========================================
+Add/ensure actions:
+- registered_office_selected
+- registered_office_selected_standalone
+- registered_office_activated_beta
+- registered_office_address_viewed
+- mail_preferences_updated
+- mail_item_received
+- mail_approval_requested
+- mail_approval_decision
+- mail_item_scanned
+- mail_forward_updated
+
+========================================
+PART 6 — TESTS
+========================================
+Backend tests (must pass):
+1) Full address is never returned unless subscription active
+2) Standalone subscribe returns VERIFICATION_REQUIRED when user not verified (flag on)
+3) Wizard select creates subscription linked to applicationId
+4) Sensitive auto escalation triggers approval even when scan_all
+5) Admin cannot upload scan unless approval granted where required
+6) Audit logs written for selection + activation + address view
+
+========================================
+DELIVERABLES
+========================================
+- Registered office option in wizard + standalone module
+- Verification prerequisite enforced for standalone purchases
+- Address gating enforced server-side
+- Mail preferences + admin mailroom + founder approvals
+- Audit logs + tests passing
+- replit.md updated to document:
+  - dual entry points (wizard + standalone)
+  - verification requirement for standalone
+  - address disclosure gating policy
+Implement now without breaking existing functionality.

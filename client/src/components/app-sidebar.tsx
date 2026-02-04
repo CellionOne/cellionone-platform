@@ -59,6 +59,7 @@ const adminItems: NavItem[] = [
   { title: "Users", url: "/admin/users", icon: Users },
   { title: "Applications", url: "/admin/applications", icon: FileText },
   { title: "Lawyer Applications", url: "/admin/lawyer-applications", icon: UserPlus },
+  { title: "Mailroom", url: "/admin/mailroom", icon: Mail },
   { title: "Receipts", url: "/admin/receipts", icon: Receipt },
   { title: "AI Events", url: "/admin/ai-events", icon: Brain },
   { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },

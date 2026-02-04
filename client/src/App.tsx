@@ -29,6 +29,7 @@ import AdminAuditLogs from "@/pages/admin/audit-logs";
 import AdminAIEvents from "@/pages/admin/ai-events";
 import AdminReceipts from "@/pages/admin/receipts";
 import AdminLawyerApplications from "@/pages/admin/lawyer-applications";
+import AdminMailroom from "@/pages/admin/mailroom";
 import ApplyLawyerPage from "@/pages/apply-lawyer";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
@@ -185,6 +186,9 @@ function Router() {
       </Route>
       <Route path="/admin/receipts">
         <ProtectedRoute component={AdminReceipts} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/mailroom">
+        <ProtectedRoute component={AdminMailroom} roles={["admin"]} />
       </Route>
       <Route path="/admin/lawyer-applications">
         <ProtectedRoute component={AdminLawyerApplications} roles={["admin"]} />

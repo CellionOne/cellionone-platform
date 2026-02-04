@@ -38,6 +38,9 @@ import RegisterPage from "@/pages/auth/register";
 import ForgotPasswordPage from "@/pages/auth/forgot-password";
 import ResetPasswordPage from "@/pages/auth/reset-password";
 import VerifyEmailPage from "@/pages/auth/verify-email";
+import PaymentCheckoutPage from "@/pages/payment/checkout";
+import PaymentSuccessPage from "@/pages/payment/success";
+import PaymentCancelPage from "@/pages/payment/cancel";
 
 function ProtectedRoute({ 
   component: Component, 
@@ -204,6 +207,16 @@ function Router() {
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />
+      
+      <Route path="/payment/checkout">
+        <ProtectedRoute component={PaymentCheckoutPage} />
+      </Route>
+      <Route path="/payment/success">
+        <ProtectedRoute component={PaymentSuccessPage} />
+      </Route>
+      <Route path="/payment/cancel">
+        <ProtectedRoute component={PaymentCancelPage} />
+      </Route>
       
       <Route component={NotFound} />
     </Switch>

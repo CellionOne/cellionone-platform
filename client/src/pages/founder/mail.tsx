@@ -27,6 +27,9 @@ import {
   Forward,
   Trash2,
   Building2,
+  Info,
+  FileCheck,
+  Calendar,
 } from "lucide-react";
 
 interface MailPreference {
@@ -58,6 +61,12 @@ interface SubscriptionData {
     tier: string;
     status: string;
   } | null;
+}
+
+interface ServicePolicy {
+  mailItemsIncluded: number;
+  storageRetentionDays: number;
+  officialMailOnly: boolean;
 }
 
 const preferenceOptions = [
@@ -93,6 +102,10 @@ export default function FounderMailPage() {
   const { data: mailData, isLoading: loadingMail } = useQuery<MailData>({
     queryKey: ["/api/registered-office/mail"],
     enabled: subscription?.subscription?.tier === "office_plus_mail" && subscription?.subscription?.status === "active",
+  });
+
+  const { data: servicePolicy } = useQuery<ServicePolicy>({
+    queryKey: ["/api/registered-office/service-policy"],
   });
 
   const updatePreferenceMutation = useMutation({
@@ -233,6 +246,42 @@ export default function FounderMailPage() {
             Manage how mail to your registered office is processed
           </p>
         </div>
+
+        {servicePolicy && (
+          <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Info className="h-5 w-5 text-blue-600" />
+                Service Policy
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                <div className="flex items-start gap-2">
+                  <Package className="h-4 w-4 text-blue-600 mt-0.5" />
+                  <div>
+                    <p className="font-medium">{servicePolicy.mailItemsIncluded} items/month</p>
+                    <p className="text-muted-foreground text-xs">Included in plan</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Calendar className="h-4 w-4 text-blue-600 mt-0.5" />
+                  <div>
+                    <p className="font-medium">{servicePolicy.storageRetentionDays} days retention</p>
+                    <p className="text-muted-foreground text-xs">Mail storage period</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <FileCheck className="h-4 w-4 text-blue-600 mt-0.5" />
+                  <div>
+                    <p className="font-medium">{servicePolicy.officialMailOnly ? "Official mail only" : "All mail accepted"}</p>
+                    <p className="text-muted-foreground text-xs">Government, bank, legal, commercial</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>

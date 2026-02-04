@@ -20,6 +20,9 @@ import {
   Copy,
   ExternalLink,
   Calendar,
+  Package,
+  FileCheck,
+  Info,
 } from "lucide-react";
 
 interface SubscriptionData {
@@ -58,6 +61,12 @@ interface IdentityData {
   status: string;
 }
 
+interface ServicePolicy {
+  mailItemsIncluded: number;
+  storageRetentionDays: number;
+  officialMailOnly: boolean;
+}
+
 export default function RegisteredOfficePage() {
   const { toast } = useToast();
 
@@ -71,6 +80,11 @@ export default function RegisteredOfficePage() {
 
   const { data: identity, isLoading: loadingIdentity } = useQuery<IdentityData | null>({
     queryKey: ["/api/founder/identity"],
+  });
+
+  const { data: servicePolicy } = useQuery<ServicePolicy>({
+    queryKey: ["/api/registered-office/service-policy"],
+    enabled: subscription?.subscription?.tier === "office_plus_mail",
   });
 
   const subscribeMutation = useMutation({
@@ -235,15 +249,48 @@ export default function RegisteredOfficePage() {
               </div>
 
               {subscription.subscription?.tier === "office_plus_mail" && (
-                <div className="pt-2 border-t">
-                  <Link href="/founder/mail">
-                    <Button variant="outline" className="gap-2" data-testid="link-manage-mail">
-                      <Mail className="h-4 w-4" />
-                      Manage Mail Preferences
-                      <ExternalLink className="h-4 w-4" />
-                    </Button>
-                  </Link>
-                </div>
+                <>
+                  {servicePolicy && (
+                    <div className="pt-2 border-t">
+                      <p className="text-sm font-medium flex items-center gap-2 mb-3">
+                        <Info className="h-4 w-4 text-primary" />
+                        Mail Service Policy
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                        <div className="flex items-start gap-2 bg-primary/5 rounded-lg p-2">
+                          <Package className="h-4 w-4 text-primary mt-0.5" />
+                          <div>
+                            <p className="font-medium">{servicePolicy.mailItemsIncluded}/month</p>
+                            <p className="text-muted-foreground text-xs">Items included</p>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2 bg-primary/5 rounded-lg p-2">
+                          <Calendar className="h-4 w-4 text-primary mt-0.5" />
+                          <div>
+                            <p className="font-medium">{servicePolicy.storageRetentionDays} days</p>
+                            <p className="text-muted-foreground text-xs">Storage retention</p>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2 bg-primary/5 rounded-lg p-2">
+                          <FileCheck className="h-4 w-4 text-primary mt-0.5" />
+                          <div>
+                            <p className="font-medium">{servicePolicy.officialMailOnly ? "Official only" : "All mail"}</p>
+                            <p className="text-muted-foreground text-xs">Mail policy</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div className="pt-2 border-t">
+                    <Link href="/founder/mail">
+                      <Button variant="outline" className="gap-2" data-testid="link-manage-mail">
+                        <Mail className="h-4 w-4" />
+                        Manage Mail Preferences
+                        <ExternalLink className="h-4 w-4" />
+                      </Button>
+                    </Link>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>

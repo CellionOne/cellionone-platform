@@ -8,6 +8,8 @@ import crypto from "crypto";
 import { z } from "zod";
 import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema } from "@shared/schema";
 import * as services from "./services";
+import { registeredOfficeService } from "./services/registeredOfficeService";
+import { mailroomService } from "./services/mailroomService";
 
 // Validation schemas
 const createApplicationSchema = insertCompanyApplicationSchema.pick({
@@ -85,6 +87,48 @@ const aiDraftSchema = z.object({
 const lawyerApplicationReviewSchema = z.object({
   action: z.enum(["approve", "reject"]),
   rejectionReason: z.string().optional(),
+});
+
+// Registered Office validation schemas
+const registeredOfficeSelectSchema = z.object({
+  applicationId: z.number(),
+  tier: z.enum(["office_only", "office_plus_mail"]),
+});
+
+const registeredOfficeSubscribeSchema = z.object({
+  tier: z.enum(["office_only", "office_plus_mail"]),
+});
+
+const mailPreferencesSchema = z.object({
+  subscriptionId: z.number(),
+  preferenceType: z.enum(["scan_all", "approve_before_scan", "forward_only"]),
+  isSensitiveAutoEscalationEnabled: z.boolean().optional(),
+});
+
+const mailIntakeSchema = z.object({
+  subscriptionId: z.number(),
+  senderName: z.string().min(1, "Sender name required"),
+  senderType: z.string(),
+  envelopePhotoDocId: z.number().optional(),
+  isSensitive: z.boolean().optional(),
+});
+
+const mailApprovalDecisionSchema = z.object({
+  decision: z.enum(["approved", "rejected"]),
+  decisionReason: z.string().optional(),
+});
+
+const mailScanUploadSchema = z.object({
+  scannedDocId: z.number(),
+});
+
+const mailForwardSchema = z.object({
+  courierName: z.string().min(1, "Courier name required"),
+  trackingNumber: z.string().min(1, "Tracking number required"),
+});
+
+const betaActivationSchema = z.object({
+  reason: z.string().min(1, "Reason required"),
 });
 
 // Lazy initialization of OpenAI to avoid startup errors
@@ -2112,6 +2156,389 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error: any) {
       console.error("Error reviewing lawyer application:", error);
       res.status(500).json({ message: error.message || "Failed to review application" });
+    }
+  });
+
+  // ============== REGISTERED OFFICE ENDPOINTS ==============
+
+  // GET /api/registered-office/options - Get tiers, pricing, and masked location
+  app.get("/api/registered-office/options", async (req, res) => {
+    try {
+      const options = await registeredOfficeService.getOptions();
+      res.json(options);
+    } catch (error: any) {
+      console.error("Error fetching registered office options:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch options" });
+    }
+  });
+
+  // POST /api/registered-office/select - Select registered office for an application (Wizard path)
+  app.post("/api/registered-office/select", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = registeredOfficeSelectSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+
+      const { applicationId, tier } = parsed.data;
+
+      // Verify the application belongs to this founder
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.founderUserId !== userId) {
+        return res.status(403).json({ message: "Application not found or access denied" });
+      }
+
+      const subscription = await registeredOfficeService.selectForApplication(applicationId, userId, tier);
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "registered_office_selected",
+        entityType: "registered_office_subscription",
+        entityId: subscription.id.toString(),
+        details: { applicationId, tier },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Registered office selected", subscription });
+    } catch (error: any) {
+      console.error("Error selecting registered office:", error);
+      res.status(500).json({ message: error.message || "Failed to select registered office" });
+    }
+  });
+
+  // POST /api/registered-office/subscribe - Subscribe to standalone registered office
+  app.post("/api/registered-office/subscribe", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = registeredOfficeSubscribeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+
+      const { tier } = parsed.data;
+
+      const subscription = await registeredOfficeService.subscribeStandalone(userId, tier);
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "registered_office_selected_standalone",
+        entityType: "registered_office_subscription",
+        entityId: subscription.id.toString(),
+        details: { tier },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Registered office subscription created", subscription });
+    } catch (error: any) {
+      console.error("Error subscribing to registered office:", error);
+      if ((error as any).code === "VERIFICATION_REQUIRED") {
+        return res.status(409).json({ code: "VERIFICATION_REQUIRED", message: error.message });
+      }
+      res.status(500).json({ message: error.message || "Failed to subscribe" });
+    }
+  });
+
+  // GET /api/registered-office/subscription - Get subscription status
+  app.get("/api/registered-office/subscription", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = req.query.applicationId ? parseInt(req.query.applicationId as string) : undefined;
+      const standalone = req.query.standalone === "true";
+
+      const subscription = await registeredOfficeService.getSubscription({
+        applicationId,
+        founderId: userId,
+        standalone,
+      });
+
+      if (!subscription) {
+        return res.json({ subscription: null });
+      }
+
+      // Get address based on subscription status
+      const address = await registeredOfficeService.getAddressForSubscription(subscription.id);
+
+      // Get mail preference if applicable
+      let mailPreference = null;
+      if (subscription.tier === "office_plus_mail" && subscription.status === "active") {
+        mailPreference = await mailroomService.getPreference(subscription.id);
+      }
+
+      // If viewing full address, log it
+      if (subscription.status === "active") {
+        await storage.createAuditLog({
+          actorUserId: userId,
+          action: "registered_office_address_viewed",
+          entityType: "registered_office_subscription",
+          entityId: subscription.id.toString(),
+          ipAddress: req.ip,
+        });
+      }
+
+      res.json({ subscription, address, mailPreference });
+    } catch (error: any) {
+      console.error("Error fetching subscription:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch subscription" });
+    }
+  });
+
+  // GET /api/registered-office/subscriptions - Get all subscriptions for founder
+  app.get("/api/registered-office/subscriptions", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const subscriptions = await registeredOfficeService.getAllSubscriptionsForFounder(userId);
+      res.json({ subscriptions });
+    } catch (error: any) {
+      console.error("Error fetching subscriptions:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch subscriptions" });
+    }
+  });
+
+  // POST /api/registered-office/preferences - Set mail handling preferences
+  app.post("/api/registered-office/preferences", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = mailPreferencesSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+
+      const { subscriptionId, preferenceType, isSensitiveAutoEscalationEnabled } = parsed.data;
+
+      // Verify subscription belongs to this founder
+      const subscription = await registeredOfficeService.getSubscriptionById(subscriptionId);
+      if (!subscription || subscription.founderId !== userId) {
+        return res.status(403).json({ message: "Subscription not found or access denied" });
+      }
+
+      const preference = await mailroomService.setPreference(
+        subscriptionId,
+        userId,
+        preferenceType,
+        isSensitiveAutoEscalationEnabled ?? true
+      );
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "mail_preferences_updated",
+        entityType: "mail_handling_preference",
+        entityId: preference.id.toString(),
+        details: { subscriptionId, preferenceType, isSensitiveAutoEscalationEnabled },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Mail preferences updated", preference });
+    } catch (error: any) {
+      console.error("Error updating mail preferences:", error);
+      res.status(500).json({ message: error.message || "Failed to update preferences" });
+    }
+  });
+
+  // GET /api/founder/mail - Get founder's mail items
+  app.get("/api/founder/mail", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const mailItems = await mailroomService.getMailItemsForFounder(userId);
+      const pendingApprovals = await mailroomService.getPendingApprovals(userId);
+      res.json({ mailItems, pendingApprovals });
+    } catch (error: any) {
+      console.error("Error fetching mail:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch mail" });
+    }
+  });
+
+  // POST /api/founder/mail/:id/approve - Approve mail action
+  app.post("/api/founder/mail/:id/approve", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const mailItemId = parseInt(req.params.id);
+
+      const parsed = mailApprovalDecisionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+
+      const { decision, decisionReason } = parsed.data;
+
+      // Verify mail item belongs to this founder
+      const mailItem = await mailroomService.getMailItemById(mailItemId);
+      if (!mailItem || mailItem.founderId !== userId) {
+        return res.status(403).json({ message: "Mail item not found or access denied" });
+      }
+
+      const result = await mailroomService.decideApproval(mailItemId, decision, decisionReason);
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "mail_approval_decision",
+        entityType: "mail_approval_request",
+        entityId: result.approvalRequest.id.toString(),
+        details: { mailItemId, decision, decisionReason },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: `Mail ${decision}`, ...result });
+    } catch (error: any) {
+      console.error("Error processing mail approval:", error);
+      res.status(500).json({ message: error.message || "Failed to process approval" });
+    }
+  });
+
+  // ============== ADMIN REGISTERED OFFICE ENDPOINTS ==============
+
+  // POST /api/admin/registered-office/:subscriptionId/activate-beta
+  app.post("/api/admin/registered-office/:subscriptionId/activate-beta", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const subscriptionId = parseInt(req.params.subscriptionId);
+
+      const parsed = betaActivationSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+
+      const { reason } = parsed.data;
+
+      const subscription = await registeredOfficeService.getSubscriptionById(subscriptionId);
+      if (!subscription) {
+        return res.status(404).json({ message: "Subscription not found" });
+      }
+
+      const activated = await registeredOfficeService.activateBeta(subscriptionId, adminId, reason);
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "registered_office_activated_beta",
+        entityType: "registered_office_subscription",
+        entityId: subscriptionId.toString(),
+        details: { reason, founderId: subscription.founderId },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Subscription activated (beta)", subscription: activated });
+    } catch (error: any) {
+      console.error("Error activating subscription:", error);
+      res.status(500).json({ message: error.message || "Failed to activate subscription" });
+    }
+  });
+
+  // POST /api/admin/mail/intake - Admin mail intake
+  app.post("/api/admin/mail/intake", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const parsed = mailIntakeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+
+      const { subscriptionId, senderName, senderType, envelopePhotoDocId, isSensitive } = parsed.data;
+
+      const result = await mailroomService.intakeMail(
+        subscriptionId,
+        senderName,
+        senderType,
+        envelopePhotoDocId,
+        isSensitive ?? false
+      );
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "mail_item_received",
+        entityType: "mail_item",
+        entityId: result.mailItem.id.toString(),
+        details: { subscriptionId, senderName, senderType, isSensitive },
+        ipAddress: req.ip,
+      });
+
+      if (result.approvalRequest) {
+        await storage.createAuditLog({
+          actorUserId: adminId,
+          action: "mail_approval_requested",
+          entityType: "mail_approval_request",
+          entityId: result.approvalRequest.id.toString(),
+          details: { mailItemId: result.mailItem.id },
+          ipAddress: req.ip,
+        });
+      }
+
+      res.json({ message: "Mail intake recorded", ...result });
+    } catch (error: any) {
+      console.error("Error recording mail intake:", error);
+      res.status(500).json({ message: error.message || "Failed to record mail intake" });
+    }
+  });
+
+  // POST /api/admin/mail/:id/upload-scan - Admin upload scanned document
+  app.post("/api/admin/mail/:id/upload-scan", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const mailItemId = parseInt(req.params.id);
+
+      const parsed = mailScanUploadSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+
+      const { scannedDocId } = parsed.data;
+
+      const mailItem = await mailroomService.uploadScan(mailItemId, scannedDocId);
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "mail_item_scanned",
+        entityType: "mail_item",
+        entityId: mailItemId.toString(),
+        details: { scannedDocId },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Scan uploaded", mailItem });
+    } catch (error: any) {
+      console.error("Error uploading scan:", error);
+      res.status(500).json({ message: error.message || "Failed to upload scan" });
+    }
+  });
+
+  // POST /api/admin/mail/:id/mark-forwarded - Admin mark mail as forwarded
+  app.post("/api/admin/mail/:id/mark-forwarded", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const mailItemId = parseInt(req.params.id);
+
+      const parsed = mailForwardSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+
+      const { courierName, trackingNumber } = parsed.data;
+
+      const mailItem = await mailroomService.markForwarded(mailItemId, courierName, trackingNumber);
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "mail_forward_updated",
+        entityType: "mail_item",
+        entityId: mailItemId.toString(),
+        details: { courierName, trackingNumber },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Mail marked as forwarded", mailItem });
+    } catch (error: any) {
+      console.error("Error marking mail as forwarded:", error);
+      res.status(500).json({ message: error.message || "Failed to mark as forwarded" });
+    }
+  });
+
+  // GET /api/admin/mail - Get all pending mail items for admin
+  app.get("/api/admin/mail", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const mailItems = await mailroomService.getAllPendingMailItems();
+      res.json({ mailItems });
+    } catch (error: any) {
+      console.error("Error fetching admin mail:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch mail" });
     }
   });
 

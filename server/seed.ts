@@ -24,6 +24,10 @@ export async function seedDatabase() {
       { key: "enable_mail_approval_flow", isEnabled: true, description: "Enable mail approval workflow" },
       { key: "enable_registered_office_payment_required", isEnabled: false, description: "Require payment for registered office (beta: false)" },
       { key: "enable_verification_required_for_registered_office", isEnabled: true, description: "Require identity verification for standalone registered office" },
+      { key: "enable_stripe_payments", isEnabled: true, description: "Enable Stripe payment processing (GBP/international)" },
+      { key: "enable_paystack_payments", isEnabled: false, description: "Enable Paystack payment processing (NGN/Nigeria)" },
+      { key: "enable_verification_payment_required", isEnabled: false, description: "Require payment for identity verification (beta: false)" },
+      { key: "enable_incorporation_payment_required", isEnabled: false, description: "Require payment for incorporation (beta: false)" },
     ];
     
     // Always insert any missing feature flags

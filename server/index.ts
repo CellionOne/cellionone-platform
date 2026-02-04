@@ -14,6 +14,41 @@ declare module "http" {
   }
 }
 
+// ============== STRIPE WEBHOOK ROUTE ==============
+// CRITICAL: Must be registered BEFORE express.json() middleware
+// Stripe webhooks need raw Buffer body for signature verification
+app.post(
+  '/api/payments/stripe/webhook',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    const signature = req.headers['stripe-signature'];
+
+    if (!signature) {
+      return res.status(400).json({ error: 'Missing stripe-signature' });
+    }
+
+    try {
+      const sig = Array.isArray(signature) ? signature[0] : signature;
+
+      // Validate that req.body is a Buffer (not parsed JSON)
+      if (!Buffer.isBuffer(req.body)) {
+        const errorMsg = '[Stripe Webhook] req.body is not a Buffer. Webhook route may be registered after express.json()';
+        console.error(errorMsg);
+        return res.status(500).json({ error: 'Webhook processing error' });
+      }
+
+      // Dynamically import webhook handler
+      const { default: stripeWebhookHandler } = await import('./services/stripeWebhookHandler');
+      await stripeWebhookHandler.processWebhook(req.body as Buffer, sig);
+
+      res.status(200).json({ received: true });
+    } catch (error: any) {
+      console.error('[Stripe Webhook] Error:', error.message);
+      res.status(400).json({ error: 'Webhook processing error' });
+    }
+  }
+);
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {

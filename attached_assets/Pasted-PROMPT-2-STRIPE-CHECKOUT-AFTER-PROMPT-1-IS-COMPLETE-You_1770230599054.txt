@@ -1,0 +1,142 @@
+PROMPT 2 — STRIPE CHECKOUT (AFTER PROMPT 1 IS COMPLETE)
+
+You are a senior full-stack engineer extending the existing Celion One codebase. Stripe products/prices already exist in the Stripe Dashboard.
+
+GOAL
+Implement Stripe Checkout for UK/foreign customers with clean price-to-service mapping that will ALSO map cleanly to Paystack NGN later.
+
+CRITICAL REQUIREMENT (PRICE PARITY LOGIC)
+We must maintain “pricing parity” between GBP and NGN offerings:
+- Stripe (GBP) is for international/UK customers.
+- Paystack (NGN) will be for Nigeria customers.
+- The same internal service identifiers must be used for both.
+- Do NOT attempt live FX conversion. Use fixed “price books”:
+  - NGN price book (e.g., verification_ngn=10000, office_only_ngn=75000, office_plus_mail_ngn=150000)
+  - GBP price book (e.g., verification_gbp=12, office_only_gbp=75, office_plus_mail_gbp=150, incorporation_gbp=150 or as configured)
+These are intentionally “clean numbers” and do not require FX matching per day.
+
+STRIPE CATALOG (ASSUMED CREATED)
+1) Product: Celion One – Identity & Compliance Verification
+   - One-off price: £12.00 (priceId: set in env/config)
+2) Product: Celion One – Company Incorporation Service
+   - One-off price: £150.00 (or configured)
+3) Product: Celion One – Registered Office Address
+   - Recurring yearly price: £75.00 (office_only)
+   - Recurring yearly price: £150.00 (office_plus_mail)
+
+IMPLEMENTATION STRATEGY
+- Create an internal “PriceBook” module that maps service types to:
+  - provider (stripe/paystack)
+  - currency
+  - amount
+  - stripePriceId (for GBP)
+  - ngnAmount (for Paystack later)
+- All billing flows must call PriceBook, not hard-coded values.
+
+FEATURE FLAGS
+- enable_stripe_payments (default ON in dev)
+- enable_paystack_payments (default OFF for now)
+- enable_verification_payment_required (default false for beta)
+- enable_registered_office_payment_required (default false for beta)
+When flags are off, allow existing beta activation path.
+
+BACKEND CHANGES
+A) Stripe configuration
+- Add STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL env vars
+- Use Stripe test mode initially
+
+B) Payment Entities (use existing Payment model)
+Ensure Payment supports:
+- id, userId, provider ('stripe'), currency ('gbp'), amount, status
+- lineItems JSON array with:
+  - serviceType: 'verification'|'incorporation'|'registered_office'
+  - tier (for registered_office): 'office_only'|'office_plus_mail'
+  - stripePriceId
+  - quantity (always 1)
+- providerSessionId (stripe checkout session id)
+- providerPaymentIntentId (if one-off) or providerSubscriptionId (if recurring)
+- createdAt, updatedAt
+
+C) Stripe Checkout Session endpoints
+1) POST /api/payments/stripe/checkout
+Input: { items: [{ serviceType, tier? , contextId? }] }
+- contextId can be applicationId for wizard purchases
+- Validate RBAC (founder)
+- Build lineItems from PriceBook and map to Stripe price IDs
+- Create Stripe Checkout Session:
+  - mode = 'payment' for one-off items only
+  - mode = 'subscription' if any recurring item exists
+IMPORTANT: Stripe checkout session mode cannot mix payment + subscription. Implement this:
+  - If cart contains both one-off and subscription:
+      - Create TWO sessions sequentially:
+        1) one-off session (verification/incorporation)
+        2) subscription session (registered office)
+      - Or require the UI to pay in two steps.
+Choose the simplest: two-step checkout with clear UI messaging.
+- Disable quantity changes and prevent promo code entry for now.
+- Persist Payment record with status=pending and providerSessionId
+- Return session URL
+
+2) POST /api/payments/stripe/webhook
+- Verify signature using STRIPE_WEBHOOK_SECRET
+- Handle events:
+  - checkout.session.completed
+  - invoice.paid (for subscriptions)
+  - customer.subscription.updated (optional)
+  - charge.refunded (optional)
+- On successful completion:
+  - Mark Payment status=paid
+  - Activate associated service:
+    - verification => mark founder verified_paid=true (or record verification fee paid)
+    - incorporation => mark application payment status if you have it
+    - registered_office => activate subscription (status=active, set dates)
+  - Create audit logs:
+    - payment_initiated
+    - payment_succeeded
+    - registered_office_activated_paid (for subscriptions)
+  - Create Notifications to founder confirming activation
+
+D) UI Changes (Frontend)
+1) Add “Pay with Card (International)” button wherever payment is required:
+   - Verification fee (if enabled)
+   - Wizard checkout (international users)
+   - Registered office subscribe (standalone)
+2) Implement a simple “Cart builder” for wizard:
+   - Determine which items are one-off vs subscription
+   - If both present:
+      - Step 1: Pay one-off
+      - Step 2: Pay registered office subscription
+3) Add a “Payment Status” page:
+   - /payment/success?session_id=...
+   - /payment/cancel
+4) After payment success:
+   - Refresh subscription/application state and reveal address if active
+
+E) Country logic (simple)
+- Stripe is intended for UK/foreign customers.
+- Add a simple “Billing Country” selection at checkout (or infer from user profile if available).
+- If country=NG, show Paystack “coming soon” or fallback to beta activation. (Do not block beta testing.)
+
+TESTS (MANDATORY)
+Backend tests:
+1) PriceBook returns correct GBP priceId and NGN amount for each service
+2) Checkout endpoint creates payment record and returns session URL
+3) Webhook marks payment paid and activates registered office subscription
+4) Address gating remains enforced until activation
+5) Two-step checkout enforced when cart has mixed modes
+
+DELIVERABLES
+- Stripe checkout sessions working in test mode
+- Webhook activation of services
+- PriceBook abstraction ready for Paystack NGN later
+- UI supports two-step checkout when needed
+- Audit logs and tests passing
+- replit.md updated with “Payments (Stripe)” section:
+  - how price IDs map to tiers
+  - two-step logic for one-off + subscription
+  - webhook setup notes
+
+IMPLEMENTATION NOTES
+- Keep amounts “clean” (GBP and NGN price books) rather than FX conversion.
+- Never store card details. Use Stripe Checkout only.
+- Ensure server-side verification of line items to prevent price tampering.

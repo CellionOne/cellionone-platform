@@ -13,6 +13,7 @@ import FounderDashboard from "@/pages/founder/dashboard";
 import FounderIdentity from "@/pages/founder/identity";
 import FounderApplications from "@/pages/founder/applications";
 import FounderVault from "@/pages/founder/vault";
+import FounderRegisteredOffice from "@/pages/founder/registered-office";
 import NewApplication from "@/pages/applications/new";
 import ApplicationDetails from "@/pages/applications/[id]";
 import LawyerDashboard from "@/pages/lawyer/dashboard";
@@ -135,6 +136,9 @@ function Router() {
       </Route>
       <Route path="/founder/vault">
         <ProtectedRoute component={FounderVault} />
+      </Route>
+      <Route path="/founder/registered-office">
+        <ProtectedRoute component={FounderRegisteredOffice} />
       </Route>
       
       <Route path="/applications/new">

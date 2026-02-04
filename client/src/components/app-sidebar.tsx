@@ -43,6 +43,7 @@ const founderItems: NavItem[] = [
   { title: "Identity Verification", url: "/founder/identity", icon: User },
   { title: "My Applications", url: "/founder/applications", icon: FileText },
   { title: "Document Vault", url: "/founder/vault", icon: FolderOpen },
+  { title: "Registered Office", url: "/founder/registered-office", icon: Building2 },
 ];
 
 const lawyerItems: NavItem[] = [

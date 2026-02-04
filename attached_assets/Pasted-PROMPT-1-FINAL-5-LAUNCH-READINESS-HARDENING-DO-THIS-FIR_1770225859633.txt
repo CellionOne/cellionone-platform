@@ -1,0 +1,234 @@
+PROMPT 1 — “FINAL 5%” LAUNCH-READINESS HARDENING (DO THIS FIRST)
+
+You are a senior full-stack engineer extending the existing Celion One codebase (React/TS/Vite/Tailwind/shadcn, Express + Postgres, Replit Auth OIDC, Zod, RBAC, feature flags, audit logs). The Registered Office + Mail Handling module is already implemented and working.
+
+OBJECTIVE
+Implement the final launch-readiness hardening for Registered Office + Mail Handling WITHOUT changing core flows. Focus on operational controls, renewals/expiry automation, and clarity in UI + docs. This must be additive, safe, and test-covered.
+
+SCOPE (MANDATORY)
+A) Service Limits + Policy Surfacing (User-visible and enforceable)
+1) Add configurable service limits (ENV or DB settings):
+   - REGISTERED_OFFICE_MAIL_ITEMS_INCLUDED_PER_MONTH (default: 5)
+   - REGISTERED_OFFICE_STORAGE_DAYS (default: 30)
+   - REGISTERED_OFFICE_OFFICIAL_MAIL_ONLY (default: true)
+2) Enforce these in admin mail intake:
+   - If OFFICIAL_MAIL_ONLY is true, require senderType != 'unknown' OR require admin to confirm “Official Mail” checkbox.
+   - If monthly mail item cap exceeded for a subscription:
+       - Still allow intake but mark as “overage” and require admin note; create a Notification to founder indicating “overage item received” and that additional charges may apply.
+3) Add a user-facing “Service Policy” section in:
+   - /founder/registered-office (subscription page)
+   - /founder/mail (mail inbox)
+   It must explicitly state:
+   - official mail only (no parcels/personal mail)
+   - scanning + email notification included (forwarding extra)
+   - storage duration (e.g., 30 days)
+   - included monthly mail item cap (e.g., 5)
+   - what happens after storage window (return to sender / shred) with a safe default policy
+
+B) Subscription Expiry Automation (Daily job)
+1) Implement a scheduled daily job (use your existing scheduler approach if present; otherwise use a simple node-cron/apscheduler equivalent for Node, or a server startup scheduler):
+   - Find RegisteredOfficeSubscription where status=active AND endDate < today
+   - Set status=expired
+   - Log audit action: registered_office_expired
+   - Create Notification to founder: “Registered office subscription expired”
+2) Enforce expiry behavior:
+   - Address must revert to masked (server-side gating already exists—ensure it is driven by status)
+   - Admin mail intake must block for expired subscriptions (unless admin explicitly records “return to sender” without opening; do not scan)
+   - Founder UI should show “Expired—renew to reactivate”
+
+C) Renewal Nudges (Notifications)
+Implement automated notifications:
+- 30 days before endDate: registered_office_renewal_30d
+- 7 days before endDate: registered_office_renewal_7d
+- 1 day after endDate (if not renewed): registered_office_expired (already in B)
+These are in-app notifications (email optional stub). Add audit actions:
+- registered_office_renewal_notice_sent
+
+D) Lawyer-Facing Indicator (Reduce filing errors)
+In lawyer application view:
+- Add a compact “Registered Office” badge:
+  - Active / Pending Payment / Expired / Not Subscribed
+- If Active: allow “View full address” and log registered_office_address_viewed
+- If not Active: show masked only
+
+E) replit.md Update (MANDATORY)
+Append a section documenting:
+- dual entry points (wizard + standalone)
+- address disclosure gating (full address only if active/paid)
+- mail handling preferences
+- admin mailroom flow
+- limits (cap, storage, official mail only)
+- expiry/renewal automation and notifications
+Keep it concise and structured.
+
+DATABASE (if needed)
+- If you don’t already have a settings table, create a simple “AppSetting” key/value table (or use env vars). Prefer env vars if that’s how the project is structured.
+- Add fields on MailItem to support overage:
+  - isOverage boolean default false
+  - overageReason text nullable
+If MailItem already has notes, use it. Do not overcomplicate.
+
+AUDIT LOG ACTIONS (ADD)
+- registered_office_expired
+- registered_office_renewal_notice_sent
+- mail_item_overage_recorded
+- mail_intake_blocked_subscription_expired
+
+TESTS (MANDATORY, must pass)
+1) Expiry job sets active->expired when endDate < today
+2) Renew notices created at 30d and 7d thresholds (use time mocking)
+3) Admin mail intake blocked when subscription expired (unless “return to sender” path)
+4) Mail item cap marks isOverage=true after threshold
+5) Lawyer view shows correct status badge and enforces masking when not active
+
+DELIVERABLES
+- Operational limits enforced + visible in UI
+- Automated expiry + renewal nudges
+- Lawyer indicator
+- Updated replit.md
+- Tests green
+
+
+========================================================
+PROMPT 2 — STRIPE CHECKOUT (AFTER PROMPT 1 IS COMPLETE)
+
+You are a senior full-stack engineer extending the existing Celion One codebase. Stripe products/prices already exist in the Stripe Dashboard.
+
+GOAL
+Implement Stripe Checkout for UK/foreign customers with clean price-to-service mapping that will ALSO map cleanly to Paystack NGN later.
+
+CRITICAL REQUIREMENT (PRICE PARITY LOGIC)
+We must maintain “pricing parity” between GBP and NGN offerings:
+- Stripe (GBP) is for international/UK customers.
+- Paystack (NGN) will be for Nigeria customers.
+- The same internal service identifiers must be used for both.
+- Do NOT attempt live FX conversion. Use fixed “price books”:
+  - NGN price book (e.g., verification_ngn=10000, office_only_ngn=75000, office_plus_mail_ngn=150000)
+  - GBP price book (e.g., verification_gbp=12, office_only_gbp=75, office_plus_mail_gbp=150, incorporation_gbp=150 or as configured)
+These are intentionally “clean numbers” and do not require FX matching per day.
+
+STRIPE CATALOG (ASSUMED CREATED)
+1) Product: Celion One – Identity & Compliance Verification
+   - One-off price: £12.00 (priceId: set in env/config)
+2) Product: Celion One – Company Incorporation Service
+   - One-off price: £150.00 (or configured)
+3) Product: Celion One – Registered Office Address
+   - Recurring yearly price: £75.00 (office_only)
+   - Recurring yearly price: £150.00 (office_plus_mail)
+
+IMPLEMENTATION STRATEGY
+- Create an internal “PriceBook” module that maps service types to:
+  - provider (stripe/paystack)
+  - currency
+  - amount
+  - stripePriceId (for GBP)
+  - ngnAmount (for Paystack later)
+- All billing flows must call PriceBook, not hard-coded values.
+
+FEATURE FLAGS
+- enable_stripe_payments (default ON in dev)
+- enable_paystack_payments (default OFF for now)
+- enable_verification_payment_required (default false for beta)
+- enable_registered_office_payment_required (default false for beta)
+When flags are off, allow existing beta activation path.
+
+BACKEND CHANGES
+A) Stripe configuration
+- Add STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL env vars
+- Use Stripe test mode initially
+
+B) Payment Entities (use existing Payment model)
+Ensure Payment supports:
+- id, userId, provider ('stripe'), currency ('gbp'), amount, status
+- lineItems JSON array with:
+  - serviceType: 'verification'|'incorporation'|'registered_office'
+  - tier (for registered_office): 'office_only'|'office_plus_mail'
+  - stripePriceId
+  - quantity (always 1)
+- providerSessionId (stripe checkout session id)
+- providerPaymentIntentId (if one-off) or providerSubscriptionId (if recurring)
+- createdAt, updatedAt
+
+C) Stripe Checkout Session endpoints
+1) POST /api/payments/stripe/checkout
+Input: { items: [{ serviceType, tier? , contextId? }] }
+- contextId can be applicationId for wizard purchases
+- Validate RBAC (founder)
+- Build lineItems from PriceBook and map to Stripe price IDs
+- Create Stripe Checkout Session:
+  - mode = 'payment' for one-off items only
+  - mode = 'subscription' if any recurring item exists
+IMPORTANT: Stripe checkout session mode cannot mix payment + subscription. Implement this:
+  - If cart contains both one-off and subscription:
+      - Create TWO sessions sequentially:
+        1) one-off session (verification/incorporation)
+        2) subscription session (registered office)
+      - Or require the UI to pay in two steps.
+Choose the simplest: two-step checkout with clear UI messaging.
+- Disable quantity changes and prevent promo code entry for now.
+- Persist Payment record with status=pending and providerSessionId
+- Return session URL
+
+2) POST /api/payments/stripe/webhook
+- Verify signature using STRIPE_WEBHOOK_SECRET
+- Handle events:
+  - checkout.session.completed
+  - invoice.paid (for subscriptions)
+  - customer.subscription.updated (optional)
+  - charge.refunded (optional)
+- On successful completion:
+  - Mark Payment status=paid
+  - Activate associated service:
+    - verification => mark founder verified_paid=true (or record verification fee paid)
+    - incorporation => mark application payment status if you have it
+    - registered_office => activate subscription (status=active, set dates)
+  - Create audit logs:
+    - payment_initiated
+    - payment_succeeded
+    - registered_office_activated_paid (for subscriptions)
+  - Create Notifications to founder confirming activation
+
+D) UI Changes (Frontend)
+1) Add “Pay with Card (International)” button wherever payment is required:
+   - Verification fee (if enabled)
+   - Wizard checkout (international users)
+   - Registered office subscribe (standalone)
+2) Implement a simple “Cart builder” for wizard:
+   - Determine which items are one-off vs subscription
+   - If both present:
+      - Step 1: Pay one-off
+      - Step 2: Pay registered office subscription
+3) Add a “Payment Status” page:
+   - /payment/success?session_id=...
+   - /payment/cancel
+4) After payment success:
+   - Refresh subscription/application state and reveal address if active
+
+E) Country logic (simple)
+- Stripe is intended for UK/foreign customers.
+- Add a simple “Billing Country” selection at checkout (or infer from user profile if available).
+- If country=NG, show Paystack “coming soon” or fallback to beta activation. (Do not block beta testing.)
+
+TESTS (MANDATORY)
+Backend tests:
+1) PriceBook returns correct GBP priceId and NGN amount for each service
+2) Checkout endpoint creates payment record and returns session URL
+3) Webhook marks payment paid and activates registered office subscription
+4) Address gating remains enforced until activation
+5) Two-step checkout enforced when cart has mixed modes
+
+DELIVERABLES
+- Stripe checkout sessions working in test mode
+- Webhook activation of services
+- PriceBook abstraction ready for Paystack NGN later
+- UI supports two-step checkout when needed
+- Audit logs and tests passing
+- replit.md updated with “Payments (Stripe)” section:
+  - how price IDs map to tiers
+  - two-step logic for one-off + subscription
+  - webhook setup notes
+
+IMPLEMENTATION NOTES
+- Keep amounts “clean” (GBP and NGN price books) rather than FX conversion.
+- Never store card details. Use Stripe Checkout only.
+- Ensure server-side verification of line items to prevent price tampering.

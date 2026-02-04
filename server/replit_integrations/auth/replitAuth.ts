@@ -29,9 +29,8 @@ export function getSession() {
   });
   // For Replit deployment behind reverse proxy:
   // - sameSite: "lax" provides CSRF protection
-  // - secure: true in production (HTTPS), false in development
+  // - secure: true always since Replit uses HTTPS for both dev preview and production
   // - proxy: true tells express-session to trust X-Forwarded-* headers
-  const isProduction = process.env.NODE_ENV === 'production';
   return session({
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
@@ -39,7 +38,7 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: isProduction,
+      secure: true,
       sameSite: "lax",
       maxAge: sessionTtl,
     },

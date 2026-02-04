@@ -521,8 +521,10 @@ export const mailItems = pgTable("mail_items", {
   senderType: varchar("sender_type", { length: 100 }), // government, bank, legal, commercial, personal, unknown
   envelopePhotoDocId: integer("envelope_photo_doc_id"), // FK to documentFiles
   scannedDocId: integer("scanned_doc_id"), // FK to documentFiles
-  status: varchar("status", { length: 50 }).default("received"), // received, pending_approval, approved, scan_in_progress, scanned, forwarding, forwarded, archived
+  status: varchar("status", { length: 50 }).default("received"), // received, pending_approval, approved, scan_in_progress, scanned, forwarding, forwarded, archived, discarded, returned_to_sender
   isSensitive: boolean("is_sensitive").default(false),
+  isOverage: boolean("is_overage").default(false), // True if this item exceeds monthly cap
+  overageReason: text("overage_reason"), // Admin notes for overage items
   receivedAt: timestamp("received_at").defaultNow(),
   scannedAt: timestamp("scanned_at"),
   forwardedAt: timestamp("forwarded_at"),

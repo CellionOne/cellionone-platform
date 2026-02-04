@@ -2172,6 +2172,17 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // GET /api/registered-office/service-policy - Get service limits and policy for founders
+  app.get("/api/registered-office/service-policy", async (req, res) => {
+    try {
+      const limits = mailroomService.getServiceLimits();
+      res.json(limits);
+    } catch (error: any) {
+      console.error("Error fetching service policy:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch service policy" });
+    }
+  });
+
   // POST /api/registered-office/select - Select registered office for an application (Wizard path)
   app.post("/api/registered-office/select", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
@@ -2626,32 +2637,106 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // GET /api/admin/mailroom/service-limits - Get service limits and policy
+  app.get("/api/admin/mailroom/service-limits", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const limits = mailroomService.getServiceLimits();
+      res.json(limits);
+    } catch (error: any) {
+      console.error("Error fetching service limits:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch service limits" });
+    }
+  });
+
   // POST /api/admin/mailroom/intake - Record new mail item
   app.post("/api/admin/mailroom/intake", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
-      const { subscriptionId, senderLabel, itemType, isSensitive, notes } = req.body;
+      const { 
+        subscriptionId, 
+        senderLabel, 
+        itemType, 
+        isSensitive, 
+        confirmedOfficialMail,  // Admin confirmation for non-official mail
+        overageReason           // Required if monthly limit exceeded
+      } = req.body;
       
-      const mailItem = await mailroomService.intakeMail(
+      const result = await mailroomService.intakeMail(
         subscriptionId,
-        senderLabel || null,
-        itemType || "letter",
+        senderLabel || "Unknown Sender",
+        itemType || "commercial",
+        undefined, // envelopePhotoDocId
         isSensitive || false,
-        notes || null
+        {
+          confirmedOfficialMail: confirmedOfficialMail || false,
+          overageReason: overageReason || undefined,
+        }
       );
 
       await storage.createAuditLog({
         actorUserId: req.user.id,
         action: "mail_intake",
         entityType: "mail_item",
-        entityId: mailItem.mailItem.id.toString(),
-        details: { senderLabel, itemType, isSensitive },
+        entityId: result.mailItem.id.toString(),
+        details: { senderLabel, itemType, isSensitive, isOverage: result.isOverage },
         ipAddress: req.ip || null,
       });
 
-      res.json(mailItem);
+      res.json(result);
     } catch (error: any) {
       console.error("Error recording mail intake:", error);
+      
+      // Return specific error codes for UI handling
+      if ((error as any).code === "SUBSCRIPTION_EXPIRED") {
+        return res.status(400).json({ 
+          message: error.message, 
+          code: "SUBSCRIPTION_EXPIRED",
+          suggestAction: "return_to_sender"
+        });
+      }
+      if ((error as any).code === "OFFICIAL_MAIL_REQUIRED") {
+        return res.status(400).json({ 
+          message: error.message, 
+          code: "OFFICIAL_MAIL_REQUIRED",
+          requireConfirmation: true
+        });
+      }
+      if ((error as any).code === "OVERAGE_REASON_REQUIRED") {
+        return res.status(400).json({ 
+          message: error.message, 
+          code: "OVERAGE_REASON_REQUIRED",
+          requireReason: true
+        });
+      }
+      
       res.status(500).json({ message: error.message || "Failed to record mail" });
+    }
+  });
+
+  // POST /api/admin/mailroom/return-to-sender - Record mail returned to sender (for expired subscriptions)
+  app.post("/api/admin/mailroom/return-to-sender", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { subscriptionId, senderLabel, itemType, notes } = req.body;
+      
+      const mailItem = await mailroomService.returnToSender(
+        subscriptionId,
+        senderLabel || "Unknown Sender",
+        itemType || "commercial",
+        notes
+      );
+
+      await storage.createAuditLog({
+        actorUserId: req.user.id,
+        action: "mail_intake_blocked_subscription_expired",
+        entityType: "mail_item",
+        entityId: mailItem.id.toString(),
+        details: { senderLabel, itemType, action: "returned_to_sender" },
+        ipAddress: req.ip || null,
+      });
+
+      res.json({ mailItem, message: "Mail recorded as returned to sender" });
+    } catch (error: any) {
+      console.error("Error recording return to sender:", error);
+      res.status(500).json({ message: error.message || "Failed to record return to sender" });
     }
   });
 

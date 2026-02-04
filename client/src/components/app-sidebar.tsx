@@ -30,6 +30,7 @@ import {
   Brain,
   Receipt,
   UserPlus,
+  Mail,
 } from "lucide-react";
 
 interface NavItem {
@@ -44,6 +45,7 @@ const founderItems: NavItem[] = [
   { title: "My Applications", url: "/founder/applications", icon: FileText },
   { title: "Document Vault", url: "/founder/vault", icon: FolderOpen },
   { title: "Registered Office", url: "/founder/registered-office", icon: Building2 },
+  { title: "Mail Handling", url: "/founder/mail", icon: Mail },
 ];
 
 const lawyerItems: NavItem[] = [

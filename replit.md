@@ -147,9 +147,9 @@ shared/
 - `SESSION_SECRET` - Session encryption key
 - `OPENAI_API_KEY` - OpenAI API key (optional, falls back to defaults)
 - `PAYSTACK_SECRET_KEY` - Paystack secret (for production)
-- `MAIL_ITEMS_INCLUDED` - Monthly mail items included per subscription (default: 5)
-- `MAIL_STORAGE_DAYS` - Days to retain mail items (default: 30)
-- `MAIL_OFFICIAL_ONLY` - Accept only official mail: government, bank, legal, commercial (default: true)
+- `REGISTERED_OFFICE_MAIL_ITEMS_INCLUDED_PER_MONTH` - Monthly mail items included per subscription (default: 5)
+- `REGISTERED_OFFICE_STORAGE_DAYS` - Days to retain mail items (default: 30)
+- `REGISTERED_OFFICE_OFFICIAL_MAIL_ONLY` - Accept only official mail: government, bank, legal, commercial (default: true)
 
 ## Testing
 - **Backend Regression Tests**: Run with `npx vitest run`
@@ -186,7 +186,7 @@ shared/
 
 ### Mail Intake Validation
 - Blocks intake for expired subscriptions (returns to sender)
-- Validates official mail type for MAIL_OFFICIAL_ONLY mode
+- Validates official mail type when REGISTERED_OFFICE_OFFICIAL_MAIL_ONLY is enabled
 - Tracks overage with reason when exceeding monthly limit
 - Sends founder notifications for overages
 

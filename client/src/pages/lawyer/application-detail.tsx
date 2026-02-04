@@ -54,8 +54,8 @@ interface RegisteredOfficeInfo {
     id: number;
     tier: string;
     status: string;
-    startsAt: string | null;
-    expiresAt: string | null;
+    startDate: string | null;
+    endDate: string | null;
   };
   address: {
     label: string;
@@ -293,7 +293,7 @@ function OverviewTab({
                 </div>
               </div>
             )}
-            {registeredOffice?.address ? (
+            {registeredOffice?.address && (registeredOffice.subscription.status === "active" || registeredOffice.subscription.status === "beta_activated") ? (
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-4" data-testid="registered-office-section">
                 <div className="flex items-start justify-between mb-2">
                   <Label className="text-muted-foreground text-sm flex items-center gap-1">
@@ -321,8 +321,8 @@ function OverviewTab({
                 </p>
                 <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                   <span>Tier: {getTierLabel(registeredOffice.subscription.tier)}</span>
-                  {registeredOffice.subscription.expiresAt && (
-                    <span>Expires: {new Date(registeredOffice.subscription.expiresAt).toLocaleDateString()}</span>
+                  {registeredOffice.subscription.endDate && (
+                    <span>Expires: {new Date(registeredOffice.subscription.endDate).toLocaleDateString()}</span>
                   )}
                 </div>
               </div>

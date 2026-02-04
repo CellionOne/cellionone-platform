@@ -2640,10 +2640,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       );
 
       await storage.createAuditLog({
-        userId: req.user.id,
+        actorUserId: req.user.id,
         action: "mail_intake",
         entityType: "mail_item",
-        entityId: mailItem.id.toString(),
+        entityId: mailItem.mailItem.id.toString(),
         details: { senderLabel, itemType, isSensitive },
         ipAddress: req.ip || null,
       });
@@ -2668,7 +2668,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const mailItem = await mailroomService.uploadScan(mailItemId, fileUrl);
 
       await storage.createAuditLog({
-        userId: req.user.id,
+        actorUserId: req.user.id,
         action: "mail_scan_complete",
         entityType: "mail_item",
         entityId: mailItemId.toString(),
@@ -2692,7 +2692,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const mailItem = await mailroomService.markForwarded(mailItemId, "Courier", trackingNumber || null);
 
       await storage.createAuditLog({
-        userId: req.user.id,
+        actorUserId: req.user.id,
         action: "mail_forwarded",
         entityType: "mail_item",
         entityId: mailItemId.toString(),
@@ -2715,7 +2715,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       await storage.updateMailItem(mailItemId, { status: "discarded" });
 
       await storage.createAuditLog({
-        userId: req.user.id,
+        actorUserId: req.user.id,
         action: "mail_discarded",
         entityType: "mail_item",
         entityId: mailItemId.toString(),
@@ -2731,7 +2731,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
   });
 
   // GET /api/registered-office/mail - Get founder's mail data
-  app.get("/api/registered-office/mail", isAuthenticated, async (req: any, res) => {
+  app.get("/api/registered-office/mail", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = req.user.id;
       
@@ -2758,7 +2758,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
   });
 
   // POST /api/registered-office/mail/:id/approve - Founder approval decision
-  app.post("/api/registered-office/mail/:id/approve", isAuthenticated, async (req: any, res) => {
+  app.post("/api/registered-office/mail/:id/approve", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = req.user.id;
       const mailItemId = parseInt(req.params.id);
@@ -2775,14 +2775,16 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(403).json({ message: "Mail item not found or unauthorized" });
       }
 
-      let decision = "scan";
-      if (action === "forward") decision = "forward";
-      if (action === "discard") decision = "discard";
+      // Map user action to approval decision
+      // approve/scan/forward = approve the mail action
+      // reject/discard = reject/archive the mail
+      const decision: "approved" | "rejected" = 
+        (action === "reject" || action === "discard") ? "rejected" : "approved";
 
       const result = await mailroomService.decideApproval(mailItemId, decision, `Founder decision: ${action}`);
 
       await storage.createAuditLog({
-        userId,
+        actorUserId: userId,
         action: "mail_approval_decision",
         entityType: "mail_item",
         entityId: mailItemId.toString(),

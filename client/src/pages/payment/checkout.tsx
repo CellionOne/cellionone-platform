@@ -295,8 +295,8 @@ export default function CheckoutPage() {
                     </Label>
                   </div>
                   
-                  <div className="flex items-center space-x-3 p-4 rounded-lg border border-border hover-elevate cursor-pointer opacity-60">
-                    <RadioGroupItem value="paystack" id="paystack" disabled data-testid="radio-paystack" />
+                  <div className="flex items-center space-x-3 p-4 rounded-lg border border-border hover-elevate cursor-pointer">
+                    <RadioGroupItem value="paystack" id="paystack" data-testid="radio-paystack" />
                     <Label htmlFor="paystack" className="flex-1 cursor-pointer">
                       <div className="flex items-center justify-between">
                         <div>

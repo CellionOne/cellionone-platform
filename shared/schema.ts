@@ -451,3 +451,112 @@ export const insertLawyerApplicationSchema = createInsertSchema(lawyerApplicatio
 });
 export type LawyerApplication = typeof lawyerApplications.$inferSelect;
 export type InsertLawyerApplication = z.infer<typeof insertLawyerApplicationSchema>;
+
+// ============== SERVICE ADDRESS (for registered office) ==============
+export const serviceAddresses = pgTable("service_addresses", {
+  id: serial("id").primaryKey(),
+  label: varchar("label", { length: 255 }).notNull(), // e.g., "Celion One Registered Office (Ikoyi)"
+  line1: varchar("line_1", { length: 255 }).notNull(), // Private - only shown after payment
+  line2: varchar("line_2", { length: 255 }),
+  floorDetails: varchar("floor_details", { length: 255 }),
+  city: varchar("city", { length: 100 }).notNull(), // Public
+  state: varchar("state", { length: 100 }).notNull(), // Public
+  country: varchar("country", { length: 100 }).default("Nigeria"), // Public
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertServiceAddressSchema = createInsertSchema(serviceAddresses).omit({ id: true, createdAt: true, updatedAt: true });
+export type ServiceAddress = typeof serviceAddresses.$inferSelect;
+export type InsertServiceAddress = z.infer<typeof insertServiceAddressSchema>;
+
+// ============== REGISTERED OFFICE SUBSCRIPTION ==============
+export const registeredOfficeSubscriptions = pgTable("registered_office_subscriptions", {
+  id: serial("id").primaryKey(),
+  founderId: varchar("founder_id").notNull(),
+  applicationId: integer("application_id"), // Nullable - linked if purchased via wizard
+  tier: varchar("tier", { length: 50 }).notNull(), // 'office_only' | 'office_plus_mail'
+  serviceAddressId: integer("service_address_id").notNull(),
+  status: varchar("status", { length: 50 }).default("selected"), // selected, pending_payment, active, expired, cancelled
+  startDate: timestamp("start_date"),
+  endDate: timestamp("end_date"),
+  paymentId: integer("payment_id"), // Nullable FK to Payment
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_ro_subscriptions_founder").on(table.founderId),
+  index("idx_ro_subscriptions_application").on(table.applicationId),
+  index("idx_ro_subscriptions_status").on(table.status),
+]);
+
+export const insertRegisteredOfficeSubscriptionSchema = createInsertSchema(registeredOfficeSubscriptions).omit({ id: true, createdAt: true, updatedAt: true });
+export type RegisteredOfficeSubscription = typeof registeredOfficeSubscriptions.$inferSelect;
+export type InsertRegisteredOfficeSubscription = z.infer<typeof insertRegisteredOfficeSubscriptionSchema>;
+
+// ============== MAIL HANDLING PREFERENCE ==============
+export const mailHandlingPreferences = pgTable("mail_handling_preferences", {
+  id: serial("id").primaryKey(),
+  subscriptionId: integer("subscription_id").notNull(),
+  founderId: varchar("founder_id").notNull(),
+  preferenceType: varchar("preference_type", { length: 50 }).notNull(), // 'scan_all' | 'approve_before_scan' | 'forward_only'
+  isSensitiveAutoEscalationEnabled: boolean("is_sensitive_auto_escalation_enabled").default(true),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_mail_prefs_subscription").on(table.subscriptionId),
+  index("idx_mail_prefs_founder").on(table.founderId),
+]);
+
+export const insertMailHandlingPreferenceSchema = createInsertSchema(mailHandlingPreferences).omit({ id: true, createdAt: true, updatedAt: true });
+export type MailHandlingPreference = typeof mailHandlingPreferences.$inferSelect;
+export type InsertMailHandlingPreference = z.infer<typeof insertMailHandlingPreferenceSchema>;
+
+// ============== MAIL ITEM ==============
+export const mailItems = pgTable("mail_items", {
+  id: serial("id").primaryKey(),
+  subscriptionId: integer("subscription_id").notNull(),
+  founderId: varchar("founder_id").notNull(),
+  senderName: varchar("sender_name", { length: 255 }),
+  senderType: varchar("sender_type", { length: 100 }), // government, bank, legal, commercial, personal, unknown
+  envelopePhotoDocId: integer("envelope_photo_doc_id"), // FK to documentFiles
+  scannedDocId: integer("scanned_doc_id"), // FK to documentFiles
+  status: varchar("status", { length: 50 }).default("received"), // received, pending_approval, approved, scan_in_progress, scanned, forwarding, forwarded, archived
+  isSensitive: boolean("is_sensitive").default(false),
+  receivedAt: timestamp("received_at").defaultNow(),
+  scannedAt: timestamp("scanned_at"),
+  forwardedAt: timestamp("forwarded_at"),
+  courierName: varchar("courier_name", { length: 100 }),
+  trackingNumber: varchar("tracking_number", { length: 255 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_mail_items_subscription").on(table.subscriptionId),
+  index("idx_mail_items_founder").on(table.founderId),
+  index("idx_mail_items_status").on(table.status),
+]);
+
+export const insertMailItemSchema = createInsertSchema(mailItems).omit({ id: true, createdAt: true, updatedAt: true });
+export type MailItem = typeof mailItems.$inferSelect;
+export type InsertMailItem = z.infer<typeof insertMailItemSchema>;
+
+// ============== MAIL APPROVAL REQUEST ==============
+export const mailApprovalRequests = pgTable("mail_approval_requests", {
+  id: serial("id").primaryKey(),
+  mailItemId: integer("mail_item_id").notNull(),
+  founderId: varchar("founder_id").notNull(),
+  requestedAction: varchar("requested_action", { length: 50 }).notNull(), // scan, forward, discard
+  decision: varchar("decision", { length: 50 }), // approved, rejected
+  decisionReason: text("decision_reason"),
+  requestedAt: timestamp("requested_at").defaultNow(),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_mail_approvals_mail_item").on(table.mailItemId),
+  index("idx_mail_approvals_founder").on(table.founderId),
+]);
+
+export const insertMailApprovalRequestSchema = createInsertSchema(mailApprovalRequests).omit({ id: true, createdAt: true });
+export type MailApprovalRequest = typeof mailApprovalRequests.$inferSelect;
+export type InsertMailApprovalRequest = z.infer<typeof insertMailApprovalRequestSchema>;

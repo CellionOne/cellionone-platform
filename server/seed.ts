@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { featureFlags, users, userRoles, companyApplications, auditLogs } from "@shared/schema";
+import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses } from "@shared/schema";
 
 export async function seedDatabase() {
   try {
@@ -19,6 +19,11 @@ export async function seedDatabase() {
       { key: "execution_declarations", isEnabled: true, description: "Enable execution declaration tracking" },
       { key: "verification_receipts", isEnabled: true, description: "Enable verification receipt issuance" },
       { key: "readiness_scoring", isEnabled: true, description: "Enable application readiness scoring" },
+      { key: "enable_registered_office_service", isEnabled: true, description: "Enable registered office address service" },
+      { key: "enable_mail_handling", isEnabled: true, description: "Enable mail handling for registered office" },
+      { key: "enable_mail_approval_flow", isEnabled: true, description: "Enable mail approval workflow" },
+      { key: "enable_registered_office_payment_required", isEnabled: false, description: "Require payment for registered office (beta: false)" },
+      { key: "enable_verification_required_for_registered_office", isEnabled: true, description: "Require identity verification for standalone registered office" },
     ];
     
     // Always insert any missing feature flags
@@ -26,6 +31,19 @@ export async function seedDatabase() {
       await db.insert(featureFlags).values(flag).onConflictDoNothing();
     }
     console.log("Synced feature flags");
+
+    // Seed service address for registered office
+    await db.insert(serviceAddresses).values({
+      label: "Celion One Registered Office (Ikoyi)",
+      line1: "51 Raymond Njoku Street, Off Awolowo Road",
+      line2: "Ikoyi",
+      floorDetails: "First Floor",
+      city: "Lagos",
+      state: "Lagos",
+      country: "Nigeria",
+      isActive: true,
+    }).onConflictDoNothing();
+    console.log("Synced service addresses");
 
     // Seed demo users if in development
     if (process.env.NODE_ENV !== "production") {

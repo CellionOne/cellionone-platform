@@ -11,6 +11,7 @@ import { LoadingSpinner, LoadingPage } from "@/components/loading-spinner";
 import { ReadinessPanel } from "@/components/readiness-panel";
 import { OfflineSyncStatus } from "@/components/offline-sync-status";
 import { useToast } from "@/hooks/use-toast";
+import { useUpload } from "@/hooks/use-upload";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Building2,
@@ -52,26 +53,33 @@ export default function ApplicationDetailsPage() {
     enabled: !!applicationId,
   });
 
+  const { uploadFile, isUploading: isFileUploading } = useUpload({
+    applicationId: parseInt(applicationId || "0", 10),
+  });
+
   const uploadMutation = useMutation({
     mutationFn: async ({ checklistId, file }: { checklistId: number; file: File }) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("checklistItemId", checklistId.toString());
+      const uploadResult = await uploadFile(file);
+      if (!uploadResult) {
+        throw new Error("Failed to upload file to storage");
+      }
       
-      const response = await fetch(`/api/applications/${applicationId}/documents`, {
-        method: "POST",
-        body: formData,
-        credentials: "include",
+      const response = await apiRequest("POST", `/api/applications/${applicationId}/documents`, {
+        checklistItemId: checklistId.toString(),
+        storagePath: uploadResult.objectPath,
+        filename: file.name,
+        docType: "uploaded_document",
       });
-      if (!response.ok) throw new Error("Upload failed");
+      
+      if (!response.ok) throw new Error("Failed to save document record");
       return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId] });
       toast({ title: "Document uploaded successfully" });
     },
-    onError: () => {
-      toast({ title: "Upload failed", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Upload failed", description: error.message, variant: "destructive" });
     },
   });
 

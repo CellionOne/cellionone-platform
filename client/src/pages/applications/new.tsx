@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -22,6 +23,9 @@ import {
   Wifi,
   WifiOff,
   Save,
+  MapPin,
+  Mail,
+  Shield,
 } from "lucide-react";
 
 const steps = [
@@ -68,9 +72,21 @@ export default function NewApplicationPage() {
       state: "",
       postalCode: "",
     },
+    useRegisteredOffice: false,
+    registeredOfficeTier: "" as "" | "office_only" | "office_plus_mail",
   });
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
   const [isLoadingAi, setIsLoadingAi] = useState(false);
+
+  // Fetch registered office options
+  const { data: registeredOfficeOptions } = useQuery<{
+    tiers: { id: string; name: string; priceNgn: number; description: string; features: string[] }[];
+    location: { label: string; city: string; state: string; country: string };
+    policyText: string;
+    termMonths: number;
+  }>({
+    queryKey: ["/api/registered-office/options"],
+  });
 
   // Load draft from localStorage on mount
   useEffect(() => {
@@ -151,16 +167,36 @@ export default function NewApplicationPage() {
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      return apiRequest("POST", "/api/applications", data);
-    },
-    onSuccess: async (response) => {
+      const response = await apiRequest("POST", "/api/applications", {
+        applicationType: data.applicationType,
+        companyType: data.companyType,
+        companyName1: data.companyName1,
+        companyName2: data.companyName2,
+        companyName3: data.companyName3,
+        businessDescription: data.businessDescription,
+        registeredAddress: data.useRegisteredOffice ? null : data.registeredAddress,
+      });
       const app = await response.json();
+      
+      // If using registered office, call the selection API
+      if (data.useRegisteredOffice && data.registeredOfficeTier) {
+        await apiRequest("POST", "/api/registered-office/select", {
+          applicationId: app.id,
+          tier: data.registeredOfficeTier,
+        });
+      }
+      
+      return app;
+    },
+    onSuccess: async (app) => {
       deleteDraft(DRAFT_ID);
       queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/dashboard"] });
       toast({
         title: "Application created",
-        description: "Your application has been saved as a draft.",
+        description: formData.useRegisteredOffice 
+          ? "Your application has been saved with registered office selection."
+          : "Your application has been saved as a draft.",
       });
       navigate(`/applications/${app.id}`);
     },
@@ -217,6 +253,9 @@ export default function NewApplicationPage() {
       case 3:
         return !!formData.businessDescription;
       case 4:
+        if (formData.useRegisteredOffice) {
+          return !!formData.registeredOfficeTier;
+        }
         return !!formData.registeredAddress.line1 && !!formData.registeredAddress.city && !!formData.registeredAddress.state;
       default:
         return false;
@@ -425,67 +464,155 @@ export default function NewApplicationPage() {
             )}
 
             {currentStep === 4 && (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="line1">Street Address *</Label>
-                  <Input
-                    id="line1"
-                    placeholder="123 Business Street"
-                    value={formData.registeredAddress.line1}
-                    onChange={(e) => updateAddress("line1", e.target.value)}
-                    data-testid="input-address-line1"
-                  />
+              <div className="space-y-6">
+                <div className="space-y-3">
+                  <Label className="text-base font-medium">Choose Address Type</Label>
+                  <RadioGroup 
+                    value={formData.useRegisteredOffice ? "celion" : "own"}
+                    onValueChange={(value) => {
+                      updateFormData("useRegisteredOffice", value === "celion");
+                      if (value === "own") {
+                        updateFormData("registeredOfficeTier", "");
+                      }
+                    }}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-start space-x-3 border rounded-lg p-4 hover-elevate cursor-pointer" onClick={() => updateFormData("useRegisteredOffice", false)}>
+                      <RadioGroupItem value="own" id="address-own" data-testid="radio-address-own" />
+                      <div className="flex-1">
+                        <Label htmlFor="address-own" className="font-medium cursor-pointer">Use My Own Address</Label>
+                        <p className="text-sm text-muted-foreground mt-1">Provide your own registered office address</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start space-x-3 border rounded-lg p-4 hover-elevate cursor-pointer bg-primary/5 border-primary/30" onClick={() => updateFormData("useRegisteredOffice", true)}>
+                      <RadioGroupItem value="celion" id="address-celion" data-testid="radio-address-celion" />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <Label htmlFor="address-celion" className="font-medium cursor-pointer">Use Celion Registered Office</Label>
+                          <Badge variant="secondary" className="text-xs">Ikoyi, Lagos</Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {registeredOfficeOptions?.location.label || "Premium business address in Ikoyi, Lagos"}
+                        </p>
+                      </div>
+                    </div>
+                  </RadioGroup>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="line2">Address Line 2</Label>
-                  <Input
-                    id="line2"
-                    placeholder="Suite, floor, building name (optional)"
-                    value={formData.registeredAddress.line2}
-                    onChange={(e) => updateAddress("line2", e.target.value)}
-                    data-testid="input-address-line2"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="city">City *</Label>
-                    <Input
-                      id="city"
-                      placeholder="Lagos"
-                      value={formData.registeredAddress.city}
-                      onChange={(e) => updateAddress("city", e.target.value)}
-                      data-testid="input-address-city"
-                    />
+
+                {formData.useRegisteredOffice && registeredOfficeOptions && (
+                  <div className="space-y-4">
+                    <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-sm">
+                      <div className="flex items-start gap-2">
+                        <Shield className="h-4 w-4 text-amber-600 mt-0.5" />
+                        <p className="text-amber-800 dark:text-amber-200">{registeredOfficeOptions.policyText}</p>
+                      </div>
+                    </div>
+                    
+                    <Label className="text-sm font-medium">Select Service Tier</Label>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {registeredOfficeOptions.tiers.map((tier) => (
+                        <Card
+                          key={tier.id}
+                          className={`cursor-pointer transition-all hover-elevate ${
+                            formData.registeredOfficeTier === tier.id
+                              ? "border-primary ring-2 ring-primary/20"
+                              : "hover:border-primary/50"
+                          }`}
+                          onClick={() => updateFormData("registeredOfficeTier", tier.id as "office_only" | "office_plus_mail")}
+                          data-testid={`card-tier-${tier.id}`}
+                        >
+                          <CardHeader className="pb-2">
+                            <div className="flex justify-between items-start">
+                              <CardTitle className="text-base">{tier.name}</CardTitle>
+                              {formData.registeredOfficeTier === tier.id && (
+                                <CheckCircle2 className="h-5 w-5 text-primary" />
+                              )}
+                            </div>
+                            <CardDescription>{tier.description}</CardDescription>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            <p className="text-2xl font-bold text-primary">
+                              ₦{tier.priceNgn.toLocaleString()}<span className="text-sm font-normal text-muted-foreground">/year</span>
+                            </p>
+                            <ul className="space-y-1.5 text-sm">
+                              {tier.features.map((feature, idx) => (
+                                <li key={idx} className="flex items-start gap-2">
+                                  <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                                  <span>{feature}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="state">State *</Label>
-                    <Select
-                      value={formData.registeredAddress.state}
-                      onValueChange={(value) => updateAddress("state", value)}
-                    >
-                      <SelectTrigger data-testid="select-address-state">
-                        <SelectValue placeholder="Select state" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {nigerianStates.map((state) => (
-                          <SelectItem key={state} value={state}>
-                            {state}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                )}
+
+                {!formData.useRegisteredOffice && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="line1">Street Address *</Label>
+                      <Input
+                        id="line1"
+                        placeholder="123 Business Street"
+                        value={formData.registeredAddress.line1}
+                        onChange={(e) => updateAddress("line1", e.target.value)}
+                        data-testid="input-address-line1"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="line2">Address Line 2</Label>
+                      <Input
+                        id="line2"
+                        placeholder="Suite, floor, building name (optional)"
+                        value={formData.registeredAddress.line2}
+                        onChange={(e) => updateAddress("line2", e.target.value)}
+                        data-testid="input-address-line2"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="city">City *</Label>
+                        <Input
+                          id="city"
+                          placeholder="Lagos"
+                          value={formData.registeredAddress.city}
+                          onChange={(e) => updateAddress("city", e.target.value)}
+                          data-testid="input-address-city"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="state">State *</Label>
+                        <Select
+                          value={formData.registeredAddress.state}
+                          onValueChange={(value) => updateAddress("state", value)}
+                        >
+                          <SelectTrigger data-testid="select-address-state">
+                            <SelectValue placeholder="Select state" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {nigerianStates.map((state) => (
+                              <SelectItem key={state} value={state}>
+                                {state}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="postalCode">Postal Code</Label>
+                      <Input
+                        id="postalCode"
+                        placeholder="100001"
+                        value={formData.registeredAddress.postalCode}
+                        onChange={(e) => updateAddress("postalCode", e.target.value)}
+                        data-testid="input-address-postal"
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="postalCode">Postal Code</Label>
-                  <Input
-                    id="postalCode"
-                    placeholder="100001"
-                    value={formData.registeredAddress.postalCode}
-                    onChange={(e) => updateAddress("postalCode", e.target.value)}
-                    data-testid="input-address-postal"
-                  />
-                </div>
+                )}
               </div>
             )}
 

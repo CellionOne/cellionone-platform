@@ -12,6 +12,7 @@ import { ReadinessPanel } from "@/components/readiness-panel";
 import { OfflineSyncStatus } from "@/components/offline-sync-status";
 import { useToast } from "@/hooks/use-toast";
 import { useUpload } from "@/hooks/use-upload";
+import { useCheckout } from "@/hooks/use-checkout";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Building2,
@@ -97,20 +98,13 @@ export default function ApplicationDetailsPage() {
     },
   });
 
-  const payMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", `/api/payments/initiate/${applicationId}`);
-      return response.json();
-    },
-    onSuccess: (data) => {
-      if (data.authorizationUrl) {
-        window.location.href = data.authorizationUrl;
-      }
-    },
-    onError: () => {
-      toast({ title: "Payment initiation failed", variant: "destructive" });
-    },
-  });
+  const { checkoutIncorporation } = useCheckout();
+
+  const handlePayment = () => {
+    if (applicationId) {
+      checkoutIncorporation(parseInt(applicationId, 10));
+    }
+  };
 
   if (isLoading) return <LoadingPage />;
 
@@ -345,26 +339,24 @@ export default function ApplicationDetailsPage() {
                     {payment.status !== "success" && (
                       <Button 
                         className="w-full" 
-                        onClick={() => payMutation.mutate()}
-                        disabled={payMutation.isPending}
+                        onClick={handlePayment}
                         data-testid="button-pay"
                       >
-                        {payMutation.isPending ? <LoadingSpinner size="sm" /> : "Pay Now"}
+                        Pay Now with Stripe
                       </Button>
                     )}
                   </div>
                 ) : (
                   <div className="text-center py-4">
                     <p className="text-sm text-muted-foreground mb-3">
-                      Complete your document upload to proceed with payment
+                      Ready to pay for your incorporation
                     </p>
                     <Button 
                       className="w-full" 
-                      disabled={progress < 100}
-                      onClick={() => payMutation.mutate()}
+                      onClick={handlePayment}
                       data-testid="button-initiate-payment"
                     >
-                      Proceed to Payment
+                      Pay with Stripe (£55)
                     </Button>
                   </div>
                 )}

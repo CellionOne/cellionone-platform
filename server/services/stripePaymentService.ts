@@ -53,7 +53,7 @@ export async function createStripeCheckoutSession(
   }
   
   // Check for mixed payment modes
-  const hasMixed = priceBook.hassMixedPaymentModes(
+  const hasMixed = priceBook.hasMixedPaymentModes(
     items.map(i => ({ serviceType: i.serviceType, tier: i.tier }))
   );
   

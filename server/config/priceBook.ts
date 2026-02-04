@@ -186,7 +186,7 @@ export function getPricesByServiceType(serviceType: ServiceType): PriceEntry[] {
  * Check if a cart contains both one-off and recurring items
  * (Stripe requires separate sessions for payment vs subscription modes)
  */
-export function hassMixedPaymentModes(items: { serviceType: ServiceType; tier?: RegisteredOfficeTier }[]): boolean {
+export function hasMixedPaymentModes(items: { serviceType: ServiceType; tier?: RegisteredOfficeTier }[]): boolean {
   const prices = items.map(item => getStripePrice(item.serviceType, item.tier)).filter(Boolean) as PriceEntry[];
   const hasOneOff = prices.some(p => !p.isRecurring);
   const hasRecurring = prices.some(p => p.isRecurring);
@@ -264,7 +264,7 @@ export default {
   getPaystackPrice,
   getPricesByProvider,
   getPricesByServiceType,
-  hassMixedPaymentModes,
+  hasMixedPaymentModes,
   splitByPaymentMode,
   calculateTotal,
   validateItems,

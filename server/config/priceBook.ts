@@ -32,10 +32,10 @@ export interface PriceEntry {
 
 // Stripe Price IDs from the Stripe Dashboard (provided by user)
 const STRIPE_PRICE_IDS = {
-  verification: 'price_1Sx9SmRvA0ZE8wcKrxO7bKVd',
-  incorporation: 'price_1Sx9VdRvA0ZE8wcKWriewuV4',
-  registered_office_office_only: 'price_1Sx9gERvA0ZE8wcKisFbb9gO',
-  registered_office_office_plus_mail: 'price_1Sx9gERvA0ZE8wcKcx5stVmN',
+  verification: 'price_1SxOlVEQUWhOmyziaAojsPOg',
+  incorporation: 'price_1SxOmuEQUWhOmyzi6iva4O61',
+  registered_office_office_only: 'price_1SxOovEQUWhOmyziblewjCEj',
+  registered_office_office_plus_mail: 'price_1SxOovEQUWhOmyzifyxCEGfF',
 };
 
 // GBP Price Book (for Stripe - international/UK customers)

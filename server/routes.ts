@@ -310,15 +310,71 @@ export async function registerRoutes(
   // Login with email/password
   app.post("/api/auth/login", async (req: any, res) => {
     try {
+      const { checkAccountLockout, recordFailedAttempt, recordSuccessfulLogin } = await import("./services/accountLockoutService");
+      
+      // Use email as identifier for lockout tracking
+      const email = req.body?.email?.toLowerCase();
+      const lockoutIdentifier = email || req.ip;
+      
+      // Check if account is locked
+      const lockoutStatus = checkAccountLockout(lockoutIdentifier);
+      if (lockoutStatus.isLocked) {
+        await storage.createAuditLog({
+          action: "login_blocked_lockout",
+          entityType: "session",
+          details: { 
+            email, 
+            minutesRemaining: lockoutStatus.lockoutMinutesRemaining,
+            reason: "account_locked" 
+          },
+          ipAddress: req.ip,
+        });
+        
+        return res.status(429).json({ 
+          message: `Account temporarily locked due to too many failed attempts. Please try again in ${lockoutStatus.lockoutMinutesRemaining} minutes.`,
+          lockedUntil: lockoutStatus.lockoutUntil,
+          minutesRemaining: lockoutStatus.lockoutMinutesRemaining,
+        });
+      }
+      
       const result = await authService.loginUser(req.body);
       
       if (!result.success) {
+        // Record failed attempt
+        const updatedLockout = recordFailedAttempt(lockoutIdentifier);
+        
+        await storage.createAuditLog({
+          action: "login_failed",
+          entityType: "session",
+          details: { 
+            email, 
+            reason: result.message,
+            attemptsRemaining: updatedLockout.remainingAttempts,
+          },
+          ipAddress: req.ip,
+        });
+        
         const status = result.requiresVerification ? 403 : 401;
-        return res.status(status).json({ 
+        const response: any = { 
           message: result.message, 
           requiresVerification: result.requiresVerification 
-        });
+        };
+        
+        // Warn user about remaining attempts
+        if (updatedLockout.remainingAttempts <= 2 && updatedLockout.remainingAttempts > 0) {
+          response.warning = `Warning: ${updatedLockout.remainingAttempts} attempt(s) remaining before account lockout.`;
+        }
+        
+        if (updatedLockout.isLocked) {
+          response.message = `Account locked for ${updatedLockout.lockoutMinutesRemaining} minutes due to too many failed attempts.`;
+          return res.status(429).json(response);
+        }
+        
+        return res.status(status).json(response);
       }
+      
+      // Record successful login (clears lockout)
+      recordSuccessfulLogin(lockoutIdentifier);
       
       // Set up session for the authenticated user
       const user = result.user;

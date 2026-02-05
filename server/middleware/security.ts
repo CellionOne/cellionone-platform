@@ -54,12 +54,17 @@ export const uploadLimiter = rateLimit({
 
 export function setupSecurityMiddleware(app: Express): void {
   // Helmet security headers
+  // NOTE: 'unsafe-inline' and 'unsafe-eval' are required for:
+  // - Vite HMR in development mode
+  // - Stripe.js integration
+  // - Paystack popup integration
+  // PRODUCTION TODO: Consider using nonces/hashes for scripts when deploying
   app.use(
     helmet({
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://js.stripe.com"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://js.stripe.com", "https://js.paystack.co"],
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
           imgSrc: ["'self'", "data:", "blob:", "https:", "*.replit.dev"],
@@ -101,10 +106,11 @@ export function setupSecurityMiddleware(app: Express): void {
   // Apply stricter rate limiting to authentication routes
   app.use("/api/auth/login", authLimiter);
   app.use("/api/auth/register", authLimiter);
-  app.use("/api/auth/password-reset", passwordResetLimiter);
+  app.use("/api/auth/reset-password", passwordResetLimiter);
   app.use("/api/auth/forgot-password", passwordResetLimiter);
 
-  // Apply upload rate limiting to specific upload paths
+  // Apply upload rate limiting to all upload-related paths
+  app.use("/api/uploads/request-url", uploadLimiter);
   app.use("/api/founder/identity/upload", uploadLimiter);
   app.use("/api/applications/:id/documents", uploadLimiter);
   app.use("/api/documents/upload", uploadLimiter);
@@ -114,42 +120,54 @@ export function setupSecurityMiddleware(app: Express): void {
 
 // CORS configuration helper
 export function getCorsOptions() {
-  const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(",")
+  const allowedOrigins: string[] = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map(o => o.trim())
     : [];
 
-  // In development, allow the Replit domain
+  // Build list of allowed Replit origins
+  const replitSlug = process.env.REPL_SLUG;
+  const replitOwner = process.env.REPL_OWNER;
+  
+  if (replitSlug && replitOwner) {
+    // Add specific Replit domains for this repl only
+    allowedOrigins.push(
+      `https://${replitSlug}.${replitOwner}.repl.co`,
+      `https://${replitSlug}-${replitOwner}.replit.dev`
+    );
+  }
+
+  // In development, add localhost
   if (process.env.NODE_ENV !== "production") {
     allowedOrigins.push(
       "http://localhost:5000",
       "https://localhost:5000"
     );
-    
-    // Allow Replit domains
-    if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
-      allowedOrigins.push(
-        `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`,
-        `https://${process.env.REPL_SLUG}-${process.env.REPL_OWNER}.replit.dev`
-      );
-    }
   }
 
   return {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (like mobile apps or curl requests)
+      // Allow requests with no origin (server-to-server, mobile apps)
       if (!origin) {
         return callback(null, true);
       }
 
-      // In development, be more permissive
+      // Check against explicit allowlist
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // In development only, allow the current request's Replit subdomain
+      // This handles dynamic preview URLs during development
       if (process.env.NODE_ENV !== "production") {
-        return callback(null, true);
+        if (replitSlug && replitOwner && (
+          origin.includes(`${replitSlug}.${replitOwner}`) ||
+          origin.includes(`${replitSlug}-${replitOwner}`)
+        )) {
+          return callback(null, true);
+        }
       }
 
-      if (allowedOrigins.includes(origin) || origin.endsWith(".replit.dev") || origin.endsWith(".repl.co")) {
-        return callback(null, true);
-      }
-
+      console.warn(`[Security] CORS blocked origin: ${origin}`);
       return callback(new Error("Not allowed by CORS"), false);
     },
     credentials: true,

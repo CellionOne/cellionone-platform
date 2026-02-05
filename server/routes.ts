@@ -452,6 +452,14 @@ export async function registerRoutes(
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const result = await authService.requestPasswordReset(email, baseUrl);
       
+      // Security audit log - password reset requested
+      await storage.createAuditLog({
+        action: "password_reset_requested",
+        entityType: "user",
+        details: { email: email?.toLowerCase(), success: true },
+        ipAddress: req.ip,
+      });
+      
       res.json({ message: result.message });
     } catch (error) {
       console.error("Forgot password error:", error);
@@ -465,6 +473,17 @@ export async function registerRoutes(
       const { token, password } = req.body;
       const result = await authService.resetPassword(token, password);
       
+      // Security audit log - password reset attempt
+      await storage.createAuditLog({
+        action: result.success ? "password_reset_success" : "password_reset_failed",
+        entityType: "user",
+        details: { 
+          success: result.success, 
+          reason: result.success ? undefined : result.message 
+        },
+        ipAddress: req.ip,
+      });
+      
       if (!result.success) {
         return res.status(400).json({ message: result.message });
       }
@@ -477,7 +496,20 @@ export async function registerRoutes(
   });
   
   // Logout (works for both email/password and Replit auth)
-  app.post("/api/auth/logout", (req: any, res) => {
+  app.post("/api/auth/logout", async (req: any, res) => {
+    const userId = req.user?.claims?.sub;
+    
+    // Security audit log - logout
+    if (userId) {
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "logout",
+        entityType: "session",
+        details: { method: "manual" },
+        ipAddress: req.ip,
+      });
+    }
+    
     req.logout(() => {
       req.session.destroy(() => {
         res.json({ message: "Logged out successfully" });

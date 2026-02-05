@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
@@ -16,6 +17,8 @@ import {
   Shield,
   ArrowRight,
   Building2,
+  ShieldCheck,
+  CalendarClock,
 } from "lucide-react";
 import type { CompanyApplication, IdentityVerification } from "@shared/schema";
 
@@ -30,11 +33,25 @@ interface DashboardData {
   };
 }
 
+interface VerificationStatus {
+  isVerified: boolean;
+  status: string;
+  verifiedAt: string | null;
+  expiresAt: string | null;
+  daysUntilExpiry: number | null;
+  requiresVerification: boolean;
+  verificationId: number | null;
+}
+
 export default function FounderDashboard() {
   const { user } = useAuth();
   
   const { data, isLoading } = useQuery<DashboardData>({
     queryKey: ["/api/founder/dashboard"],
+  });
+
+  const { data: verificationStatus } = useQuery<VerificationStatus>({
+    queryKey: ["/api/founder/verification-status"],
   });
 
   const getGreeting = () => {
@@ -120,8 +137,87 @@ export default function FounderDashboard() {
               </Card>
             </div>
 
-            {data?.identity?.status !== "verified" && (
-              <Card className="border-primary/50 bg-primary/5">
+            {verificationStatus?.isVerified ? (
+              <Card className="border-green-500/30 bg-green-500/5" data-testid="verification-status-verified">
+                <CardHeader className="flex flex-row items-start gap-4 pb-2">
+                  <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
+                    <ShieldCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-lg">Identity Verified</CardTitle>
+                      <Badge variant="secondary" className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                        Active
+                      </Badge>
+                    </div>
+                    <CardDescription className="flex items-center gap-1 mt-1">
+                      <CalendarClock className="h-3.5 w-3.5" />
+                      {verificationStatus.daysUntilExpiry && verificationStatus.daysUntilExpiry <= 30 ? (
+                        <span className="text-orange-600 dark:text-orange-400">
+                          Expires in {verificationStatus.daysUntilExpiry} days - renew soon
+                        </span>
+                      ) : (
+                        <span>
+                          Valid until {verificationStatus.expiresAt 
+                            ? new Date(verificationStatus.expiresAt).toLocaleDateString("en-GB", {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric"
+                              })
+                            : "N/A"
+                          }
+                        </span>
+                      )}
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+              </Card>
+            ) : verificationStatus?.status === "in_progress" ? (
+              <Card className="border-blue-500/30 bg-blue-500/5" data-testid="verification-status-pending">
+                <CardHeader className="flex flex-row items-start gap-4 pb-2">
+                  <div className="h-10 w-10 rounded-full bg-blue-500/10 flex items-center justify-center">
+                    <Shield className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-lg">Verification In Progress</CardTitle>
+                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+                        Processing
+                      </Badge>
+                    </div>
+                    <CardDescription>
+                      Your identity verification is being processed. This usually takes a few minutes.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+              </Card>
+            ) : verificationStatus?.status === "expired" ? (
+              <Card className="border-orange-500/50 bg-orange-500/5" data-testid="verification-status-expired">
+                <CardHeader className="flex flex-row items-start gap-4 pb-2">
+                  <div className="h-10 w-10 rounded-full bg-orange-500/10 flex items-center justify-center">
+                    <AlertCircle className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-lg">Verification Expired</CardTitle>
+                      <Badge variant="secondary" className="bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300">
+                        Renewal Required
+                      </Badge>
+                    </div>
+                    <CardDescription>
+                      Your identity verification has expired. Please verify again to continue registering companies.
+                    </CardDescription>
+                  </div>
+                  <Button asChild data-testid="button-renew-verification">
+                    <Link href="/founder/identity">
+                      Verify Again
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </Link>
+                  </Button>
+                </CardHeader>
+              </Card>
+            ) : (
+              <Card className="border-primary/50 bg-primary/5" data-testid="verification-status-required">
                 <CardHeader className="flex flex-row items-start gap-4 pb-2">
                   <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
                     <Shield className="h-5 w-5 text-primary" />
@@ -129,7 +225,7 @@ export default function FounderDashboard() {
                   <div className="flex-1">
                     <CardTitle className="text-lg">Complete Your Identity Verification</CardTitle>
                     <CardDescription>
-                      You need to verify your identity before submitting applications
+                      You need to verify your identity before submitting applications. Verification is valid for one year.
                     </CardDescription>
                   </div>
                   <Button asChild data-testid="button-verify-identity">

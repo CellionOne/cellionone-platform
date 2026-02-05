@@ -86,7 +86,7 @@ export const companyApplications = pgTable("company_applications", {
   id: serial("id").primaryKey(),
   founderUserId: varchar("founder_user_id").notNull(),
   applicationType: varchar("application_type", { length: 50 }).default("incorporation"), // incorporation, post_incorporation
-  status: varchar("status", { length: 50 }).default("draft"), // draft, submitted, under_review, clarification_requested, filed, pending_originals, courier_in_transit, completed, rejected
+  status: varchar("status", { length: 50 }).default("draft"), // draft, pending_verification, submitted, under_review, clarification_requested, filed, pending_originals, courier_in_transit, completed, rejected
   companyName1: varchar("company_name_1", { length: 255 }),
   companyName2: varchar("company_name_2", { length: 255 }),
   companyName3: varchar("company_name_3", { length: 255 }),

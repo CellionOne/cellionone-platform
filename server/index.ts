@@ -91,6 +91,39 @@ app.post(
   }
 );
 
+// ============== EXTERNAL VERIFICATION WEBHOOK ROUTE ==============
+// CRITICAL: Must be registered BEFORE express.json() middleware
+// External identity verification services send webhooks when verification completes
+app.post(
+  '/api/webhooks/verification',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    try {
+      // Validate that req.body is a Buffer
+      if (!Buffer.isBuffer(req.body)) {
+        console.error('[Verification Webhook] req.body is not a Buffer');
+        return res.status(500).json({ error: 'Webhook processing error' });
+      }
+
+      const payload = req.body.toString('utf8');
+      
+      // Dynamically import webhook handler
+      const { processVerificationWebhook } = await import('./services/verificationWebhookHandler');
+      const result = await processVerificationWebhook(payload, req.headers);
+
+      if (!result.success) {
+        console.error('[Verification Webhook] Failed to process:', result.error);
+        return res.status(400).json({ error: result.error });
+      }
+
+      res.status(200).json({ received: true });
+    } catch (error: any) {
+      console.error('[Verification Webhook] Error:', error.message);
+      res.status(400).json({ error: 'Webhook processing error' });
+    }
+  }
+);
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {

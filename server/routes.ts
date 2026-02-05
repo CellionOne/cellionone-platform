@@ -220,7 +220,13 @@ export async function registerRoutes(
   await setupAuth(app);
   console.log("Auth routes initialised – custom role-aware endpoint active");
   
-  // Setup object storage routes
+  // Session timeout middleware (after auth initialization)
+  const { sessionTimeout, validateFileUploadMiddleware } = await import("./middleware/security");
+  app.use(sessionTimeout);
+  console.log("[Security] Session timeout middleware enabled (30 min idle, 8 hour absolute)");
+  
+  // Setup object storage routes with file validation
+  app.use("/api/uploads/request-url", validateFileUploadMiddleware);
   registerObjectStorageRoutes(app);
   
   // Seed feature flags

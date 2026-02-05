@@ -4,7 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { startSubscriptionScheduler } from "./services/subscriptionScheduler";
-import { setupSecurityMiddleware, securityLogger } from "./middleware/security";
+import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUploadMiddleware } from "./middleware/security";
 
 const app = express();
 const httpServer = createServer(app);

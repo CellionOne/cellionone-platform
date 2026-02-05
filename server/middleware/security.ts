@@ -180,3 +180,189 @@ export function securityLogger(req: Request, res: Response, next: NextFunction):
 
   next();
 }
+
+// Session timeout configuration
+const SESSION_CONFIG = {
+  IDLE_TIMEOUT_MINUTES: 30, // Log out after 30 minutes of inactivity
+  ABSOLUTE_TIMEOUT_HOURS: 8, // Maximum session duration (8 hours)
+};
+
+interface SessionWithActivity {
+  lastActivity?: number;
+  createdAt?: number;
+}
+
+/**
+ * Session timeout middleware
+ * 
+ * Enforces session timeouts:
+ * - Idle timeout: Session expires after inactivity
+ * - Absolute timeout: Session expires after max duration regardless of activity
+ */
+export function sessionTimeout(req: Request, res: Response, next: NextFunction): void {
+  const session = (req as any).session as SessionWithActivity | undefined;
+  
+  if (!session || !(req as any).isAuthenticated?.()) {
+    return next();
+  }
+  
+  const now = Date.now();
+  
+  // Initialize timestamps if not present
+  if (!session.createdAt) {
+    session.createdAt = now;
+  }
+  if (!session.lastActivity) {
+    session.lastActivity = now;
+  }
+  
+  // Check absolute timeout (max session duration)
+  const sessionAge = now - session.createdAt;
+  const maxSessionAge = SESSION_CONFIG.ABSOLUTE_TIMEOUT_HOURS * 60 * 60 * 1000;
+  
+  if (sessionAge > maxSessionAge) {
+    console.log(`[Security] Session absolute timeout exceeded for user`);
+    (req as any).logout?.((err: any) => {
+      if (err) console.error("Logout error:", err);
+    });
+    (req as any).session?.destroy?.((err: any) => {
+      if (err) console.error("Session destroy error:", err);
+    });
+    return res.status(401).json({ 
+      message: "Session expired. Please log in again.",
+      reason: "absolute_timeout"
+    });
+  }
+  
+  // Check idle timeout
+  const idleTime = now - session.lastActivity;
+  const maxIdleTime = SESSION_CONFIG.IDLE_TIMEOUT_MINUTES * 60 * 1000;
+  
+  if (idleTime > maxIdleTime) {
+    console.log(`[Security] Session idle timeout exceeded for user`);
+    (req as any).logout?.((err: any) => {
+      if (err) console.error("Logout error:", err);
+    });
+    (req as any).session?.destroy?.((err: any) => {
+      if (err) console.error("Session destroy error:", err);
+    });
+    return res.status(401).json({ 
+      message: "Session expired due to inactivity. Please log in again.",
+      reason: "idle_timeout"
+    });
+  }
+  
+  // Update last activity timestamp
+  session.lastActivity = now;
+  
+  next();
+}
+
+// File upload validation configuration
+const UPLOAD_CONFIG = {
+  MAX_FILE_SIZE_MB: 10,
+  ALLOWED_DOCUMENT_EXTENSIONS: [".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx"],
+  ALLOWED_IMAGE_EXTENSIONS: [".jpg", ".jpeg", ".png", ".gif", ".webp"],
+  ALLOWED_MIME_TYPES: new Set([
+    // Documents
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    // Images
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+  ]),
+  // Dangerous patterns that should never be in filenames
+  DANGEROUS_PATTERNS: [
+    /\.\./,           // Path traversal
+    /[<>:"|?*]/,      // Invalid characters
+    /\x00/,           // Null bytes
+    /^\.+$/,          // Only dots
+  ],
+};
+
+export interface FileUploadValidation {
+  isValid: boolean;
+  error?: string;
+}
+
+/**
+ * Validate file upload request metadata
+ * Called before generating presigned URLs
+ */
+export function validateFileUpload(
+  filename: string,
+  contentType: string | undefined,
+  size: number | undefined
+): FileUploadValidation {
+  // Check filename for dangerous patterns
+  for (const pattern of UPLOAD_CONFIG.DANGEROUS_PATTERNS) {
+    if (pattern.test(filename)) {
+      return { isValid: false, error: "Invalid filename detected" };
+    }
+  }
+  
+  // Check file extension
+  const ext = filename.toLowerCase().substring(filename.lastIndexOf("."));
+  const allowedExtensions = [
+    ...UPLOAD_CONFIG.ALLOWED_DOCUMENT_EXTENSIONS,
+    ...UPLOAD_CONFIG.ALLOWED_IMAGE_EXTENSIONS,
+  ];
+  
+  if (!allowedExtensions.includes(ext)) {
+    return { 
+      isValid: false, 
+      error: `File type not allowed. Allowed types: ${allowedExtensions.join(", ")}` 
+    };
+  }
+  
+  // Check MIME type if provided
+  if (contentType && !UPLOAD_CONFIG.ALLOWED_MIME_TYPES.has(contentType.toLowerCase())) {
+    return { 
+      isValid: false, 
+      error: "File content type not allowed" 
+    };
+  }
+  
+  // Check file size if provided
+  if (size !== undefined) {
+    const maxBytes = UPLOAD_CONFIG.MAX_FILE_SIZE_MB * 1024 * 1024;
+    if (size > maxBytes) {
+      return { 
+        isValid: false, 
+        error: `File too large. Maximum size is ${UPLOAD_CONFIG.MAX_FILE_SIZE_MB}MB` 
+      };
+    }
+    if (size <= 0) {
+      return { isValid: false, error: "Invalid file size" };
+    }
+  }
+  
+  return { isValid: true };
+}
+
+/**
+ * Middleware to validate file upload requests
+ */
+export function validateFileUploadMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  const { name, contentType, size } = req.body;
+  
+  if (!name) {
+    return next(); // Let the route handler deal with missing name
+  }
+  
+  const validation = validateFileUpload(name, contentType, size);
+  
+  if (!validation.isValid) {
+    console.warn(`[Security] File upload rejected: ${validation.error} - ${name} from ${req.ip}`);
+    return res.status(400).json({ error: validation.error });
+  }
+  
+  next();
+}

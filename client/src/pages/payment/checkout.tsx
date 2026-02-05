@@ -61,7 +61,7 @@ interface PriceBookResponse {
 
 interface CheckoutSessionResponse {
   sessionId: string;
-  url: string;
+  sessionUrl: string;
   dbSessionId: number;
   mode: "payment" | "subscription";
   requiresSecondStep: boolean;
@@ -136,7 +136,7 @@ export default function CheckoutPage() {
         }));
       }
       
-      window.location.href = data.url;
+      window.location.href = data.sessionUrl;
     },
     onError: (error: any) => {
       toast({

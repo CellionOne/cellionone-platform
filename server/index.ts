@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { startSubscriptionScheduler } from "./services/subscriptionScheduler";
+import { setupSecurityMiddleware, securityLogger } from "./middleware/security";
 
 const app = express();
 const httpServer = createServer(app);
@@ -13,6 +14,13 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+// ============== SECURITY MIDDLEWARE ==============
+// CRITICAL: Must be set up early, but AFTER webhook routes are registered
+// (webhooks need raw body parsing which conflicts with some security headers)
+
+// Security logging for suspicious requests (safe to add before webhooks)
+app.use(securityLogger);
 
 // ============== STRIPE WEBHOOK ROUTE ==============
 // CRITICAL: Must be registered BEFORE express.json() middleware
@@ -123,6 +131,10 @@ app.post(
     }
   }
 );
+
+// ============== SECURITY HEADERS & RATE LIMITING ==============
+// CRITICAL: Must be AFTER webhook routes (which need raw body) but BEFORE express.json()
+setupSecurityMiddleware(app);
 
 app.use(
   express.json({

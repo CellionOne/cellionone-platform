@@ -10,6 +10,7 @@ import { insertCompanyApplicationSchema, insertClarificationRequestSchema, inser
 import * as services from "./services";
 import { registeredOfficeService } from "./services/registeredOfficeService";
 import { mailroomService } from "./services/mailroomService";
+import * as verificationService from "./services/verificationService";
 
 // Validation schemas
 const createApplicationSchema = insertCompanyApplicationSchema.pick({
@@ -458,7 +459,7 @@ export async function registerRoutes(
   app.post("/api/payments/stripe/checkout", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const { items, context } = req.body;
+      let { items, context } = req.body;
       
       // Validate items
       if (!items || !Array.isArray(items) || items.length === 0) {
@@ -474,6 +475,22 @@ export async function registerRoutes(
         if (item.serviceType === "registered_office" && !item.tier) {
           return res.status(400).json({ message: "Registered office items must have a tier" });
         }
+      }
+      
+      // Check user's verification status
+      const vStatus = await verificationService.getVerificationStatus(userId);
+      const hasIncorporation = items.some((i: any) => i.serviceType === "incorporation");
+      const hasVerificationItem = items.some((i: any) => i.serviceType === "verification");
+      
+      // For incorporation, user must be verified or pay for verification
+      if (hasIncorporation && vStatus.requiresVerification && !hasVerificationItem) {
+        // Auto-add verification to the cart
+        items = [{ serviceType: "verification" }, ...items];
+      }
+      
+      // If user is already verified and they've included verification, remove it
+      if (!vStatus.requiresVerification && hasVerificationItem) {
+        items = items.filter((i: any) => i.serviceType !== "verification");
       }
       
       // Check if Stripe is configured
@@ -503,11 +520,15 @@ export async function registerRoutes(
         action: "stripe_checkout_initiated",
         entityType: "stripe_checkout_session",
         entityId: String(result.dbSessionId),
-        details: { items, mode: result.mode, requiresSecondStep: result.requiresSecondStep },
+        details: { items, mode: result.mode, requiresSecondStep: result.requiresSecondStep, verificationStatus: vStatus.status },
         ipAddress: req.ip,
       });
       
-      res.json(result);
+      res.json({
+        ...result,
+        verificationAutoAdded: hasIncorporation && vStatus.requiresVerification && !hasVerificationItem,
+        verificationSkipped: !vStatus.requiresVerification && hasVerificationItem,
+      });
     } catch (error: any) {
       console.error("Error creating Stripe checkout:", error);
       res.status(500).json({ message: error.message || "Failed to create checkout session" });
@@ -575,7 +596,7 @@ export async function registerRoutes(
   app.post("/api/payments/paystack/initialize", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const { items, context } = req.body;
+      let { items, context } = req.body;
 
       // Validate items
       if (!items || !Array.isArray(items) || items.length === 0) {
@@ -590,6 +611,21 @@ export async function registerRoutes(
         if (item.serviceType === "registered_office" && !item.tier) {
           return res.status(400).json({ message: "Registered office items must have a tier" });
         }
+      }
+
+      // Check user's verification status
+      const vStatus = await verificationService.getVerificationStatus(userId);
+      const hasIncorporation = items.some((i: any) => i.serviceType === "incorporation");
+      const hasVerificationItem = items.some((i: any) => i.serviceType === "verification");
+      
+      // For incorporation, user must be verified or pay for verification
+      if (hasIncorporation && vStatus.requiresVerification && !hasVerificationItem) {
+        items = [{ serviceType: "verification" }, ...items];
+      }
+      
+      // If user is already verified and they've included verification, remove it
+      if (!vStatus.requiresVerification && hasVerificationItem) {
+        items = items.filter((i: any) => i.serviceType !== "verification");
       }
 
       // Check if Paystack is configured
@@ -619,11 +655,15 @@ export async function registerRoutes(
         action: "paystack_transaction_initiated",
         entityType: "paystack_transaction",
         entityId: result.reference,
-        details: { items, reference: result.reference },
+        details: { items, reference: result.reference, verificationStatus: vStatus.status },
         ipAddress: req.ip,
       });
 
-      res.json(result);
+      res.json({
+        ...result,
+        verificationAutoAdded: hasIncorporation && vStatus.requiresVerification && !hasVerificationItem,
+        verificationSkipped: !vStatus.requiresVerification && hasVerificationItem,
+      });
     } catch (error: any) {
       console.error("Error initializing Paystack transaction:", error);
       res.status(500).json({ message: error.message || "Failed to initialize transaction" });
@@ -722,6 +762,18 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching identity verification:", error);
       res.status(500).json({ message: "Failed to fetch identity verification" });
+    }
+  });
+
+  // Get comprehensive verification status (with expiry info)
+  app.get("/api/founder/verification-status", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const status = await verificationService.getVerificationStatus(userId);
+      res.json(status);
+    } catch (error) {
+      console.error("Error fetching verification status:", error);
+      res.status(500).json({ message: "Failed to fetch verification status" });
     }
   });
 

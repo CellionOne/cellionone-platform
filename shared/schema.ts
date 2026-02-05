@@ -62,13 +62,17 @@ export type InsertUserRole = z.infer<typeof insertUserRoleSchema>;
 export const identityVerifications = pgTable("identity_verifications", {
   id: serial("id").primaryKey(),
   founderUserId: varchar("founder_user_id").notNull(),
-  status: varchar("status", { length: 50 }).default("not_started"), // not_started, pending, verified, rejected
-  method: varchar("method", { length: 50 }).default("manual"), // manual, automated
+  status: varchar("status", { length: 50 }).default("not_started"), // not_started, pending, in_progress, verified, rejected, expired
+  method: varchar("method", { length: 50 }).default("manual"), // manual, automated, external
+  externalProvider: varchar("external_provider", { length: 100 }), // e.g., "smile_id", "onfido", etc.
+  externalSessionId: varchar("external_session_id", { length: 255 }), // session ID from external provider
   selfieFileId: integer("selfie_file_id"),
+  selfieUrl: varchar("selfie_url", { length: 500 }), // URL from external verification service selfie
   idDocFileId: integer("id_doc_file_id"),
   livenessScore: integer("liveness_score"),
   notes: text("notes"),
   verifiedAt: timestamp("verified_at"),
+  expiresAt: timestamp("expires_at"), // verification expires after 1 year
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Shield,
   Upload,
@@ -17,6 +18,7 @@ import {
   AlertCircle,
   CheckCircle2,
   User,
+  Info,
 } from "lucide-react";
 import type { IdentityVerification } from "@shared/schema";
 
@@ -277,6 +279,16 @@ export default function IdentityVerificationPage() {
                 </ul>
               </CardContent>
             </Card>
+
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertTitle>About Passport Photos</AlertTitle>
+              <AlertDescription>
+                This identity verification is separate from the passport photograph required for CAC registration. 
+                When completing your company application, you will also need to upload a formal passport-sized 
+                photograph (white background, professional attire) for the Corporate Affairs Commission filing.
+              </AlertDescription>
+            </Alert>
           </>
         )}
       </div>

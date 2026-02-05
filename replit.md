@@ -22,6 +22,15 @@ Key architectural patterns include:
 - **Registered Office Service:** Offers tiered registered address services with mail handling, configurable limits (e.g., mail items per month, storage duration), and an automated daily scheduler for subscription management (expiry, renewal nudges). Address visibility is gated based on subscription status.
 - **Feature Flags:** Allows dynamic control over feature availability for various functionalities like payment providers or specific service requirements.
 - **Comprehensive Audit Logging:** Tracks significant user and system actions across the platform.
+- **Security Hardening Suite:** Multi-layered security protections including:
+  - HTTP security headers via Helmet.js (CSP, HSTS, XSS protection, X-Frame-Options)
+  - Rate limiting: API (100/15min), auth (10/15min), password reset (3/hour), uploads (50/hour)
+  - CORS with explicit origin allowlisting
+  - Account lockout (5 failed attempts = 15 min lockout)
+  - Session timeout (30 min idle, 8 hour absolute maximum)
+  - File upload validation (type, size, extension whitelist)
+  - Password strength requirements (8+ chars, uppercase, lowercase, number, special char)
+  - Security-focused audit logging (login attempts, lockouts, password resets, logouts)
 
 ## External Dependencies
 - **PostgreSQL:** Primary database, hosted via Neon.

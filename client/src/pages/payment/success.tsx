@@ -18,12 +18,28 @@ interface SessionInfo {
 export default function PaymentSuccessPage() {
   const [, setLocation] = useLocation();
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [hasSecondStep, setHasSecondStep] = useState(false);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const sid = urlParams.get("session_id");
     setSessionId(sid);
-  }, []);
+    
+    const checkoutState = sessionStorage.getItem("checkoutState");
+    if (checkoutState) {
+      try {
+        const parsed = JSON.parse(checkoutState);
+        if (parsed.items && parsed.items.length > 0) {
+          setHasSecondStep(true);
+          setTimeout(() => {
+            setLocation("/payment/checkout?step=2");
+          }, 2000);
+        }
+      } catch (e) {
+        sessionStorage.removeItem("checkoutState");
+      }
+    }
+  }, [setLocation]);
 
   const { data, isLoading } = useQuery<SessionInfo>({
     queryKey: ["/api/payments/stripe/session", sessionId],
@@ -89,6 +105,24 @@ export default function PaymentSuccessPage() {
 
     return steps;
   };
+
+  if (hasSecondStep) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 dark:bg-green-900 mb-4">
+            <CheckCircle2 className="h-8 w-8 text-green-600 dark:text-green-400" />
+          </div>
+          <h1 className="text-2xl font-bold text-foreground mb-2">Step 1 Complete!</h1>
+          <p className="text-muted-foreground mb-4">Your one-time payment was successful.</p>
+          <div className="flex items-center justify-center gap-2">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <span className="text-foreground">Redirecting to subscription checkout...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

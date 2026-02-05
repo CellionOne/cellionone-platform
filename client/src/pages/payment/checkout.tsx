@@ -85,9 +85,12 @@ export default function CheckoutPage() {
   const [selectedProvider, setSelectedProvider] = useState<"stripe" | "paystack">("stripe");
   const [isRedirecting, setIsRedirecting] = useState(false);
 
+  const [isStep2, setIsStep2] = useState(false);
+
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const stateParam = urlParams.get("state");
+    const step = urlParams.get("step");
     
     if (stateParam) {
       try {
@@ -101,7 +104,12 @@ export default function CheckoutPage() {
     const storedState = sessionStorage.getItem("checkoutState");
     if (storedState) {
       try {
-        setCheckoutState(JSON.parse(storedState));
+        const parsed = JSON.parse(storedState);
+        setCheckoutState(parsed);
+        if (step === "2") {
+          setIsStep2(true);
+          sessionStorage.removeItem("checkoutState");
+        }
       } catch (e) {
         console.error("Failed to parse stored checkout state:", e);
       }
@@ -256,9 +264,19 @@ export default function CheckoutPage() {
     <div className="min-h-screen bg-background py-12 px-4">
       <div className="max-w-2xl mx-auto">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Checkout</h1>
+          {isStep2 && (
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary mb-4">
+              <span className="font-medium">Step 2 of 2: Subscription Setup</span>
+            </div>
+          )}
+          <h1 className="text-3xl font-bold text-foreground">
+            {isStep2 ? "Complete Your Subscription" : "Checkout"}
+          </h1>
           <p className="text-muted-foreground mt-2">
-            Complete your purchase to activate services
+            {isStep2 
+              ? "Set up your annual subscription to continue"
+              : "Complete your purchase to activate services"
+            }
           </p>
         </div>
 

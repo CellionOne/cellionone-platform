@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { identityVerifications } from "@shared/schema";
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, desc } from "drizzle-orm";
 
 const VERIFICATION_VALIDITY_DAYS = 365;
 
@@ -17,11 +17,12 @@ export interface VerificationStatus {
 export async function getVerificationStatus(userId: string): Promise<VerificationStatus> {
   const now = new Date();
   
+  // Always get the most recent verification record (order by createdAt DESC)
   const verification = await db
     .select()
     .from(identityVerifications)
     .where(eq(identityVerifications.founderUserId, userId))
-    .orderBy(identityVerifications.createdAt)
+    .orderBy(desc(identityVerifications.createdAt))
     .limit(1);
 
   if (!verification.length) {
@@ -95,13 +96,16 @@ export async function markUserVerified(
   const expiresAt = new Date(now);
   expiresAt.setDate(expiresAt.getDate() + VERIFICATION_VALIDITY_DAYS);
 
+  // Get the most recent verification record (order by createdAt DESC)
   const existingVerification = await db
     .select()
     .from(identityVerifications)
     .where(eq(identityVerifications.founderUserId, userId))
+    .orderBy(desc(identityVerifications.createdAt))
     .limit(1);
 
   if (existingVerification.length) {
+    // Update the most recent record
     const [updated] = await db
       .update(identityVerifications)
       .set({
@@ -148,13 +152,16 @@ export async function startVerificationSession(
 ): Promise<{ verificationId: number }> {
   const now = new Date();
 
+  // Get the most recent verification record
   const existingVerification = await db
     .select()
     .from(identityVerifications)
     .where(eq(identityVerifications.founderUserId, userId))
+    .orderBy(desc(identityVerifications.createdAt))
     .limit(1);
 
   if (existingVerification.length) {
+    // Update the most recent record
     const [updated] = await db
       .update(identityVerifications)
       .set({

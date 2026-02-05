@@ -40,7 +40,7 @@ const featureFlagUpdateSchema = z.object({
 
 const statusUpdateSchema = z.object({
   status: z.enum([
-    "draft", "submitted", "under_review", "clarification_requested",
+    "draft", "pending_verification", "submitted", "under_review", "clarification_requested",
     "filed", "pending_originals", "courier_in_transit", "completed", "rejected"
   ]),
 });

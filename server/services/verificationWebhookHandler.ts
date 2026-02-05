@@ -4,23 +4,32 @@
  * Handles incoming webhooks from external identity verification services.
  * This is a placeholder implementation that can be adapted for various providers
  * like Smile ID, Onfido, Jumio, etc.
+ * 
+ * SECURITY: Includes signature verification and idempotency handling.
  */
 
 import { db } from "../db";
-import { companyApplications } from "@shared/schema";
+import { companyApplications, identityVerifications } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import * as verificationService from "./verificationService";
 import { storage } from "../storage";
 import type { IncomingHttpHeaders } from "http";
+import crypto from "crypto";
+
+// In-memory set for idempotency (in production, use Redis or database)
+const processedWebhooks = new Set<string>();
+const PROCESSED_WEBHOOK_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
 interface WebhookResult {
   success: boolean;
   error?: string;
   userId?: string;
+  alreadyProcessed?: boolean;
 }
 
 interface VerificationWebhookPayload {
   event: string;
+  eventId?: string;
   data: {
     sessionId: string;
     userId?: string;
@@ -36,31 +45,119 @@ interface VerificationWebhookPayload {
   };
 }
 
+function verifyWebhookSignature(
+  payload: string,
+  signature: string | undefined,
+  secret: string
+): boolean {
+  if (!signature) {
+    return false;
+  }
+
+  // Support multiple signature formats (HMAC-SHA256 is common)
+  const expectedSignature = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  // Constant-time comparison to prevent timing attacks
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expectedSignature)
+    );
+  } catch {
+    // Buffer length mismatch - signatures don't match
+    return false;
+  }
+}
+
+function getIdempotencyKey(payload: VerificationWebhookPayload): string {
+  // Use eventId if available, otherwise combine event + sessionId + timestamp
+  if (payload.eventId) {
+    return payload.eventId;
+  }
+  return `${payload.event}:${payload.data.sessionId}:${payload.data.timestamp || Date.now()}`;
+}
+
+function isWebhookAlreadyProcessed(idempotencyKey: string): boolean {
+  return processedWebhooks.has(idempotencyKey);
+}
+
+function markWebhookProcessed(idempotencyKey: string): void {
+  processedWebhooks.add(idempotencyKey);
+  
+  // Clean up old entries after TTL (simple implementation)
+  setTimeout(() => {
+    processedWebhooks.delete(idempotencyKey);
+  }, PROCESSED_WEBHOOK_TTL);
+}
+
 export async function processVerificationWebhook(
   payload: string,
   headers: IncomingHttpHeaders
 ): Promise<WebhookResult> {
+  // Get webhook secret from environment
+  const webhookSecret = process.env.VERIFICATION_WEBHOOK_SECRET;
+  
+  // SECURITY: Verify webhook signature if secret is configured
+  if (webhookSecret) {
+    const signature = 
+      headers["x-verification-signature"] || 
+      headers["x-webhook-signature"] ||
+      headers["x-signature"];
+    
+    const signatureStr = Array.isArray(signature) ? signature[0] : signature;
+    
+    if (!verifyWebhookSignature(payload, signatureStr, webhookSecret)) {
+      console.error("[Verification Webhook] Invalid signature - rejecting webhook");
+      return { success: false, error: "Invalid webhook signature" };
+    }
+    console.log("[Verification Webhook] Signature verified successfully");
+  } else {
+    console.warn("[Verification Webhook] No VERIFICATION_WEBHOOK_SECRET configured - skipping signature verification (NOT RECOMMENDED FOR PRODUCTION)");
+  }
+
   try {
     const data: VerificationWebhookPayload = JSON.parse(payload);
     
-    console.log(`[Verification Webhook] Received event: ${data.event}`);
+    // Idempotency check - prevent duplicate processing
+    const idempotencyKey = getIdempotencyKey(data);
+    if (isWebhookAlreadyProcessed(idempotencyKey)) {
+      console.log(`[Verification Webhook] Duplicate webhook detected, skipping: ${idempotencyKey}`);
+      return { success: true, alreadyProcessed: true };
+    }
+    
+    console.log(`[Verification Webhook] Processing event: ${data.event} (key: ${idempotencyKey})`);
+    
+    let result: WebhookResult;
     
     switch (data.event) {
       case "verification.completed":
       case "verification.approved":
-        return await handleVerificationApproved(data.data);
+        result = await handleVerificationApproved(data.data);
+        break;
         
       case "verification.declined":
       case "verification.failed":
-        return await handleVerificationDeclined(data.data);
+        result = await handleVerificationDeclined(data.data);
+        break;
         
       case "verification.pending":
-        return await handleVerificationPending(data.data);
+        result = await handleVerificationPending(data.data);
+        break;
         
       default:
         console.log(`[Verification Webhook] Unhandled event type: ${data.event}`);
-        return { success: true };
+        result = { success: true };
     }
+    
+    // Mark as processed only on success
+    if (result.success) {
+      markWebhookProcessed(idempotencyKey);
+    }
+    
+    return result;
   } catch (error: any) {
     console.error("[Verification Webhook] Parse error:", error.message);
     return { success: false, error: "Invalid payload" };
@@ -76,6 +173,12 @@ async function handleVerificationApproved(
     if (!verification) {
       console.error(`[Verification Webhook] No verification found for session: ${data.sessionId}`);
       return { success: false, error: "Verification session not found" };
+    }
+    
+    // Check if already verified (additional idempotency at data level)
+    if (verification.status === "verified") {
+      console.log(`[Verification Webhook] User ${verification.founderUserId} already verified, skipping`);
+      return { success: true, userId: verification.founderUserId, alreadyProcessed: true };
     }
     
     const userId = verification.founderUserId;
@@ -121,7 +224,11 @@ async function handleVerificationDeclined(
       return { success: false, error: "Verification session not found" };
     }
     
-    const { identityVerifications } = await import("@shared/schema");
+    // Check if already processed
+    if (verification.status === "rejected") {
+      console.log(`[Verification Webhook] Verification ${verification.id} already rejected, skipping`);
+      return { success: true, userId: verification.founderUserId, alreadyProcessed: true };
+    }
     
     await db
       .update(identityVerifications)
@@ -170,6 +277,12 @@ async function updatePendingApplications(userId: string): Promise<void> {
     );
   
   for (const app of pendingApps) {
+    // Additional idempotency: check if already submitted
+    if (app.status !== "pending_verification") {
+      console.log(`[Verification Webhook] Application ${app.id} already processed, skipping`);
+      continue;
+    }
+    
     await db
       .update(companyApplications)
       .set({
@@ -177,7 +290,12 @@ async function updatePendingApplications(userId: string): Promise<void> {
         submittedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(companyApplications.id, app.id));
+      .where(
+        and(
+          eq(companyApplications.id, app.id),
+          eq(companyApplications.status, "pending_verification") // Ensure we only update if still pending
+        )
+      );
     
     await storage.createAuditLog({
       actorUserId: userId,

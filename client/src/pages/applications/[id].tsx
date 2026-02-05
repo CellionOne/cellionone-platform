@@ -36,6 +36,7 @@ interface ApplicationDetails {
 
 const statusTimeline = [
   { status: "draft", label: "Draft", icon: FileText },
+  { status: "pending_verification", label: "Awaiting Verification", icon: AlertCircle },
   { status: "submitted", label: "Submitted", icon: Clock },
   { status: "under_review", label: "Under Review", icon: AlertCircle },
   { status: "filed", label: "Filed", icon: CheckCircle2 },

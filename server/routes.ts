@@ -6,7 +6,9 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines } from "@shared/schema";
+import { db } from "./db";
+import { eq, desc, and, asc } from "drizzle-orm";
 import * as services from "./services";
 import { registeredOfficeService } from "./services/registeredOfficeService";
 import { mailroomService } from "./services/mailroomService";
@@ -3300,6 +3302,635 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error: any) {
       console.error("Error processing approval:", error);
       res.status(500).json({ message: error.message || "Failed to process approval" });
+    }
+  });
+
+  // ============== LEGAL AI CHAT ==============
+
+  app.get("/api/legal-chat/conversations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const conversations = await db
+        .select()
+        .from(legalChatConversations)
+        .where(eq(legalChatConversations.userId, userId))
+        .orderBy(desc(legalChatConversations.updatedAt));
+
+      res.json(conversations);
+    } catch (error: any) {
+      console.error("Error fetching conversations:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch conversations" });
+    }
+  });
+
+  app.post("/api/legal-chat/conversations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const [conversation] = await db
+        .insert(legalChatConversations)
+        .values({ userId, title: "New Conversation" })
+        .returning();
+
+      res.json(conversation);
+    } catch (error: any) {
+      console.error("Error creating conversation:", error);
+      res.status(500).json({ message: error.message || "Failed to create conversation" });
+    }
+  });
+
+  app.get("/api/legal-chat/conversations/:id/messages", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const conversationId = parseInt(req.params.id);
+      if (isNaN(conversationId)) return res.status(400).json({ message: "Invalid conversation ID" });
+
+      const [conversation] = await db
+        .select()
+        .from(legalChatConversations)
+        .where(eq(legalChatConversations.id, conversationId));
+
+      if (!conversation || conversation.userId !== userId) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+
+      const messages = await db
+        .select()
+        .from(legalChatMessages)
+        .where(eq(legalChatMessages.conversationId, conversationId))
+        .orderBy(legalChatMessages.createdAt);
+
+      res.json(messages);
+    } catch (error: any) {
+      console.error("Error fetching messages:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch messages" });
+    }
+  });
+
+  app.post("/api/legal-chat/conversations/:id/messages", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const conversationId = parseInt(req.params.id);
+      if (isNaN(conversationId)) return res.status(400).json({ message: "Invalid conversation ID" });
+
+      const { content } = req.body;
+      if (!content || typeof content !== "string" || !content.trim()) {
+        return res.status(400).json({ message: "Message content is required" });
+      }
+
+      const [conversation] = await db
+        .select()
+        .from(legalChatConversations)
+        .where(eq(legalChatConversations.id, conversationId));
+
+      if (!conversation || conversation.userId !== userId) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+
+      const [userMessage] = await db
+        .insert(legalChatMessages)
+        .values({ conversationId, role: "user", content: content.trim() })
+        .returning();
+
+      const existingMessages = await db
+        .select()
+        .from(legalChatMessages)
+        .where(eq(legalChatMessages.conversationId, conversationId))
+        .orderBy(legalChatMessages.createdAt);
+
+      const isFirstMessage = existingMessages.length === 1;
+      if (isFirstMessage) {
+        const title = content.trim().substring(0, 50) + (content.trim().length > 50 ? "..." : "");
+        await db
+          .update(legalChatConversations)
+          .set({ title, updatedAt: new Date() })
+          .where(eq(legalChatConversations.id, conversationId));
+      } else {
+        await db
+          .update(legalChatConversations)
+          .set({ updatedAt: new Date() })
+          .where(eq(legalChatConversations.id, conversationId));
+      }
+
+      const ai = getOpenAI();
+      if (!ai) {
+        return res.status(503).json({ message: "AI service is not configured" });
+      }
+
+      const recentMessages = existingMessages.slice(-20);
+      const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+        {
+          role: "system",
+          content: `You are Celion Legal AI, an expert assistant on Nigerian corporate law and the Companies and Allied Matters Act (CAMA) 2020. You help founders understand:
+- Company incorporation processes with the Corporate Affairs Commission (CAC)
+- Post-incorporation requirements (TIN, VAT, PAYE, company seal)
+- Compliance obligations (annual returns, tax filings)
+- Director and shareholder responsibilities
+- Business name registration vs company incorporation
+- Share capital requirements and structures
+- Nigerian business regulations and permits
+
+Important guidelines:
+- Always clarify you are an AI assistant, not a lawyer
+- Recommend consulting a qualified lawyer for specific legal advice
+- Be specific to Nigerian law and CAC procedures
+- Reference CAMA 2020 provisions where relevant
+- Keep responses clear, concise, and practical
+- If unsure about something, say so rather than guessing`,
+        },
+        ...recentMessages.map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        })),
+      ];
+
+      const completion = await ai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: chatMessages,
+        max_tokens: 1024,
+      });
+
+      const aiContent = completion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response. Please try again.";
+
+      const [aiMessage] = await db
+        .insert(legalChatMessages)
+        .values({ conversationId, role: "assistant", content: aiContent })
+        .returning();
+
+      res.json({ userMessage, aiMessage });
+    } catch (error: any) {
+      console.error("Error sending message:", error);
+      res.status(500).json({ message: error.message || "Failed to send message" });
+    }
+  });
+
+  app.delete("/api/legal-chat/conversations/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const conversationId = parseInt(req.params.id);
+      if (isNaN(conversationId)) return res.status(400).json({ message: "Invalid conversation ID" });
+
+      const [conversation] = await db
+        .select()
+        .from(legalChatConversations)
+        .where(eq(legalChatConversations.id, conversationId));
+
+      if (!conversation || conversation.userId !== userId) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+
+      await db
+        .delete(legalChatMessages)
+        .where(eq(legalChatMessages.conversationId, conversationId));
+
+      await db
+        .delete(legalChatConversations)
+        .where(eq(legalChatConversations.id, conversationId));
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting conversation:", error);
+      res.status(500).json({ message: error.message || "Failed to delete conversation" });
+    }
+  });
+
+  // ============== COMPANY PROFILE ROUTES ==============
+
+  const DEFAULT_POST_INC_TASKS = [
+    { taskKey: "tin_registration", title: "Register for Tax Identification Number (TIN)", description: "Register your company with the Federal Inland Revenue Service (FIRS) to obtain a TIN.", guidance: "Visit the nearest FIRS office or apply online at www.firs.gov.ng. Required documents: CAC certificate, Memorandum of Association, utility bill, completed TIN application form. Processing typically takes 2-5 business days.", sortOrder: 1 },
+    { taskKey: "bank_account", title: "Open a Corporate Bank Account", description: "Open a business bank account in your company's name for all business transactions.", guidance: "Visit any commercial bank with: CAC certificate (certified true copy), Memorandum & Articles of Association, Board resolution to open account, Company TIN, Completed account opening forms, Valid IDs of directors/signatories. Compare bank charges and services before choosing.", sortOrder: 2 },
+    { taskKey: "company_seal", title: "Obtain Company Common Seal", description: "Get an official company seal/stamp bearing the company name and RC number.", guidance: "Order from any registered seal maker. The seal must bear your company name exactly as registered with CAC and your RC number. Cost typically ranges from \u20A65,000 - \u20A615,000. Required for executing deeds and certain legal documents.", sortOrder: 3 },
+    { taskKey: "vat_registration", title: "Register for Value Added Tax (VAT)", description: "If your business supplies taxable goods or services, register for VAT with FIRS.", guidance: "VAT registration is mandatory if your annual turnover exceeds \u20A625 million or if you supply VAT-able goods/services. Apply at the FIRS office with your TIN, CAC documents, and completed VAT registration form. VAT is currently 7.5% in Nigeria.", sortOrder: 4 },
+    { taskKey: "paye_registration", title: "Register for PAYE (Pay As You Earn)", description: "Register with the State Internal Revenue Service for employee tax deductions.", guidance: "Required once you start employing staff. Register with the State IRS where your business operates. You'll need: Company TIN, CAC certificate, list of employees with their salary details. PAYE must be remitted monthly by the 10th of the following month.", sortOrder: 5 },
+    { taskKey: "pension_setup", title: "Set Up Pension Scheme", description: "Register with the National Pension Commission (PenCom) if you have 3 or more employees.", guidance: "Under the Pension Reform Act 2014, employers with 3+ employees must contribute to the Contributory Pension Scheme. Employer contributes minimum 10% and employee minimum 8% of basic salary. Register with a licensed Pension Fund Administrator (PFA).", sortOrder: 6 },
+    { taskKey: "scuml_registration", title: "SCUML Registration (if applicable)", description: "Register with the Special Control Unit against Money Laundering if your business type requires it.", guidance: "Designated Non-Financial Businesses and Professions (DNFBPs) must register with SCUML. This includes: legal practitioners, accountants, real estate agents, dealers in precious metals, and NGOs. Register at scuml.org.ng with your CAC documents.", sortOrder: 7 },
+    { taskKey: "business_premises", title: "Register Business Premises", description: "Register your business premises with the relevant state/local government authority.", guidance: "Most states require businesses to register their premises and obtain a Business Premises Permit. Visit your Local Government Authority or State Ministry of Commerce. Fees vary by state and business size. Renewal is typically annual.", sortOrder: 8 },
+    { taskKey: "annual_returns_setup", title: "Set Up Annual Returns Calendar", description: "Mark your annual returns filing deadline and set up reminders to avoid penalties.", guidance: "Companies must file annual returns with CAC within 42 days of their incorporation anniversary date. Late filing attracts a penalty of \u20A65,000 plus \u20A650 per day for every day of default. Use Celion One's Compliance Calendar to track this automatically.", sortOrder: 9 },
+    { taskKey: "statutory_registers", title: "Maintain Statutory Registers", description: "Set up and maintain the required statutory books and registers for your company.", guidance: "Under CAMA 2020, every company must maintain: Register of Members, Register of Directors, Register of Charges, Minutes Book for Board and General Meetings, Register of Debenture Holders (if applicable). These must be kept at the registered office and available for inspection.", sortOrder: 10 },
+  ];
+
+  app.get("/api/founder/company-profiles", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profiles = await db
+        .select()
+        .from(companyProfiles)
+        .where(eq(companyProfiles.founderId, userId))
+        .orderBy(desc(companyProfiles.createdAt));
+      res.json(profiles);
+    } catch (error: any) {
+      console.error("Error fetching company profiles:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch company profiles" });
+    }
+  });
+
+  app.get("/api/founder/company-profiles/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const [profile] = await db
+        .select()
+        .from(companyProfiles)
+        .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+
+      if (!profile) return res.status(404).json({ message: "Company profile not found" });
+
+      const tasks = await db
+        .select()
+        .from(postIncorporationTasks)
+        .where(eq(postIncorporationTasks.companyProfileId, profileId))
+        .orderBy(asc(postIncorporationTasks.sortOrder));
+
+      res.json({ ...profile, tasks });
+    } catch (error: any) {
+      console.error("Error fetching company profile:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch company profile" });
+    }
+  });
+
+  app.put("/api/founder/company-profiles/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const [existing] = await db
+        .select()
+        .from(companyProfiles)
+        .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+
+      if (!existing) return res.status(404).json({ message: "Company profile not found" });
+
+      const allowedFields: Record<string, any> = {};
+      if (req.body.rcNumber !== undefined) allowedFields.rcNumber = req.body.rcNumber;
+      if (req.body.tinNumber !== undefined) allowedFields.tinNumber = req.body.tinNumber;
+      if (req.body.incorporationDate !== undefined) allowedFields.incorporationDate = req.body.incorporationDate ? new Date(req.body.incorporationDate) : null;
+      allowedFields.updatedAt = new Date();
+
+      const [updated] = await db
+        .update(companyProfiles)
+        .set(allowedFields)
+        .where(eq(companyProfiles.id, profileId))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating company profile:", error);
+      res.status(500).json({ message: error.message || "Failed to update company profile" });
+    }
+  });
+
+  app.post("/api/founder/company-profiles/from-application/:applicationId", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.applicationId, 10);
+      if (isNaN(applicationId)) return res.status(400).json({ message: "Invalid application ID" });
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      if (application.founderUserId !== userId) return res.status(403).json({ message: "Forbidden" });
+      if (!["completed", "filed"].includes(application.status || "")) {
+        return res.status(400).json({ message: "Application must be completed or filed to create a company profile" });
+      }
+
+      const [existingProfile] = await db
+        .select()
+        .from(companyProfiles)
+        .where(and(eq(companyProfiles.applicationId, applicationId), eq(companyProfiles.founderId, userId)));
+
+      if (existingProfile) {
+        return res.status(409).json({ message: "A company profile already exists for this application", profile: existingProfile });
+      }
+
+      const [newProfile] = await db
+        .insert(companyProfiles)
+        .values({
+          applicationId,
+          founderId: userId,
+          companyName: application.companyName1 || "Unnamed Company",
+          companyType: application.companyType || "LTD",
+          registeredAddress: application.registeredAddress as any,
+          directors: (application.directorsData as any) || [],
+          shareholders: (application.shareholdersData as any) || [],
+          businessActivities: (application.selectedActivities as any) || [],
+          incorporationDate: application.completedAt || new Date(),
+        })
+        .returning();
+
+      for (const task of DEFAULT_POST_INC_TASKS) {
+        await db.insert(postIncorporationTasks).values({
+          companyProfileId: newProfile.id,
+          founderId: userId,
+          ...task,
+          status: "not_started",
+        });
+      }
+
+      const tasks = await db
+        .select()
+        .from(postIncorporationTasks)
+        .where(eq(postIncorporationTasks.companyProfileId, newProfile.id))
+        .orderBy(asc(postIncorporationTasks.sortOrder));
+
+      res.json({ ...newProfile, tasks });
+    } catch (error: any) {
+      console.error("Error creating company profile from application:", error);
+      res.status(500).json({ message: error.message || "Failed to create company profile" });
+    }
+  });
+
+  // ============== POST-INCORPORATION CHECKLIST ROUTES ==============
+
+  app.get("/api/founder/company-profiles/:id/checklist", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const [profile] = await db
+        .select()
+        .from(companyProfiles)
+        .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+
+      if (!profile) return res.status(404).json({ message: "Company profile not found" });
+
+      const tasks = await db
+        .select()
+        .from(postIncorporationTasks)
+        .where(eq(postIncorporationTasks.companyProfileId, profileId))
+        .orderBy(asc(postIncorporationTasks.sortOrder));
+
+      res.json(tasks);
+    } catch (error: any) {
+      console.error("Error fetching checklist:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch checklist" });
+    }
+  });
+
+  app.put("/api/founder/company-profiles/:id/checklist/:taskId", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const taskId = parseInt(req.params.taskId, 10);
+      if (isNaN(profileId) || isNaN(taskId)) return res.status(400).json({ message: "Invalid ID" });
+
+      const [profile] = await db
+        .select()
+        .from(companyProfiles)
+        .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+
+      if (!profile) return res.status(404).json({ message: "Company profile not found" });
+
+      const [task] = await db
+        .select()
+        .from(postIncorporationTasks)
+        .where(and(eq(postIncorporationTasks.id, taskId), eq(postIncorporationTasks.companyProfileId, profileId)));
+
+      if (!task) return res.status(404).json({ message: "Task not found" });
+
+      const updateData: Record<string, any> = { updatedAt: new Date() };
+      if (req.body.status !== undefined) {
+        updateData.status = req.body.status;
+        if (req.body.status === "completed") {
+          updateData.completedAt = new Date();
+        } else {
+          updateData.completedAt = null;
+        }
+      }
+      if (req.body.notes !== undefined) updateData.notes = req.body.notes;
+
+      const [updated] = await db
+        .update(postIncorporationTasks)
+        .set(updateData)
+        .where(eq(postIncorporationTasks.id, taskId))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating checklist task:", error);
+      res.status(500).json({ message: error.message || "Failed to update task" });
+    }
+  });
+
+  // ============== COMPLIANCE CALENDAR ROUTES ==============
+
+  function generateComplianceDeadlines(companyProfileId: number, founderId: string, incorporationDate: Date) {
+    const incDate = new Date(incorporationDate);
+    const currentYear = new Date().getFullYear();
+
+    const getNextAnnualReturnDate = () => {
+      let anniversaryYear = currentYear;
+      let anniversary = new Date(anniversaryYear, incDate.getMonth(), incDate.getDate());
+      let deadline = new Date(anniversary);
+      deadline.setDate(deadline.getDate() + 42);
+      if (deadline < new Date()) {
+        anniversaryYear++;
+        anniversary = new Date(anniversaryYear, incDate.getMonth(), incDate.getDate());
+        deadline = new Date(anniversary);
+        deadline.setDate(deadline.getDate() + 42);
+      }
+      return deadline;
+    };
+
+    const getNextQuarterEnd = () => {
+      const now = new Date();
+      const quarterMonth = Math.ceil((now.getMonth() + 1) / 3) * 3;
+      let quarterEnd = new Date(now.getFullYear(), quarterMonth, 0);
+      if (quarterEnd < now) {
+        quarterEnd = new Date(now.getFullYear(), quarterMonth + 3, 0);
+      }
+      const dueDate = new Date(quarterEnd);
+      dueDate.setDate(dueDate.getDate() + 21);
+      return dueDate;
+    };
+
+    return [
+      {
+        companyProfileId,
+        founderId,
+        deadlineType: "annual_return",
+        title: "CAC Annual Returns Filing",
+        description: "File your annual returns with the Corporate Affairs Commission (CAC).",
+        dueDate: getNextAnnualReturnDate(),
+        penaltyInfo: "Late filing penalty: ₦5,000 base fee plus ₦50 per day of default. Persistent non-filing may lead to company striking off the register.",
+        isRecurring: true,
+        recurrenceRule: "yearly",
+        status: "upcoming",
+      },
+      {
+        companyProfileId,
+        founderId,
+        deadlineType: "tax_filing",
+        title: "Company Income Tax (CIT) Returns",
+        description: "File your company income tax returns with the Federal Inland Revenue Service (FIRS).",
+        dueDate: new Date(currentYear, 5, 30),
+        penaltyInfo: "Penalty for late filing: ₦25,000 for the first month and ₦5,000 for each subsequent month. Plus interest on unpaid tax at prevailing CBN lending rate.",
+        isRecurring: true,
+        recurrenceRule: "yearly",
+        status: "upcoming",
+      },
+      {
+        companyProfileId,
+        founderId,
+        deadlineType: "vat_return",
+        title: "VAT Returns (Quarterly)",
+        description: "File and remit your Value Added Tax returns to FIRS if registered for VAT.",
+        dueDate: getNextQuarterEnd(),
+        penaltyInfo: "Penalty for late filing: ₦5,000 for the first month and ₦5,000 for each subsequent month. Plus 5% per annum interest above CBN rediscount rate on unpaid VAT.",
+        isRecurring: true,
+        recurrenceRule: "quarterly",
+        status: "upcoming",
+      },
+      {
+        companyProfileId,
+        founderId,
+        deadlineType: "paye_remittance",
+        title: "PAYE Monthly Remittance",
+        description: "Remit employee PAYE deductions to the State Internal Revenue Service by the 10th of each month.",
+        dueDate: (() => { const d = new Date(); d.setMonth(d.getMonth() + 1); d.setDate(10); return d; })(),
+        penaltyInfo: "Penalty for late remittance: 10% of the tax due plus interest at CBN minimum rediscount rate. Employers may face prosecution for persistent defaults.",
+        isRecurring: true,
+        recurrenceRule: "monthly",
+        status: "upcoming",
+      },
+      {
+        companyProfileId,
+        founderId,
+        deadlineType: "audit_filing",
+        title: "Annual Audit & Financial Statements",
+        description: "Prepare audited financial statements and file with CAC alongside annual returns.",
+        dueDate: getNextAnnualReturnDate(),
+        penaltyInfo: "Must be filed alongside annual returns. Companies that fail to keep proper accounting records may face fines of up to ₦500,000 under CAMA 2020.",
+        isRecurring: true,
+        recurrenceRule: "yearly",
+        status: "upcoming",
+      },
+    ];
+  }
+
+  app.get("/api/founder/company-profiles/:id/compliance", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const [profile] = await db
+        .select()
+        .from(companyProfiles)
+        .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+
+      if (!profile) return res.status(404).json({ message: "Company profile not found" });
+
+      const deadlines = await db
+        .select()
+        .from(complianceDeadlines)
+        .where(eq(complianceDeadlines.companyProfileId, profileId))
+        .orderBy(asc(complianceDeadlines.dueDate));
+
+      res.json(deadlines);
+    } catch (error: any) {
+      console.error("Error fetching compliance deadlines:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch compliance deadlines" });
+    }
+  });
+
+  app.put("/api/founder/company-profiles/:id/compliance/:deadlineId", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const deadlineId = parseInt(req.params.deadlineId, 10);
+      if (isNaN(profileId) || isNaN(deadlineId)) return res.status(400).json({ message: "Invalid ID" });
+
+      const [profile] = await db
+        .select()
+        .from(companyProfiles)
+        .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+
+      if (!profile) return res.status(404).json({ message: "Company profile not found" });
+
+      const [deadline] = await db
+        .select()
+        .from(complianceDeadlines)
+        .where(and(eq(complianceDeadlines.id, deadlineId), eq(complianceDeadlines.companyProfileId, profileId)));
+
+      if (!deadline) return res.status(404).json({ message: "Deadline not found" });
+
+      const updateData: Record<string, any> = { updatedAt: new Date() };
+      if (req.body.status !== undefined) {
+        updateData.status = req.body.status;
+        if (req.body.status === "completed") {
+          updateData.completedAt = new Date();
+        } else {
+          updateData.completedAt = null;
+        }
+      }
+      if (req.body.notes !== undefined) updateData.notes = req.body.notes;
+
+      const [updated] = await db
+        .update(complianceDeadlines)
+        .set(updateData)
+        .where(eq(complianceDeadlines.id, deadlineId))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating compliance deadline:", error);
+      res.status(500).json({ message: error.message || "Failed to update compliance deadline" });
+    }
+  });
+
+  app.post("/api/founder/company-profiles/:id/compliance/generate", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const [profile] = await db
+        .select()
+        .from(companyProfiles)
+        .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+
+      if (!profile) return res.status(404).json({ message: "Company profile not found" });
+
+      const incorporationDate = profile.incorporationDate || new Date();
+      const deadlinesData = generateComplianceDeadlines(profileId, userId, incorporationDate);
+
+      const now = new Date();
+      const fourteenDaysFromNow = new Date();
+      fourteenDaysFromNow.setDate(fourteenDaysFromNow.getDate() + 14);
+
+      const insertedDeadlines = [];
+      for (const dl of deadlinesData) {
+        let status = "upcoming";
+        if (dl.dueDate < now) {
+          status = "overdue";
+        } else if (dl.dueDate <= fourteenDaysFromNow) {
+          status = "due_soon";
+        }
+
+        const [inserted] = await db
+          .insert(complianceDeadlines)
+          .values({ ...dl, status })
+          .returning();
+
+        insertedDeadlines.push(inserted);
+      }
+
+      res.json(insertedDeadlines);
+    } catch (error: any) {
+      console.error("Error generating compliance deadlines:", error);
+      res.status(500).json({ message: error.message || "Failed to generate compliance deadlines" });
     }
   });
 

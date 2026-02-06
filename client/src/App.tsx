@@ -15,6 +15,10 @@ import FounderApplications from "@/pages/founder/applications";
 import FounderVault from "@/pages/founder/vault";
 import FounderRegisteredOffice from "@/pages/founder/registered-office";
 import FounderMail from "@/pages/founder/mail";
+import FounderLegalAssistant from "@/pages/founder/legal-assistant";
+import FounderCompanyProfile from "@/pages/founder/company-profile";
+import FounderPostIncChecklist from "@/pages/founder/post-inc-checklist";
+import FounderComplianceCalendar from "@/pages/founder/compliance-calendar";
 import NewApplication from "@/pages/applications/new";
 import ApplicationDetails from "@/pages/applications/[id]";
 import LawyerDashboard from "@/pages/lawyer/dashboard";
@@ -147,6 +151,18 @@ function Router() {
       </Route>
       <Route path="/founder/mail">
         <ProtectedRoute component={FounderMail} />
+      </Route>
+      <Route path="/founder/legal-assistant">
+        <ProtectedRoute component={FounderLegalAssistant} />
+      </Route>
+      <Route path="/founder/company-profile">
+        <ProtectedRoute component={FounderCompanyProfile} />
+      </Route>
+      <Route path="/founder/post-inc-checklist">
+        <ProtectedRoute component={FounderPostIncChecklist} />
+      </Route>
+      <Route path="/founder/compliance">
+        <ProtectedRoute component={FounderComplianceCalendar} />
       </Route>
       
       <Route path="/applications/new">

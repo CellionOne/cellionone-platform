@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { startSubscriptionScheduler } from "./services/subscriptionScheduler";
+import { runComplianceDeadlineCheck } from "./services/complianceScheduler";
 import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUploadMiddleware } from "./middleware/security";
 
 const app = express();
@@ -226,6 +227,9 @@ app.use((req, res, next) => {
       
       // Start the subscription scheduler for expiry/renewal processing
       startSubscriptionScheduler();
+      
+      // Run compliance deadline check daily
+      runComplianceDeadlineCheck().catch(console.error);
     },
   );
 })();

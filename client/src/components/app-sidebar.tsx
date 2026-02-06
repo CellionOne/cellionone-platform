@@ -31,6 +31,10 @@ import {
   Receipt,
   UserPlus,
   Mail,
+  MessageSquare,
+  Calendar,
+  ListChecks,
+  Briefcase,
 } from "lucide-react";
 
 interface NavItem {
@@ -43,9 +47,13 @@ const founderItems: NavItem[] = [
   { title: "Dashboard", url: "/founder/dashboard", icon: LayoutDashboard },
   { title: "Identity Verification", url: "/founder/identity", icon: User },
   { title: "My Applications", url: "/founder/applications", icon: FileText },
+  { title: "Company Profile", url: "/founder/company-profile", icon: Briefcase },
+  { title: "Checklist", url: "/founder/post-inc-checklist", icon: ListChecks },
+  { title: "Compliance Calendar", url: "/founder/compliance", icon: Calendar },
   { title: "Document Vault", url: "/founder/vault", icon: FolderOpen },
   { title: "Registered Office", url: "/founder/registered-office", icon: Building2 },
   { title: "Mail Handling", url: "/founder/mail", icon: Mail },
+  { title: "Legal AI", url: "/founder/legal-assistant", icon: MessageSquare },
 ];
 
 const lawyerItems: NavItem[] = [

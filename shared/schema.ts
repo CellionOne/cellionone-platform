@@ -642,3 +642,114 @@ export const mailApprovalRequests = pgTable("mail_approval_requests", {
 export const insertMailApprovalRequestSchema = createInsertSchema(mailApprovalRequests).omit({ id: true, createdAt: true });
 export type MailApprovalRequest = typeof mailApprovalRequests.$inferSelect;
 export type InsertMailApprovalRequest = z.infer<typeof insertMailApprovalRequestSchema>;
+
+// ============== LEGAL AI CHAT ==============
+export const legalChatConversations = pgTable("legal_chat_conversations", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull(),
+  title: varchar("title", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [index("idx_legal_chat_user").on(table.userId)]);
+
+export const insertLegalChatConversationSchema = createInsertSchema(legalChatConversations).omit({ id: true, createdAt: true, updatedAt: true });
+export type LegalChatConversation = typeof legalChatConversations.$inferSelect;
+export type InsertLegalChatConversation = z.infer<typeof insertLegalChatConversationSchema>;
+
+export const legalChatMessages = pgTable("legal_chat_messages", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id").notNull(),
+  role: varchar("role", { length: 20 }).notNull(), // user, assistant
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [index("idx_legal_chat_messages_conv").on(table.conversationId)]);
+
+export const insertLegalChatMessageSchema = createInsertSchema(legalChatMessages).omit({ id: true, createdAt: true });
+export type LegalChatMessage = typeof legalChatMessages.$inferSelect;
+export type InsertLegalChatMessage = z.infer<typeof insertLegalChatMessageSchema>;
+
+// ============== COMPANY PROFILE ==============
+export const companyProfiles = pgTable("company_profiles", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  founderId: varchar("founder_id").notNull(),
+  companyName: varchar("company_name", { length: 255 }).notNull(),
+  rcNumber: varchar("rc_number", { length: 100 }),
+  companyType: varchar("company_type", { length: 100 }),
+  incorporationDate: timestamp("incorporation_date"),
+  registeredAddress: json("registered_address").$type<{
+    line1?: string;
+    line2?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+  }>(),
+  directors: json("directors").$type<{ name: string; role?: string; email?: string }[]>(),
+  shareholders: json("shareholders").$type<{ name: string; shares?: number; percentage?: number }[]>(),
+  businessActivities: json("business_activities").$type<string[]>(),
+  shareCapital: varchar("share_capital", { length: 255 }),
+  tinNumber: varchar("tin_number", { length: 100 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_company_profiles_founder").on(table.founderId),
+  index("idx_company_profiles_application").on(table.applicationId),
+]);
+
+export const insertCompanyProfileSchema = createInsertSchema(companyProfiles).omit({ id: true, createdAt: true, updatedAt: true });
+export type CompanyProfile = typeof companyProfiles.$inferSelect;
+export type InsertCompanyProfile = z.infer<typeof insertCompanyProfileSchema>;
+
+// ============== POST-INCORPORATION CHECKLIST ==============
+export const postIncorporationTasks = pgTable("post_incorporation_tasks", {
+  id: serial("id").primaryKey(),
+  companyProfileId: integer("company_profile_id").notNull(),
+  founderId: varchar("founder_id").notNull(),
+  taskKey: varchar("task_key", { length: 100 }).notNull(), // tin_registration, bank_account, vat_registration, company_seal, scuml_registration, pension_setup, employee_registration, business_premises, annual_returns_setup
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  guidance: text("guidance"),
+  status: varchar("status", { length: 50 }).default("not_started"), // not_started, in_progress, completed, skipped
+  completedAt: timestamp("completed_at"),
+  notes: text("notes"),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_post_inc_tasks_company").on(table.companyProfileId),
+  index("idx_post_inc_tasks_founder").on(table.founderId),
+]);
+
+export const insertPostIncorporationTaskSchema = createInsertSchema(postIncorporationTasks).omit({ id: true, createdAt: true, updatedAt: true });
+export type PostIncorporationTask = typeof postIncorporationTasks.$inferSelect;
+export type InsertPostIncorporationTask = z.infer<typeof insertPostIncorporationTaskSchema>;
+
+// ============== COMPLIANCE DEADLINE ==============
+export const complianceDeadlines = pgTable("compliance_deadlines", {
+  id: serial("id").primaryKey(),
+  companyProfileId: integer("company_profile_id").notNull(),
+  founderId: varchar("founder_id").notNull(),
+  deadlineType: varchar("deadline_type", { length: 100 }).notNull(), // annual_return, tax_filing, vat_return, paye_remittance, audit_filing
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  dueDate: timestamp("due_date").notNull(),
+  penaltyInfo: text("penalty_info"),
+  status: varchar("status", { length: 50 }).default("upcoming"), // upcoming, due_soon, overdue, completed
+  completedAt: timestamp("completed_at"),
+  isRecurring: boolean("is_recurring").default(true),
+  recurrenceRule: varchar("recurrence_rule", { length: 100 }), // yearly, quarterly, monthly
+  lastNotifiedAt: timestamp("last_notified_at"),
+  notes: text("notes"),
+  notificationsSent: integer("notifications_sent").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_compliance_deadlines_company").on(table.companyProfileId),
+  index("idx_compliance_deadlines_founder").on(table.founderId),
+  index("idx_compliance_deadlines_due").on(table.dueDate),
+  index("idx_compliance_deadlines_status").on(table.status),
+]);
+
+export const insertComplianceDeadlineSchema = createInsertSchema(complianceDeadlines).omit({ id: true, createdAt: true, updatedAt: true });
+export type ComplianceDeadline = typeof complianceDeadlines.$inferSelect;
+export type InsertComplianceDeadline = z.infer<typeof insertComplianceDeadlineSchema>;

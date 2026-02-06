@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { useAuth } from "@/hooks/use-auth";
+import { Progress } from "@/components/ui/progress";
 import {
   FileText,
   Plus,
@@ -19,8 +20,12 @@ import {
   Building2,
   ShieldCheck,
   CalendarClock,
+  ListChecks,
+  Calendar,
+  MessageSquare,
+  AlertTriangle,
 } from "lucide-react";
-import type { CompanyApplication, IdentityVerification } from "@shared/schema";
+import type { CompanyApplication, IdentityVerification, CompanyProfile, PostIncorporationTask, ComplianceDeadline } from "@shared/schema";
 
 interface DashboardData {
   applications: CompanyApplication[];
@@ -52,6 +57,22 @@ export default function FounderDashboard() {
 
   const { data: verificationStatus } = useQuery<VerificationStatus>({
     queryKey: ["/api/founder/verification-status"],
+  });
+
+  const { data: profiles } = useQuery<CompanyProfile[]>({
+    queryKey: ["/api/founder/company-profiles"],
+  });
+
+  const firstProfileId = profiles?.[0]?.id;
+
+  const { data: tasks } = useQuery<PostIncorporationTask[]>({
+    queryKey: ["/api/founder/company-profiles", firstProfileId, "checklist"],
+    enabled: !!firstProfileId,
+  });
+
+  const { data: deadlines } = useQuery<ComplianceDeadline[]>({
+    queryKey: ["/api/founder/company-profiles", firstProfileId, "compliance"],
+    enabled: !!firstProfileId,
   });
 
   const getGreeting = () => {
@@ -236,6 +257,118 @@ export default function FounderDashboard() {
                   </Button>
                 </CardHeader>
               </Card>
+            )}
+
+            {profiles && profiles.length > 0 && (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <Card className="hover-elevate" data-testid="widget-checklist">
+                  <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Post-Inc. Checklist
+                    </CardTitle>
+                    <ListChecks className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {tasks && tasks.length > 0 ? (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-2xl font-bold">
+                            {tasks.filter(t => t.status === "completed").length}/{tasks.length}
+                          </span>
+                          <span className="text-sm text-muted-foreground">completed</span>
+                        </div>
+                        <Progress 
+                          value={(tasks.filter(t => t.status === "completed").length / tasks.length) * 100} 
+                          className="h-2"
+                        />
+                        <Button variant="ghost" size="sm" asChild className="w-full" data-testid="link-checklist">
+                          <Link href="/founder/post-inc-checklist">
+                            View Checklist
+                            <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                          </Link>
+                        </Button>
+                      </>
+                    ) : (
+                      <Button variant="ghost" size="sm" asChild className="w-full" data-testid="link-checklist-start">
+                        <Link href="/founder/post-inc-checklist">
+                          Get Started
+                          <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                        </Link>
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="hover-elevate" data-testid="widget-compliance">
+                  <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Compliance
+                    </CardTitle>
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {deadlines && deadlines.length > 0 ? (
+                      <>
+                        {deadlines.filter(d => d.status === "overdue").length > 0 && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+                            <span className="text-red-600 dark:text-red-400 font-medium">
+                              {deadlines.filter(d => d.status === "overdue").length} overdue
+                            </span>
+                          </div>
+                        )}
+                        {deadlines.filter(d => d.status === "due_soon").length > 0 && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <Clock className="h-3.5 w-3.5 text-amber-500" />
+                            <span className="text-amber-600 dark:text-amber-400">
+                              {deadlines.filter(d => d.status === "due_soon").length} due soon
+                            </span>
+                          </div>
+                        )}
+                        {deadlines.filter(d => d.status === "upcoming").length > 0 && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-blue-500" />
+                            <span>{deadlines.filter(d => d.status === "upcoming").length} upcoming</span>
+                          </div>
+                        )}
+                        <Button variant="ghost" size="sm" asChild className="w-full" data-testid="link-compliance">
+                          <Link href="/founder/compliance">
+                            View Calendar
+                            <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                          </Link>
+                        </Button>
+                      </>
+                    ) : (
+                      <Button variant="ghost" size="sm" asChild className="w-full" data-testid="link-compliance-start">
+                        <Link href="/founder/compliance">
+                          Set Up Deadlines
+                          <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                        </Link>
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="hover-elevate" data-testid="widget-ai">
+                  <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Legal AI Assistant
+                    </CardTitle>
+                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Get instant answers about Nigerian company law, CAC processes, and compliance.
+                    </p>
+                    <Button variant="ghost" size="sm" asChild className="w-full" data-testid="link-ai-assistant">
+                      <Link href="/founder/legal-assistant">
+                        Ask a Question
+                        <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                      </Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
             )}
 
             <div>

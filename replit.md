@@ -22,6 +22,14 @@ Key architectural patterns include:
 - **Registered Office Service:** Offers tiered registered address services with mail handling, configurable limits (e.g., mail items per month, storage duration), and an automated daily scheduler for subscription management (expiry, renewal nudges). Address visibility is gated based on subscription status.
 - **Feature Flags:** Allows dynamic control over feature availability for various functionalities like payment providers or specific service requirements.
 - **Comprehensive Audit Logging:** Tracks significant user and system actions across the platform.
+- **Post-Incorporation Support Suite:** Comprehensive post-incorporation features including:
+  - AI Legal Assistant: GPT-4o powered chat for Nigerian company law questions (`server/routes.ts`, `client/src/pages/founder/legal-assistant.tsx`)
+  - Company Profiles: Digital company file with directors, shareholders, RC numbers (`client/src/pages/founder/company-profile.tsx`)
+  - Post-Incorporation Checklist: 10 guided tasks (TIN, bank account, VAT, PAYE, etc.) (`client/src/pages/founder/post-inc-checklist.tsx`)
+  - Compliance Calendar: Auto-calculated Nigerian compliance deadlines (CAC annual returns, CIT, VAT, PAYE, audit) with status tracking (`client/src/pages/founder/compliance-calendar.tsx`)
+  - Email Notifications: Escalating compliance reminders (30/14/7/1/0 days), checklist nudges, incorporation completion emails via Resend (`server/services/emailService.ts`)
+  - Compliance Scheduler: Daily background job that updates deadline statuses and sends reminder emails (`server/services/complianceScheduler.ts`)
+  - Database: 5 new tables - `legal_chat_messages`, `company_profiles`, `post_incorporation_tasks`, `compliance_deadlines`, plus existing tables
 - **Security Hardening Suite:** Multi-layered security protections including:
   - HTTP security headers via Helmet.js (CSP, HSTS, XSS protection, X-Frame-Options)
   - Rate limiting: API (100/15min), auth (10/15min), password reset (3/hour), uploads (50/hour)

@@ -206,47 +206,6 @@ export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true,
 export type Payment = typeof payments.$inferSelect;
 export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 
-// ============== STRIPE CHECKOUT SESSION ==============
-export const stripeCheckoutSessions = pgTable("stripe_checkout_sessions", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id").notNull(),
-  stripeSessionId: varchar("stripe_session_id", { length: 255 }).notNull().unique(),
-  stripeCustomerId: varchar("stripe_customer_id", { length: 255 }),
-  mode: varchar("mode", { length: 50 }).notNull(), // 'payment' | 'subscription'
-  status: varchar("status", { length: 50 }).default("pending"), // pending, completed, expired, failed
-  currency: varchar("currency", { length: 10 }).default("GBP"),
-  amountTotal: integer("amount_total"), // in smallest currency unit (pence/kobo)
-  lineItems: json("line_items").$type<{
-    serviceType: string;
-    tier?: string;
-    stripePriceId: string;
-    quantity: number;
-    amount: number;
-  }[]>(),
-  contextJson: json("context_json").$type<{
-    applicationId?: number;
-    subscriptionId?: number;
-    step?: number; // for two-step checkout (1 = one-off, 2 = subscription)
-    pendingOneOffSessionId?: number; // link to completed one-off session for step 2
-  }>(),
-  stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 255 }),
-  stripeSubscriptionId: varchar("stripe_subscription_id", { length: 255 }),
-  successUrl: varchar("success_url", { length: 500 }),
-  cancelUrl: varchar("cancel_url", { length: 500 }),
-  completedAt: timestamp("completed_at"),
-  expiresAt: timestamp("expires_at"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [
-  index("idx_stripe_sessions_user").on(table.userId),
-  index("idx_stripe_sessions_status").on(table.status),
-  index("idx_stripe_sessions_stripe_id").on(table.stripeSessionId),
-]);
-
-export const insertStripeCheckoutSessionSchema = createInsertSchema(stripeCheckoutSessions).omit({ id: true, createdAt: true, updatedAt: true });
-export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
-export type InsertStripeCheckoutSession = z.infer<typeof insertStripeCheckoutSessionSchema>;
-
 // ============== PAYSTACK TRANSACTION ==============
 export const paystackTransactions = pgTable("paystack_transactions", {
   id: serial("id").primaryKey(),

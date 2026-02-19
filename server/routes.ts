@@ -519,163 +519,29 @@ export async function registerRoutes(
     });
   });
 
-  // ============== STRIPE PAYMENT ROUTES ==============
-  const stripePaymentService = await import("./services/stripePaymentService");
-  const stripeWebhookHandler = await import("./services/stripeWebhookHandler");
-  const priceBook = await import("./config/priceBook");
-  
-  // Get Stripe publishable key (public endpoint)
-  app.get("/api/payments/stripe/config", async (req, res) => {
-    try {
-      const isConfigured = await stripePaymentService.isStripeConfigured();
-      if (!isConfigured) {
-        return res.status(503).json({ message: "Stripe is not configured" });
-      }
-      const publishableKey = await stripePaymentService.getPublishableKey();
-      res.json({ publishableKey });
-    } catch (error) {
-      console.error("Error getting Stripe config:", error);
-      res.status(500).json({ message: "Failed to get Stripe configuration" });
-    }
-  });
-  
-  // Get price book for a provider (public endpoint for UI)
+  // ============== PAYSTACK PAYMENT ROUTES ==============
+  const paystackPaymentService = await import("./services/paystackPaymentService");
+  const paystackWebhookHandler = await import("./services/paystackWebhookHandler");
+
+  // Get price book (public endpoint for UI - Paystack NGN only)
   app.get("/api/payments/pricebook", async (req, res) => {
     try {
-      const provider = (req.query.provider as string) || "stripe";
-      const prices = priceBook.default.getPricesByProvider(provider as any);
+      const priceBook = await import("./config/priceBook");
+      const prices = priceBook.default.getPricesByProvider('paystack');
       res.json({ prices });
     } catch (error) {
       console.error("Error getting price book:", error);
       res.status(500).json({ message: "Failed to get price book" });
     }
   });
-  
-  // Create Stripe Checkout session (authenticated)
-  app.post("/api/payments/stripe/checkout", isAuthenticated, requireRole("founder"), async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      let { items, context } = req.body;
-      
-      // Validate items
-      if (!items || !Array.isArray(items) || items.length === 0) {
-        return res.status(400).json({ message: "Items are required" });
-      }
-      
-      // Validate each item has serviceType
-      for (const item of items) {
-        if (!item.serviceType) {
-          return res.status(400).json({ message: "Each item must have a serviceType" });
-        }
-        // Validate tier for registered_office
-        if (item.serviceType === "registered_office" && !item.tier) {
-          return res.status(400).json({ message: "Registered office items must have a tier" });
-        }
-      }
-      
-      // Check user's verification status
-      const vStatus = await verificationService.getVerificationStatus(userId);
-      const hasIncorporation = items.some((i: any) => i.serviceType === "incorporation");
-      const hasVerificationItem = items.some((i: any) => i.serviceType === "verification");
-      
-      // For incorporation, user must be verified or pay for verification
-      if (hasIncorporation && vStatus.requiresVerification && !hasVerificationItem) {
-        // Auto-add verification to the cart
-        items = [{ serviceType: "verification" }, ...items];
-      }
-      
-      // If user is already verified and they've included verification, remove it
-      if (!vStatus.requiresVerification && hasVerificationItem) {
-        items = items.filter((i: any) => i.serviceType !== "verification");
-      }
-      
-      // Check if Stripe is configured
-      const isConfigured = await stripePaymentService.isStripeConfigured();
-      if (!isConfigured) {
-        return res.status(503).json({ message: "Stripe payments are not available" });
-      }
-      
-      // Check feature flag
-      const stripeEnabled = await storage.getFeatureFlag("enable_stripe_payments");
-      if (!stripeEnabled?.isEnabled) {
-        return res.status(503).json({ message: "Stripe payments are currently disabled" });
-      }
-      
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
-      
-      const result = await stripePaymentService.createStripeCheckoutSession(
-        userId,
-        items,
-        context || {},
-        baseUrl
-      );
-      
-      // Audit log
-      await storage.createAuditLog({
-        actorUserId: userId,
-        action: "stripe_checkout_initiated",
-        entityType: "stripe_checkout_session",
-        entityId: String(result.dbSessionId),
-        details: { items, mode: result.mode, requiresSecondStep: result.requiresSecondStep, verificationStatus: vStatus.status },
-        ipAddress: req.ip,
-      });
-      
-      res.json({
-        ...result,
-        verificationAutoAdded: hasIncorporation && vStatus.requiresVerification && !hasVerificationItem,
-        verificationSkipped: !vStatus.requiresVerification && hasVerificationItem,
-      });
-    } catch (error: any) {
-      console.error("Error creating Stripe checkout:", error);
-      res.status(500).json({ message: error.message || "Failed to create checkout session" });
-    }
-  });
-  
-  // Get checkout session status (authenticated)
-  app.get("/api/payments/stripe/session/:sessionId", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const { sessionId } = req.params;
-      
-      // First try to find by our DB ID
-      let session = await storage.getStripeCheckoutSession(parseInt(sessionId, 10));
-      
-      // If not found, try by Stripe session ID
-      if (!session && sessionId.startsWith("cs_")) {
-        session = await storage.getStripeCheckoutSessionByStripeId(sessionId);
-      }
-      
-      if (!session) {
-        return res.status(404).json({ message: "Session not found" });
-      }
-      
-      // Verify ownership
-      if (session.userId !== userId) {
-        return res.status(403).json({ message: "Access denied" });
-      }
-      
-      res.json({ session });
-    } catch (error) {
-      console.error("Error fetching session:", error);
-      res.status(500).json({ message: "Failed to fetch session" });
-    }
-  });
-  
-  // Get user's checkout sessions (authenticated)
-  app.get("/api/payments/stripe/sessions", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const sessions = await storage.getStripeCheckoutSessionsByUser(userId);
-      res.json({ sessions });
-    } catch (error) {
-      console.error("Error fetching sessions:", error);
-      res.status(500).json({ message: "Failed to fetch sessions" });
-    }
-  });
 
-  // ============== PAYSTACK PAYMENT ROUTES ==============
-  const paystackPaymentService = await import("./services/paystackPaymentService");
-  const paystackWebhookHandler = await import("./services/paystackWebhookHandler");
+  // STRIPE REMOVED - Paystack-only payment system
+  // The following Stripe routes have been intentionally removed:
+  // - /api/payments/stripe/config
+  // - /api/payments/stripe/checkout  
+  // - /api/payments/stripe/session/:sessionId
+  // - /api/payments/stripe/sessions
+  // All payments are now handled through Paystack (NGN)
 
   // Check if Paystack is configured (public endpoint)
   app.get("/api/payments/paystack/config", async (req, res) => {

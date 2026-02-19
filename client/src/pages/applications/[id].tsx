@@ -343,7 +343,7 @@ export default function ApplicationDetailsPage() {
                         onClick={handlePayment}
                         data-testid="button-pay"
                       >
-                        Pay Now with Stripe
+                        Pay Now
                       </Button>
                     )}
                   </div>
@@ -357,7 +357,7 @@ export default function ApplicationDetailsPage() {
                       onClick={handlePayment}
                       data-testid="button-initiate-payment"
                     >
-                      Pay with Stripe (£55)
+                      Pay Now
                     </Button>
                   </div>
                 )}

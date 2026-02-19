@@ -56,7 +56,6 @@ export function setupSecurityMiddleware(app: Express): void {
   // Helmet security headers
   // NOTE: 'unsafe-inline' and 'unsafe-eval' are required for:
   // - Vite HMR in development mode
-  // - Stripe.js integration
   // - Paystack popup integration
   // PRODUCTION TODO: Consider using nonces/hashes for scripts when deploying
   app.use(
@@ -64,24 +63,23 @@ export function setupSecurityMiddleware(app: Express): void {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://js.stripe.com", "https://js.paystack.co"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://js.paystack.co"],
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
           imgSrc: ["'self'", "data:", "blob:", "https:", "*.replit.dev"],
           connectSrc: [
             "'self'",
-            "https://api.stripe.com",
             "https://api.paystack.co",
             "wss:",
             "ws:",
           ],
-          frameSrc: ["'self'", "https://js.stripe.com", "https://hooks.stripe.com"],
+          frameSrc: ["'self'"],
           objectSrc: ["'none'"],
           mediaSrc: ["'self'"],
           workerSrc: ["'self'", "blob:"],
         },
       },
-      crossOriginEmbedderPolicy: false, // Needed for Stripe/Paystack iframes
+      crossOriginEmbedderPolicy: false, // Needed for Paystack iframes
       crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
       crossOriginResourcePolicy: { policy: "cross-origin" },
       hsts: {

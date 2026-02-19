@@ -1,7 +1,7 @@
 # Celion One - Nigeria Legal Tech Platform
 
 ## Overview
-Celion One is a comprehensive legal tech platform designed to streamline company incorporation in Nigeria. It serves Founders, Lawyers, and Administrators, offering features such as identity verification, a digital application wizard, document management, integrated payment systems (Paystack, Stripe), AI-powered suggestions for corporate activities, lawyer assignment and case management, and robust administrative controls with audit logging. The platform aims to revolutionize legal processes in Nigeria by providing an efficient, transparent, and technology-driven solution for company registration and related legal services.
+Celion One is a comprehensive legal tech platform designed to streamline company incorporation in Nigeria. It serves Founders, Lawyers, and Administrators, offering features such as identity verification, a digital application wizard, document management, integrated payment via Paystack (NGN), AI-powered suggestions for corporate activities, lawyer assignment and case management, and robust administrative controls with audit logging. The platform aims to revolutionize legal processes in Nigeria by providing an efficient, transparent, and technology-driven solution for company registration and related legal services.
 
 ## User Preferences
 I want iterative development.
@@ -18,7 +18,7 @@ Key architectural patterns include:
 - **Modular Frontend:** Organized into reusable components, pages per user role, and custom hooks.
 - **Structured Backend:** Clear separation of API routes, database operations, and shared schema definitions.
 - **Progressive Web Application (PWA):** Features offline support via a service worker and a web app manifest.
-- **Dual Payment Provider System:** Supports Stripe (GBP) for international transactions and Paystack (NGN) for local Nigerian transactions, managed by a `PriceBook` module. This involves a two-step checkout flow for mixed one-off and subscription purchases and robust webhook processing for transaction completion.
+- **Paystack-Only Payment System:** All payments processed through Paystack in Nigerian Naira (NGN). International customers pay in NGN and their bank handles currency conversion. Managed by a `PriceBook` module with webhook processing for transaction completion. Stripe was intentionally removed to simplify the payment architecture.
 - **Registered Office Service:** Offers tiered registered address services with mail handling, configurable limits (e.g., mail items per month, storage duration), and an automated daily scheduler for subscription management (expiry, renewal nudges). Address visibility is gated based on subscription status.
 - **Feature Flags:** Allows dynamic control over feature availability for various functionalities like payment providers or specific service requirements.
 - **Comprehensive Audit Logging:** Tracks significant user and system actions across the platform.
@@ -52,7 +52,6 @@ Key architectural patterns include:
 ## External Dependencies
 - **PostgreSQL:** Primary database, hosted via Neon.
 - **OpenAI GPT-4o:** Used for AI-powered CAC activity suggestions.
-- **Paystack:** Payment gateway for Nigerian Naira (NGN) transactions.
-- **Stripe:** Payment gateway for international (GBP) transactions.
+- **Paystack:** Sole payment gateway for all transactions (NGN). International cards accepted — customer's bank handles currency conversion.
 - **Resend:** Email service for authentication and notifications.
 - **Replit Auth:** For user authentication services.

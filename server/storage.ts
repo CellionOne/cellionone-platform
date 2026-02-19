@@ -27,7 +27,6 @@ import {
   mailHandlingPreferences, type MailHandlingPreference,
   mailItems, type MailItem,
   mailApprovalRequests, type MailApprovalRequest,
-  stripeCheckoutSessions, type StripeCheckoutSession, type InsertStripeCheckoutSession,
   paystackTransactions, type PaystackTransaction, type InsertPaystackTransaction,
 } from "@shared/schema";
 
@@ -163,13 +162,6 @@ export interface IStorage {
   getPendingLawyerApplications(): Promise<LawyerApplication[]>;
   createLawyerApplication(data: InsertLawyerApplication): Promise<LawyerApplication>;
   updateLawyerApplication(id: number, data: Partial<LawyerApplication>): Promise<LawyerApplication | undefined>;
-
-  // Stripe Checkout Sessions
-  getStripeCheckoutSession(id: number): Promise<StripeCheckoutSession | undefined>;
-  getStripeCheckoutSessionByStripeId(stripeSessionId: string): Promise<StripeCheckoutSession | undefined>;
-  getStripeCheckoutSessionsByUser(userId: string): Promise<StripeCheckoutSession[]>;
-  createStripeCheckoutSession(data: InsertStripeCheckoutSession): Promise<StripeCheckoutSession>;
-  updateStripeCheckoutSession(id: number, data: Partial<InsertStripeCheckoutSession>): Promise<StripeCheckoutSession | undefined>;
 
   // Paystack Transactions
   getPaystackTransaction(id: number): Promise<PaystackTransaction | undefined>;
@@ -808,36 +800,6 @@ export class DatabaseStorage implements IStorage {
       .where(eq(mailApprovalRequests.id, id))
       .returning();
     return req;
-  }
-
-  // Stripe Checkout Sessions
-  async getStripeCheckoutSession(id: number): Promise<StripeCheckoutSession | undefined> {
-    const [session] = await db.select().from(stripeCheckoutSessions).where(eq(stripeCheckoutSessions.id, id));
-    return session;
-  }
-
-  async getStripeCheckoutSessionByStripeId(stripeSessionId: string): Promise<StripeCheckoutSession | undefined> {
-    const [session] = await db.select().from(stripeCheckoutSessions).where(eq(stripeCheckoutSessions.stripeSessionId, stripeSessionId));
-    return session;
-  }
-
-  async getStripeCheckoutSessionsByUser(userId: string): Promise<StripeCheckoutSession[]> {
-    return db.select().from(stripeCheckoutSessions)
-      .where(eq(stripeCheckoutSessions.userId, userId))
-      .orderBy(desc(stripeCheckoutSessions.createdAt));
-  }
-
-  async createStripeCheckoutSession(data: InsertStripeCheckoutSession): Promise<StripeCheckoutSession> {
-    const [session] = await db.insert(stripeCheckoutSessions).values(data).returning();
-    return session;
-  }
-
-  async updateStripeCheckoutSession(id: number, data: Partial<InsertStripeCheckoutSession>): Promise<StripeCheckoutSession | undefined> {
-    const [session] = await db.update(stripeCheckoutSessions)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(stripeCheckoutSessions.id, id))
-      .returning();
-    return session;
   }
 
   // Paystack Transactions

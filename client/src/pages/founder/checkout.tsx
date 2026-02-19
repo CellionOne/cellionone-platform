@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import {
   ShoppingCart, Building2, FileText, Shield, Loader2, Plus, X,
   ExternalLink, CheckCircle2, Sparkles, ArrowRight, Users, Clock,
-  MapPin, Hash, ClipboardList
+  MapPin, Hash, ClipboardList, ShieldCheck, Info, AlertTriangle
 } from "lucide-react";
 
 interface Product {
@@ -47,6 +48,14 @@ function getSkuDescription(sku: string): string {
   return descriptions[sku] || "";
 }
 
+function getSkuAdvisory(sku: string): string | null {
+  const advisories: Record<string, string> = {
+    TIN: "You can apply for TIN registration directly with FIRS at no cost. However, the process requires consistent follow-up and can take considerable time. Our fee covers professional handling and expedited processing on your behalf.",
+    SCUML: "You can apply for SCUML registration directly with the EFCC at no cost. However, the process requires consistent follow-up and can take considerable time. Our fee covers professional handling and expedited processing on your behalf.",
+  };
+  return advisories[sku] || null;
+}
+
 function getSkuBenefit(sku: string): string {
   const benefits: Record<string, string> = {
     TIN: "Needed for corporate bank account",
@@ -58,13 +67,21 @@ function getSkuBenefit(sku: string): string {
 
 export default function CheckoutPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [, setLocation] = useLocation();
   const [mode, setMode] = useState<CheckoutMode>("new_company");
   const [selectedSkus, setSelectedSkus] = useState<string[]>([]);
 
+  const isVerified = !!(user as any)?.isIdentityVerified;
+
   const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
   });
+
+  const verifyProduct = useMemo(
+    () => products?.find(p => p.sku === "VERIFY") || null,
+    [products]
+  );
 
   const cacProducts = useMemo(
     () => products?.filter(p => p.sku.startsWith("CAC_") && !p.requiresManualPricing) || [],
@@ -81,15 +98,27 @@ export default function CheckoutPage() {
     [products]
   );
 
+  const needsVerification = !isVerified && selectedSkus.length > 0;
+
   const selectedProducts = useMemo(
     () => products?.filter(p => selectedSkus.includes(p.sku)) || [],
     [products, selectedSkus]
   );
 
-  const totalKobo = useMemo(
-    () => selectedProducts.reduce((sum, p) => sum + p.priceNgn, 0),
-    [selectedProducts]
-  );
+  const allCheckoutSkus = useMemo(() => {
+    if (needsVerification && !selectedSkus.includes("VERIFY")) {
+      return [...selectedSkus, "VERIFY"];
+    }
+    return selectedSkus;
+  }, [selectedSkus, needsVerification]);
+
+  const totalKobo = useMemo(() => {
+    let total = selectedProducts.reduce((sum, p) => sum + p.priceNgn, 0);
+    if (needsVerification && verifyProduct && !selectedSkus.includes("VERIFY")) {
+      total += verifyProduct.priceNgn;
+    }
+    return total;
+  }, [selectedProducts, needsVerification, verifyProduct, selectedSkus]);
 
   const hasIncorporation = selectedSkus.some(s => s.startsWith("CAC_") || s === "NGO");
 
@@ -122,7 +151,7 @@ export default function CheckoutPage() {
   const checkoutMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/checkout/split", {
-        items: selectedSkus.map(sku => ({ sku })),
+        items: allCheckoutSkus.map(sku => ({ sku })),
       });
       return res.json();
     },
@@ -393,6 +422,7 @@ export default function CheckoutPage() {
                     const isSelected = selectedSkus.includes(p.sku);
                     const Icon = getSkuIcon(p.sku);
                     const description = getSkuDescription(p.sku);
+                    const advisory = getSkuAdvisory(p.sku);
                     return (
                       <Card
                         key={p.sku}
@@ -415,6 +445,12 @@ export default function CheckoutPage() {
                                   <div className="flex items-center gap-1 mt-1.5">
                                     <Clock className="h-3 w-3 text-primary flex-shrink-0" />
                                     <span className="text-xs text-primary font-medium">{getSkuBenefit(p.sku)}</span>
+                                  </div>
+                                )}
+                                {advisory && (
+                                  <div className="flex items-start gap-1.5 mt-2 p-2 rounded-md bg-muted/50">
+                                    <AlertTriangle className="h-3 w-3 text-muted-foreground flex-shrink-0 mt-0.5" />
+                                    <span className="text-xs text-muted-foreground" data-testid={`text-advisory-${p.sku}`}>{advisory}</span>
                                   </div>
                                 )}
                               </div>
@@ -440,27 +476,15 @@ export default function CheckoutPage() {
               </div>
 
               {selectedProducts.length > 0 && (
-                <Card className="border-primary/30 bg-primary/5" data-testid="card-fill-form-prompt">
+                <Card className="border-muted bg-muted/30" data-testid="card-post-payment-info">
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
-                      <ClipboardList className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
+                      <Info className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm">Company details and documents required</p>
+                        <p className="font-medium text-sm">What happens after payment</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          To process your service request, we need your company registration details and supporting documents (Certificate of Incorporation, MEMART, TIN, Proof of Address, etc.).
+                          After successful payment, you will be asked to provide your company registration details and upload supporting documents (Certificate of Incorporation, MEMART, TIN, Proof of Address, etc.) so a lawyer can process your request.
                         </p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="mt-3"
-                          onClick={() => {
-                            const serviceParam = selectedSkus.filter(s => !s.startsWith("CAC_") && s !== "NGO").join(",");
-                            setLocation(`/founder/service-request?service=${serviceParam}`);
-                          }}
-                          data-testid="button-fill-service-form"
-                        >
-                          <ClipboardList className="h-3 w-3 mr-1" /> Fill Service Request Form
-                        </Button>
                       </div>
                     </div>
                   </CardContent>
@@ -512,6 +536,30 @@ export default function CheckoutPage() {
                       <span className="text-sm font-medium flex-shrink-0">{formatNgn(p.priceNgn)}</span>
                     </div>
                   ))}
+
+                  {needsVerification && verifyProduct && (
+                    <>
+                      <Separator />
+                      <div className="flex items-center justify-between gap-2" data-testid="summary-item-VERIFY">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <ShieldCheck className="h-4 w-4 text-primary flex-shrink-0" />
+                          <span className="text-sm truncate">{verifyProduct.name}</span>
+                        </div>
+                        <span className="text-sm font-medium flex-shrink-0">{formatNgn(verifyProduct.priceNgn)}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground pl-6">
+                        One-time fee. Protects the integrity of your registration and provides assurance to regulatory bodies and third parties.
+                      </p>
+                    </>
+                  )}
+
+                  {isVerified && (
+                    <div className="flex items-center gap-2 text-xs text-primary" data-testid="text-already-verified">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      <span>Identity verified — no additional verification fee</span>
+                    </div>
+                  )}
+
                   <Separator />
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold">Total</span>

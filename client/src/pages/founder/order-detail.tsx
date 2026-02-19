@@ -1,10 +1,11 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Loader2, ArrowLeft, CheckCircle2, Clock, AlertCircle, XCircle } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle2, Clock, AlertCircle, XCircle, ClipboardList, ArrowRight } from "lucide-react";
 import { Link } from "wouter";
 
 function formatNgn(kobo: number): string {
@@ -99,6 +100,10 @@ export default function OrderDetailPage() {
 
   const { order, items } = data;
 
+  const hasPostIncItems = useMemo(() => {
+    return items.some(item => ["SCUML", "TM", "TIN"].includes(item.sku));
+  }, [items]);
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
       <div className="flex items-center gap-4 flex-wrap">
@@ -111,6 +116,27 @@ export default function OrderDetailPage() {
         {getStatusBadge(order.status)}
         {getFulfilmentBadge(order.fulfilmentStatus)}
       </div>
+
+      {order.status === "paid" && hasPostIncItems && (
+        <Card className="border-primary/30" data-testid="card-service-request-cta">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-3 min-w-0">
+                <ClipboardList className="h-5 w-5 text-primary flex-shrink-0" />
+                <div>
+                  <p className="font-medium">Complete Your Service Request</p>
+                  <p className="text-sm text-muted-foreground">Provide company details and upload documents so a lawyer can process your request</p>
+                </div>
+              </div>
+              <Link href={`/founder/service-request?orderId=${order.id}`}>
+                <Button size="sm" data-testid="button-complete-service-request">
+                  Fill Form <ArrowRight className="h-3 w-3 ml-1" />
+                </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card data-testid="card-order-receipt">
         <CardHeader>

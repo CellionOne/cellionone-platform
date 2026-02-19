@@ -109,9 +109,17 @@ export default function ServiceRequestFormPage() {
   const params = new URLSearchParams(searchString);
   const editProfileId = params.get("profileId");
   const serviceType = params.get("service");
+  const orderId = params.get("orderId");
   const [step, setStep] = useState(1);
   const [profileId, setProfileId] = useState<number | null>(editProfileId ? parseInt(editProfileId) : null);
   const [uploadingDocType, setUploadingDocType] = useState<string | null>(null);
+
+  const { data: orderData, isLoading: orderLoading } = useQuery<any>({
+    queryKey: ["/api/founder/orders", orderId],
+    enabled: !!orderId,
+  });
+
+  const orderIsPaid = !orderId || orderData?.order?.status === "paid";
 
   const { data: existingProfiles, isLoading: profilesLoading } = useQuery<any[]>({
     queryKey: ["/api/founder/service-profiles"],
@@ -275,10 +283,33 @@ export default function ServiceRequestFormPage() {
     queryClient.invalidateQueries({ queryKey: ["/api/founder/service-profiles", existingProfile.id] });
   };
 
-  if (profilesLoading) {
+  if (orderLoading || profilesLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]" data-testid="form-loading">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (orderId && !orderIsPaid) {
+    return (
+      <div className="p-6 max-w-3xl mx-auto space-y-6">
+        <Card>
+          <CardContent className="p-8 text-center space-y-4">
+            <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto" />
+            <h2 className="text-xl font-semibold" data-testid="text-payment-required">Payment Required</h2>
+            <p className="text-muted-foreground">
+              Payment for this order has not been confirmed yet. You can fill in your company details and upload documents after your payment is processed.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => setLocation(`/founder/orders/${orderId}`)}
+              data-testid="button-view-order"
+            >
+              View Order Status
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }

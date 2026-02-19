@@ -1,6 +1,6 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { orderPayments, orders, orderItems, serviceRequests, companyApplications } from '@shared/schema';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
@@ -208,6 +208,26 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
         });
       } catch (err) {
         console.error(`[Paystack Webhook] Error creating service request for ${serviceType}:`, err);
+      }
+    }
+
+    if (serviceType === 'VERIFY') {
+      try {
+        await db.update(users)
+          .set({ isIdentityVerified: true, identityVerifiedAt: new Date(), updatedAt: new Date() })
+          .where(eq(users.id, order.founderId));
+
+        await storage.createAuditLog({
+          actorUserId: order.founderId,
+          action: 'identity_verification_activated',
+          entityType: 'user',
+          entityId: order.founderId,
+          details: { orderId: order.id, method: 'payment', sku: 'VERIFY' },
+        });
+
+        console.log(`[Paystack Webhook] User ${order.founderId} marked as identity verified`);
+      } catch (err) {
+        console.error(`[Paystack Webhook] Error marking user as verified:`, err);
       }
     }
   }

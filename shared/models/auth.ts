@@ -23,6 +23,8 @@ export const users = pgTable("users", {
   profileImageUrl: varchar("profile_image_url"),
   passwordHash: varchar("password_hash"),
   emailVerified: boolean("email_verified").default(false),
+  isIdentityVerified: boolean("is_identity_verified").default(false),
+  identityVerifiedAt: timestamp("identity_verified_at"),
   verificationToken: varchar("verification_token"),
   verificationTokenExpiry: timestamp("verification_token_expiry"),
   resetToken: varchar("reset_token"),

@@ -726,10 +726,18 @@ export async function registerRoutes(
         return res.status(400).json({ message: "User email is required for Paystack payments" });
       }
 
+      let finalItems = items.map((i: { sku: string }) => ({ sku: i.sku }));
+      if (!user.isIdentityVerified) {
+        const hasVerify = finalItems.some((i: { sku: string }) => i.sku === "VERIFY");
+        if (!hasVerify) {
+          finalItems.push({ sku: "VERIFY" });
+        }
+      }
+
       const { order, items: orderItemRecords } = await orderService.createOrder({
         founderId: userId,
         applicationId: applicationId || undefined,
-        items: items.map((i: { sku: string }) => ({ sku: i.sku })),
+        items: finalItems,
       });
 
       const baseUrl = `${req.protocol}://${req.get("host")}`;

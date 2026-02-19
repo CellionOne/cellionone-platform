@@ -5,11 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Loader2, ArrowLeft, CheckCircle2, Clock, AlertCircle, XCircle, ClipboardList, ArrowRight } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle2, Clock, AlertCircle, XCircle, ClipboardList, ArrowRight, FileText } from "lucide-react";
 import { Link } from "wouter";
 
 function formatNgn(kobo: number): string {
-  return `₦${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 0 })}`;
+  return `\u20A6${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 0 })}`;
 }
 
 function getStatusBadge(status: string) {
@@ -25,17 +25,39 @@ function getStatusBadge(status: string) {
   }
 }
 
-function getFulfilmentBadge(status: string | null) {
+function getServiceRequestStatusBadge(status: string) {
   switch (status) {
     case "completed":
       return <Badge variant="default"><CheckCircle2 className="h-3 w-3 mr-1" /> Completed</Badge>;
     case "in_progress":
       return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" /> In Progress</Badge>;
+    case "assigned":
+      return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" /> Assigned</Badge>;
     case "cancelled":
       return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" /> Cancelled</Badge>;
+    case "queued":
     default:
-      return <Badge variant="outline"><Clock className="h-3 w-3 mr-1" /> Pending</Badge>;
+      return <Badge variant="outline"><Clock className="h-3 w-3 mr-1" /> Queued</Badge>;
   }
+}
+
+function getServiceLabel(serviceType: string): string {
+  const labels: Record<string, string> = {
+    SCUML: "SCUML Registration",
+    TM: "Trademark Registration",
+    TIN: "TIN Registration",
+  };
+  return labels[serviceType] || serviceType;
+}
+
+interface ServiceRequest {
+  id: number;
+  serviceType: string;
+  status: string;
+  companyProfileId: number | null;
+  assignedLawyerId: string | null;
+  createdAt: string;
+  completedAt: string | null;
 }
 
 export default function OrderDetailPage() {
@@ -72,6 +94,11 @@ export default function OrderDetailPage() {
     queryKey: ["/api/founder/orders", orderId],
   });
 
+  const { data: serviceRequests } = useQuery<ServiceRequest[]>({
+    queryKey: ["/api/founder/orders", orderId, "service-requests"],
+    enabled: !!data && data.order.status === "paid",
+  });
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -87,9 +114,9 @@ export default function OrderDetailPage() {
           <CardContent className="p-8 text-center">
             <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <p className="text-muted-foreground">Order not found or you don't have access.</p>
-            <Link href="/founder/checkout">
+            <Link href="/founder/orders">
               <Button variant="outline" className="mt-4">
-                <ArrowLeft className="h-4 w-4 mr-2" /> Back to Checkout
+                <ArrowLeft className="h-4 w-4 mr-2" /> Back to Orders
               </Button>
             </Link>
           </CardContent>
@@ -100,40 +127,69 @@ export default function OrderDetailPage() {
 
   const { order, items } = data;
 
-  const hasPostIncItems = useMemo(() => {
-    return items.some(item => ["SCUML", "TM", "TIN"].includes(item.sku));
-  }, [items]);
+  const pendingServiceRequests = serviceRequests?.filter(sr =>
+    ["queued", "assigned"].includes(sr.status) && !sr.companyProfileId
+  ) || [];
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
       <div className="flex items-center gap-4 flex-wrap">
-        <Link href="/founder/checkout">
-          <Button variant="ghost" size="sm" data-testid="button-back-checkout">
+        <Link href="/founder/orders">
+          <Button variant="ghost" size="sm" data-testid="button-back-orders">
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
           </Button>
         </Link>
         <h1 className="text-2xl font-bold" data-testid="text-order-title">Order #{order.id}</h1>
         {getStatusBadge(order.status)}
-        {getFulfilmentBadge(order.fulfilmentStatus)}
       </div>
 
-      {order.status === "paid" && hasPostIncItems && (
+      {pendingServiceRequests.length > 0 && (
         <Card className="border-primary/30" data-testid="card-service-request-cta">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-3 min-w-0">
-                <ClipboardList className="h-5 w-5 text-primary flex-shrink-0" />
-                <div>
-                  <p className="font-medium">Complete Your Service Request</p>
-                  <p className="text-sm text-muted-foreground">Provide company details and upload documents so a lawyer can process your request</p>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-primary flex-shrink-0" />
+              <p className="font-medium">Action Required: Complete Your Service Request</p>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Provide your company details and upload supporting documents so a lawyer can process your request.
+            </p>
+            <Link href={`/founder/service-request?orderId=${order.id}`}>
+              <Button size="sm" data-testid="button-complete-service-request">
+                Fill Service Request Form <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
+      {serviceRequests && serviceRequests.length > 0 && (
+        <Card data-testid="card-service-requests">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Service Requests
+            </CardTitle>
+            <CardDescription>Track the progress of your service requests</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {serviceRequests.map((sr) => (
+              <div
+                key={sr.id}
+                className="flex items-center justify-between gap-4 p-3 rounded-lg border border-border"
+                data-testid={`service-request-${sr.id}`}
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">{getServiceLabel(sr.serviceType)}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {sr.companyProfileId ? "Company details submitted" : "Awaiting company details"}
+                    {sr.completedAt && ` \u00B7 Completed ${new Date(sr.completedAt).toLocaleDateString("en-NG")}`}
+                  </p>
+                </div>
+                <div className="flex-shrink-0">
+                  {getServiceRequestStatusBadge(sr.status)}
                 </div>
               </div>
-              <Link href={`/founder/service-request?orderId=${order.id}`}>
-                <Button size="sm" data-testid="button-complete-service-request">
-                  Fill Form <ArrowRight className="h-3 w-3 ml-1" />
-                </Button>
-              </Link>
-            </div>
+            ))}
           </CardContent>
         </Card>
       )}

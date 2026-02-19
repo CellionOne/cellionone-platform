@@ -6,7 +6,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc } from "drizzle-orm";
 import * as services from "./services";
@@ -810,6 +810,256 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching order:", error);
       res.status(500).json({ message: "Failed to fetch order" });
+    }
+  });
+
+  // ============== FOUNDER SERVICE REQUESTS ==============
+  app.get("/api/founder/service-requests", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const requests = await db.select().from(serviceRequestsTable)
+        .where(eq(serviceRequestsTable.founderId, userId))
+        .orderBy(desc(serviceRequestsTable.createdAt));
+      res.json(requests);
+    } catch (error) {
+      console.error("Error fetching service requests:", error);
+      res.status(500).json({ message: "Failed to fetch service requests" });
+    }
+  });
+
+  app.get("/api/founder/orders/:orderId/service-requests", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const orderId = parseInt(req.params.orderId, 10);
+      if (isNaN(orderId)) return res.status(400).json({ message: "Invalid order ID" });
+
+      const order = await db.select().from(ordersTable).where(eq(ordersTable.id, orderId));
+      if (!order.length || order[0].founderId !== userId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const requests = await db.select().from(serviceRequestsTable)
+        .where(and(eq(serviceRequestsTable.orderId, orderId), eq(serviceRequestsTable.founderId, userId)));
+      res.json(requests);
+    } catch (error) {
+      console.error("Error fetching order service requests:", error);
+      res.status(500).json({ message: "Failed to fetch service requests" });
+    }
+  });
+
+  app.put("/api/founder/service-requests/:id/profile", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid service request ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr || sr.founderId !== userId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const { companyProfileId } = req.body;
+      if (!companyProfileId) return res.status(400).json({ message: "companyProfileId is required" });
+
+      const [profile] = await db.select().from(srProfilesTable).where(eq(srProfilesTable.id, companyProfileId));
+      if (!profile || profile.founderId !== userId) {
+        return res.status(403).json({ message: "Profile not found or not yours" });
+      }
+
+      const [updated] = await db.update(serviceRequestsTable)
+        .set({ companyProfileId, updatedAt: new Date() })
+        .where(eq(serviceRequestsTable.id, srId))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "service_request_profile_linked",
+        entityType: "service_request",
+        entityId: String(srId),
+        details: { companyProfileId },
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error linking profile to service request:", error);
+      res.status(500).json({ message: "Failed to link profile" });
+    }
+  });
+
+  // ============== LAWYER SERVICE REQUESTS ==============
+  app.get("/api/lawyer/service-requests", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const lawyerId = getUserId(req);
+      const statusFilter = req.query.status as string | undefined;
+
+      let query = db.select({
+        serviceRequest: serviceRequestsTable,
+        founderEmail: usersTable.email,
+        founderFirstName: usersTable.firstName,
+        founderLastName: usersTable.lastName,
+      })
+        .from(serviceRequestsTable)
+        .leftJoin(usersTable, eq(serviceRequestsTable.founderId, usersTable.id))
+        .orderBy(desc(serviceRequestsTable.createdAt));
+
+      let results;
+      if (statusFilter) {
+        results = await query.where(
+          and(
+            eq(serviceRequestsTable.status, statusFilter),
+            eq(serviceRequestsTable.assignedLawyerId, lawyerId)
+          )
+        );
+      } else {
+        results = await query;
+      }
+
+      res.json(results.map(r => ({
+        ...r.serviceRequest,
+        founder: {
+          email: r.founderEmail,
+          firstName: r.founderFirstName,
+          lastName: r.founderLastName,
+        },
+      })));
+    } catch (error) {
+      console.error("Error fetching lawyer service requests:", error);
+      res.status(500).json({ message: "Failed to fetch service requests" });
+    }
+  });
+
+  app.get("/api/lawyer/service-requests/:id", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr) return res.status(404).json({ message: "Not found" });
+
+      let profile = null;
+      if (sr.companyProfileId) {
+        const [p] = await db.select().from(srProfilesTable).where(eq(srProfilesTable.id, sr.companyProfileId));
+        profile = p || null;
+      }
+
+      let documents: any[] = [];
+      if (sr.companyProfileId) {
+        documents = await db.select().from(srDocumentsTable)
+          .where(eq(srDocumentsTable.companyProfileId, sr.companyProfileId));
+      }
+
+      const [founder] = await db.select({
+        email: usersTable.email,
+        firstName: usersTable.firstName,
+        lastName: usersTable.lastName,
+      }).from(usersTable).where(eq(usersTable.id, sr.founderId));
+
+      res.json({ serviceRequest: sr, profile, documents, founder });
+    } catch (error) {
+      console.error("Error fetching service request detail:", error);
+      res.status(500).json({ message: "Failed to fetch service request" });
+    }
+  });
+
+  app.put("/api/lawyer/service-requests/:id/status", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const lawyerId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid ID" });
+
+      const { status, notes } = req.body;
+      const validStatuses = ["assigned", "in_progress", "completed", "cancelled"];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ message: `Status must be one of: ${validStatuses.join(", ")}` });
+      }
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr) return res.status(404).json({ message: "Not found" });
+
+      const updateData: Record<string, unknown> = {
+        status,
+        assignedLawyerId: lawyerId,
+        updatedAt: new Date(),
+      };
+      if (notes) updateData.notes = notes;
+      if (status === "completed") updateData.completedAt = new Date();
+
+      const [updated] = await db.update(serviceRequestsTable)
+        .set(updateData)
+        .where(eq(serviceRequestsTable.id, srId))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: lawyerId,
+        action: "service_request_status_updated",
+        entityType: "service_request",
+        entityId: String(srId),
+        details: { status, previousStatus: sr.status, founderId: sr.founderId },
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating service request:", error);
+      res.status(500).json({ message: "Failed to update service request" });
+    }
+  });
+
+  // ============== ADMIN SERVICE REQUESTS ==============
+  app.get("/api/admin/service-requests", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const results = await db.select({
+        serviceRequest: serviceRequestsTable,
+        founderEmail: usersTable.email,
+        founderFirstName: usersTable.firstName,
+        founderLastName: usersTable.lastName,
+      })
+        .from(serviceRequestsTable)
+        .leftJoin(usersTable, eq(serviceRequestsTable.founderId, usersTable.id))
+        .orderBy(desc(serviceRequestsTable.createdAt));
+
+      res.json(results.map(r => ({
+        ...r.serviceRequest,
+        founder: {
+          email: r.founderEmail,
+          firstName: r.founderFirstName,
+          lastName: r.founderLastName,
+        },
+      })));
+    } catch (error) {
+      console.error("Error fetching admin service requests:", error);
+      res.status(500).json({ message: "Failed to fetch service requests" });
+    }
+  });
+
+  app.put("/api/admin/service-requests/:id/assign", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid ID" });
+
+      const { assignedLawyerId } = req.body;
+      if (!assignedLawyerId) return res.status(400).json({ message: "assignedLawyerId is required" });
+
+      const [updated] = await db.update(serviceRequestsTable)
+        .set({ assignedLawyerId, status: "assigned", updatedAt: new Date() })
+        .where(eq(serviceRequestsTable.id, srId))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "service_request_assigned",
+        entityType: "service_request",
+        entityId: String(srId),
+        details: { assignedLawyerId },
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error assigning service request:", error);
+      res.status(500).json({ message: "Failed to assign service request" });
     }
   });
 

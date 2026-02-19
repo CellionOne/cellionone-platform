@@ -121,6 +121,11 @@ export default function ServiceRequestFormPage() {
 
   const orderIsPaid = !orderId || orderData?.order?.status === "paid";
 
+  const { data: orderServiceRequests } = useQuery<any[]>({
+    queryKey: ["/api/founder/orders", orderId, "service-requests"],
+    enabled: !!orderId && orderIsPaid,
+  });
+
   const { data: existingProfiles, isLoading: profilesLoading } = useQuery<any[]>({
     queryKey: ["/api/founder/service-profiles"],
   });
@@ -185,6 +190,20 @@ export default function ServiceRequestFormPage() {
     }
   }, [profileDetail, form]);
 
+  const linkProfileToServiceRequests = async (pId: number) => {
+    if (!orderServiceRequests || !orderId) return;
+    for (const sr of orderServiceRequests) {
+      if (!sr.companyProfileId) {
+        try {
+          await apiRequest("PUT", `/api/founder/service-requests/${sr.id}/profile`, { companyProfileId: pId });
+        } catch (err) {
+          console.error("Failed to link profile to service request:", err);
+        }
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: ["/api/founder/orders", orderId, "service-requests"] });
+  };
+
   const saveMutation = useMutation({
     mutationFn: async (data: ServiceProfileFormData) => {
       if (profileId) {
@@ -195,12 +214,16 @@ export default function ServiceRequestFormPage() {
         return res.json();
       }
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
+      const savedProfileId = profileId || result.id;
       if (!profileId) {
-        setProfileId(result.id);
+        setProfileId(savedProfileId);
       }
       queryClient.invalidateQueries({ queryKey: ["/api/founder/service-profiles"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/founder/service-profiles", profileId || result.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/service-profiles", savedProfileId] });
+
+      await linkProfileToServiceRequests(savedProfileId);
+
       toast({ title: "Company details saved", description: "Your company information has been saved successfully." });
       setStep(3);
     },

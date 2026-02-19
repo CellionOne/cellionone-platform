@@ -21,6 +21,7 @@ import FounderPostIncChecklist from "@/pages/founder/post-inc-checklist";
 import FounderComplianceCalendar from "@/pages/founder/compliance-calendar";
 import FounderCheckout from "@/pages/founder/checkout";
 import FounderServiceRequestForm from "@/pages/founder/service-request-form";
+import FounderOrders from "@/pages/founder/orders";
 import FounderOrderDetail from "@/pages/founder/order-detail";
 import NewApplication from "@/pages/applications/new";
 import ApplicationDetails from "@/pages/applications/[id]";
@@ -28,6 +29,8 @@ import LawyerDashboard from "@/pages/lawyer/dashboard";
 import LawyerApplications from "@/pages/lawyer/applications";
 import LawyerApplicationDetail from "@/pages/lawyer/application-detail";
 import LawyerPayouts from "@/pages/lawyer/payouts";
+import LawyerServiceRequests from "@/pages/lawyer/service-requests";
+import LawyerServiceRequestDetail from "@/pages/lawyer/service-request-detail";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminUsers from "@/pages/admin/users";
 import AdminApplications from "@/pages/admin/applications";
@@ -174,6 +177,9 @@ function Router() {
       <Route path="/founder/service-request">
         <ProtectedRoute component={FounderServiceRequestForm} />
       </Route>
+      <Route path="/founder/orders">
+        <ProtectedRoute component={FounderOrders} />
+      </Route>
       <Route path="/founder/orders/:id">
         <ProtectedRoute component={FounderOrderDetail} />
       </Route>
@@ -196,6 +202,12 @@ function Router() {
       </Route>
       <Route path="/lawyer/payouts">
         <ProtectedRoute component={LawyerPayouts} roles={["lawyer"]} />
+      </Route>
+      <Route path="/lawyer/service-requests">
+        <ProtectedRoute component={LawyerServiceRequests} roles={["lawyer"]} />
+      </Route>
+      <Route path="/lawyer/service-requests/:id">
+        <ProtectedRoute component={LawyerServiceRequestDetail} roles={["lawyer"]} />
       </Route>
       
       <Route path="/admin/dashboard">

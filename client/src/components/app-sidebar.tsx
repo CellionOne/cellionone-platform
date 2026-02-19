@@ -48,6 +48,7 @@ const founderItems: NavItem[] = [
   { title: "Dashboard", url: "/founder/dashboard", icon: LayoutDashboard },
   { title: "Identity Verification", url: "/founder/identity", icon: User },
   { title: "My Applications", url: "/founder/applications", icon: FileText },
+  { title: "My Orders", url: "/founder/orders", icon: Receipt },
   { title: "Company Profile", url: "/founder/company-profile", icon: Briefcase },
   { title: "Checklist", url: "/founder/post-inc-checklist", icon: ListChecks },
   { title: "Compliance Calendar", url: "/founder/compliance", icon: Calendar },
@@ -61,6 +62,7 @@ const founderItems: NavItem[] = [
 const lawyerItems: NavItem[] = [
   { title: "Dashboard", url: "/lawyer/dashboard", icon: LayoutDashboard },
   { title: "Assigned Cases", url: "/lawyer/applications", icon: Scale },
+  { title: "Service Requests", url: "/lawyer/service-requests", icon: ClipboardList },
   { title: "Payouts", url: "/lawyer/payouts", icon: Wallet },
 ];
 

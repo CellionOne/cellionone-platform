@@ -817,6 +817,7 @@ export const serviceRequests = pgTable("service_requests", {
   serviceType: varchar("service_type", { length: 50 }).notNull(), // SCUML | TM | TIN
   status: varchar("status", { length: 50 }).default("queued"), // queued | assigned | in_progress | completed | cancelled
   assignedLawyerId: varchar("assigned_lawyer_id"),
+  companyProfileId: integer("company_profile_id"),
   notes: text("notes"),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),

@@ -31,7 +31,7 @@ Key architectural patterns include:
   - Compliance Scheduler: Daily background job that updates deadline statuses and sends reminder emails (`server/services/complianceScheduler.ts`)
   - Database: 5 new tables - `legal_chat_messages`, `company_profiles`, `post_incorporation_tasks`, `compliance_deadlines`, plus existing tables
 - **Paystack Split Payment System:** Automatic split settlement where Celion takes a fixed NGN cut per SKU and the remainder auto-settles to a lawyer subaccount via Paystack's `subaccount` + `transaction_charge` mechanism. Key components:
-  - Product Catalog: 8 SKUs (5 CAC tiers by share capital + SCUML, TM, TIN) with per-SKU fixed cuts (`server/seed.ts`, `product_catalog` table)
+  - Product Catalog: 9 SKUs (5 CAC tiers by share capital + SCUML, TM, TIN, NGO) with per-SKU fixed cuts (`server/seed.ts`, `product_catalog` table)
   - Order System: Orders with line items tracking `totalAmount`, `totalCellionCut`, `totalLawyerNet` (`orders`, `order_items`, `order_payments` tables)
   - Split Checkout: `POST /api/checkout/split` creates order + initializes Paystack with `subaccount` and `transaction_charge` params (`server/services/paystackPaymentService.ts`)
   - Webhook Handler: `charge.success` verifies amount, marks order paid, activates applications, creates service requests for post-inc add-ons (`server/services/paystackWebhookHandler.ts`)

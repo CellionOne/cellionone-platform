@@ -47,16 +47,17 @@ export async function seedDatabase() {
     }).onConflictDoNothing();
     console.log("Synced service addresses");
 
-    // Seed product catalog with fixed-cut SKUs
+    // Seed product catalog with fixed-cut SKUs (prices in kobo: ₦1 = 100 kobo)
     const catalogItems = [
       { sku: "CAC_1M", name: "Company Incorporation (₦1M Share Capital)", category: "incorporation", priceNgn: 10000000, cellionCutNgn: 2500000, metadata: { shareCapital: 1000000 } },
-      { sku: "CAC_5M", name: "Company Incorporation (₦5M Share Capital)", category: "incorporation", priceNgn: 15000000, cellionCutNgn: 3000000, metadata: { shareCapital: 5000000 } },
+      { sku: "CAC_5M", name: "Company Incorporation (₦5M Share Capital)", category: "incorporation", priceNgn: 15000000, cellionCutNgn: 2500000, metadata: { shareCapital: 5000000 } },
       { sku: "CAC_10M", name: "Company Incorporation (₦10M Share Capital)", category: "incorporation", priceNgn: 35000000, cellionCutNgn: 3500000, metadata: { shareCapital: 10000000 } },
       { sku: "CAC_20M", name: "Company Incorporation (₦20M Share Capital)", category: "incorporation", priceNgn: 55000000, cellionCutNgn: 4000000, metadata: { shareCapital: 20000000 } },
-      { sku: "CAC_100M", name: "Company Incorporation (₦100M Share Capital)", category: "incorporation", priceNgn: 300000000, cellionCutNgn: 10000000, metadata: { shareCapital: 100000000, foreignParticipation: true } },
-      { sku: "SCUML", name: "SCUML Registration", category: "post_incorporation", priceNgn: 15000000, cellionCutNgn: 2500000 },
-      { sku: "TM", name: "Trademark Registration", category: "post_incorporation", priceNgn: 25000000, cellionCutNgn: 3500000 },
-      { sku: "TIN", name: "TIN Registration", category: "post_incorporation", priceNgn: 2000000, cellionCutNgn: null, requiresManualPricing: true, metadata: { note: "varies by location" } },
+      { sku: "CAC_100M", name: "Company Incorporation (₦100M Share Capital, incl. Foreign Participation per CAMA)", category: "incorporation", priceNgn: 300000000, cellionCutNgn: 10000000, metadata: { shareCapital: 100000000, foreignParticipation: true } },
+      { sku: "SCUML", name: "SCUML Certificate (EFCC)", category: "post_incorporation", priceNgn: 15000000, cellionCutNgn: 2500000, metadata: { deliveryDays: 5 } },
+      { sku: "TM", name: "Trademark Registration (2 Stages)", category: "post_incorporation", priceNgn: 25000000, cellionCutNgn: 3500000 },
+      { sku: "TIN", name: "TIN Registration (FIRS)", category: "post_incorporation", priceNgn: 2000000, cellionCutNgn: 1000000, metadata: { note: "Price may vary by company location" } },
+      { sku: "NGO", name: "Registration of Incorporated Trustees (NGO)", category: "incorporation", priceNgn: 25000000, cellionCutNgn: 4000000, metadata: { note: "Includes filing fees, newspaper publications, constitution and legal charges" } },
     ];
     for (const item of catalogItems) {
       await db.insert(productCatalog).values(item).onConflictDoNothing();

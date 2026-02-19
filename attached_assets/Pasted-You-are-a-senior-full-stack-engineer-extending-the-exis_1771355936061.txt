@@ -1,0 +1,301 @@
+You are a senior full-stack engineer extending the existing Celine One (Cellion One) codebase.
+
+CURRENT STACK (DO NOT REBUILD)
+- Frontend: React + TypeScript + Vite + Tailwind + shadcn/ui
+- Backend: Express.js + TypeScript REST API
+- Database: PostgreSQL
+- Auth: Replit Auth (OIDC)
+- Validation: Zod
+- Existing: RBAC (Founder/Lawyer/Admin), incorporation wizard, registered office + mail handling, document vault, feature flags, audit logs.
+
+GOAL
+Implement Paystack split checkout for Nigeria (NGN) using a fixed-cut product catalog where:
+- Each product has a fixed NGN price
+- Cellion keeps a fixed NGN “cut”
+- The remaining amount is settled to the Lawyer via Paystack Subaccount
+- Payments are tied to either:
+  a) an incorporation application (applicationId), or
+  b) a standalone service purchase (e.g., SCUML, Trademark, Registered Office when Paystack is used later)
+
+Use Paystack Subaccounts + transaction_charge (fixed split) and verify via webhooks.
+
+CRITICAL REQUIREMENTS
+1) NEVER trust client-provided prices/cuts. Server must compute from ProductCatalog by SKU.
+2) For every payment, record the split breakdown in DB: total, cellion_cut, lawyer_net.
+3) All Paystack webhooks must be verified with Paystack signature.
+4) Only mark orders paid after webhook verification (not on redirect).
+5) Feature flags must allow turning Paystack on/off cleanly without breaking existing flows.
+
+========================================================
+PART 1 — ENV VARS + CONFIG
+========================================================
+Add to environment:
+- PAYSTACK_SECRET_KEY=...
+- PAYSTACK_PUBLIC_KEY=...
+- PAYSTACK_WEBHOOK_SECRET=...  (if applicable; verify using Paystack signature header per docs)
+- PAYSTACK_CALLBACK_URL=https://<your-domain>/payment/success
+- PAYSTACK_CANCEL_URL=https://<your-domain>/payment/cancel
+- PAYSTACK_LAWYER_SUBACCOUNT_CODE=SUB_xxxxx  (created in Paystack dashboard)
+- PAYSTACK_CURRENCY=NGN
+
+Feature flags:
+- enable_paystack_payments (default OFF in prod until keys ready)
+- enable_paystack_split_settlement (default ON when paystack enabled)
+
+========================================================
+PART 2 — DATABASE (Postgres) — ProductCatalog + Orders + Payments
+========================================================
+
+A) ProductCatalog (NEW)
+Fields:
+- id (uuid)
+- sku (text unique)         // e.g., CAC_1M, SCUML
+- name (text)
+- category (text)           // incorporation | post_incorporation
+- price_ngn (int)
+- cellion_cut_ngn (int nullable)   // fixed cut; if null => manual pricing required
+- is_active (bool default true)
+- requires_manual_pricing (bool default false)
+- metadata (jsonb nullable) // share_capital, notes
+- created_at, updated_at
+
+Seed this catalog with:
+INCORPORATION
+- CAC_1M:  price 100000, cut 25000, metadata.share_capital=1000000
+- CAC_5M:  price 150000, cut 30000, metadata.share_capital=5000000  (interim fixed cut)
+- CAC_10M: price 350000, cut 35000, metadata.share_capital=10000000
+- CAC_20M: price 550000, cut 40000, metadata.share_capital=20000000
+- CAC_100M: price 3000000, cut 100000, metadata.share_capital=100000000, metadata.foreign_participation=true
+
+ADD-ONS
+- SCUML: price 150000, cut 25000
+- TM:    price 250000, cut 35000
+- TIN:   price 20000, cut NULL, requires_manual_pricing=true, metadata.note="varies by location"
+
+B) Order (NEW)
+Represents what the customer is buying.
+Fields:
+- id (uuid)
+- founder_id (uuid FK users)
+- application_id (uuid nullable)   // link to incorporation application if relevant
+- status (text) // draft | pending_payment | paid | failed | cancelled
+- currency (text) default 'NGN'
+- total_amount (int)
+- created_at, updated_at
+
+C) OrderItem (NEW)
+Fields:
+- id (uuid)
+- order_id (uuid FK)
+- product_id (uuid FK ProductCatalog)
+- sku (text)
+- quantity (int default 1) // always 1 for now
+- unit_price (int)
+- cellion_cut (int)        // for this item
+- lawyer_net (int)         // unit_price - cellion_cut
+- metadata (jsonb nullable)
+
+D) Payment (Extend existing if present; otherwise create)
+Fields:
+- id (uuid)
+- order_id (uuid FK)
+- provider (text)  // 'paystack'
+- status (text)    // initiated | pending | paid | failed
+- amount (int)
+- currency (text)  // 'NGN'
+- paystack_reference (text unique)
+- authorization_url (text nullable)
+- paid_at (timestamp nullable)
+- raw_event (jsonb nullable) // store webhook payload for audit/debug
+- created_at, updated_at
+
+========================================================
+PART 3 — BACKEND SERVICES (Express)
+========================================================
+
+A) productCatalogService
+- getActiveProducts()
+- getBySku(sku)
+- computeItemAmounts(sku):
+  - fetch product
+  - if requires_manual_pricing => throw error "MANUAL_PRICING_REQUIRED"
+  - return { price_ngn, cellion_cut_ngn, lawyer_net_ngn }
+
+B) orderService
+- createOrder(founderId, applicationId?, items:[{sku}]):
+  - validate each sku exists and active
+  - compute totals server-side
+  - create Order + OrderItems with split breakdown
+  - status = pending_payment
+  - return order
+
+C) paystackService
+- initializeTransaction({order, founderEmail}):
+  - amount = order.total_amount (in kobo? Paystack uses kobo; multiply by 100 if required)
+  - currency NGN
+  - callback_url PAYSTACK_CALLBACK_URL + ?orderId=...
+  - metadata include:
+      - orderId
+      - founderId
+      - applicationId
+      - items (sku list)
+  - SPLIT:
+      - subaccount = PAYSTACK_LAWYER_SUBACCOUNT_CODE
+      - transaction_charge = TOTAL_CELLION_CUT (sum of item cuts)
+    NOTE: If Paystack requires transaction_charge in kobo, multiply by 100.
+  - Return authorization_url + reference
+
+- verifyWebhookSignature(req):
+  - validate Paystack signature header per official docs; reject if invalid
+
+- handleWebhook(event):
+  - on charge.success:
+      - find Payment by reference
+      - verify amounts match expected (server-side)
+      - mark Payment paid; store raw_event; paid_at
+      - mark Order paid
+      - trigger business activations:
+          * if applicationId exists:
+              - mark incorporation payment step complete OR set application paymentStatus=paid
+          * if items include SCUML/TM/TIN:
+              - create service requests / tasks for lawyer/admin queue
+      - write audit log entries:
+          - payment_initiated
+          - payment_succeeded
+          - order_paid
+          - payout_split_recorded
+  - on charge.failed:
+      - mark Payment failed; Order failed; audit log
+
+========================================================
+PART 4 — API ROUTES (Zod + RBAC)
+========================================================
+
+A) Product catalog
+GET /api/products
+- Founder authenticated
+- return list of active products with:
+  - sku, name, category, price_ngn, requires_manual_pricing
+  - do NOT return internal lawyer subaccount codes
+
+B) Create order
+POST /api/orders
+Body: { applicationId?: string, items: [{ sku: string }] }
+- Founder authenticated
+- Validate items length >= 1
+- Create Order + OrderItems from catalog
+- Return { orderId, total_amount, currency, items breakdown }
+
+C) Initialize Paystack checkout
+POST /api/payments/paystack/checkout
+Body: { orderId: string }
+- Founder authenticated; must own order
+- Ensure order status pending_payment
+- Create Payment record status=initiated
+- Call paystack initializeTransaction with split settings
+- Update Payment with reference + authorization_url; status=pending
+- Return { authorization_url, reference }
+
+D) Webhook
+POST /api/payments/paystack/webhook
+- No auth
+- Verify signature
+- Process event
+- Return 200 quickly
+
+E) Payment status
+GET /api/orders/:orderId
+- Founder authenticated; ownership check
+- Return order + items + payment status
+
+========================================================
+PART 5 — FRONTEND UI (React + shadcn/ui)
+========================================================
+
+A) Pricing/Checkout UI (NGN)
+1) Add a “Pay with Paystack (NGN)” option where relevant:
+- Incorporation wizard final step (when user chooses CAC tier)
+- Post-incorporation add-ons page (SCUML, Trademark, TIN)
+2) Build a small cart builder:
+- For incorporation: select CAC tier => items=[{sku:'CAC_1M'...}]
+- For add-ons: allow selecting SCUML/TM etc
+3) Checkout flow:
+- POST /api/orders (get orderId)
+- POST /api/payments/paystack/checkout (get authorization_url)
+- Redirect user to authorization_url
+
+B) Success/Cancel pages
+Routes:
+- /payment/success (reads query params, calls /api/orders/:id to show receipt)
+- /payment/cancel
+
+C) Receipt / Breakdown (Founder View)
+Show:
+- total paid
+- items purchased
+- “Processing by legal partner” status
+Do NOT show internal split amounts to users unless you want transparency. (Keep optional.)
+Admin view can show split breakdown.
+
+D) Admin: Orders & Fulfilment queue
+Add /admin/orders:
+- filter paid orders
+- show items and linked application
+- show split breakdown (cellion cut + lawyer net) for reconciliation
+- status workflow: assigned_to_lawyer, in_progress, completed
+Hook into existing lawyer portal if applicable.
+
+========================================================
+PART 6 — BUSINESS ACTIVATION HOOKS
+========================================================
+
+When order is paid:
+- For incorporation items (CAC_*):
+  - set application.paymentStatus='paid'
+  - set application.status='submitted' (or next correct state)
+  - notify assigned lawyer/admin
+- For SCUML/TM/TIN:
+  - create “ServiceRequest” records (NEW table optional) tied to founder/company:
+      - type: SCUML | TM | TIN
+      - status: queued
+      - notes: any metadata
+  - show these in lawyer/admin queue
+
+========================================================
+PART 7 — SECURITY + FRAUD CONTROLS
+========================================================
+- Rate limit checkout endpoints
+- Verify order totals match Paystack event amount
+- Verify currency NGN
+- Reject webhook events where reference unknown or already paid
+- Store webhook raw payload for audit/debug
+- Audit log all payment transitions
+
+========================================================
+PART 8 — TESTS (MANDATORY)
+========================================================
+Backend tests:
+1) Catalog seed exists and returns correct pricing
+2) Creating order computes totals server-side, ignores client tampering
+3) Checkout init sets transaction_charge = sum(cellion_cut)
+4) Webhook charge.success marks payment paid + order paid + updates application
+5) Webhook rejects invalid signature
+6) TIN requires manual pricing => returns MANUAL_PRICING_REQUIRED
+
+========================================================
+PART 9 — DOCUMENTATION (replit.md)
+========================================================
+Add section “Paystack Payments (NGN) with Split Settlement” including:
+- Catalog SKUs + pricing
+- Fixed-cut split model using subaccount + transaction_charge
+- Required env vars
+- Webhook verification notes
+- How to reconcile orders in /admin/orders
+
+DELIVERABLES
+- ProductCatalog table seeded with fixed-cut SKUs
+- Paystack checkout working end-to-end with split settlements
+- Webhook verification and payment activation
+- Admin reconciliation view
+- Tests passing
+- Documentation updated

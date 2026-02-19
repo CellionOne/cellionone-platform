@@ -889,3 +889,41 @@ export const serviceRequestDocuments = pgTable("service_request_documents", {
 export const insertServiceRequestDocumentSchema = createInsertSchema(serviceRequestDocuments).omit({ id: true, createdAt: true });
 export type ServiceRequestDocument = typeof serviceRequestDocuments.$inferSelect;
 export type InsertServiceRequestDocument = z.infer<typeof insertServiceRequestDocumentSchema>;
+
+// ============== NOTIFICATION PREFERENCES ==============
+export const notificationPreferences = pgTable("notification_preferences", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().unique(),
+  complianceReminders: boolean("compliance_reminders").default(true),
+  serviceRequestUpdates: boolean("service_request_updates").default(true),
+  orderUpdates: boolean("order_updates").default(true),
+  incorporationUpdates: boolean("incorporation_updates").default(true),
+  marketingEmails: boolean("marketing_emails").default(false),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_notification_prefs_user").on(table.userId),
+]);
+
+export const insertNotificationPreferencesSchema = createInsertSchema(notificationPreferences).omit({ id: true, updatedAt: true });
+export type NotificationPreference = typeof notificationPreferences.$inferSelect;
+export type InsertNotificationPreference = z.infer<typeof insertNotificationPreferencesSchema>;
+
+// ============== SETTINGS SCHEMAS ==============
+export const updateProfileSchema = z.object({
+  firstName: z.string().min(1, "First name is required").max(100),
+  lastName: z.string().min(1, "Last name is required").max(100),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string()
+    .min(8, "Password must be at least 8 characters")
+    .max(128, "Password must be less than 128 characters")
+    .refine((p) => /[A-Z]/.test(p), "Must contain uppercase letter")
+    .refine((p) => /[a-z]/.test(p), "Must contain lowercase letter")
+    .refine((p) => /[0-9]/.test(p), "Must contain a number")
+    .refine((p) => /[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/`~;']/.test(p), "Must contain special character"),
+});
+
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;

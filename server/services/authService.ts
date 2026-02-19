@@ -207,6 +207,30 @@ export async function requestPasswordReset(email: string, baseUrl: string): Prom
   return { success: true, message: "If an account exists, a password reset email has been sent." };
 }
 
+export async function changePassword(userId: string, currentPassword: string, newPassword: string): Promise<AuthResult> {
+  const user = await storage.getUser(userId);
+  if (!user) {
+    return { success: false, message: "User not found" };
+  }
+
+  if (!user.passwordHash) {
+    return { success: false, message: "This account uses a different login method. Password cannot be changed." };
+  }
+
+  const isCurrentValid = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!isCurrentValid) {
+    return { success: false, message: "Current password is incorrect" };
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  await storage.updatePassword(userId, passwordHash);
+
+  return {
+    success: true,
+    message: "Password changed successfully.",
+  };
+}
+
 export async function resetPassword(token: string, newPassword: string): Promise<AuthResult> {
   if (!token || !newPassword) {
     return { success: false, message: "Token and new password are required" };

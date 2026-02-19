@@ -49,6 +49,7 @@ import RegisterPage from "@/pages/auth/register";
 import ForgotPasswordPage from "@/pages/auth/forgot-password";
 import ResetPasswordPage from "@/pages/auth/reset-password";
 import VerifyEmailPage from "@/pages/auth/verify-email";
+import SettingsPage from "@/pages/settings";
 import PaymentCheckoutPage from "@/pages/payment/checkout";
 import PaymentSuccessPage from "@/pages/payment/success";
 import PaymentCancelPage from "@/pages/payment/cancel";
@@ -239,6 +240,10 @@ function Router() {
       </Route>
       <Route path="/admin/orders">
         <ProtectedRoute component={AdminOrders} roles={["admin"]} />
+      </Route>
+      
+      <Route path="/settings">
+        <ProtectedRoute component={SettingsPage} />
       </Route>
       
       <Route path="/apply-lawyer" component={ApplyLawyerPage} />

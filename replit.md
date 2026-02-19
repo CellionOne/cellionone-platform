@@ -43,6 +43,11 @@ Key architectural patterns include:
   - Lawyer Service Requests: Lawyers can view assigned/queued requests, see founder details + company profiles + uploaded documents, and update status (queued → assigned → in_progress → completed). Pages: `client/src/pages/lawyer/service-requests.tsx`, `client/src/pages/lawyer/service-request-detail.tsx`
   - Admin Service Requests: Admin orders page shows service requests per order with lawyer assignment capability. Admin can assign lawyers to queued requests.
 - **Identity Verification (Payment-Based):** One-time NGN 5,000 fee auto-injected at checkout for unverified users. Status reflected on identity page (`client/src/pages/founder/identity.tsx`) based on `user.identityVerified` boolean. No document upload — verification is payment-gated via VERIFY SKU in product catalog.
+- **User Settings Page:** Shared `/settings` page accessible to all roles (founder, lawyer, admin) with three sections:
+  - Profile: Edit first/last name, email displayed read-only (`client/src/pages/settings.tsx`)
+  - Password: Change password with current password verification, password strength requirements enforced
+  - Notification Preferences: Role-adaptive toggles (compliance reminders, service request updates, order updates, incorporation updates, marketing emails). Stored in `notification_preferences` table. Founders see all 5 toggles; lawyers/admins see service request updates and marketing only.
+  - API: GET/PUT `/api/settings/profile`, POST `/api/settings/change-password`, GET/PUT `/api/settings/notifications`
 - **Security Hardening Suite:** Multi-layered security protections including:
   - HTTP security headers via Helmet.js (CSP, HSTS, XSS protection, X-Frame-Options)
   - Rate limiting: API (100/15min), auth (10/15min), password reset (3/hour), uploads (50/hour)

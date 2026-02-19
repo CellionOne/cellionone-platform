@@ -519,6 +519,160 @@ export async function registerRoutes(
     });
   });
 
+  // ============== SETTINGS ROUTES ==============
+
+  // Get user profile for settings
+  app.get("/api/settings/profile", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      res.json({
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
+        email: user.email || "",
+        hasPassword: !!user.passwordHash,
+      });
+    } catch (error) {
+      console.error("Error getting profile:", error);
+      res.status(500).json({ message: "Failed to get profile" });
+    }
+  });
+
+  // Update user profile
+  app.put("/api/settings/profile", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { updateProfileSchema } = await import("@shared/schema");
+      const validation = updateProfileSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: validation.error.errors[0].message });
+      }
+      const { firstName, lastName } = validation.data;
+      const updated = await storage.updateUser(userId, { firstName, lastName });
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "profile_updated",
+        entityType: "user",
+        entityId: userId,
+        details: { firstName, lastName },
+        ipAddress: req.ip,
+      });
+      res.json({
+        firstName: updated.firstName || "",
+        lastName: updated.lastName || "",
+        email: updated.email || "",
+        hasPassword: !!updated.passwordHash,
+      });
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  // Change password
+  app.post("/api/settings/change-password", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { changePasswordSchema } = await import("@shared/schema");
+      const validation = changePasswordSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: validation.error.errors[0].message });
+      }
+      const { currentPassword, newPassword } = validation.data;
+      const result = await authService.changePassword(userId, currentPassword, newPassword);
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: result.success ? "password_change_success" : "password_change_failed",
+        entityType: "user",
+        entityId: userId,
+        details: { success: result.success },
+        ipAddress: req.ip,
+      });
+      if (!result.success) {
+        return res.status(400).json({ message: result.message });
+      }
+      res.json({ message: result.message });
+    } catch (error) {
+      console.error("Error changing password:", error);
+      res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
+  // Get notification preferences
+  app.get("/api/settings/notifications", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const prefs = await storage.getNotificationPreferences(userId);
+      if (!prefs) {
+        return res.json({
+          complianceReminders: true,
+          serviceRequestUpdates: true,
+          orderUpdates: true,
+          incorporationUpdates: true,
+          marketingEmails: false,
+        });
+      }
+      res.json({
+        complianceReminders: prefs.complianceReminders,
+        serviceRequestUpdates: prefs.serviceRequestUpdates,
+        orderUpdates: prefs.orderUpdates,
+        incorporationUpdates: prefs.incorporationUpdates,
+        marketingEmails: prefs.marketingEmails,
+      });
+    } catch (error) {
+      console.error("Error getting notification preferences:", error);
+      res.status(500).json({ message: "Failed to get notification preferences" });
+    }
+  });
+
+  // Update notification preferences
+  const notificationPrefsSchema = z.object({
+    complianceReminders: z.boolean().optional(),
+    serviceRequestUpdates: z.boolean().optional(),
+    orderUpdates: z.boolean().optional(),
+    incorporationUpdates: z.boolean().optional(),
+    marketingEmails: z.boolean().optional(),
+  });
+
+  app.put("/api/settings/notifications", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const validation = notificationPrefsSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: validation.error.errors[0].message });
+      }
+      const { complianceReminders, serviceRequestUpdates, orderUpdates, incorporationUpdates, marketingEmails } = validation.data;
+      const prefs = await storage.upsertNotificationPreferences(userId, {
+        complianceReminders,
+        serviceRequestUpdates,
+        orderUpdates,
+        incorporationUpdates,
+        marketingEmails,
+      });
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "notification_preferences_updated",
+        entityType: "user",
+        entityId: userId,
+        details: { complianceReminders, serviceRequestUpdates, orderUpdates, incorporationUpdates, marketingEmails },
+        ipAddress: req.ip,
+      });
+      res.json({
+        complianceReminders: prefs.complianceReminders,
+        serviceRequestUpdates: prefs.serviceRequestUpdates,
+        orderUpdates: prefs.orderUpdates,
+        incorporationUpdates: prefs.incorporationUpdates,
+        marketingEmails: prefs.marketingEmails,
+      });
+    } catch (error) {
+      console.error("Error updating notification preferences:", error);
+      res.status(500).json({ message: "Failed to update notification preferences" });
+    }
+  });
+
   // ============== PAYSTACK PAYMENT ROUTES ==============
   const paystackPaymentService = await import("./services/paystackPaymentService");
   const paystackWebhookHandler = await import("./services/paystackWebhookHandler");

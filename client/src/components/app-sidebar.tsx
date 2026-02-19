@@ -57,6 +57,7 @@ const founderItems: NavItem[] = [
   { title: "Mail Handling", url: "/founder/mail", icon: Mail },
   { title: "Legal AI", url: "/founder/legal-assistant", icon: MessageSquare },
   { title: "Services & Checkout", url: "/founder/checkout", icon: ShoppingCart },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 const lawyerItems: NavItem[] = [
@@ -64,6 +65,7 @@ const lawyerItems: NavItem[] = [
   { title: "Assigned Cases", url: "/lawyer/applications", icon: Scale },
   { title: "Service Requests", url: "/lawyer/service-requests", icon: ClipboardList },
   { title: "Payouts", url: "/lawyer/payouts", icon: Wallet },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 const adminItems: NavItem[] = [
@@ -77,6 +79,7 @@ const adminItems: NavItem[] = [
   { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },
   { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
   { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 interface AppSidebarProps {

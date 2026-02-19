@@ -31,6 +31,7 @@ import {
   serviceRequestCompanyProfiles, type ServiceRequestCompanyProfile, type InsertServiceRequestCompanyProfile,
   serviceRequestDocuments, type ServiceRequestDocument, type InsertServiceRequestDocument,
   serviceRequests, type ServiceRequest, type InsertServiceRequest,
+  notificationPreferences, type NotificationPreference,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -190,6 +191,16 @@ export interface IStorage {
   getServiceRequestsByFounder(founderId: string): Promise<ServiceRequest[]>;
   createServiceRequest(data: InsertServiceRequest): Promise<ServiceRequest>;
   updateServiceRequest(id: number, data: Partial<InsertServiceRequest>): Promise<ServiceRequest | undefined>;
+
+  // Notification Preferences
+  getNotificationPreferences(userId: string): Promise<NotificationPreference | undefined>;
+  upsertNotificationPreferences(userId: string, data: Partial<{
+    complianceReminders: boolean;
+    serviceRequestUpdates: boolean;
+    orderUpdates: boolean;
+    incorporationUpdates: boolean;
+    marketingEmails: boolean;
+  }>): Promise<NotificationPreference>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -923,6 +934,34 @@ export class DatabaseStorage implements IStorage {
       .where(eq(serviceRequests.id, id))
       .returning();
     return request;
+  }
+
+  // Notification Preferences
+  async getNotificationPreferences(userId: string): Promise<NotificationPreference | undefined> {
+    const [prefs] = await db.select().from(notificationPreferences)
+      .where(eq(notificationPreferences.userId, userId));
+    return prefs;
+  }
+
+  async upsertNotificationPreferences(userId: string, data: Partial<{
+    complianceReminders: boolean;
+    serviceRequestUpdates: boolean;
+    orderUpdates: boolean;
+    incorporationUpdates: boolean;
+    marketingEmails: boolean;
+  }>): Promise<NotificationPreference> {
+    const existing = await this.getNotificationPreferences(userId);
+    if (existing) {
+      const [updated] = await db.update(notificationPreferences)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(notificationPreferences.userId, userId))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(notificationPreferences)
+      .values({ userId, ...data })
+      .returning();
+    return created;
   }
 }
 

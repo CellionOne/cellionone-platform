@@ -6,7 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { ShoppingCart, Building2, FileText, Shield, Loader2, Plus, Minus, AlertCircle, ExternalLink, CheckCircle2 } from "lucide-react";
+import {
+  ShoppingCart, Building2, FileText, Shield, Loader2, Plus, X,
+  ExternalLink, CheckCircle2, Sparkles, ArrowRight, Users, Clock,
+  MapPin, Hash
+} from "lucide-react";
 
 interface Product {
   id: number;
@@ -18,26 +22,55 @@ interface Product {
   metadata: Record<string, unknown> | null;
 }
 
+type CheckoutMode = "new_company" | "existing_company";
+
 function formatNgn(kobo: number): string {
   return `₦${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 0 })}`;
 }
 
 function getSkuIcon(sku: string) {
   if (sku.startsWith("CAC_")) return Building2;
+  if (sku === "NGO") return Users;
   if (sku === "TM") return Shield;
+  if (sku === "TIN") return Hash;
+  if (sku === "SCUML") return FileText;
   return FileText;
+}
+
+function getSkuDescription(sku: string): string {
+  const descriptions: Record<string, string> = {
+    TIN: "Get your Tax Identification Number from the Federal Inland Revenue Service. Required for opening a corporate bank account.",
+    SCUML: "Special Control Unit against Money Laundering certificate from the EFCC. Required for financial transactions.",
+    TM: "Protect your brand name with a registered trademark. Covers both stages of the trademark process.",
+  };
+  return descriptions[sku] || "";
+}
+
+function getSkuBenefit(sku: string): string {
+  const benefits: Record<string, string> = {
+    TIN: "Needed for corporate bank account",
+    SCUML: "Ready in 5 business days",
+    TM: "Full brand name protection",
+  };
+  return benefits[sku] || "";
 }
 
 export default function CheckoutPage() {
   const { toast } = useToast();
+  const [mode, setMode] = useState<CheckoutMode>("new_company");
   const [selectedSkus, setSelectedSkus] = useState<string[]>([]);
 
   const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
   });
 
-  const incorporationProducts = useMemo(
-    () => products?.filter(p => p.category === "incorporation" && !p.requiresManualPricing) || [],
+  const cacProducts = useMemo(
+    () => products?.filter(p => p.sku.startsWith("CAC_") && !p.requiresManualPricing) || [],
+    [products]
+  );
+
+  const ngoProduct = useMemo(
+    () => products?.find(p => p.sku === "NGO" && !p.requiresManualPricing) || null,
     [products]
   );
 
@@ -56,17 +89,32 @@ export default function CheckoutPage() {
     [selectedProducts]
   );
 
-  const selectedIncorporation = selectedSkus.find(s => s.startsWith("CAC_"));
+  const hasIncorporation = selectedSkus.some(s => s.startsWith("CAC_") || s === "NGO");
+
+  const unselectedAddOns = useMemo(
+    () => addOnProducts.filter(p => !selectedSkus.includes(p.sku)),
+    [addOnProducts, selectedSkus]
+  );
 
   const toggleSku = (sku: string) => {
     setSelectedSkus(prev => {
-      if (sku.startsWith("CAC_")) {
-        const withoutCac = prev.filter(s => !s.startsWith("CAC_"));
-        if (prev.includes(sku)) return withoutCac;
-        return [...withoutCac, sku];
+      const isIncorporationType = sku.startsWith("CAC_") || sku === "NGO";
+      if (isIncorporationType) {
+        const withoutIncorporation = prev.filter(s => !s.startsWith("CAC_") && s !== "NGO");
+        if (prev.includes(sku)) return withoutIncorporation;
+        return [...withoutIncorporation, sku];
       }
       return prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku];
     });
+  };
+
+  const removeSku = (sku: string) => {
+    setSelectedSkus(prev => prev.filter(s => s !== sku));
+  };
+
+  const switchMode = (newMode: CheckoutMode) => {
+    setMode(newMode);
+    setSelectedSkus([]);
   };
 
   const checkoutMutation = useMutation({
@@ -99,69 +147,249 @@ export default function CheckoutPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-8">
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold" data-testid="text-checkout-title">Services & Checkout</h1>
-        <p className="text-muted-foreground mt-1">Select services for your company incorporation and post-incorporation needs.</p>
+        <p className="text-muted-foreground mt-1">Select the services you need and proceed to payment.</p>
+      </div>
+
+      <div className="flex gap-2 flex-wrap">
+        <Button
+          variant={mode === "new_company" ? "default" : "outline"}
+          onClick={() => switchMode("new_company")}
+          data-testid="button-mode-new-company"
+          className="toggle-elevate"
+        >
+          <Building2 className="h-4 w-4 mr-2" />
+          New Company Registration
+        </Button>
+        <Button
+          variant={mode === "existing_company" ? "default" : "outline"}
+          onClick={() => switchMode("existing_company")}
+          data-testid="button-mode-existing-company"
+          className="toggle-elevate"
+        >
+          <FileText className="h-4 w-4 mr-2" />
+          I Already Have a Company
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <div>
-            <h2 className="text-lg font-semibold mb-3" data-testid="text-incorporation-heading">Company Incorporation</h2>
-            <p className="text-sm text-muted-foreground mb-4">Choose a share capital tier for your company registration with the Corporate Affairs Commission (CAC).</p>
-            <div className="space-y-3">
-              {incorporationProducts.map((p) => {
-                const isSelected = selectedSkus.includes(p.sku);
-                const Icon = getSkuIcon(p.sku);
-                const shareCapital = (p.metadata as any)?.shareCapital;
-                return (
+
+          {mode === "new_company" && (
+            <>
+              <div>
+                <h2 className="text-lg font-semibold mb-2" data-testid="text-incorporation-heading">
+                  Company Incorporation (CAC)
+                </h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Choose a share capital tier for your company registration with the Corporate Affairs Commission.
+                </p>
+                <div className="space-y-3">
+                  {cacProducts.map((p) => {
+                    const isSelected = selectedSkus.includes(p.sku);
+                    const shareCapital = (p.metadata as any)?.shareCapital;
+                    return (
+                      <Card
+                        key={p.sku}
+                        className={`cursor-pointer transition-colors ${isSelected ? "border-primary ring-1 ring-primary" : ""}`}
+                        onClick={() => toggleSku(p.sku)}
+                        data-testid={`card-product-${p.sku}`}
+                      >
+                        <CardContent className="flex items-center justify-between gap-4 p-4">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`p-2 rounded-md ${isSelected ? "bg-primary/10" : "bg-muted"}`}>
+                              <Building2 className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-medium truncate">{p.name}</p>
+                              {shareCapital && (
+                                <p className="text-xs text-muted-foreground">
+                                  Share Capital: {formatNgn(shareCapital * 100)}
+                                  {(p.metadata as any)?.foreignParticipation && " — includes foreign participation per CAMA"}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            <span className="font-semibold text-lg">{formatNgn(p.priceNgn)}</span>
+                            {isSelected ? (
+                              <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
+                                <CheckCircle2 className="h-3 w-3 mr-1" /> Selected
+                              </Badge>
+                            ) : (
+                              <Button size="sm" variant="outline" data-testid={`button-select-${p.sku}`}>Select</Button>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {ngoProduct && (
+                <div>
+                  <h2 className="text-lg font-semibold mb-2" data-testid="text-ngo-heading">
+                    NGO / Incorporated Trustees
+                  </h2>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Register a non-profit organisation or incorporated trustees.
+                  </p>
                   <Card
-                    key={p.sku}
-                    className={`cursor-pointer transition-colors ${isSelected ? "border-primary ring-1 ring-primary" : ""}`}
-                    onClick={() => toggleSku(p.sku)}
-                    data-testid={`card-product-${p.sku}`}
+                    className={`cursor-pointer transition-colors ${selectedSkus.includes("NGO") ? "border-primary ring-1 ring-primary" : ""}`}
+                    onClick={() => toggleSku("NGO")}
+                    data-testid="card-product-NGO"
                   >
                     <CardContent className="flex items-center justify-between gap-4 p-4">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`p-2 rounded-md ${isSelected ? "bg-primary/10" : "bg-muted"}`}>
-                          <Icon className="h-5 w-5" />
+                        <div className={`p-2 rounded-md ${selectedSkus.includes("NGO") ? "bg-primary/10" : "bg-muted"}`}>
+                          <Users className="h-5 w-5" />
                         </div>
                         <div className="min-w-0">
-                          <p className="font-medium truncate">{p.name}</p>
-                          {shareCapital && (
-                            <p className="text-xs text-muted-foreground">
-                              Share Capital: {formatNgn(shareCapital * 100)}
-                              {(p.metadata as any)?.foreignParticipation && " (Foreign Participation)"}
-                            </p>
-                          )}
+                          <p className="font-medium">{ngoProduct.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Includes filing fees, newspaper publications, constitution & legal charges
+                          </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0">
-                        <span className="font-semibold text-lg">{formatNgn(p.priceNgn)}</span>
-                        {isSelected ? (
-                          <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
+                        <span className="font-semibold text-lg">{formatNgn(ngoProduct.priceNgn)}</span>
+                        {selectedSkus.includes("NGO") ? (
+                          <Badge variant="default" data-testid="badge-selected-NGO">
                             <CheckCircle2 className="h-3 w-3 mr-1" /> Selected
                           </Badge>
                         ) : (
-                          <Button size="sm" variant="outline" data-testid={`button-select-${p.sku}`}>Select</Button>
+                          <Button size="sm" variant="outline" data-testid="button-select-NGO">Select</Button>
                         )}
                       </div>
                     </CardContent>
                   </Card>
-                );
-              })}
-            </div>
-          </div>
+                </div>
+              )}
 
-          {addOnProducts.length > 0 && (
+              {hasIncorporation && unselectedAddOns.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    <h2 className="text-lg font-semibold" data-testid="text-recommended-heading">
+                      Recommended Add-ons
+                    </h2>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Most founders add these services alongside their incorporation to save time and avoid delays later.
+                  </p>
+                  <div className="space-y-3">
+                    {unselectedAddOns.map((p) => {
+                      const Icon = getSkuIcon(p.sku);
+                      const description = getSkuDescription(p.sku);
+                      const benefit = getSkuBenefit(p.sku);
+                      return (
+                        <Card
+                          key={p.sku}
+                          className="cursor-pointer transition-colors border-dashed"
+                          onClick={() => toggleSku(p.sku)}
+                          data-testid={`card-recommended-${p.sku}`}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex items-start gap-3 min-w-0">
+                                <div className="p-2 rounded-md bg-muted flex-shrink-0 mt-0.5">
+                                  <Icon className="h-5 w-5" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-medium">{p.name}</p>
+                                  {description && (
+                                    <p className="text-xs text-muted-foreground mt-1">{description}</p>
+                                  )}
+                                  {benefit && (
+                                    <div className="flex items-center gap-1 mt-1.5">
+                                      <Clock className="h-3 w-3 text-primary flex-shrink-0" />
+                                      <span className="text-xs text-primary font-medium">{benefit}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 flex-shrink-0">
+                                <span className="font-semibold">{formatNgn(p.priceNgn)}</span>
+                                <Button size="sm" variant="outline" data-testid={`button-add-recommended-${p.sku}`}>
+                                  <Plus className="h-3 w-3 mr-1" /> Add
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {!hasIncorporation && addOnProducts.length > 0 && (
+                <div>
+                  <h2 className="text-lg font-semibold mb-2" data-testid="text-addons-heading">Additional Services</h2>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    You can also add these services to your incorporation order.
+                  </p>
+                  <div className="space-y-3">
+                    {addOnProducts.map((p) => {
+                      const isSelected = selectedSkus.includes(p.sku);
+                      const Icon = getSkuIcon(p.sku);
+                      return (
+                        <Card
+                          key={p.sku}
+                          className={`cursor-pointer transition-colors ${isSelected ? "border-primary ring-1 ring-primary" : ""}`}
+                          onClick={() => toggleSku(p.sku)}
+                          data-testid={`card-product-${p.sku}`}
+                        >
+                          <CardContent className="flex items-center justify-between gap-4 p-4">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`p-2 rounded-md ${isSelected ? "bg-primary/10" : "bg-muted"}`}>
+                                <Icon className="h-5 w-5" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-medium">{p.name}</p>
+                                {getSkuDescription(p.sku) && (
+                                  <p className="text-xs text-muted-foreground mt-0.5">{getSkuDescription(p.sku)}</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 flex-shrink-0">
+                              <span className="font-semibold">{formatNgn(p.priceNgn)}</span>
+                              {isSelected ? (
+                                <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
+                                  <CheckCircle2 className="h-3 w-3 mr-1" /> Added
+                                </Badge>
+                              ) : (
+                                <Button size="sm" variant="outline" data-testid={`button-add-${p.sku}`}>
+                                  <Plus className="h-3 w-3 mr-1" /> Add
+                                </Button>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {mode === "existing_company" && (
             <div>
-              <h2 className="text-lg font-semibold mb-3" data-testid="text-addons-heading">Add-on Services</h2>
-              <p className="text-sm text-muted-foreground mb-4">Enhance your incorporation with additional registrations.</p>
+              <h2 className="text-lg font-semibold mb-2" data-testid="text-standalone-heading">
+                Services for Your Existing Company
+              </h2>
+              <p className="text-sm text-muted-foreground mb-4">
+                Already incorporated? Select the services you need for your business.
+              </p>
               <div className="space-y-3">
                 {addOnProducts.map((p) => {
                   const isSelected = selectedSkus.includes(p.sku);
                   const Icon = getSkuIcon(p.sku);
+                  const description = getSkuDescription(p.sku);
                   return (
                     <Card
                       key={p.sku}
@@ -169,24 +397,37 @@ export default function CheckoutPage() {
                       onClick={() => toggleSku(p.sku)}
                       data-testid={`card-product-${p.sku}`}
                     >
-                      <CardContent className="flex items-center justify-between gap-4 p-4">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className={`p-2 rounded-md ${isSelected ? "bg-primary/10" : "bg-muted"}`}>
-                            <Icon className="h-5 w-5" />
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-start gap-3 min-w-0">
+                            <div className={`p-2 rounded-md ${isSelected ? "bg-primary/10" : "bg-muted"} flex-shrink-0 mt-0.5`}>
+                              <Icon className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-medium">{p.name}</p>
+                              {description && (
+                                <p className="text-xs text-muted-foreground mt-1">{description}</p>
+                              )}
+                              {getSkuBenefit(p.sku) && (
+                                <div className="flex items-center gap-1 mt-1.5">
+                                  <Clock className="h-3 w-3 text-primary flex-shrink-0" />
+                                  <span className="text-xs text-primary font-medium">{getSkuBenefit(p.sku)}</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <p className="font-medium">{p.name}</p>
-                        </div>
-                        <div className="flex items-center gap-3 flex-shrink-0">
-                          <span className="font-semibold text-lg">{formatNgn(p.priceNgn)}</span>
-                          {isSelected ? (
-                            <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
-                              <CheckCircle2 className="h-3 w-3 mr-1" /> Added
-                            </Badge>
-                          ) : (
-                            <Button size="sm" variant="outline" data-testid={`button-add-${p.sku}`}>
-                              <Plus className="h-3 w-3 mr-1" /> Add
-                            </Button>
-                          )}
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            <span className="font-semibold text-lg">{formatNgn(p.priceNgn)}</span>
+                            {isSelected ? (
+                              <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
+                                <CheckCircle2 className="h-3 w-3 mr-1" /> Added
+                              </Badge>
+                            ) : (
+                              <Button size="sm" variant="outline" data-testid={`button-add-${p.sku}`}>
+                                <Plus className="h-3 w-3 mr-1" /> Add
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -212,14 +453,30 @@ export default function CheckoutPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {selectedProducts.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4" data-testid="text-empty-cart">
-                  No services selected yet. Choose from the options on the left to get started.
-                </p>
+                <div className="text-center py-6" data-testid="text-empty-cart">
+                  <ShoppingCart className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
+                  <p className="text-sm text-muted-foreground">
+                    {mode === "new_company"
+                      ? "Choose an incorporation tier or NGO registration to get started."
+                      : "Select the services you need for your company."}
+                  </p>
+                </div>
               ) : (
                 <>
                   {selectedProducts.map((p) => (
                     <div key={p.sku} className="flex items-center justify-between gap-2" data-testid={`summary-item-${p.sku}`}>
-                      <span className="text-sm truncate">{p.name}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 flex-shrink-0"
+                          onClick={(e) => { e.stopPropagation(); removeSku(p.sku); }}
+                          data-testid={`button-remove-${p.sku}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                        <span className="text-sm truncate">{p.name}</span>
+                      </div>
                       <span className="text-sm font-medium flex-shrink-0">{formatNgn(p.priceNgn)}</span>
                     </div>
                   ))}
@@ -246,7 +503,7 @@ export default function CheckoutPage() {
                   </>
                 ) : (
                   <>
-                    Pay {formatNgn(totalKobo)}
+                    Pay {selectedProducts.length > 0 ? formatNgn(totalKobo) : ""}
                     <ExternalLink className="h-4 w-4 ml-2" />
                   </>
                 )}

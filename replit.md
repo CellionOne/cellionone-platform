@@ -37,9 +37,12 @@ Key architectural patterns include:
   - Webhook Handler: `charge.success` verifies amount, marks order paid, activates applications, creates service requests for post-inc add-ons (`server/services/paystackWebhookHandler.ts`)
   - Feature Flags: `enable_paystack_payments`, `enable_paystack_split_settlement`
   - Secrets: `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `PAYSTACK_LAWYER_SUBACCOUNT_CODE`
-  - Frontend: Checkout page (`client/src/pages/founder/checkout.tsx`), Order detail page, Admin orders management (`client/src/pages/admin/orders.tsx`)
-  - Service Requests: Auto-created for SCUML/TM/TIN add-ons upon payment (`service_requests` table)
+  - Frontend: Checkout page (`client/src/pages/founder/checkout.tsx`), Order list (`client/src/pages/founder/orders.tsx`), Order detail page (`client/src/pages/founder/order-detail.tsx`), Admin orders management (`client/src/pages/admin/orders.tsx`)
+  - Service Requests: Auto-created for SCUML/TM/TIN add-ons upon payment (`service_requests` table). Managed by founders, lawyers, and admins through dedicated pages.
   - Service Request Form: Multi-section form for existing company owners to submit company details and upload required documents (Certificate of Incorporation, MEMART, Status Report, TIN, Proof of Address, additional certs). Data stored in `service_request_company_profiles` and `service_request_documents` tables. Profiles are reusable across multiple service requests. Uses object storage for document persistence. (`client/src/pages/founder/service-request-form.tsx`, API routes in `server/routes.ts`)
+  - Lawyer Service Requests: Lawyers can view assigned/queued requests, see founder details + company profiles + uploaded documents, and update status (queued → assigned → in_progress → completed). Pages: `client/src/pages/lawyer/service-requests.tsx`, `client/src/pages/lawyer/service-request-detail.tsx`
+  - Admin Service Requests: Admin orders page shows service requests per order with lawyer assignment capability. Admin can assign lawyers to queued requests.
+- **Identity Verification (Payment-Based):** One-time NGN 5,000 fee auto-injected at checkout for unverified users. Status reflected on identity page (`client/src/pages/founder/identity.tsx`) based on `user.identityVerified` boolean. No document upload — verification is payment-gated via VERIFY SKU in product catalog.
 - **Security Hardening Suite:** Multi-layered security protections including:
   - HTTP security headers via Helmet.js (CSP, HSTS, XSS protection, X-Frame-Options)
   - Rate limiting: API (100/15min), auth (10/15min), password reset (3/hour), uploads (50/hour)

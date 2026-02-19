@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Loader2, ArrowLeft, CheckCircle2, Clock, XCircle, FileText,
-  User, Building2, Download, ArrowRight,
+  User, Building2, Download,
 } from "lucide-react";
 import { useState } from "react";
 

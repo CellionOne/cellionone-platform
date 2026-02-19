@@ -1,31 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { LoadingSpinner } from "@/components/loading-spinner";
 import {
   Shield,
   CheckCircle2,
-  AlertCircle,
   Info,
   ArrowRight,
-  ShoppingCart,
-  Clock,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import type { IdentityVerification } from "@shared/schema";
 
 export default function IdentityVerificationPage() {
   const { user } = useAuth();
-
-  const { data: verification, isLoading } = useQuery<IdentityVerification | null>({
-    queryKey: ["/api/founder/identity"],
-  });
-
-  const isVerified = user?.identityVerified === true || verification?.status === "verified";
+  const isVerified = user?.identityVerified === true;
 
   return (
     <DashboardLayout
@@ -40,11 +29,7 @@ export default function IdentityVerificationPage() {
           </p>
         </div>
 
-        {isLoading ? (
-          <div className="flex justify-center py-12">
-            <LoadingSpinner size="lg" />
-          </div>
-        ) : isVerified ? (
+        {isVerified ? (
           <Card className="border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30" data-testid="card-verified">
             <CardHeader>
               <div className="flex items-start gap-4">
@@ -54,33 +39,12 @@ export default function IdentityVerificationPage() {
                 <div className="flex-1">
                   <div className="flex items-center gap-3 flex-wrap">
                     <CardTitle>Identity Verified</CardTitle>
-                    <Badge variant="default">
+                    <Badge variant="default" data-testid="badge-verified">
                       <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
                     </Badge>
                   </div>
-                  <CardDescription className="mt-1">
+                  <CardDescription className="mt-1" data-testid="text-verified-desc">
                     Your identity has been verified. You can now place orders and submit service requests.
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
-        ) : verification?.status === "pending" ? (
-          <Card data-testid="card-pending">
-            <CardHeader>
-              <div className="flex items-start gap-4">
-                <div className="h-10 w-10 rounded-full bg-yellow-100 dark:bg-yellow-900/50 flex items-center justify-center flex-shrink-0">
-                  <Clock className="h-5 w-5 text-yellow-600" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <CardTitle>Verification Pending</CardTitle>
-                    <Badge variant="secondary">
-                      <Clock className="h-3 w-3 mr-1" /> Processing
-                    </Badge>
-                  </div>
-                  <CardDescription className="mt-1">
-                    Your verification payment has been received. Processing is underway.
                   </CardDescription>
                 </div>
               </div>

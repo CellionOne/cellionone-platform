@@ -1,10 +1,7 @@
-/**
- * Paystack Webhook Handler
- * 
- * Processes Paystack webhook events for transaction completion and service activation.
- */
-
 import { storage } from '../storage';
+import { db } from '../db';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications } from '@shared/schema';
+import { eq, and } from 'drizzle-orm';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
 
@@ -25,8 +22,11 @@ export interface PaystackWebhookEvent {
     ip_address?: string;
     metadata?: {
       userId?: string;
+      founderId?: string;
+      orderId?: number;
       applicationId?: number;
       subscriptionId?: number;
+      items?: string[];
       lineItems?: Array<{
         serviceType: ServiceType;
         tier?: RegisteredOfficeTier;
@@ -59,19 +59,15 @@ export interface PaystackWebhookEvent {
   };
 }
 
-/**
- * Process a Paystack webhook request
- */
 export async function processWebhook(
   payload: string,
   signature: string
 ): Promise<{ processed: boolean; event?: string; error?: string }> {
-  // Verify signature
   if (!verifyWebhookSignature(payload, signature)) {
     console.error('[Paystack Webhook] Invalid signature');
     return { processed: false, error: 'Invalid signature' };
   }
-  
+
   let event: PaystackWebhookEvent;
   try {
     event = JSON.parse(payload);
@@ -79,45 +75,198 @@ export async function processWebhook(
     console.error('[Paystack Webhook] Invalid JSON payload');
     return { processed: false, error: 'Invalid JSON' };
   }
-  
+
   console.log(`[Paystack Webhook] Received event: ${event.event}`);
-  
-  // Handle different event types
+
   switch (event.event) {
     case 'charge.success':
-      await handleChargeSuccess(event.data);
+      await handleChargeSuccess(event.data, payload);
       break;
     case 'charge.failed':
-      await handleChargeFailed(event.data);
+      await handleChargeFailed(event.data, payload);
       break;
     default:
       console.log(`[Paystack Webhook] Unhandled event type: ${event.event}`);
   }
-  
+
   return { processed: true, event: event.event };
 }
 
-/**
- * Handle successful charge
- */
-async function handleChargeSuccess(data: PaystackWebhookEvent['data']): Promise<void> {
+async function handleChargeSuccess(data: PaystackWebhookEvent['data'], rawPayload: string): Promise<void> {
   const reference = data.reference;
-  
-  // Get our database record
-  const transaction = await storage.getPaystackTransactionByReference(reference);
-  if (!transaction) {
-    console.error(`[Paystack Webhook] No transaction found for reference: ${reference}`);
+
+  const isSplitOrder = reference.startsWith('celion_split_');
+
+  if (isSplitOrder) {
+    await handleSplitOrderSuccess(data, rawPayload);
+  } else {
+    await handleLegacyPaymentSuccess(data);
+  }
+}
+
+async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPayload: string): Promise<void> {
+  const reference = data.reference;
+
+  const [payment] = await db.select().from(orderPayments)
+    .where(eq(orderPayments.paystackReference, reference));
+
+  if (!payment) {
+    console.error(`[Paystack Webhook] No order payment found for reference: ${reference}`);
     return;
   }
-  
-  // Verify with Paystack API to be sure (double-check)
+
+  if (payment.status === 'paid') {
+    console.log(`[Paystack Webhook] Payment already processed for reference: ${reference}`);
+    return;
+  }
+
   const verification = await verifyTransaction(reference);
   if (verification.status !== 'success') {
     console.error(`[Paystack Webhook] Verification failed for reference: ${reference}`);
     return;
   }
-  
-  // Update transaction status
+
+  if (verification.amount !== payment.amount) {
+    console.error(`[Paystack Webhook] Amount mismatch: expected ${payment.amount}, got ${verification.amount} for reference: ${reference}`);
+    return;
+  }
+
+  if (verification.currency !== 'NGN') {
+    console.error(`[Paystack Webhook] Currency mismatch: expected NGN, got ${verification.currency} for reference: ${reference}`);
+    return;
+  }
+
+  await db.update(orderPayments)
+    .set({
+      status: 'paid',
+      paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+      rawEvent: JSON.parse(rawPayload),
+      updatedAt: new Date(),
+    })
+    .where(eq(orderPayments.id, payment.id));
+
+  const [order] = await db.select().from(orders)
+    .where(eq(orders.id, payment.orderId));
+
+  if (!order) {
+    console.error(`[Paystack Webhook] No order found for orderId: ${payment.orderId}`);
+    return;
+  }
+
+  await db.update(orders)
+    .set({ status: 'paid', updatedAt: new Date() })
+    .where(eq(orders.id, order.id));
+
+  const items = await db.select().from(orderItems)
+    .where(eq(orderItems.orderId, order.id));
+
+  if (order.applicationId) {
+    try {
+      await storage.updateApplication(order.applicationId, {
+        paymentState: 'paid_escrowed',
+        paymentStateUpdatedAt: new Date(),
+      });
+
+      await storage.createAuditLog({
+        actorUserId: order.founderId,
+        action: 'incorporation_fee_paid_split',
+        entityType: 'company_application',
+        entityId: String(order.applicationId),
+        details: {
+          provider: 'paystack',
+          orderId: order.id,
+          paymentState: 'paid_escrowed',
+          totalAmount: order.totalAmount,
+          cellionCut: order.totalCellionCut,
+          lawyerNet: order.totalLawyerNet,
+        },
+      });
+    } catch (err) {
+      console.error(`[Paystack Webhook] Error updating application ${order.applicationId}:`, err);
+    }
+  }
+
+  for (const item of items) {
+    const serviceType = item.sku;
+    if (['SCUML', 'TM', 'TIN'].includes(serviceType)) {
+      try {
+        await db.insert(serviceRequests).values({
+          founderId: order.founderId,
+          orderId: order.id,
+          orderItemId: item.id,
+          serviceType,
+          status: 'queued',
+          notes: `Auto-created from paid order #${order.id}`,
+        });
+
+        await storage.createAuditLog({
+          actorUserId: order.founderId,
+          action: 'service_request_created',
+          entityType: 'service_request',
+          entityId: `${serviceType}_order_${order.id}`,
+          details: { serviceType, orderId: order.id, sku: item.sku },
+        });
+      } catch (err) {
+        console.error(`[Paystack Webhook] Error creating service request for ${serviceType}:`, err);
+      }
+    }
+  }
+
+  await storage.createAuditLog({
+    actorUserId: order.founderId,
+    action: 'split_payment_completed',
+    entityType: 'order',
+    entityId: String(order.id),
+    details: {
+      reference,
+      amount: data.amount,
+      currency: data.currency,
+      channel: data.channel,
+      totalAmount: order.totalAmount,
+      cellionCut: order.totalCellionCut,
+      lawyerNet: order.totalLawyerNet,
+      items: items.map(i => ({ sku: i.sku, unitPrice: i.unitPrice, cellionCut: i.cellionCut, lawyerNet: i.lawyerNet })),
+    },
+  });
+
+  await storage.createAuditLog({
+    actorUserId: order.founderId,
+    action: 'payout_split_recorded',
+    entityType: 'order',
+    entityId: String(order.id),
+    details: {
+      cellionCut: order.totalCellionCut,
+      lawyerNet: order.totalLawyerNet,
+      subaccountSettlement: true,
+    },
+  });
+
+  await storage.createNotification({
+    userId: order.founderId,
+    title: 'Payment Successful',
+    message: `Your payment of ₦${(order.totalAmount / 100).toLocaleString()} has been processed successfully.`,
+    type: 'success',
+    linkUrl: `/founder/orders/${order.id}`,
+  });
+
+  console.log(`[Paystack Webhook] Split payment processed for order #${order.id}, reference: ${reference}`);
+}
+
+async function handleLegacyPaymentSuccess(data: PaystackWebhookEvent['data']): Promise<void> {
+  const reference = data.reference;
+
+  const transaction = await storage.getPaystackTransactionByReference(reference);
+  if (!transaction) {
+    console.error(`[Paystack Webhook] No transaction found for reference: ${reference}`);
+    return;
+  }
+
+  const verification = await verifyTransaction(reference);
+  if (verification.status !== 'success') {
+    console.error(`[Paystack Webhook] Verification failed for reference: ${reference}`);
+    return;
+  }
+
   await storage.updatePaystackTransaction(transaction.id, {
     status: 'success',
     paystackTransactionId: String(data.id),
@@ -125,22 +274,20 @@ async function handleChargeSuccess(data: PaystackWebhookEvent['data']): Promise<
     channel: data.channel,
     completedAt: data.paid_at ? new Date(data.paid_at) : new Date(),
   });
-  
-  // Activate services based on line items
+
   const lineItems = transaction.lineItems || [];
   const context = transaction.contextJson || {};
   const userId = transaction.userId;
-  
+
   for (const item of lineItems) {
     await activateService(
-      userId, 
-      item.serviceType as ServiceType, 
-      item.tier as RegisteredOfficeTier | undefined, 
+      userId,
+      item.serviceType as ServiceType,
+      item.tier as RegisteredOfficeTier | undefined,
       context
     );
   }
-  
-  // Create audit log
+
   await storage.createAuditLog({
     actorUserId: userId,
     action: 'paystack_payment_completed',
@@ -154,8 +301,7 @@ async function handleChargeSuccess(data: PaystackWebhookEvent['data']): Promise<
       lineItems: lineItems.map(i => ({ serviceType: i.serviceType, tier: i.tier })),
     },
   });
-  
-  // Create notification for user
+
   await storage.createNotification({
     userId,
     title: 'Payment Successful',
@@ -163,44 +309,68 @@ async function handleChargeSuccess(data: PaystackWebhookEvent['data']): Promise<
     type: 'success',
     linkUrl: '/founder/dashboard',
   });
-  
-  console.log(`[Paystack Webhook] Successfully processed payment for reference: ${reference}`);
+
+  console.log(`[Paystack Webhook] Legacy payment processed for reference: ${reference}`);
 }
 
-/**
- * Handle failed charge
- */
-async function handleChargeFailed(data: PaystackWebhookEvent['data']): Promise<void> {
+async function handleChargeFailed(data: PaystackWebhookEvent['data'], rawPayload: string): Promise<void> {
   const reference = data.reference;
-  
-  const transaction = await storage.getPaystackTransactionByReference(reference);
-  if (!transaction) {
-    console.error(`[Paystack Webhook] No transaction found for failed charge: ${reference}`);
-    return;
+  const isSplitOrder = reference.startsWith('celion_split_');
+
+  if (isSplitOrder) {
+    const [payment] = await db.select().from(orderPayments)
+      .where(eq(orderPayments.paystackReference, reference));
+
+    if (payment) {
+      await db.update(orderPayments)
+        .set({ status: 'failed', rawEvent: JSON.parse(rawPayload), updatedAt: new Date() })
+        .where(eq(orderPayments.id, payment.id));
+
+      await db.update(orders)
+        .set({ status: 'failed', updatedAt: new Date() })
+        .where(eq(orders.id, payment.orderId));
+
+      const [order] = await db.select().from(orders).where(eq(orders.id, payment.orderId));
+      if (order) {
+        await storage.createNotification({
+          userId: order.founderId,
+          title: 'Payment Failed',
+          message: `Your payment of ₦${(order.totalAmount / 100).toLocaleString()} could not be processed. ${data.gateway_response || 'Please try again.'}`,
+          type: 'warning',
+          linkUrl: '/payment/checkout',
+        });
+
+        await storage.createAuditLog({
+          actorUserId: order.founderId,
+          action: 'split_payment_failed',
+          entityType: 'order',
+          entityId: String(order.id),
+          details: { reference, gatewayResponse: data.gateway_response },
+        });
+      }
+    }
+  } else {
+    const transaction = await storage.getPaystackTransactionByReference(reference);
+    if (transaction) {
+      await storage.updatePaystackTransaction(transaction.id, {
+        status: 'failed',
+        paystackTransactionId: String(data.id),
+        gatewayResponse: data.gateway_response,
+      });
+
+      await storage.createNotification({
+        userId: transaction.userId,
+        title: 'Payment Failed',
+        message: `Your payment of ₦${((transaction.amountTotal || 0) / 100).toLocaleString()} could not be processed. ${data.gateway_response || 'Please try again.'}`,
+        type: 'warning',
+        linkUrl: '/payment/checkout',
+      });
+    }
   }
-  
-  // Update transaction status
-  await storage.updatePaystackTransaction(transaction.id, {
-    status: 'failed',
-    paystackTransactionId: String(data.id),
-    gatewayResponse: data.gateway_response,
-  });
-  
-  // Create notification for user
-  await storage.createNotification({
-    userId: transaction.userId,
-    title: 'Payment Failed',
-    message: `Your payment of ₦${((transaction.amountTotal || 0) / 100).toLocaleString()} could not be processed. ${data.gateway_response || 'Please try again.'}`,
-    type: 'warning',
-    linkUrl: '/payment/checkout',
-  });
-  
+
   console.log(`[Paystack Webhook] Payment failed for reference: ${reference}`);
 }
 
-/**
- * Activate a service after successful payment
- */
 async function activateService(
   userId: string,
   serviceType: ServiceType,
@@ -223,7 +393,7 @@ async function activateService(
           notes: 'Verification fee paid via Paystack.',
         });
       }
-      
+
       await storage.createAuditLog({
         actorUserId: userId,
         action: 'verification_fee_paid',
@@ -233,7 +403,7 @@ async function activateService(
       });
       break;
     }
-    
+
     case 'incorporation': {
       if (context.applicationId) {
         const application = await storage.getApplication(context.applicationId);
@@ -242,7 +412,7 @@ async function activateService(
             paymentState: 'paid_escrowed',
             paymentStateUpdatedAt: new Date(),
           });
-          
+
           await storage.createAuditLog({
             actorUserId: userId,
             action: 'incorporation_fee_paid',
@@ -254,32 +424,32 @@ async function activateService(
       }
       break;
     }
-    
+
     case 'registered_office': {
       if (context.subscriptionId) {
         const now = new Date();
         const oneYearFromNow = new Date(now);
         oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
-        
+
         await storage.updateRegisteredOfficeSubscription(context.subscriptionId, {
           status: 'active',
           startDate: now,
           endDate: oneYearFromNow,
         });
-        
+
         await storage.createAuditLog({
           actorUserId: userId,
           action: 'registered_office_activated_paid',
           entityType: 'registered_office_subscription',
           entityId: String(context.subscriptionId),
-          details: { 
-            provider: 'paystack', 
-            tier, 
-            startDate: now.toISOString(), 
-            endDate: oneYearFromNow.toISOString() 
+          details: {
+            provider: 'paystack',
+            tier,
+            startDate: now.toISOString(),
+            endDate: oneYearFromNow.toISOString(),
           },
         });
-        
+
         await storage.createNotification({
           userId,
           title: 'Registered Office Activated',

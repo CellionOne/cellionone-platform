@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses } from "@shared/schema";
+import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog } from "@shared/schema";
 
 export async function seedDatabase() {
   try {
@@ -7,8 +7,6 @@ export async function seedDatabase() {
     const allFlags = [
       { key: "kyc_verification", isEnabled: true, description: "Enable KYC identity verification" },
       { key: "ai_suggestions", isEnabled: true, description: "Enable AI-powered CAC activity suggestions" },
-      { key: "paystack_payments", isEnabled: true, description: "Enable Paystack payment processing" },
-      { key: "lawyer_payout", isEnabled: true, description: "Enable lawyer payout processing" },
       { key: "document_vault", isEnabled: true, description: "Enable document vault feature" },
       { key: "courier_tracking", isEnabled: false, description: "Enable courier tracking for document delivery" },
       { key: "multi_director", isEnabled: true, description: "Allow multiple directors per application" },
@@ -25,7 +23,8 @@ export async function seedDatabase() {
       { key: "enable_registered_office_payment_required", isEnabled: false, description: "Require payment for registered office (beta: false)" },
       { key: "enable_verification_required_for_registered_office", isEnabled: true, description: "Require identity verification for standalone registered office" },
       { key: "enable_stripe_payments", isEnabled: true, description: "Enable Stripe payment processing (GBP/international)" },
-      { key: "enable_paystack_payments", isEnabled: false, description: "Enable Paystack payment processing (NGN/Nigeria)" },
+      { key: "enable_paystack_payments", isEnabled: true, description: "Enable Paystack payment processing (NGN/Nigeria)" },
+      { key: "enable_paystack_split_settlement", isEnabled: true, description: "Enable Paystack split settlement to lawyer subaccount" },
       { key: "enable_verification_payment_required", isEnabled: false, description: "Require payment for identity verification (beta: false)" },
       { key: "enable_incorporation_payment_required", isEnabled: false, description: "Require payment for incorporation (beta: false)" },
     ];
@@ -48,6 +47,22 @@ export async function seedDatabase() {
       isActive: true,
     }).onConflictDoNothing();
     console.log("Synced service addresses");
+
+    // Seed product catalog with fixed-cut SKUs
+    const catalogItems = [
+      { sku: "CAC_1M", name: "Company Incorporation (₦1M Share Capital)", category: "incorporation", priceNgn: 10000000, cellionCutNgn: 2500000, metadata: { shareCapital: 1000000 } },
+      { sku: "CAC_5M", name: "Company Incorporation (₦5M Share Capital)", category: "incorporation", priceNgn: 15000000, cellionCutNgn: 3000000, metadata: { shareCapital: 5000000 } },
+      { sku: "CAC_10M", name: "Company Incorporation (₦10M Share Capital)", category: "incorporation", priceNgn: 35000000, cellionCutNgn: 3500000, metadata: { shareCapital: 10000000 } },
+      { sku: "CAC_20M", name: "Company Incorporation (₦20M Share Capital)", category: "incorporation", priceNgn: 55000000, cellionCutNgn: 4000000, metadata: { shareCapital: 20000000 } },
+      { sku: "CAC_100M", name: "Company Incorporation (₦100M Share Capital)", category: "incorporation", priceNgn: 300000000, cellionCutNgn: 10000000, metadata: { shareCapital: 100000000, foreignParticipation: true } },
+      { sku: "SCUML", name: "SCUML Registration", category: "post_incorporation", priceNgn: 15000000, cellionCutNgn: 2500000 },
+      { sku: "TM", name: "Trademark Registration", category: "post_incorporation", priceNgn: 25000000, cellionCutNgn: 3500000 },
+      { sku: "TIN", name: "TIN Registration", category: "post_incorporation", priceNgn: 2000000, cellionCutNgn: null, requiresManualPricing: true, metadata: { note: "varies by location" } },
+    ];
+    for (const item of catalogItems) {
+      await db.insert(productCatalog).values(item).onConflictDoNothing();
+    }
+    console.log("Synced product catalog");
 
     // Seed demo users if in development
     if (process.env.NODE_ENV !== "production") {

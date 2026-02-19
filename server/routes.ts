@@ -6,7 +6,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc } from "drizzle-orm";
 import * as services from "./services";
@@ -811,6 +811,190 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching Paystack transactions:", error);
       res.status(500).json({ message: "Failed to fetch transactions" });
+    }
+  });
+
+  // ============== PRODUCT CATALOG & SPLIT CHECKOUT ROUTES ==============
+  const productCatalogService = await import("./services/productCatalogService");
+  const orderService = await import("./services/orderService");
+
+  app.get("/api/products", async (req, res) => {
+    try {
+      const products = await productCatalogService.getActiveProducts();
+      const formatted = products.map(p => ({
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        category: p.category,
+        priceNgn: p.priceNgn,
+        requiresManualPricing: p.requiresManualPricing,
+        metadata: p.metadata,
+      }));
+      res.json(formatted);
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      res.status(500).json({ message: "Failed to fetch products" });
+    }
+  });
+
+  app.post("/api/checkout/split", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { items, applicationId } = req.body;
+
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "At least one item is required" });
+      }
+
+      const paystackEnabled = await storage.getFeatureFlag("enable_paystack_payments");
+      if (!paystackEnabled?.isEnabled) {
+        return res.status(503).json({ message: "Paystack payments are currently disabled" });
+      }
+
+      if (!paystackPaymentService.isPaystackConfigured()) {
+        return res.status(503).json({ message: "Paystack payments are not available" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user?.email) {
+        return res.status(400).json({ message: "User email is required for Paystack payments" });
+      }
+
+      const { order, items: orderItemRecords } = await orderService.createOrder({
+        founderId: userId,
+        applicationId: applicationId || undefined,
+        items: items.map((i: { sku: string }) => ({ sku: i.sku })),
+      });
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+      const result = await paystackPaymentService.initializeSplitTransaction({
+        orderId: order.id,
+        email: user.email,
+        totalAmount: order.totalAmount,
+        totalCellionCut: order.totalCellionCut || 0,
+        founderId: userId,
+        applicationId: order.applicationId,
+        itemSkus: orderItemRecords.map(i => i.sku),
+        baseUrl,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "split_checkout_initiated",
+        entityType: "order",
+        entityId: String(order.id),
+        details: {
+          reference: result.reference,
+          totalAmount: order.totalAmount,
+          cellionCut: order.totalCellionCut,
+          lawyerNet: order.totalLawyerNet,
+          items: items.map((i: { sku: string }) => i.sku),
+        },
+        ipAddress: req.ip,
+      });
+
+      res.json({
+        orderId: order.id,
+        authorizationUrl: result.authorizationUrl,
+        reference: result.reference,
+        totalAmount: order.totalAmount,
+        totalCellionCut: order.totalCellionCut,
+        totalLawyerNet: order.totalLawyerNet,
+      });
+    } catch (error: any) {
+      console.error("Error creating split checkout:", error);
+      if (error.message === "MANUAL_PRICING_REQUIRED") {
+        return res.status(400).json({ message: "One or more items requires manual pricing. Please contact support." });
+      }
+      res.status(500).json({ message: error.message || "Failed to create checkout" });
+    }
+  });
+
+  app.get("/api/founder/orders", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const userOrders = await orderService.getOrdersByFounder(userId);
+      res.json(userOrders);
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+      res.status(500).json({ message: "Failed to fetch orders" });
+    }
+  });
+
+  app.get("/api/founder/orders/:id", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const orderId = parseInt(req.params.id, 10);
+      if (isNaN(orderId)) return res.status(400).json({ message: "Invalid order ID" });
+
+      const result = await orderService.getOrderById(orderId);
+      if (!result) return res.status(404).json({ message: "Order not found" });
+      if (result.order.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching order:", error);
+      res.status(500).json({ message: "Failed to fetch order" });
+    }
+  });
+
+  // ============== ADMIN ORDER MANAGEMENT ==============
+  app.get("/api/admin/orders", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const allOrders = await db.select().from(ordersTable).orderBy(ordersTable.createdAt);
+      res.json(allOrders);
+    } catch (error) {
+      console.error("Error fetching admin orders:", error);
+      res.status(500).json({ message: "Failed to fetch orders" });
+    }
+  });
+
+  app.get("/api/admin/orders/:id", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const orderId = parseInt(req.params.id, 10);
+      if (isNaN(orderId)) return res.status(400).json({ message: "Invalid order ID" });
+
+      const result = await orderService.getOrderById(orderId);
+      if (!result) return res.status(404).json({ message: "Order not found" });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching admin order:", error);
+      res.status(500).json({ message: "Failed to fetch order" });
+    }
+  });
+
+  app.patch("/api/admin/orders/:id/fulfilment", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const orderId = parseInt(req.params.id, 10);
+      if (isNaN(orderId)) return res.status(400).json({ message: "Invalid order ID" });
+
+      const { fulfilmentStatus, assignedLawyerId } = req.body;
+      if (!fulfilmentStatus) return res.status(400).json({ message: "fulfilmentStatus is required" });
+
+      const validStatuses = ["pending", "in_progress", "completed", "cancelled"];
+      if (!validStatuses.includes(fulfilmentStatus)) {
+        return res.status(400).json({ message: `Invalid fulfilmentStatus. Must be one of: ${validStatuses.join(", ")}` });
+      }
+
+      const updated = await orderService.updateOrderFulfilment(orderId, fulfilmentStatus, assignedLawyerId);
+      if (!updated) return res.status(404).json({ message: "Order not found" });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "order_fulfilment_updated",
+        entityType: "order",
+        entityId: String(orderId),
+        details: { fulfilmentStatus, assignedLawyerId },
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating order fulfilment:", error);
+      res.status(500).json({ message: "Failed to update order fulfilment" });
     }
   });
 

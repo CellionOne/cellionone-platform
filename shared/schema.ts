@@ -753,3 +753,118 @@ export const complianceDeadlines = pgTable("compliance_deadlines", {
 export const insertComplianceDeadlineSchema = createInsertSchema(complianceDeadlines).omit({ id: true, createdAt: true, updatedAt: true });
 export type ComplianceDeadline = typeof complianceDeadlines.$inferSelect;
 export type InsertComplianceDeadline = z.infer<typeof insertComplianceDeadlineSchema>;
+
+// ============== PRODUCT CATALOG ==============
+export const productCatalog = pgTable("product_catalog", {
+  id: serial("id").primaryKey(),
+  sku: varchar("sku", { length: 50 }).notNull().unique(),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull(), // incorporation | post_incorporation | addon
+  priceNgn: integer("price_ngn").notNull(), // in kobo
+  cellionCutNgn: integer("cellion_cut_ngn"), // fixed cut in kobo; null => manual pricing
+  isActive: boolean("is_active").default(true),
+  requiresManualPricing: boolean("requires_manual_pricing").default(false),
+  metadata: json("metadata").$type<{
+    shareCapital?: number;
+    foreignParticipation?: boolean;
+    note?: string;
+  }>(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_product_catalog_sku").on(table.sku),
+  index("idx_product_catalog_category").on(table.category),
+]);
+
+export const insertProductCatalogSchema = createInsertSchema(productCatalog).omit({ id: true, createdAt: true, updatedAt: true });
+export type ProductCatalogItem = typeof productCatalog.$inferSelect;
+export type InsertProductCatalogItem = z.infer<typeof insertProductCatalogSchema>;
+
+// ============== ORDERS ==============
+export const orders = pgTable("orders", {
+  id: serial("id").primaryKey(),
+  founderId: varchar("founder_id").notNull(),
+  applicationId: integer("application_id"), // link to incorporation application if relevant
+  status: varchar("status", { length: 50 }).default("draft"), // draft | pending_payment | paid | failed | cancelled
+  currency: varchar("currency", { length: 10 }).default("NGN"),
+  totalAmount: integer("total_amount").notNull(), // in kobo
+  totalCellionCut: integer("total_cellion_cut").notNull().default(0), // sum of all item cuts in kobo
+  totalLawyerNet: integer("total_lawyer_net").notNull().default(0), // total - cellion cut in kobo
+  fulfilmentStatus: varchar("fulfilment_status", { length: 50 }).default("pending"), // pending | assigned | in_progress | completed
+  assignedLawyerId: varchar("assigned_lawyer_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_orders_founder").on(table.founderId),
+  index("idx_orders_application").on(table.applicationId),
+  index("idx_orders_status").on(table.status),
+]);
+
+export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true, updatedAt: true });
+export type Order = typeof orders.$inferSelect;
+export type InsertOrder = z.infer<typeof insertOrderSchema>;
+
+// ============== ORDER ITEMS ==============
+export const orderItems = pgTable("order_items", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull(),
+  productId: integer("product_id").notNull(),
+  sku: varchar("sku", { length: 50 }).notNull(),
+  quantity: integer("quantity").default(1),
+  unitPrice: integer("unit_price").notNull(), // in kobo
+  cellionCut: integer("cellion_cut").notNull().default(0), // for this item in kobo
+  lawyerNet: integer("lawyer_net").notNull().default(0), // unit_price - cellion_cut in kobo
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_order_items_order").on(table.orderId),
+  index("idx_order_items_product").on(table.productId),
+]);
+
+export const insertOrderItemSchema = createInsertSchema(orderItems).omit({ id: true, createdAt: true });
+export type OrderItem = typeof orderItems.$inferSelect;
+export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
+
+// ============== ORDER PAYMENTS (Paystack split) ==============
+export const orderPayments = pgTable("order_payments", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull(),
+  provider: varchar("provider", { length: 50 }).default("paystack"),
+  status: varchar("status", { length: 50 }).default("initiated"), // initiated | pending | paid | failed
+  amount: integer("amount").notNull(), // in kobo
+  currency: varchar("currency", { length: 10 }).default("NGN"),
+  paystackReference: varchar("paystack_reference", { length: 255 }).unique(),
+  authorizationUrl: text("authorization_url"),
+  paidAt: timestamp("paid_at"),
+  rawEvent: json("raw_event").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_order_payments_order").on(table.orderId),
+  index("idx_order_payments_reference").on(table.paystackReference),
+  index("idx_order_payments_status").on(table.status),
+]);
+
+export const insertOrderPaymentSchema = createInsertSchema(orderPayments).omit({ id: true, createdAt: true, updatedAt: true });
+export type OrderPayment = typeof orderPayments.$inferSelect;
+export type InsertOrderPayment = z.infer<typeof insertOrderPaymentSchema>;
+
+// ============== SERVICE REQUESTS (SCUML, TM, TIN fulfillment) ==============
+export const serviceRequests = pgTable("service_requests", {
+  id: serial("id").primaryKey(),
+  founderId: varchar("founder_id").notNull(),
+  orderId: integer("order_id"),
+  orderItemId: integer("order_item_id"),
+  serviceType: varchar("service_type", { length: 50 }).notNull(), // SCUML | TM | TIN
+  status: varchar("status", { length: 50 }).default("queued"), // queued | assigned | in_progress | completed | cancelled
+  assignedLawyerId: varchar("assigned_lawyer_id"),
+  notes: text("notes"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_service_requests_founder").on(table.founderId),
+  index("idx_service_requests_order").on(table.orderId),
+  index("idx_service_requests_status").on(table.status),
+  index("idx_service_requests_type").on(table.serviceType),
+]);

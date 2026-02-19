@@ -35,6 +35,7 @@ import {
   Calendar,
   ListChecks,
   Briefcase,
+  ShoppingCart,
 } from "lucide-react";
 
 interface NavItem {
@@ -54,6 +55,7 @@ const founderItems: NavItem[] = [
   { title: "Registered Office", url: "/founder/registered-office", icon: Building2 },
   { title: "Mail Handling", url: "/founder/mail", icon: Mail },
   { title: "Legal AI", url: "/founder/legal-assistant", icon: MessageSquare },
+  { title: "Services & Checkout", url: "/founder/checkout", icon: ShoppingCart },
 ];
 
 const lawyerItems: NavItem[] = [
@@ -71,6 +73,7 @@ const adminItems: NavItem[] = [
   { title: "Receipts", url: "/admin/receipts", icon: Receipt },
   { title: "AI Events", url: "/admin/ai-events", icon: Brain },
   { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },
+  { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
   { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },
 ];
 

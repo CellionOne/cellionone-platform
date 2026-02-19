@@ -19,6 +19,8 @@ import FounderLegalAssistant from "@/pages/founder/legal-assistant";
 import FounderCompanyProfile from "@/pages/founder/company-profile";
 import FounderPostIncChecklist from "@/pages/founder/post-inc-checklist";
 import FounderComplianceCalendar from "@/pages/founder/compliance-calendar";
+import FounderCheckout from "@/pages/founder/checkout";
+import FounderOrderDetail from "@/pages/founder/order-detail";
 import NewApplication from "@/pages/applications/new";
 import ApplicationDetails from "@/pages/applications/[id]";
 import LawyerDashboard from "@/pages/lawyer/dashboard";
@@ -34,6 +36,7 @@ import AdminAIEvents from "@/pages/admin/ai-events";
 import AdminReceipts from "@/pages/admin/receipts";
 import AdminLawyerApplications from "@/pages/admin/lawyer-applications";
 import AdminMailroom from "@/pages/admin/mailroom";
+import AdminOrders from "@/pages/admin/orders";
 import ApplyLawyerPage from "@/pages/apply-lawyer";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
@@ -164,6 +167,12 @@ function Router() {
       <Route path="/founder/compliance">
         <ProtectedRoute component={FounderComplianceCalendar} />
       </Route>
+      <Route path="/founder/checkout">
+        <ProtectedRoute component={FounderCheckout} />
+      </Route>
+      <Route path="/founder/orders/:id">
+        <ProtectedRoute component={FounderOrderDetail} />
+      </Route>
       
       <Route path="/applications/new">
         <ProtectedRoute component={NewApplication} />
@@ -211,6 +220,9 @@ function Router() {
       </Route>
       <Route path="/admin/lawyer-applications">
         <ProtectedRoute component={AdminLawyerApplications} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/orders">
+        <ProtectedRoute component={AdminOrders} roles={["admin"]} />
       </Route>
       
       <Route path="/apply-lawyer" component={ApplyLawyerPage} />

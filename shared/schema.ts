@@ -827,3 +827,64 @@ export const serviceRequests = pgTable("service_requests", {
   index("idx_service_requests_status").on(table.status),
   index("idx_service_requests_type").on(table.serviceType),
 ]);
+
+export const insertServiceRequestSchema = createInsertSchema(serviceRequests).omit({ id: true, createdAt: true, updatedAt: true });
+export type ServiceRequest = typeof serviceRequests.$inferSelect;
+export type InsertServiceRequest = z.infer<typeof insertServiceRequestSchema>;
+
+// ============== SERVICE REQUEST COMPANY PROFILES (reusable across services) ==============
+export const serviceRequestCompanyProfiles = pgTable("service_request_company_profiles", {
+  id: serial("id").primaryKey(),
+  founderId: varchar("founder_id").notNull(),
+  category: varchar("category", { length: 100 }).notNull(),
+  cacRegistrationType: varchar("cac_registration_type", { length: 50 }).notNull(),
+  sector: varchar("sector", { length: 255 }),
+  mainBusinessObjectives: text("main_business_objectives"),
+  incorporationNumber: varchar("incorporation_number", { length: 100 }).notNull(),
+  registeredName: varchar("registered_name", { length: 500 }).notNull(),
+  dateIncorporated: varchar("date_incorporated", { length: 20 }),
+  tinNumber: varchar("tin_number", { length: 50 }),
+  headOfficeAddress: text("head_office_address"),
+  state: varchar("state", { length: 100 }),
+  bankName: varchar("bank_name", { length: 255 }),
+  accountNumber: varchar("account_number", { length: 20 }),
+  accountName: varchar("account_name", { length: 255 }),
+  organizationPhone: varchar("organization_phone", { length: 30 }),
+  organizationEmail: varchar("organization_email", { length: 255 }),
+  contactPersonName: varchar("contact_person_name", { length: 255 }),
+  contactPersonNin: varchar("contact_person_nin", { length: 20 }),
+  contactPersonAddress: text("contact_person_address"),
+  contactPersonEmail: varchar("contact_person_email", { length: 255 }),
+  contactPersonMobile: varchar("contact_person_mobile", { length: 30 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_sr_company_profiles_founder").on(table.founderId),
+]);
+
+export const insertServiceRequestCompanyProfileSchema = createInsertSchema(serviceRequestCompanyProfiles).omit({ id: true, createdAt: true, updatedAt: true });
+export type ServiceRequestCompanyProfile = typeof serviceRequestCompanyProfiles.$inferSelect;
+export type InsertServiceRequestCompanyProfile = z.infer<typeof insertServiceRequestCompanyProfileSchema>;
+
+// ============== SERVICE REQUEST DOCUMENTS ==============
+export const serviceRequestDocuments = pgTable("service_request_documents", {
+  id: serial("id").primaryKey(),
+  founderId: varchar("founder_id").notNull(),
+  serviceRequestId: integer("service_request_id"),
+  companyProfileId: integer("company_profile_id"),
+  docType: varchar("doc_type", { length: 100 }).notNull(),
+  filename: varchar("filename", { length: 255 }).notNull(),
+  storagePath: varchar("storage_path", { length: 500 }).notNull(),
+  sizeBytes: integer("size_bytes"),
+  mimeType: varchar("mime_type", { length: 100 }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_sr_documents_founder").on(table.founderId),
+  index("idx_sr_documents_service_request").on(table.serviceRequestId),
+  index("idx_sr_documents_company_profile").on(table.companyProfileId),
+  index("idx_sr_documents_doc_type").on(table.docType),
+]);
+
+export const insertServiceRequestDocumentSchema = createInsertSchema(serviceRequestDocuments).omit({ id: true, createdAt: true });
+export type ServiceRequestDocument = typeof serviceRequestDocuments.$inferSelect;
+export type InsertServiceRequestDocument = z.infer<typeof insertServiceRequestDocumentSchema>;

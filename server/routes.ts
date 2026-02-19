@@ -3984,5 +3984,284 @@ Important guidelines:
     }
   });
 
+  // ============== SERVICE REQUEST COMPANY PROFILES & DOCUMENTS ==============
+
+  app.get("/api/founder/service-profiles", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profiles = await storage.getServiceRequestCompanyProfilesByFounder(userId);
+      res.json(profiles);
+    } catch (error: any) {
+      console.error("Error fetching service profiles:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch service profiles" });
+    }
+  });
+
+  app.get("/api/founder/service-profiles/:id", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const profile = await storage.getServiceRequestCompanyProfile(id);
+      if (!profile || profile.founderId !== userId) {
+        return res.status(404).json({ message: "Profile not found" });
+      }
+
+      const documents = await storage.getServiceRequestDocumentsByProfile(id);
+      res.json({ ...profile, documents });
+    } catch (error: any) {
+      console.error("Error fetching service profile:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch service profile" });
+    }
+  });
+
+  const serviceProfileSchema = z.object({
+    category: z.string().min(1, "Category is required"),
+    cacRegistrationType: z.string().min(1, "CAC registration type is required"),
+    sector: z.string().optional().default(""),
+    mainBusinessObjectives: z.string().optional().default(""),
+    incorporationNumber: z.string().min(1, "Incorporation/Registration number is required"),
+    registeredName: z.string().min(1, "Registered company name is required"),
+    dateIncorporated: z.string().optional().default(""),
+    tinNumber: z.string().optional().default(""),
+    headOfficeAddress: z.string().optional().default(""),
+    state: z.string().optional().default(""),
+    bankName: z.string().optional().default(""),
+    accountNumber: z.string().optional().default(""),
+    accountName: z.string().optional().default(""),
+    organizationPhone: z.string().optional().default(""),
+    organizationEmail: z.string().optional().default(""),
+    contactPersonName: z.string().optional().default(""),
+    contactPersonNin: z.string().optional().default(""),
+    contactPersonAddress: z.string().optional().default(""),
+    contactPersonEmail: z.string().optional().default(""),
+    contactPersonMobile: z.string().optional().default(""),
+  });
+
+  app.post("/api/founder/service-profiles", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = serviceProfileSchema.parse(req.body);
+
+      const profile = await storage.createServiceRequestCompanyProfile({
+        ...parsed,
+        founderId: userId,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "create_service_profile",
+        entityType: "service_request_company_profile",
+        entityId: String(profile.id),
+        details: { registeredName: parsed.registeredName, category: parsed.category },
+        ipAddress: req.ip,
+      });
+
+      res.json(profile);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Validation failed", errors: error.errors });
+      }
+      console.error("Error creating service profile:", error);
+      res.status(500).json({ message: error.message || "Failed to create service profile" });
+    }
+  });
+
+  app.put("/api/founder/service-profiles/:id", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const existing = await storage.getServiceRequestCompanyProfile(id);
+      if (!existing || existing.founderId !== userId) {
+        return res.status(404).json({ message: "Profile not found" });
+      }
+
+      const parsed = serviceProfileSchema.partial().parse(req.body);
+      const profile = await storage.updateServiceRequestCompanyProfile(id, parsed);
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "update_service_profile",
+        entityType: "service_request_company_profile",
+        entityId: String(id),
+        ipAddress: req.ip,
+      });
+
+      res.json(profile);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Validation failed", errors: error.errors });
+      }
+      console.error("Error updating service profile:", error);
+      res.status(500).json({ message: error.message || "Failed to update service profile" });
+    }
+  });
+
+  // Document upload for service requests (uses object storage)
+  const objectStorageService = new ObjectStorageService();
+
+  app.post("/api/founder/service-profiles/:profileId/documents/upload-url", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.profileId, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const profile = await storage.getServiceRequestCompanyProfile(profileId);
+      if (!profile || profile.founderId !== userId) {
+        return res.status(404).json({ message: "Profile not found" });
+      }
+
+      const { name, size, contentType, docType } = req.body;
+      if (!name || !docType) {
+        return res.status(400).json({ message: "Missing required fields: name, docType" });
+      }
+
+      const allowedTypes = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
+      if (contentType && !allowedTypes.includes(contentType)) {
+        return res.status(400).json({ message: "Only PDF, JPEG, and PNG files are allowed" });
+      }
+
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (size && size > maxSize) {
+        return res.status(400).json({ message: "File size must be under 10MB" });
+      }
+
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+
+      res.json({
+        uploadURL,
+        objectPath,
+        metadata: { name, size, contentType, docType, profileId },
+      });
+    } catch (error: any) {
+      console.error("Error generating upload URL:", error);
+      res.status(500).json({ message: "Failed to generate upload URL" });
+    }
+  });
+
+  app.post("/api/founder/service-profiles/:profileId/documents", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.profileId, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const profile = await storage.getServiceRequestCompanyProfile(profileId);
+      if (!profile || profile.founderId !== userId) {
+        return res.status(404).json({ message: "Profile not found" });
+      }
+
+      const { docType, filename, storagePath, sizeBytes, mimeType, serviceRequestId } = req.body;
+      if (!docType || !filename || !storagePath) {
+        return res.status(400).json({ message: "Missing required fields: docType, filename, storagePath" });
+      }
+
+      const doc = await storage.createServiceRequestDocument({
+        founderId: userId,
+        companyProfileId: profileId,
+        serviceRequestId: serviceRequestId || null,
+        docType,
+        filename,
+        storagePath,
+        sizeBytes: sizeBytes || null,
+        mimeType: mimeType || null,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "upload_service_document",
+        entityType: "service_request_document",
+        entityId: String(doc.id),
+        details: { docType, filename, profileId },
+        ipAddress: req.ip,
+      });
+
+      res.json(doc);
+    } catch (error: any) {
+      console.error("Error saving document record:", error);
+      res.status(500).json({ message: error.message || "Failed to save document" });
+    }
+  });
+
+  app.get("/api/founder/service-profiles/:profileId/documents", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.profileId, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const profile = await storage.getServiceRequestCompanyProfile(profileId);
+      if (!profile || profile.founderId !== userId) {
+        return res.status(404).json({ message: "Profile not found" });
+      }
+
+      const documents = await storage.getServiceRequestDocumentsByProfile(profileId);
+      res.json(documents);
+    } catch (error: any) {
+      console.error("Error fetching documents:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch documents" });
+    }
+  });
+
+  app.get("/api/founder/service-profiles/:profileId/documents/:docId/download", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.profileId, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const profile = await storage.getServiceRequestCompanyProfile(profileId);
+      if (!profile || profile.founderId !== userId) {
+        return res.status(404).json({ message: "Profile not found" });
+      }
+
+      const documents = await storage.getServiceRequestDocumentsByProfile(profileId);
+      const doc = documents.find(d => d.id === parseInt(req.params.docId, 10));
+      if (!doc) return res.status(404).json({ message: "Document not found" });
+
+      const downloadURL = await objectStorageService.getObjectEntityDownloadURL(doc.storagePath);
+      res.json({ downloadURL });
+    } catch (error: any) {
+      console.error("Error getting download URL:", error);
+      res.status(500).json({ message: error.message || "Failed to get download URL" });
+    }
+  });
+
+  app.delete("/api/founder/service-profiles/:profileId/documents/:docId", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.profileId, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const profile = await storage.getServiceRequestCompanyProfile(profileId);
+      if (!profile || profile.founderId !== userId) {
+        return res.status(404).json({ message: "Profile not found" });
+      }
+
+      const documents = await storage.getServiceRequestDocumentsByProfile(profileId);
+      const doc = documents.find(d => d.id === parseInt(req.params.docId, 10));
+      if (!doc) return res.status(404).json({ message: "Document not found" });
+
+      await storage.deleteServiceRequestDocument(doc.id);
+      res.json({ message: "Document deleted" });
+    } catch (error: any) {
+      console.error("Error deleting document:", error);
+      res.status(500).json({ message: error.message || "Failed to delete document" });
+    }
+  });
+
+  // Service Requests for founder
+  app.get("/api/founder/service-requests", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const requests = await storage.getServiceRequestsByFounder(userId);
+      res.json(requests);
+    } catch (error: any) {
+      console.error("Error fetching service requests:", error);
+      res.status(500).json({ message: error.message || "Failed to fetch service requests" });
+    }
+  });
+
   return httpServer;
 }

@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +10,7 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   ShoppingCart, Building2, FileText, Shield, Loader2, Plus, X,
   ExternalLink, CheckCircle2, Sparkles, ArrowRight, Users, Clock,
-  MapPin, Hash
+  MapPin, Hash, ClipboardList
 } from "lucide-react";
 
 interface Product {
@@ -57,6 +58,7 @@ function getSkuBenefit(sku: string): string {
 
 export default function CheckoutPage() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [mode, setMode] = useState<CheckoutMode>("new_company");
   const [selectedSkus, setSelectedSkus] = useState<string[]>([]);
 
@@ -378,62 +380,92 @@ export default function CheckoutPage() {
           )}
 
           {mode === "existing_company" && (
-            <div>
-              <h2 className="text-lg font-semibold mb-2" data-testid="text-standalone-heading">
-                Services for Your Existing Company
-              </h2>
-              <p className="text-sm text-muted-foreground mb-4">
-                Already incorporated? Select the services you need for your business.
-              </p>
-              <div className="space-y-3">
-                {addOnProducts.map((p) => {
-                  const isSelected = selectedSkus.includes(p.sku);
-                  const Icon = getSkuIcon(p.sku);
-                  const description = getSkuDescription(p.sku);
-                  return (
-                    <Card
-                      key={p.sku}
-                      className={`cursor-pointer transition-colors ${isSelected ? "border-primary ring-1 ring-primary" : ""}`}
-                      onClick={() => toggleSku(p.sku)}
-                      data-testid={`card-product-${p.sku}`}
-                    >
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex items-start gap-3 min-w-0">
-                            <div className={`p-2 rounded-md ${isSelected ? "bg-primary/10" : "bg-muted"} flex-shrink-0 mt-0.5`}>
-                              <Icon className="h-5 w-5" />
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold mb-2" data-testid="text-standalone-heading">
+                  Services for Your Existing Company
+                </h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Already incorporated? Select the services you need for your business.
+                </p>
+                <div className="space-y-3">
+                  {addOnProducts.map((p) => {
+                    const isSelected = selectedSkus.includes(p.sku);
+                    const Icon = getSkuIcon(p.sku);
+                    const description = getSkuDescription(p.sku);
+                    return (
+                      <Card
+                        key={p.sku}
+                        className={`cursor-pointer transition-colors ${isSelected ? "border-primary ring-1 ring-primary" : ""}`}
+                        onClick={() => toggleSku(p.sku)}
+                        data-testid={`card-product-${p.sku}`}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex items-start gap-3 min-w-0">
+                              <div className={`p-2 rounded-md ${isSelected ? "bg-primary/10" : "bg-muted"} flex-shrink-0 mt-0.5`}>
+                                <Icon className="h-5 w-5" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-medium">{p.name}</p>
+                                {description && (
+                                  <p className="text-xs text-muted-foreground mt-1">{description}</p>
+                                )}
+                                {getSkuBenefit(p.sku) && (
+                                  <div className="flex items-center gap-1 mt-1.5">
+                                    <Clock className="h-3 w-3 text-primary flex-shrink-0" />
+                                    <span className="text-xs text-primary font-medium">{getSkuBenefit(p.sku)}</span>
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            <div className="min-w-0">
-                              <p className="font-medium">{p.name}</p>
-                              {description && (
-                                <p className="text-xs text-muted-foreground mt-1">{description}</p>
-                              )}
-                              {getSkuBenefit(p.sku) && (
-                                <div className="flex items-center gap-1 mt-1.5">
-                                  <Clock className="h-3 w-3 text-primary flex-shrink-0" />
-                                  <span className="text-xs text-primary font-medium">{getSkuBenefit(p.sku)}</span>
-                                </div>
+                            <div className="flex items-center gap-3 flex-shrink-0">
+                              <span className="font-semibold text-lg">{formatNgn(p.priceNgn)}</span>
+                              {isSelected ? (
+                                <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
+                                  <CheckCircle2 className="h-3 w-3 mr-1" /> Added
+                                </Badge>
+                              ) : (
+                                <Button size="sm" variant="outline" data-testid={`button-add-${p.sku}`}>
+                                  <Plus className="h-3 w-3 mr-1" /> Add
+                                </Button>
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-3 flex-shrink-0">
-                            <span className="font-semibold text-lg">{formatNgn(p.priceNgn)}</span>
-                            {isSelected ? (
-                              <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
-                                <CheckCircle2 className="h-3 w-3 mr-1" /> Added
-                              </Badge>
-                            ) : (
-                              <Button size="sm" variant="outline" data-testid={`button-add-${p.sku}`}>
-                                <Plus className="h-3 w-3 mr-1" /> Add
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
               </div>
+
+              {selectedProducts.length > 0 && (
+                <Card className="border-primary/30 bg-primary/5" data-testid="card-fill-form-prompt">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <ClipboardList className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm">Company details and documents required</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          To process your service request, we need your company registration details and supporting documents (Certificate of Incorporation, MEMART, TIN, Proof of Address, etc.).
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mt-3"
+                          onClick={() => {
+                            const serviceParam = selectedSkus.filter(s => !s.startsWith("CAC_") && s !== "NGO").join(",");
+                            setLocation(`/founder/service-request?service=${serviceParam}`);
+                          }}
+                          data-testid="button-fill-service-form"
+                        >
+                          <ClipboardList className="h-3 w-3 mr-1" /> Fill Service Request Form
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
         </div>

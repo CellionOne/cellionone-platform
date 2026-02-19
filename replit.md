@@ -39,6 +39,7 @@ Key architectural patterns include:
   - Secrets: `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `PAYSTACK_LAWYER_SUBACCOUNT_CODE`
   - Frontend: Checkout page (`client/src/pages/founder/checkout.tsx`), Order detail page, Admin orders management (`client/src/pages/admin/orders.tsx`)
   - Service Requests: Auto-created for SCUML/TM/TIN add-ons upon payment (`service_requests` table)
+  - Service Request Form: Multi-section form for existing company owners to submit company details and upload required documents (Certificate of Incorporation, MEMART, Status Report, TIN, Proof of Address, additional certs). Data stored in `service_request_company_profiles` and `service_request_documents` tables. Profiles are reusable across multiple service requests. Uses object storage for document persistence. (`client/src/pages/founder/service-request-form.tsx`, API routes in `server/routes.ts`)
 - **Security Hardening Suite:** Multi-layered security protections including:
   - HTTP security headers via Helmet.js (CSP, HSTS, XSS protection, X-Frame-Options)
   - Rate limiting: API (100/15min), auth (10/15min), password reset (3/hour), uploads (50/hour)

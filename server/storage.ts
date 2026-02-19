@@ -28,6 +28,9 @@ import {
   mailItems, type MailItem,
   mailApprovalRequests, type MailApprovalRequest,
   paystackTransactions, type PaystackTransaction, type InsertPaystackTransaction,
+  serviceRequestCompanyProfiles, type ServiceRequestCompanyProfile, type InsertServiceRequestCompanyProfile,
+  serviceRequestDocuments, type ServiceRequestDocument, type InsertServiceRequestDocument,
+  serviceRequests, type ServiceRequest, type InsertServiceRequest,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -169,6 +172,24 @@ export interface IStorage {
   getPaystackTransactionsByUser(userId: string): Promise<PaystackTransaction[]>;
   createPaystackTransaction(data: InsertPaystackTransaction): Promise<PaystackTransaction>;
   updatePaystackTransaction(id: number, data: Partial<InsertPaystackTransaction>): Promise<PaystackTransaction | undefined>;
+
+  // Service Request Company Profiles
+  getServiceRequestCompanyProfile(id: number): Promise<ServiceRequestCompanyProfile | undefined>;
+  getServiceRequestCompanyProfilesByFounder(founderId: string): Promise<ServiceRequestCompanyProfile[]>;
+  createServiceRequestCompanyProfile(data: InsertServiceRequestCompanyProfile): Promise<ServiceRequestCompanyProfile>;
+  updateServiceRequestCompanyProfile(id: number, data: Partial<InsertServiceRequestCompanyProfile>): Promise<ServiceRequestCompanyProfile | undefined>;
+
+  // Service Request Documents
+  getServiceRequestDocumentsByProfile(companyProfileId: number): Promise<ServiceRequestDocument[]>;
+  getServiceRequestDocumentsByServiceRequest(serviceRequestId: number): Promise<ServiceRequestDocument[]>;
+  createServiceRequestDocument(data: InsertServiceRequestDocument): Promise<ServiceRequestDocument>;
+  deleteServiceRequestDocument(id: number): Promise<void>;
+
+  // Service Requests
+  getServiceRequest(id: number): Promise<ServiceRequest | undefined>;
+  getServiceRequestsByFounder(founderId: string): Promise<ServiceRequest[]>;
+  createServiceRequest(data: InsertServiceRequest): Promise<ServiceRequest>;
+  updateServiceRequest(id: number, data: Partial<InsertServiceRequest>): Promise<ServiceRequest | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -830,6 +851,78 @@ export class DatabaseStorage implements IStorage {
       .where(eq(paystackTransactions.id, id))
       .returning();
     return transaction;
+  }
+
+  // Service Request Company Profiles
+  async getServiceRequestCompanyProfile(id: number): Promise<ServiceRequestCompanyProfile | undefined> {
+    const [profile] = await db.select().from(serviceRequestCompanyProfiles).where(eq(serviceRequestCompanyProfiles.id, id));
+    return profile;
+  }
+
+  async getServiceRequestCompanyProfilesByFounder(founderId: string): Promise<ServiceRequestCompanyProfile[]> {
+    return db.select().from(serviceRequestCompanyProfiles)
+      .where(eq(serviceRequestCompanyProfiles.founderId, founderId))
+      .orderBy(desc(serviceRequestCompanyProfiles.updatedAt));
+  }
+
+  async createServiceRequestCompanyProfile(data: InsertServiceRequestCompanyProfile): Promise<ServiceRequestCompanyProfile> {
+    const [profile] = await db.insert(serviceRequestCompanyProfiles).values(data).returning();
+    return profile;
+  }
+
+  async updateServiceRequestCompanyProfile(id: number, data: Partial<InsertServiceRequestCompanyProfile>): Promise<ServiceRequestCompanyProfile | undefined> {
+    const [profile] = await db.update(serviceRequestCompanyProfiles)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(serviceRequestCompanyProfiles.id, id))
+      .returning();
+    return profile;
+  }
+
+  // Service Request Documents
+  async getServiceRequestDocumentsByProfile(companyProfileId: number): Promise<ServiceRequestDocument[]> {
+    return db.select().from(serviceRequestDocuments)
+      .where(eq(serviceRequestDocuments.companyProfileId, companyProfileId))
+      .orderBy(desc(serviceRequestDocuments.createdAt));
+  }
+
+  async getServiceRequestDocumentsByServiceRequest(serviceRequestId: number): Promise<ServiceRequestDocument[]> {
+    return db.select().from(serviceRequestDocuments)
+      .where(eq(serviceRequestDocuments.serviceRequestId, serviceRequestId))
+      .orderBy(desc(serviceRequestDocuments.createdAt));
+  }
+
+  async createServiceRequestDocument(data: InsertServiceRequestDocument): Promise<ServiceRequestDocument> {
+    const [doc] = await db.insert(serviceRequestDocuments).values(data).returning();
+    return doc;
+  }
+
+  async deleteServiceRequestDocument(id: number): Promise<void> {
+    await db.delete(serviceRequestDocuments).where(eq(serviceRequestDocuments.id, id));
+  }
+
+  // Service Requests
+  async getServiceRequest(id: number): Promise<ServiceRequest | undefined> {
+    const [request] = await db.select().from(serviceRequests).where(eq(serviceRequests.id, id));
+    return request;
+  }
+
+  async getServiceRequestsByFounder(founderId: string): Promise<ServiceRequest[]> {
+    return db.select().from(serviceRequests)
+      .where(eq(serviceRequests.founderId, founderId))
+      .orderBy(desc(serviceRequests.createdAt));
+  }
+
+  async createServiceRequest(data: InsertServiceRequest): Promise<ServiceRequest> {
+    const [request] = await db.insert(serviceRequests).values(data).returning();
+    return request;
+  }
+
+  async updateServiceRequest(id: number, data: Partial<InsertServiceRequest>): Promise<ServiceRequest | undefined> {
+    const [request] = await db.update(serviceRequests)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(serviceRequests.id, id))
+      .returning();
+    return request;
   }
 }
 

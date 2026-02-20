@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Building2, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { CelionLogo } from "@/components/celion-logo";
 import { Link } from "wouter";
 
 export default function TermsPage() {
@@ -10,12 +11,7 @@ export default function TermsPage() {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16 gap-4">
             <Link href="/">
-              <a className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center">
-                  <Building2 className="h-5 w-5 text-primary-foreground" />
-                </div>
-                <span className="font-bold text-xl">Celion One</span>
-              </a>
+              <CelionLogo />
             </Link>
             <ThemeToggle />
           </div>

@@ -37,6 +37,7 @@ import {
   Briefcase,
   ShoppingCart,
 } from "lucide-react";
+import { CelionLogo } from "@/components/celion-logo";
 
 interface NavItem {
   title: string;
@@ -114,9 +115,7 @@ export function AppSidebar({ role }: AppSidebarProps) {
     <Sidebar>
       <SidebarHeader className="p-4">
         <Link href="/" className="flex items-center gap-2 hover-elevate rounded-md p-2 -m-2">
-          <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center">
-            <Building2 className="h-5 w-5 text-primary-foreground" />
-          </div>
+          <CelionLogo showText={false} />
           <div>
             <span className="font-bold text-lg">Celion One</span>
             <p className="text-xs text-muted-foreground">{roleLabel}</p>

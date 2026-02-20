@@ -115,9 +115,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
     <Sidebar>
       <SidebarHeader className="p-4">
         <Link href="/" className="flex items-center gap-2 hover-elevate rounded-md p-2 -m-2">
-          <CelionLogo showText={false} />
           <div>
-            <span className="font-bold text-lg">Celion One</span>
+            <CelionLogo textClassName="font-bold text-lg" />
             <p className="text-xs text-muted-foreground">{roleLabel}</p>
           </div>
         </Link>

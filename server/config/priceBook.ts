@@ -1,7 +1,7 @@
 /**
  * PriceBook Module
  * 
- * Maps Celion One services to Paystack (NGN) pricing.
+ * Maps Cellion One services to Paystack (NGN) pricing.
  * All payments are processed through Paystack in Nigerian Naira.
  * International customers pay in NGN and their bank handles conversion.
  * 

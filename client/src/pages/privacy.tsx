@@ -38,7 +38,7 @@ export default function PrivacyPage() {
               <h2 className="text-2xl font-semibold">1. Introduction</h2>
               <p>
                 <strong>Cellion Platforms Nigeria Limited</strong> ("we", "us", "our"), in partnership with 
-                <strong> Disslio Limited</strong> (UK), operates the Celion One platform. This Privacy Policy 
+                <strong> Disslio Limited</strong> (UK), operates the Cellion One platform. This Privacy Policy 
                 explains how we collect, use, disclose, and protect your personal information when you use 
                 our services.
               </p>
@@ -226,7 +226,7 @@ export default function PrivacyPage() {
 
           <div className="mt-12 pt-8 border-t">
             <p className="text-sm text-muted-foreground text-center">
-              By using Celion One, you acknowledge that you have read and understood this Privacy Policy.
+              By using Cellion One, you acknowledge that you have read and understood this Privacy Policy.
             </p>
           </div>
         </div>

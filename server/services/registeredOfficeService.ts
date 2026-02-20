@@ -90,7 +90,7 @@ export const registeredOfficeService = {
         state: address.state,
         country: address.country || "Nigeria",
       } : {
-        label: "Celion One Registered Office (Ikoyi)",
+        label: "Cellion One Registered Office (Ikoyi)",
         city: "Lagos",
         state: "Lagos",
         country: "Nigeria",

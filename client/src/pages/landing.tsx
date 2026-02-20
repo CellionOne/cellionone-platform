@@ -263,7 +263,7 @@ export default function LandingPage() {
               Ready to Register Your Company?
             </h2>
             <p className="text-lg text-muted-foreground mb-8 max-w-2xl mx-auto">
-              Join thousands of entrepreneurs who have successfully registered their Nigerian companies through Celion One.
+              Join thousands of entrepreneurs who have successfully registered their Nigerian companies through Cellion One.
             </p>
             <Button size="lg" asChild className="gap-2" data-testid="button-cta-start">
               <a href="/register">

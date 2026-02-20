@@ -488,7 +488,7 @@ export default function NewApplicationPage() {
                       <RadioGroupItem value="celion" id="address-celion" data-testid="radio-address-celion" />
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <Label htmlFor="address-celion" className="font-medium cursor-pointer">Use Celion Registered Office</Label>
+                          <Label htmlFor="address-celion" className="font-medium cursor-pointer">Use Cellion Registered Office</Label>
                           <Badge variant="secondary" className="text-xs">Ikoyi, Lagos</Badge>
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">

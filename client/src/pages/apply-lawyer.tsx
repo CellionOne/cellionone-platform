@@ -97,7 +97,7 @@ export default function ApplyLawyerPage() {
               </div>
               <CardTitle className="text-2xl font-bold">Application Submitted</CardTitle>
               <CardDescription className="text-base">
-                Thank you for applying to join Celion One as a legal practitioner. 
+                Thank you for applying to join Cellion One as a legal practitioner. 
                 We will review your application and get back to you within 2-3 business days.
               </CardDescription>
             </CardHeader>
@@ -149,7 +149,7 @@ export default function ApplyLawyerPage() {
                 <div>
                   <CardTitle className="text-2xl">Join as a Legal Practitioner</CardTitle>
                   <CardDescription>
-                    Apply to become a verified lawyer on Celion One
+                    Apply to become a verified lawyer on Cellion One
                   </CardDescription>
                 </div>
               </div>
@@ -302,7 +302,7 @@ export default function ApplyLawyerPage() {
                         <FormLabel>Statement of Interest *</FormLabel>
                         <FormControl>
                           <Textarea 
-                            placeholder="Tell us why you want to join Celion One and your experience with company incorporation..."
+                            placeholder="Tell us why you want to join Cellion One and your experience with company incorporation..."
                             className="resize-none min-h-[120px]"
                             data-testid="input-statement"
                             {...field} 

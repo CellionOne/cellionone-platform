@@ -214,7 +214,7 @@ export async function registerRoutes(
   // ============================================================
   // CRITICAL AUTH GUARD: Do NOT call registerAuthRoutes(app)
   // ============================================================
-  // Celion One implements its own /api/auth/user endpoint that returns
+  // Cellion One implements its own /api/auth/user endpoint that returns
   // user roles. The default Replit Auth registerAuthRoutes() would
   // silently override this endpoint and break role-based routing.
   // This was a known production bug fixed on January 31, 2026.
@@ -3890,7 +3890,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
         {
           role: "system",
-          content: `You are Celion Legal AI, an expert assistant on Nigerian corporate law and the Companies and Allied Matters Act (CAMA) 2020. You help founders understand:
+          content: `You are Cellion Legal AI, an expert assistant on Nigerian corporate law and the Companies and Allied Matters Act (CAMA) 2020. You help founders understand:
 - Company incorporation processes with the Corporate Affairs Commission (CAC)
 - Post-incorporation requirements (TIN, VAT, PAYE, company seal)
 - Compliance obligations (annual returns, tax filings)
@@ -3976,7 +3976,7 @@ Important guidelines:
     { taskKey: "pension_setup", title: "Set Up Pension Scheme", description: "Register with the National Pension Commission (PenCom) if you have 3 or more employees.", guidance: "Under the Pension Reform Act 2014, employers with 3+ employees must contribute to the Contributory Pension Scheme. Employer contributes minimum 10% and employee minimum 8% of basic salary. Register with a licensed Pension Fund Administrator (PFA).", sortOrder: 6 },
     { taskKey: "scuml_registration", title: "SCUML Registration (if applicable)", description: "Register with the Special Control Unit against Money Laundering if your business type requires it.", guidance: "Designated Non-Financial Businesses and Professions (DNFBPs) must register with SCUML. This includes: legal practitioners, accountants, real estate agents, dealers in precious metals, and NGOs. Register at scuml.org.ng with your CAC documents.", sortOrder: 7 },
     { taskKey: "business_premises", title: "Register Business Premises", description: "Register your business premises with the relevant state/local government authority.", guidance: "Most states require businesses to register their premises and obtain a Business Premises Permit. Visit your Local Government Authority or State Ministry of Commerce. Fees vary by state and business size. Renewal is typically annual.", sortOrder: 8 },
-    { taskKey: "annual_returns_setup", title: "Set Up Annual Returns Calendar", description: "Mark your annual returns filing deadline and set up reminders to avoid penalties.", guidance: "Companies must file annual returns with CAC within 42 days of their incorporation anniversary date. Late filing attracts a penalty of \u20A65,000 plus \u20A650 per day for every day of default. Use Celion One's Compliance Calendar to track this automatically.", sortOrder: 9 },
+    { taskKey: "annual_returns_setup", title: "Set Up Annual Returns Calendar", description: "Mark your annual returns filing deadline and set up reminders to avoid penalties.", guidance: "Companies must file annual returns with CAC within 42 days of their incorporation anniversary date. Late filing attracts a penalty of \u20A65,000 plus \u20A650 per day for every day of default. Use Cellion One's Compliance Calendar to track this automatically.", sortOrder: 9 },
     { taskKey: "statutory_registers", title: "Maintain Statutory Registers", description: "Set up and maintain the required statutory books and registers for your company.", guidance: "Under CAMA 2020, every company must maintain: Register of Members, Register of Directors, Register of Charges, Minutes Book for Board and General Meetings, Register of Debenture Holders (if applicable). These must be kept at the registered office and available for inspection.", sortOrder: 10 },
   ];
 

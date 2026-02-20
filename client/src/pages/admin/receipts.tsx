@@ -322,7 +322,7 @@ export default function AdminReceipts() {
                   <SelectValue placeholder="Select issuer" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="celion">Celion One</SelectItem>
+                  <SelectItem value="celion">Cellion One</SelectItem>
                   <SelectItem value="lawyer_proxy">Lawyer Proxy</SelectItem>
                   <SelectItem value="agency">Agency</SelectItem>
                 </SelectContent>

@@ -79,7 +79,7 @@ export default function PaymentSuccessPage() {
         <Card>
           <CardHeader>
             <CardTitle>Next Steps</CardTitle>
-            <CardDescription>Continue your journey with Celion One</CardDescription>
+            <CardDescription>Continue your journey with Cellion One</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {orderLoading ? (

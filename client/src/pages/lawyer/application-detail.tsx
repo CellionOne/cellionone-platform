@@ -298,7 +298,7 @@ function OverviewTab({
                 <div className="flex items-start justify-between mb-2">
                   <Label className="text-muted-foreground text-sm flex items-center gap-1">
                     <MapPin className="h-3 w-3" />
-                    Registered Office (Celion One)
+                    Registered Office (Cellion One)
                   </Label>
                   <div className="flex items-center gap-2">
                     {registeredOffice.subscription.tier === "office_plus_mail" && (
@@ -331,7 +331,7 @@ function OverviewTab({
                 <div className="flex items-start justify-between mb-2">
                   <Label className="text-muted-foreground text-sm flex items-center gap-1">
                     <MapPin className="h-3 w-3" />
-                    Registered Office (Celion One)
+                    Registered Office (Cellion One)
                   </Label>
                   {getRegisteredOfficeBadge(registeredOffice.subscription.status)}
                 </div>

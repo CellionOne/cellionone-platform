@@ -52,7 +52,7 @@ export async function sendVerificationEmail(to: string, token: string, baseUrl: 
   const result = await client.emails.send({
     from: fromEmail,
     to,
-    subject: 'Verify your email - Celion One',
+    subject: 'Verify your email - Cellion One',
     html: `
       <!DOCTYPE html>
       <html>
@@ -66,13 +66,13 @@ export async function sendVerificationEmail(to: string, token: string, baseUrl: 
               <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                 <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
               </div>
-              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Celion One</h1>
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
             </div>
             
             <h2 style="color: #18181b; font-size: 20px; margin-bottom: 16px;">Verify your email address</h2>
             
             <p style="color: #52525b; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
-              Thank you for registering with Celion One. Please click the button below to verify your email address and complete your registration.
+              Thank you for registering with Cellion One. Please click the button below to verify your email address and complete your registration.
             </p>
             
             <div style="text-align: center; margin-bottom: 24px;">
@@ -89,7 +89,7 @@ export async function sendVerificationEmail(to: string, token: string, baseUrl: 
             </p>
             
             <p style="color: #71717a; font-size: 14px; line-height: 1.6;">
-              This link will expire in 24 hours. If you didn't create an account with Celion One, you can safely ignore this email.
+              This link will expire in 24 hours. If you didn't create an account with Cellion One, you can safely ignore this email.
             </p>
             
             <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 32px 0;">
@@ -114,7 +114,7 @@ export async function sendPasswordResetEmail(to: string, token: string, baseUrl:
   const result = await client.emails.send({
     from: fromEmail,
     to,
-    subject: 'Reset your password - Celion One',
+    subject: 'Reset your password - Cellion One',
     html: `
       <!DOCTYPE html>
       <html>
@@ -128,7 +128,7 @@ export async function sendPasswordResetEmail(to: string, token: string, baseUrl:
               <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                 <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
               </div>
-              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Celion One</h1>
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
             </div>
             
             <h2 style="color: #18181b; font-size: 20px; margin-bottom: 16px;">Reset your password</h2>
@@ -174,7 +174,7 @@ export async function sendWelcomeEmail(to: string, firstName: string) {
   const result = await client.emails.send({
     from: fromEmail,
     to,
-    subject: 'Welcome to Celion One!',
+    subject: 'Welcome to Cellion One!',
     html: `
       <!DOCTYPE html>
       <html>
@@ -188,13 +188,13 @@ export async function sendWelcomeEmail(to: string, firstName: string) {
               <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                 <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
               </div>
-              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Celion One</h1>
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
             </div>
             
             <h2 style="color: #18181b; font-size: 20px; margin-bottom: 16px;">Welcome, ${firstName}!</h2>
             
             <p style="color: #52525b; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
-              Thank you for joining Celion One - Nigeria's premier company incorporation platform. You're now ready to start your business journey.
+              Thank you for joining Cellion One - Nigeria's premier company incorporation platform. You're now ready to start your business journey.
             </p>
             
             <div style="background: #f0fdf4; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
@@ -276,7 +276,7 @@ export async function sendApplicationStatusEmail(
               <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                 <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
               </div>
-              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Celion One</h1>
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
             </div>
             
             <h2 style="color: #18181b; font-size: 20px; margin-bottom: 16px;">Application Status Update</h2>
@@ -368,7 +368,7 @@ export async function sendComplianceReminderEmail(
               <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                 <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
               </div>
-              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Celion One</h1>
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
             </div>
             
             <h2 style="color: #18181b; font-size: 20px; margin-bottom: 16px;">Compliance Deadline Reminder</h2>
@@ -464,7 +464,7 @@ export async function sendChecklistNudgeEmail(
               <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                 <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
               </div>
-              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Celion One</h1>
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
             </div>
             
             <h2 style="color: #18181b; font-size: 20px; margin-bottom: 16px;">Checklist Progress Update</h2>
@@ -543,7 +543,7 @@ export async function sendIncorporationCompleteEmail(
               <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
                 <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
               </div>
-              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Celion One</h1>
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
             </div>
             
             <div style="text-align: center; margin-bottom: 24px;">

@@ -1,7 +1,7 @@
-# Celion One - Nigeria Legal Tech Platform
+# Cellion One - Nigeria Legal Tech Platform
 
 ## Overview
-Celion One is a comprehensive legal tech platform designed to streamline company incorporation in Nigeria. It serves Founders, Lawyers, and Administrators, offering features such as identity verification, a digital application wizard, document management, integrated payment via Paystack (NGN), AI-powered suggestions for corporate activities, lawyer assignment and case management, and robust administrative controls with audit logging. The platform aims to revolutionize legal processes in Nigeria by providing an efficient, transparent, and technology-driven solution for company registration and related legal services.
+Cellion One is a comprehensive legal tech platform designed to streamline company incorporation in Nigeria. It serves Founders, Lawyers, and Administrators, offering features such as identity verification, a digital application wizard, document management, integrated payment via Paystack (NGN), AI-powered suggestions for corporate activities, lawyer assignment and case management, and robust administrative controls with audit logging. The platform aims to revolutionize legal processes in Nigeria by providing an efficient, transparent, and technology-driven solution for company registration and related legal services.
 
 ## User Preferences
 I want iterative development.

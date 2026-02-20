@@ -1,7 +1,7 @@
 /**
  * Security Middleware Configuration
  * 
- * Implements security best practices for the Celion One legal tech platform.
+ * Implements security best practices for the Cellion One legal tech platform.
  * - HTTP security headers via Helmet
  * - Rate limiting for API and auth endpoints
  * - CORS configuration

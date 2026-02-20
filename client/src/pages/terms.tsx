@@ -37,8 +37,8 @@ export default function TermsPage() {
             <section className="space-y-4">
               <h2 className="text-2xl font-semibold">1. Introduction</h2>
               <p>
-                Welcome to Celion One ("Platform", "Service", "we", "us", or "our"). These Terms and Conditions 
-                ("Terms") govern your use of the Celion One platform, operated by <strong>Cellion Platforms Nigeria Limited</strong> 
+                Welcome to Cellion One ("Platform", "Service", "we", "us", or "our"). These Terms and Conditions 
+                ("Terms") govern your use of the Cellion One platform, operated by <strong>Cellion Platforms Nigeria Limited</strong> 
                 (RC Number pending), a company registered in Nigeria, in partnership with <strong>Disslio Limited</strong>, 
                 a company registered in the United Kingdom.
               </p>
@@ -51,7 +51,7 @@ export default function TermsPage() {
             <section className="space-y-4">
               <h2 className="text-2xl font-semibold">2. Services Description</h2>
               <p>
-                Celion One provides a digital platform facilitating company incorporation services in Nigeria, 
+                Cellion One provides a digital platform facilitating company incorporation services in Nigeria, 
                 including but not limited to:
               </p>
               <ul className="list-disc pl-6 space-y-2">
@@ -134,7 +134,7 @@ export default function TermsPage() {
                 Legal practitioners on our Platform are independent professionals licensed to practice law 
                 in Nigeria. While we verify their credentials, we do not control their professional judgment 
                 or actions. The relationship between you and any legal practitioner is separate from your 
-                relationship with Celion One.
+                relationship with Cellion One.
               </p>
             </section>
 
@@ -239,7 +239,7 @@ export default function TermsPage() {
 
           <div className="mt-12 pt-8 border-t">
             <p className="text-sm text-muted-foreground text-center">
-              By using Celion One, you acknowledge that you have read, understood, and agree to these Terms and Conditions.
+              By using Cellion One, you acknowledge that you have read, understood, and agree to these Terms and Conditions.
             </p>
           </div>
         </div>

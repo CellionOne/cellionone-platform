@@ -213,7 +213,7 @@ export default function LegalAssistant() {
             <div className="p-3 border-b flex items-center gap-2">
               <Bot className="h-5 w-5 text-primary" />
               <div>
-                <h2 className="font-semibold text-sm">Celion Legal AI</h2>
+                <h2 className="font-semibold text-sm">Cellion Legal AI</h2>
                 <p className="text-xs text-muted-foreground">Nigerian Corporate Law Assistant</p>
               </div>
             </div>
@@ -226,7 +226,7 @@ export default function LegalAssistant() {
                       <Sparkles className="h-8 w-8 text-primary" />
                     </div>
                     <div className="text-center space-y-2">
-                      <h3 className="text-lg font-semibold">Ask Celion Legal AI</h3>
+                      <h3 className="text-lg font-semibold">Ask Cellion Legal AI</h3>
                       <p className="text-sm text-muted-foreground max-w-md">
                         Get guidance on Nigerian company incorporation, CAC procedures, and compliance requirements.
                       </p>

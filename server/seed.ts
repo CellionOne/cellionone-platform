@@ -36,7 +36,7 @@ export async function seedDatabase() {
 
     // Seed service address for registered office
     await db.insert(serviceAddresses).values({
-      label: "Celion One Registered Office (Ikoyi)",
+      label: "Cellion One Registered Office (Ikoyi)",
       line1: "51 Raymond Njoku Street, Off Awolowo Road",
       line2: "Ikoyi",
       floorDetails: "First Floor",

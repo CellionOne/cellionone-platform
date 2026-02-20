@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { 
   Building2, 
@@ -9,7 +10,15 @@ import {
   Clock, 
   CheckCircle2,
   ArrowRight,
-  Sparkles
+  Sparkles,
+  Receipt,
+  Stamp,
+  MapPin,
+  CalendarCheck,
+  BadgeCheck,
+  Landmark,
+  FileSignature,
+  BriefcaseBusiness
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
 
@@ -46,11 +55,82 @@ const features = [
   }
 ];
 
+const services = [
+  {
+    icon: Receipt,
+    title: "TIN Registration",
+    description: "Get your Tax Identification Number from the Federal Inland Revenue Service (FIRS).",
+    price: "₦20,000"
+  },
+  {
+    icon: BadgeCheck,
+    title: "SCUML Certificate",
+    description: "Obtain your SCUML certificate from the EFCC for designated non-financial businesses.",
+    price: "₦150,000"
+  },
+  {
+    icon: Stamp,
+    title: "Trademark Registration",
+    description: "Protect your brand with official trademark registration handled in two stages.",
+    price: "₦250,000"
+  },
+  {
+    icon: MapPin,
+    title: "Registered Office Address",
+    description: "Premium business address in Ikoyi, Lagos with mail handling and forwarding.",
+    price: "Available"
+  },
+  {
+    icon: CalendarCheck,
+    title: "Compliance Calendar",
+    description: "Automated compliance deadlines tracking with email reminders so you never miss a filing.",
+    price: "Included"
+  },
+  {
+    icon: Landmark,
+    title: "NGO Registration",
+    description: "Register your Incorporated Trustees (NGO/Foundation) with the Corporate Affairs Commission.",
+    price: "₦250,000"
+  }
+];
+
+const pricingTiers = [
+  {
+    name: "Starter",
+    sharecap: "₦1M Share Capital",
+    price: "₦100,000",
+    popular: false,
+  },
+  {
+    name: "Growth",
+    sharecap: "₦5M Share Capital",
+    price: "₦150,000",
+    popular: true,
+  },
+  {
+    name: "Professional",
+    sharecap: "₦10M Share Capital",
+    price: "₦350,000",
+    popular: false,
+  },
+  {
+    name: "Enterprise",
+    sharecap: "₦20M Share Capital",
+    price: "₦550,000",
+    popular: false,
+  },
+  {
+    name: "Foreign Participation",
+    sharecap: "₦100M Share Capital (per CAMA)",
+    price: "₦3,000,000",
+    popular: false,
+  }
+];
+
 const comingSoon = [
-  { title: "TIN Registration", description: "Get your Tax Identification Number" },
-  { title: "Bank Account Opening", description: "Open corporate bank accounts easily" },
-  { title: "Registered Address", description: "Virtual office address services" },
-  { title: "Compliance Reminders", description: "Never miss a filing deadline" }
+  { icon: Landmark, title: "Bank Account Opening", description: "Open corporate bank accounts seamlessly after incorporation" },
+  { icon: FileSignature, title: "Annual Returns Filing", description: "Automated CAC annual returns preparation and filing" },
+  { icon: BriefcaseBusiness, title: "Company Secretary Services", description: "Ongoing statutory compliance and company secretarial support" }
 ];
 
 export default function LandingPage() {
@@ -63,8 +143,9 @@ export default function LandingPage() {
             
             <div className="hidden md:flex items-center gap-8">
               <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Features</a>
+              <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Pricing</a>
+              <a href="#services" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Services</a>
               <a href="#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
-              <a href="#coming-soon" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Coming Soon</a>
             </div>
             
             <div className="flex items-center gap-2">
@@ -230,26 +311,100 @@ export default function LandingPage() {
           </div>
         </section>
 
+        <section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center mb-16">
+              <h2 className="text-3xl sm:text-4xl font-bold mb-4">Company Incorporation Pricing</h2>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                Transparent, all-inclusive pricing for your Nigerian company registration. Choose the share capital tier that fits your business.
+              </p>
+            </div>
+            
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+              {pricingTiers.map((tier, index) => (
+                <Card key={index} className={`relative overflow-hidden ${tier.popular ? "border-primary shadow-lg" : ""}`} data-testid={`card-pricing-${index}`}>
+                  {tier.popular && (
+                    <div className="bg-primary text-primary-foreground text-center text-xs font-medium py-1">
+                      Most Popular
+                    </div>
+                  )}
+                  <CardContent className="p-6 flex flex-col items-center text-center">
+                    <h3 className="font-semibold text-lg mb-1">{tier.name}</h3>
+                    <p className="text-xs text-muted-foreground mb-4">{tier.sharecap}</p>
+                    <p className="text-2xl font-bold text-primary mb-4">{tier.price}</p>
+                    <ul className="text-xs text-muted-foreground space-y-2 mb-6">
+                      <li className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-primary flex-shrink-0" /> CAC Filing & Registration</li>
+                      <li className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-primary flex-shrink-0" /> Expert Lawyer Assigned</li>
+                      <li className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-primary flex-shrink-0" /> Stamped Originals Delivered</li>
+                      <li className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-primary flex-shrink-0" /> Digital Document Vault</li>
+                    </ul>
+                    <Button size="sm" asChild className="w-full" variant={tier.popular ? "default" : "outline"} data-testid={`button-pricing-${index}`}>
+                      <a href="/register">Get Started</a>
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+            
+            <p className="text-center text-sm text-muted-foreground mt-8">
+              All prices are in Nigerian Naira (NGN). A one-time identity verification fee of ₦5,000 applies for new users.
+            </p>
+          </div>
+        </section>
+
+        <section id="services" className="py-20 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center mb-16">
+              <h2 className="text-3xl sm:text-4xl font-bold mb-4">Products & Services</h2>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                Beyond incorporation — everything you need to set up and run your business in Nigeria.
+              </p>
+            </div>
+            
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {services.map((service, index) => (
+                <Card key={index} className="hover-elevate group" data-testid={`card-service-${index}`}>
+                  <CardContent className="p-6">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                        <service.icon className="h-6 w-6 text-primary" />
+                      </div>
+                      <Badge variant="secondary" className="text-xs">{service.price}</Badge>
+                    </div>
+                    <h3 className="font-semibold text-lg mb-2">{service.title}</h3>
+                    <p className="text-muted-foreground text-sm">{service.description}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
         <section id="coming-soon" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
           <div className="max-w-7xl mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-3xl sm:text-4xl font-bold mb-4">Coming Soon</h2>
               <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                More features to help you run your business smoothly
+                More features on the way to help you run your business smoothly
               </p>
             </div>
             
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid sm:grid-cols-1 md:grid-cols-3 gap-6">
               {comingSoon.map((item, index) => (
-                <Card key={index} className="relative overflow-hidden">
+                <Card key={index} className="relative overflow-hidden" data-testid={`card-coming-soon-${index}`}>
                   <div className="absolute top-2 right-2">
                     <span className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary font-medium">
                       Coming Soon
                     </span>
                   </div>
-                  <CardContent className="p-6 pt-10">
-                    <h3 className="font-semibold text-lg mb-2">{item.title}</h3>
-                    <p className="text-muted-foreground text-sm">{item.description}</p>
+                  <CardContent className="p-6 pt-10 flex items-start gap-4">
+                    <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                      <item.icon className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-lg mb-1">{item.title}</h3>
+                      <p className="text-muted-foreground text-sm">{item.description}</p>
+                    </div>
                   </CardContent>
                 </Card>
               ))}

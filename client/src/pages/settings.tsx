@@ -23,7 +23,24 @@ import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { updateProfileSchema, changePasswordSchema } from "@shared/schema";
 import type { UpdateProfileInput, ChangePasswordInput } from "@shared/schema";
-import { User, Lock, Bell, Loader2, Check } from "lucide-react";
+import { User, Lock, Bell, Loader2, Check, ShieldCheck, Phone, Copy, Eye, EyeOff } from "lucide-react";
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+} from "@/components/ui/input-otp";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 
 interface ProfileData {
   firstName: string;
@@ -60,6 +77,8 @@ export default function SettingsPage() {
         <ProfileSection />
         <Separator />
         <PasswordSection />
+        <Separator />
+        <TwoFactorSection />
         <Separator />
         <NotificationSection roles={roles} />
       </div>
@@ -288,6 +307,281 @@ function PasswordSection() {
               </div>
             </form>
           </Form>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+interface TwoFactorStatus {
+  enabled: boolean;
+  method: string | null;
+  phone: string | null;
+}
+
+function TwoFactorSection() {
+  const { toast } = useToast();
+  const [step, setStep] = useState<"idle" | "phone" | "verify" | "backup">("idle");
+  const [phoneNumber, setPhoneNumber] = useState("+234");
+  const [otpValue, setOtpValue] = useState("");
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [showBackupCodes, setShowBackupCodes] = useState(false);
+  const [disablePassword, setDisablePassword] = useState("");
+
+  const { data: status, isLoading } = useQuery<TwoFactorStatus>({
+    queryKey: ["/api/settings/two-factor"],
+  });
+
+  const setupMutation = useMutation({
+    mutationFn: async (phone: string) => {
+      const res = await apiRequest("POST", "/api/settings/two-factor/setup", { phoneNumber: phone });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        setStep("verify");
+        toast({ title: "Code sent", description: data.message });
+      } else {
+        toast({ title: "Error", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const confirmMutation = useMutation({
+    mutationFn: async ({ otp, phone }: { otp: string; phone: string }) => {
+      const res = await apiRequest("POST", "/api/settings/two-factor/confirm", { otp, phoneNumber: phone });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.success && data.backupCodes) {
+        setBackupCodes(data.backupCodes);
+        setStep("backup");
+        queryClient.invalidateQueries({ queryKey: ["/api/settings/two-factor"] });
+        toast({ title: "2FA Enabled", description: "Two-factor authentication is now active" });
+      } else {
+        toast({ title: "Error", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const disableMutation = useMutation({
+    mutationFn: async (password: string) => {
+      const res = await apiRequest("POST", "/api/settings/two-factor/disable", { password });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        queryClient.invalidateQueries({ queryKey: ["/api/settings/two-factor"] });
+        setDisablePassword("");
+        toast({ title: "2FA Disabled", description: data.message });
+      } else {
+        toast({ title: "Error", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const copyBackupCodes = () => {
+    navigator.clipboard.writeText(backupCodes.join("\n"));
+    toast({ title: "Copied", description: "Backup codes copied to clipboard" });
+  };
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> Two-Factor Authentication</CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (status?.enabled) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5" /> Two-Factor Authentication
+                <Badge variant="default" className="ml-2" data-testid="badge-2fa-enabled">Enabled</Badge>
+              </CardTitle>
+              <CardDescription className="mt-1">
+                {status.phone ? `SMS codes sent to ${status.phone}` : "SMS verification is active"}
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" data-testid="button-disable-2fa">
+                Disable Two-Factor Authentication
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Disable Two-Factor Authentication?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will remove the extra security layer from your account. Enter your password to confirm.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <Input
+                type="password"
+                placeholder="Enter your current password"
+                value={disablePassword}
+                onChange={(e) => setDisablePassword(e.target.value)}
+                data-testid="input-disable-2fa-password"
+              />
+              <AlertDialogFooter>
+                <AlertDialogCancel data-testid="button-cancel-disable-2fa">Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => disableMutation.mutate(disablePassword)}
+                  disabled={!disablePassword || disableMutation.isPending}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  data-testid="button-confirm-disable-2fa"
+                >
+                  {disableMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Disable
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5" /> Two-Factor Authentication
+          <Badge variant="secondary" className="ml-2" data-testid="badge-2fa-disabled">Disabled</Badge>
+        </CardTitle>
+        <CardDescription>
+          Add an extra layer of security to your account by receiving SMS verification codes when you sign in
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {step === "idle" && (
+          <Button onClick={() => setStep("phone")} data-testid="button-enable-2fa">
+            <Phone className="h-4 w-4 mr-2" />
+            Enable Two-Factor Authentication
+          </Button>
+        )}
+
+        {step === "phone" && (
+          <div className="space-y-4 max-w-sm">
+            <div className="space-y-2">
+              <Label>Phone Number</Label>
+              <Input
+                type="tel"
+                placeholder="+234 801 234 5678"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                data-testid="input-2fa-phone"
+              />
+              <p className="text-xs text-muted-foreground">Enter your Nigerian phone number in international format (starting with +234)</p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => setupMutation.mutate(phoneNumber)}
+                disabled={setupMutation.isPending || phoneNumber.length < 10}
+                data-testid="button-send-2fa-code"
+              >
+                {setupMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Send Verification Code
+              </Button>
+              <Button variant="ghost" onClick={() => { setStep("idle"); setPhoneNumber("+234"); }} data-testid="button-cancel-2fa-setup">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === "verify" && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">Enter the 6-digit code sent to {phoneNumber}</p>
+            <div className="flex justify-start">
+              <InputOTP maxLength={6} value={otpValue} onChange={setOtpValue} data-testid="input-2fa-otp">
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                  <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
+                </InputOTPGroup>
+              </InputOTP>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => confirmMutation.mutate({ otp: otpValue, phone: phoneNumber })}
+                disabled={confirmMutation.isPending || otpValue.length !== 6}
+                data-testid="button-verify-2fa-code"
+              >
+                {confirmMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Verify & Enable
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setupMutation.mutate(phoneNumber)}
+                disabled={setupMutation.isPending}
+                data-testid="button-resend-2fa-code"
+              >
+                Resend Code
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === "backup" && (
+          <div className="space-y-4">
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-4 rounded-lg">
+              <h4 className="font-semibold text-amber-900 dark:text-amber-200 mb-2">Save Your Backup Codes</h4>
+              <p className="text-sm text-amber-800 dark:text-amber-300 mb-3">
+                Store these codes in a safe place. You can use them to sign in if you lose access to your phone. Each code can only be used once.
+              </p>
+              <div className="relative">
+                <div className={`grid grid-cols-2 gap-2 p-3 bg-white dark:bg-background rounded border font-mono text-sm ${!showBackupCodes ? 'blur-sm select-none' : ''}`}>
+                  {backupCodes.map((code, i) => (
+                    <div key={i} className="text-center py-1" data-testid={`text-backup-code-${i}`}>{code}</div>
+                  ))}
+                </div>
+                {!showBackupCodes && (
+                  <button
+                    className="absolute inset-0 flex items-center justify-center"
+                    onClick={() => setShowBackupCodes(true)}
+                    data-testid="button-show-backup-codes"
+                  >
+                    <Eye className="h-5 w-5 text-muted-foreground" />
+                    <span className="ml-2 text-sm text-muted-foreground">Click to reveal</span>
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={copyBackupCodes} data-testid="button-copy-backup-codes">
+                <Copy className="h-4 w-4 mr-2" />
+                Copy Codes
+              </Button>
+              <Button onClick={() => { setStep("idle"); setBackupCodes([]); setOtpValue(""); setShowBackupCodes(false); }} data-testid="button-done-2fa-setup">
+                Done
+              </Button>
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

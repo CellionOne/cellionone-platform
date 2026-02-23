@@ -384,8 +384,28 @@ export async function registerRoutes(
       // Record successful login (clears lockout)
       recordSuccessfulLogin(lockoutIdentifier);
       
-      // Set up session for the authenticated user
       const user = result.user;
+
+      if (user.twoFactorEnabled && user.twoFactorPhone) {
+        const twoFactorSvc = await import("./services/twoFactorService");
+        await twoFactorSvc.sendLoginOTP(user.id, user.twoFactorPhone);
+        
+        await storage.createAuditLog({
+          actorUserId: user.id,
+          action: "two_factor_challenge_sent",
+          entityType: "session",
+          details: { email: user.email, method: "sms" },
+          ipAddress: req.ip,
+        });
+        
+        return res.json({
+          requiresTwoFactor: true,
+          userId: user.id,
+          message: "Verification code sent to your phone",
+        });
+      }
+      
+      // Set up session for the authenticated user
       const sessionUser = { 
         claims: { sub: user.id, email: user.email, first_name: user.firstName, last_name: user.lastName },
         expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 1 week
@@ -670,6 +690,733 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating notification preferences:", error);
       res.status(500).json({ message: "Failed to update notification preferences" });
+    }
+  });
+
+  // ============== TWO-FACTOR AUTHENTICATION ROUTES ==============
+  const twoFactorService = await import("./services/twoFactorService");
+
+  app.get("/api/settings/two-factor", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      res.json({
+        enabled: user.twoFactorEnabled || false,
+        method: user.twoFactorMethod || null,
+        phone: user.twoFactorPhone ? user.twoFactorPhone.replace(/(\+\d{3})\d+(\d{4})/, '$1****$2') : null,
+      });
+    } catch (error) {
+      console.error("Error getting 2FA status:", error);
+      res.status(500).json({ message: "Failed to get two-factor status" });
+    }
+  });
+
+  app.post("/api/settings/two-factor/setup", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { phoneNumber } = req.body;
+      if (!phoneNumber || typeof phoneNumber !== 'string') {
+        return res.status(400).json({ message: "Phone number is required" });
+      }
+      const phone = phoneNumber.trim();
+      if (!phone.startsWith('+') || phone.length < 10) {
+        return res.status(400).json({ message: "Phone number must be in international format (e.g. +234...)" });
+      }
+      const result = await twoFactorService.setupTwoFactor(userId, phone);
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "two_factor_setup_initiated",
+        entityType: "user",
+        entityId: userId,
+        details: { method: 'sms' },
+        ipAddress: req.ip,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error setting up 2FA:", error);
+      res.status(500).json({ message: "Failed to set up two-factor authentication" });
+    }
+  });
+
+  app.post("/api/settings/two-factor/confirm", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { otp, phoneNumber } = req.body;
+      if (!otp || typeof otp !== 'string' || otp.length !== 6) {
+        return res.status(400).json({ message: "Invalid verification code" });
+      }
+      if (!phoneNumber || typeof phoneNumber !== 'string') {
+        return res.status(400).json({ message: "Phone number is required" });
+      }
+      const result = await twoFactorService.confirmTwoFactorSetup(userId, otp, phoneNumber.trim());
+      if (result.success) {
+        await storage.createAuditLog({
+          actorUserId: userId,
+          action: "two_factor_enabled",
+          entityType: "user",
+          entityId: userId,
+          details: { method: 'sms' },
+          ipAddress: req.ip,
+        });
+      }
+      res.json(result);
+    } catch (error) {
+      console.error("Error confirming 2FA:", error);
+      res.status(500).json({ message: "Failed to confirm two-factor authentication" });
+    }
+  });
+
+  app.post("/api/settings/two-factor/disable", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { password } = req.body;
+      if (!password || typeof password !== 'string') {
+        return res.status(400).json({ message: "Current password is required to disable 2FA" });
+      }
+      const user = await storage.getUser(userId);
+      if (!user || !user.passwordHash) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const bcrypt = await import("bcryptjs");
+      const valid = await bcrypt.compare(password, user.passwordHash);
+      if (!valid) {
+        return res.status(403).json({ message: "Incorrect password" });
+      }
+      const result = await twoFactorService.disableTwoFactor(userId);
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "two_factor_disabled",
+        entityType: "user",
+        entityId: userId,
+        ipAddress: req.ip,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error disabling 2FA:", error);
+      res.status(500).json({ message: "Failed to disable two-factor authentication" });
+    }
+  });
+
+  app.post("/api/auth/two-factor/send", async (req: any, res) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ message: "User ID required" });
+      const user = await storage.getUser(userId);
+      if (!user || !user.twoFactorEnabled || !user.twoFactorPhone) {
+        return res.status(400).json({ message: "2FA not configured for this user" });
+      }
+      const result = await twoFactorService.sendLoginOTP(userId, user.twoFactorPhone);
+      res.json(result);
+    } catch (error) {
+      console.error("Error sending login OTP:", error);
+      res.status(500).json({ message: "Failed to send verification code" });
+    }
+  });
+
+  app.post("/api/auth/two-factor/verify", async (req: any, res) => {
+    try {
+      const { userId, otp, backupCode } = req.body;
+      if (!userId) return res.status(400).json({ message: "User ID required" });
+
+      const user = await storage.getUser(userId);
+      if (!user || !user.twoFactorEnabled) {
+        return res.status(400).json({ message: "2FA not configured for this user" });
+      }
+
+      let verified = false;
+
+      if (backupCode && typeof backupCode === 'string') {
+        if (!user.twoFactorBackupCodes) {
+          return res.status(400).json({ success: false, message: "No backup codes available" });
+        }
+        const result = twoFactorService.verifyBackupCode(user.twoFactorBackupCodes, backupCode);
+        if (result.success) {
+          await storage.updateUserTwoFactor(userId, {
+            twoFactorBackupCodes: result.remainingCodes,
+            lastTwoFactorAt: new Date(),
+          });
+          await storage.createAuditLog({
+            actorUserId: userId,
+            action: "two_factor_backup_code_used",
+            entityType: "user",
+            entityId: userId,
+            ipAddress: req.ip,
+          });
+          verified = true;
+        } else {
+          return res.json({ success: false, message: "Invalid backup code" });
+        }
+      } else {
+        if (!otp || typeof otp !== 'string') {
+          return res.status(400).json({ message: "Verification code required" });
+        }
+        const result = twoFactorService.verifyLoginOTP(userId, otp);
+        if (result.success) {
+          await storage.updateUserTwoFactor(userId, { lastTwoFactorAt: new Date() });
+          await storage.createAuditLog({
+            actorUserId: userId,
+            action: "two_factor_login_verified",
+            entityType: "user",
+            entityId: userId,
+            ipAddress: req.ip,
+          });
+          verified = true;
+        } else {
+          return res.json(result);
+        }
+      }
+
+      if (verified) {
+        const sessionUser = {
+          claims: { sub: user.id, email: user.email, first_name: user.firstName, last_name: user.lastName },
+          expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
+        };
+
+        req.login(sessionUser, (err: any) => {
+          if (err) {
+            console.error("Session login error after 2FA:", err);
+            return res.status(500).json({ message: "Login failed after verification" });
+          }
+
+          storage.createAuditLog({
+            actorUserId: user.id,
+            action: "login",
+            entityType: "session",
+            details: { email: user.email, method: "email_password_2fa" },
+            ipAddress: req.ip,
+          });
+
+          res.json({ success: true, message: "Verification successful", user });
+        });
+      }
+    } catch (error) {
+      console.error("Error verifying login OTP:", error);
+      res.status(500).json({ message: "Failed to verify code" });
+    }
+  });
+
+  // ============== PERSONAL PROFILE ROUTES ==============
+  const encryptionService = await import("./services/encryptionService");
+
+  app.get("/api/profile/personal", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const profile = await storage.getFounderProfile(userId);
+      if (!profile) {
+        return res.json({
+          userId,
+          fullName: null,
+          phone: null,
+          dateOfBirth: null,
+          nationality: null,
+          gender: null,
+          occupation: null,
+          addressLine1: null,
+          addressLine2: null,
+          city: null,
+          state: null,
+          postalCode: null,
+          country: "Nigeria",
+          ninLast4: null,
+          bvnLast4: null,
+          hasNin: false,
+          hasBvn: false,
+          idType: null,
+          hasIdDocument: false,
+          hasPassportPhoto: false,
+          hasSignature: false,
+          profileCompletion: 0,
+          isProfileComplete: false,
+        });
+      }
+
+      let ninLast4: string | null = null;
+      let bvnLast4: string | null = null;
+
+      if (profile.ninEncrypted) {
+        try {
+          const nin = encryptionService.decrypt(profile.ninEncrypted);
+          ninLast4 = nin.slice(-4);
+        } catch { ninLast4 = null; }
+      }
+      if (profile.bvnEncrypted) {
+        try {
+          const bvn = encryptionService.decrypt(profile.bvnEncrypted);
+          bvnLast4 = bvn.slice(-4);
+        } catch { bvnLast4 = null; }
+      }
+
+      res.json({
+        userId: profile.userId,
+        fullName: profile.fullName,
+        phone: profile.phone,
+        dateOfBirth: profile.dateOfBirth,
+        nationality: profile.nationality,
+        gender: profile.gender,
+        occupation: profile.occupation,
+        addressLine1: profile.addressLine1,
+        addressLine2: profile.addressLine2,
+        city: profile.city,
+        state: profile.state,
+        postalCode: profile.postalCode,
+        country: profile.country,
+        ninLast4,
+        bvnLast4,
+        hasNin: !!profile.ninEncrypted,
+        hasBvn: !!profile.bvnEncrypted,
+        idType: profile.idType,
+        hasIdDocument: !!profile.idDocumentPath,
+        hasPassportPhoto: !!profile.passportPhotoPath,
+        hasSignature: !!profile.signaturePath,
+        profileCompletion: profile.profileCompletion,
+        isProfileComplete: profile.isProfileComplete,
+      });
+    } catch (error) {
+      console.error("Error getting personal profile:", error);
+      res.status(500).json({ message: "Failed to get profile" });
+    }
+  });
+
+  app.put("/api/profile/personal", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const {
+        fullName, phone, dateOfBirth, nationality, gender, occupation,
+        addressLine1, addressLine2, city, state, postalCode, country,
+        nin, bvn, idType,
+      } = req.body;
+
+      const profileData: any = {
+        userId,
+        fullName, phone, dateOfBirth, nationality, gender, occupation,
+        addressLine1, addressLine2, city, state, postalCode, country,
+        idType,
+      };
+
+      if (nin && typeof nin === 'string' && nin.length === 11) {
+        profileData.ninEncrypted = encryptionService.encrypt(nin);
+        await storage.logSensitiveDataAccess({
+          accessorUserId: userId,
+          targetUserId: userId,
+          dataType: 'nin',
+          action: 'update',
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+        });
+      }
+
+      if (bvn && typeof bvn === 'string' && bvn.length === 11) {
+        profileData.bvnEncrypted = encryptionService.encrypt(bvn);
+        await storage.logSensitiveDataAccess({
+          accessorUserId: userId,
+          targetUserId: userId,
+          dataType: 'bvn',
+          action: 'update',
+          ipAddress: req.ip,
+          userAgent: req.headers['user-agent'],
+        });
+      }
+
+      const completionFields = [
+        fullName, phone, dateOfBirth, nationality, gender, occupation,
+        addressLine1, city, state, country, idType,
+      ];
+      const filled = completionFields.filter(Boolean).length;
+      const total = completionFields.length;
+      const existing = await storage.getFounderProfile(userId);
+      const hasDocuments = (existing?.passportPhotoPath || req.body.passportPhotoPath) &&
+                           (existing?.signaturePath || req.body.signaturePath) &&
+                           (existing?.idDocumentPath || req.body.idDocumentPath);
+      const hasIds = (existing?.ninEncrypted || profileData.ninEncrypted) &&
+                     (existing?.bvnEncrypted || profileData.bvnEncrypted);
+
+      const docScore = hasDocuments ? 15 : 0;
+      const idScore = hasIds ? 15 : 0;
+      profileData.profileCompletion = Math.round((filled / total) * 70) + docScore + idScore;
+      profileData.isProfileComplete = profileData.profileCompletion >= 85;
+
+      const profile = await storage.upsertFounderProfile(profileData);
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "personal_profile_updated",
+        entityType: "founder_profile",
+        entityId: String(profile.id),
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Profile updated successfully", profileCompletion: profileData.profileCompletion });
+    } catch (error) {
+      console.error("Error updating personal profile:", error);
+      res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  app.post("/api/profile/personal/upload-url", isAuthenticated, async (req: any, res) => {
+    try {
+      const { docType, contentType, name, size } = req.body;
+      const validDocTypes = ['passport_photo', 'signature', 'id_document'];
+      if (!docType || !validDocTypes.includes(docType)) {
+        return res.status(400).json({ message: "Invalid document type" });
+      }
+
+      const allowedTypes = ["image/jpeg", "image/png", "image/jpg", "application/pdf"];
+      if (contentType && !allowedTypes.includes(contentType)) {
+        return res.status(400).json({ message: "Only JPEG, PNG, and PDF files are allowed" });
+      }
+
+      const maxSize = 5 * 1024 * 1024;
+      if (size && size > maxSize) {
+        return res.status(400).json({ message: "File size must be under 5MB" });
+      }
+
+      const objectStorage = new ObjectStorageService();
+      const uploadURL = await objectStorage.getObjectEntityUploadURL();
+      const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+
+      res.json({ uploadURL, objectPath });
+    } catch (error: any) {
+      console.error("Error generating upload URL:", error);
+      res.status(500).json({ message: "Failed to generate upload URL" });
+    }
+  });
+
+  app.post("/api/profile/personal/upload-complete", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { docType, objectPath } = req.body;
+      const validDocTypes = ['passport_photo', 'signature', 'id_document'];
+      if (!docType || !validDocTypes.includes(docType) || !objectPath) {
+        return res.status(400).json({ message: "Invalid request" });
+      }
+
+      const pathField = docType === 'passport_photo' ? 'passportPhotoPath'
+        : docType === 'signature' ? 'signaturePath'
+        : 'idDocumentPath';
+
+      const existing = await storage.getFounderProfile(userId);
+      const profileData: any = { userId, [pathField]: objectPath };
+
+      if (existing) {
+        const completionFields = [
+          existing.fullName, existing.phone, existing.dateOfBirth, existing.nationality,
+          existing.gender, existing.occupation, existing.addressLine1, existing.city,
+          existing.state, existing.country, existing.idType,
+        ];
+        const filled = completionFields.filter(Boolean).length;
+        const total = completionFields.length;
+        const pp = docType === 'passport_photo' ? objectPath : existing.passportPhotoPath;
+        const sig = docType === 'signature' ? objectPath : existing.signaturePath;
+        const idDoc = docType === 'id_document' ? objectPath : existing.idDocumentPath;
+        const hasDocuments = pp && sig && idDoc;
+        const hasIds = existing.ninEncrypted && existing.bvnEncrypted;
+        const docScore = hasDocuments ? 15 : 0;
+        const idScore = hasIds ? 15 : 0;
+        profileData.profileCompletion = Math.round((filled / total) * 70) + docScore + idScore;
+        profileData.isProfileComplete = profileData.profileCompletion >= 85;
+      }
+
+      await storage.upsertFounderProfile(profileData);
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "personal_document_uploaded",
+        entityType: "founder_profile",
+        details: { docType },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Document uploaded successfully", docType });
+    } catch (error) {
+      console.error("Error completing upload:", error);
+      res.status(500).json({ message: "Failed to save document" });
+    }
+  });
+
+  app.get("/api/profile/personal/document/:docType", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { docType } = req.params;
+      const validDocTypes = ['passport_photo', 'signature', 'id_document'];
+      if (!validDocTypes.includes(docType)) {
+        return res.status(400).json({ message: "Invalid document type" });
+      }
+
+      const profile = await storage.getFounderProfile(userId);
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const path = docType === 'passport_photo' ? profile.passportPhotoPath
+        : docType === 'signature' ? profile.signaturePath
+        : profile.idDocumentPath;
+
+      if (!path) return res.status(404).json({ message: "Document not found" });
+
+      await storage.logSensitiveDataAccess({
+        accessorUserId: userId,
+        targetUserId: userId,
+        dataType: docType,
+        action: 'view',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      const objectStorage = new ObjectStorageService();
+      const downloadURL = await objectStorage.getObjectEntityDownloadURL(path);
+      res.json({ downloadURL });
+    } catch (error) {
+      console.error("Error getting document URL:", error);
+      res.status(500).json({ message: "Failed to get document" });
+    }
+  });
+
+  // ============== COMPANY PEOPLE (DIRECTORS/SHAREHOLDERS) ROUTES ==============
+
+  app.get("/api/company-people", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const people = await storage.getCompanyPeopleByFounder(userId);
+      res.json(people);
+    } catch (error) {
+      console.error("Error getting company people:", error);
+      res.status(500).json({ message: "Failed to get company people" });
+    }
+  });
+
+  app.get("/api/company-people/my-invitations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const invitations = await storage.getCompanyPeopleByPersonUserId(userId);
+      res.json(invitations);
+    } catch (error) {
+      console.error("Error getting invitations:", error);
+      res.status(500).json({ message: "Failed to get invitations" });
+    }
+  });
+
+  app.post("/api/company-people", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { inviteEmail, role, title, sharesAllocated, shareClass, sharePercentage, applicationId, companyProfileId } = req.body;
+
+      if (!inviteEmail || !role) {
+        return res.status(400).json({ message: "Email and role are required" });
+      }
+
+      if (!['director', 'shareholder', 'director_shareholder', 'secretary'].includes(role)) {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+
+      const crypto = await import("crypto");
+      const inviteToken = crypto.randomBytes(32).toString('hex');
+
+      const person = await storage.createCompanyPerson({
+        founderId: userId,
+        inviteEmail: inviteEmail.toLowerCase().trim(),
+        inviteToken,
+        inviteStatus: "pending",
+        inviteSentAt: new Date(),
+        role,
+        title,
+        sharesAllocated: sharesAllocated || null,
+        shareClass: shareClass || null,
+        sharePercentage: sharePercentage || null,
+        applicationId: applicationId || null,
+        companyProfileId: companyProfileId || null,
+      });
+
+      try {
+        const { Resend } = await import("resend");
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const appUrl = process.env.REPLIT_DEV_DOMAIN
+          ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+          : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+
+        const roleLabel = role === 'director_shareholder' ? 'Director & Shareholder' : role.charAt(0).toUpperCase() + role.slice(1);
+        const user = await storage.getUser(userId);
+        const founderName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'A founder';
+
+        await resend.emails.send({
+          from: "Cellion One <onboarding@resend.dev>",
+          to: inviteEmail.toLowerCase().trim(),
+          subject: `You've been invited as a ${roleLabel} on Cellion One`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2>Company Director/Shareholder Invitation</h2>
+              <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
+              <p>To accept this invitation, please create an account or sign in using this link:</p>
+              <p><a href="${appUrl}/register?invite=${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
+              <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/register?invite=${inviteToken}</p>
+              <hr style="margin: 24px 0;" />
+              <p style="color: #666; font-size: 12px;">This invitation was sent from Cellion One. If you didn't expect this, you can ignore this email.</p>
+            </div>
+          `,
+        });
+      } catch (emailErr: any) {
+        console.warn("[CompanyPeople] Failed to send invite email:", emailErr?.message);
+      }
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "company_person_invited",
+        entityType: "company_person",
+        entityId: String(person.id),
+        details: { inviteEmail, role, title },
+        ipAddress: req.ip,
+      });
+
+      res.json(person);
+    } catch (error) {
+      console.error("Error inviting company person:", error);
+      res.status(500).json({ message: "Failed to invite person" });
+    }
+  });
+
+  app.put("/api/company-people/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+
+      const existing = await storage.getCompanyPeople(0);
+      const people = await storage.getCompanyPeopleByFounder(userId);
+      const person = people.find(p => p.id === id);
+      if (!person) {
+        return res.status(404).json({ message: "Person not found" });
+      }
+
+      const { role, title, sharesAllocated, shareClass, sharePercentage } = req.body;
+      const updated = await storage.updateCompanyPerson(id, {
+        role: role || person.role,
+        title: title !== undefined ? title : person.title,
+        sharesAllocated: sharesAllocated !== undefined ? sharesAllocated : person.sharesAllocated,
+        shareClass: shareClass !== undefined ? shareClass : person.shareClass,
+        sharePercentage: sharePercentage !== undefined ? sharePercentage : person.sharePercentage,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating company person:", error);
+      res.status(500).json({ message: "Failed to update person" });
+    }
+  });
+
+  app.delete("/api/company-people/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+
+      const people = await storage.getCompanyPeopleByFounder(userId);
+      const person = people.find(p => p.id === id);
+      if (!person) {
+        return res.status(404).json({ message: "Person not found" });
+      }
+
+      await storage.deleteCompanyPerson(id);
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "company_person_removed",
+        entityType: "company_person",
+        entityId: String(id),
+        details: { inviteEmail: person.inviteEmail, role: person.role },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Person removed" });
+    } catch (error) {
+      console.error("Error removing company person:", error);
+      res.status(500).json({ message: "Failed to remove person" });
+    }
+  });
+
+  app.post("/api/company-people/accept-invite", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { inviteToken } = req.body;
+      if (!inviteToken) return res.status(400).json({ message: "Invite token required" });
+
+      const person = await storage.getCompanyPersonByInviteToken(inviteToken);
+      if (!person) {
+        return res.status(404).json({ message: "Invalid or expired invitation" });
+      }
+
+      if (person.inviteStatus === 'accepted') {
+        return res.status(400).json({ message: "Invitation already accepted" });
+      }
+
+      await storage.updateCompanyPerson(person.id, {
+        personUserId: userId,
+        inviteStatus: 'accepted',
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "company_person_invite_accepted",
+        entityType: "company_person",
+        entityId: String(person.id),
+        details: { role: person.role, founderId: person.founderId },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Invitation accepted", role: person.role });
+    } catch (error) {
+      console.error("Error accepting invitation:", error);
+      res.status(500).json({ message: "Failed to accept invitation" });
+    }
+  });
+
+  app.post("/api/company-people/resend-invite/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+
+      const people = await storage.getCompanyPeopleByFounder(userId);
+      const person = people.find(p => p.id === id);
+      if (!person || !person.inviteEmail) {
+        return res.status(404).json({ message: "Person not found" });
+      }
+
+      if (person.inviteStatus === 'accepted') {
+        return res.status(400).json({ message: "Invitation already accepted" });
+      }
+
+      try {
+        const { Resend } = await import("resend");
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const appUrl = process.env.REPLIT_DEV_DOMAIN
+          ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+          : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+
+        const roleLabel = person.role === 'director_shareholder' ? 'Director & Shareholder' : person.role.charAt(0).toUpperCase() + person.role.slice(1);
+        const user = await storage.getUser(userId);
+        const founderName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'A founder';
+
+        await resend.emails.send({
+          from: "Cellion One <onboarding@resend.dev>",
+          to: person.inviteEmail,
+          subject: `Reminder: You've been invited as a ${roleLabel} on Cellion One`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2>Reminder: Company Director/Shareholder Invitation</h2>
+              <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
+              <p><a href="${appUrl}/register?invite=${person.inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
+              <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/register?invite=${person.inviteToken}</p>
+            </div>
+          `,
+        });
+
+        await storage.updateCompanyPerson(person.id, { inviteSentAt: new Date() });
+        res.json({ message: "Invitation resent" });
+      } catch (emailErr: any) {
+        console.warn("[CompanyPeople] Failed to resend invite:", emailErr?.message);
+        res.status(500).json({ message: "Failed to send email" });
+      }
+    } catch (error) {
+      console.error("Error resending invitation:", error);
+      res.status(500).json({ message: "Failed to resend invitation" });
     }
   });
 

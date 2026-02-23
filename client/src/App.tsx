@@ -50,6 +50,8 @@ import ForgotPasswordPage from "@/pages/auth/forgot-password";
 import ResetPasswordPage from "@/pages/auth/reset-password";
 import VerifyEmailPage from "@/pages/auth/verify-email";
 import SettingsPage from "@/pages/settings";
+import PersonalProfilePage from "@/pages/personal-profile";
+import CompanyPeoplePage from "@/pages/founder/company-people";
 import PaymentCheckoutPage from "@/pages/payment/checkout";
 import PaymentSuccessPage from "@/pages/payment/success";
 import PaymentCancelPage from "@/pages/payment/cancel";
@@ -172,6 +174,9 @@ function Router() {
       <Route path="/founder/compliance">
         <ProtectedRoute component={FounderComplianceCalendar} />
       </Route>
+      <Route path="/founder/company-people">
+        <ProtectedRoute component={CompanyPeoplePage} roles={["founder"]} />
+      </Route>
       <Route path="/founder/checkout">
         <ProtectedRoute component={FounderCheckout} />
       </Route>
@@ -242,6 +247,9 @@ function Router() {
         <ProtectedRoute component={AdminOrders} roles={["admin"]} />
       </Route>
       
+      <Route path="/profile">
+        <ProtectedRoute component={PersonalProfilePage} />
+      </Route>
       <Route path="/settings">
         <ProtectedRoute component={SettingsPage} />
       </Route>

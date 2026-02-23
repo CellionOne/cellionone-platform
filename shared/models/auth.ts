@@ -29,6 +29,12 @@ export const users = pgTable("users", {
   verificationTokenExpiry: timestamp("verification_token_expiry"),
   resetToken: varchar("reset_token"),
   resetTokenExpiry: timestamp("reset_token_expiry"),
+  twoFactorEnabled: boolean("two_factor_enabled").default(false),
+  twoFactorMethod: varchar("two_factor_method", { length: 20 }),
+  twoFactorPhone: varchar("two_factor_phone", { length: 50 }),
+  twoFactorSecret: varchar("two_factor_secret", { length: 255 }),
+  twoFactorBackupCodes: varchar("two_factor_backup_codes", { length: 1000 }),
+  lastTwoFactorAt: timestamp("last_two_factor_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -42,6 +48,12 @@ export const insertUserSchema = createInsertSchema(users).omit({
   verificationTokenExpiry: true,
   resetToken: true,
   resetTokenExpiry: true,
+  twoFactorEnabled: true,
+  twoFactorMethod: true,
+  twoFactorPhone: true,
+  twoFactorSecret: true,
+  twoFactorBackupCodes: true,
+  lastTwoFactorAt: true,
 });
 
 // Password strength validation

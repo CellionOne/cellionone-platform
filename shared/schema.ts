@@ -6,7 +6,7 @@ import { z } from "zod";
 // Re-export auth models
 export * from "./models/auth";
 
-// ============== FOUNDER PROFILE ==============
+// ============== FOUNDER PROFILE (personal profile for any user) ==============
 export const founderProfiles = pgTable("founder_profiles", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").notNull().unique(),
@@ -14,12 +14,22 @@ export const founderProfiles = pgTable("founder_profiles", {
   phone: varchar("phone", { length: 50 }),
   dateOfBirth: varchar("date_of_birth"),
   nationality: varchar("nationality", { length: 100 }),
+  gender: varchar("gender", { length: 20 }),
+  occupation: varchar("occupation", { length: 255 }),
   addressLine1: varchar("address_line_1", { length: 255 }),
   addressLine2: varchar("address_line_2", { length: 255 }),
   city: varchar("city", { length: 100 }),
   state: varchar("state", { length: 100 }),
   postalCode: varchar("postal_code", { length: 20 }),
   country: varchar("country", { length: 100 }).default("Nigeria"),
+  ninEncrypted: varchar("nin_encrypted", { length: 500 }),
+  bvnEncrypted: varchar("bvn_encrypted", { length: 500 }),
+  idType: varchar("id_type", { length: 50 }),
+  idDocumentPath: varchar("id_document_path", { length: 500 }),
+  passportPhotoPath: varchar("passport_photo_path", { length: 500 }),
+  signaturePath: varchar("signature_path", { length: 500 }),
+  profileCompletion: integer("profile_completion").default(0),
+  isProfileComplete: boolean("is_profile_complete").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -27,6 +37,55 @@ export const founderProfiles = pgTable("founder_profiles", {
 export const insertFounderProfileSchema = createInsertSchema(founderProfiles).omit({ id: true, createdAt: true, updatedAt: true });
 export type FounderProfile = typeof founderProfiles.$inferSelect;
 export type InsertFounderProfile = z.infer<typeof insertFounderProfileSchema>;
+
+// ============== COMPANY PEOPLE (directors/shareholders linked to applications) ==============
+export const companyPeople = pgTable("company_people", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id"),
+  companyProfileId: integer("company_profile_id"),
+  founderId: varchar("founder_id").notNull(),
+  personUserId: varchar("person_user_id"),
+  inviteEmail: varchar("invite_email", { length: 255 }),
+  inviteStatus: varchar("invite_status", { length: 50 }).default("pending"),
+  inviteToken: varchar("invite_token", { length: 255 }),
+  inviteSentAt: timestamp("invite_sent_at"),
+  role: varchar("role", { length: 50 }).notNull(),
+  title: varchar("title", { length: 100 }),
+  sharesAllocated: integer("shares_allocated"),
+  shareClass: varchar("share_class", { length: 50 }),
+  sharePercentage: varchar("share_percentage", { length: 20 }),
+  isVerified: boolean("is_verified").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_company_people_application").on(table.applicationId),
+  index("idx_company_people_company_profile").on(table.companyProfileId),
+  index("idx_company_people_founder").on(table.founderId),
+  index("idx_company_people_person").on(table.personUserId),
+  index("idx_company_people_invite_email").on(table.inviteEmail),
+]);
+
+export const insertCompanyPersonSchema = createInsertSchema(companyPeople).omit({ id: true, createdAt: true, updatedAt: true });
+export type CompanyPerson = typeof companyPeople.$inferSelect;
+export type InsertCompanyPerson = z.infer<typeof insertCompanyPersonSchema>;
+
+// ============== SENSITIVE DATA ACCESS LOG ==============
+export const sensitiveDataAccessLogs = pgTable("sensitive_data_access_logs", {
+  id: serial("id").primaryKey(),
+  accessorUserId: varchar("accessor_user_id").notNull(),
+  targetUserId: varchar("target_user_id").notNull(),
+  dataType: varchar("data_type", { length: 50 }).notNull(),
+  action: varchar("action", { length: 50 }).notNull(),
+  entityType: varchar("entity_type", { length: 100 }),
+  entityId: varchar("entity_id", { length: 100 }),
+  ipAddress: varchar("ip_address", { length: 50 }),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_sensitive_access_accessor").on(table.accessorUserId),
+  index("idx_sensitive_access_target").on(table.targetUserId),
+  index("idx_sensitive_access_data_type").on(table.dataType),
+]);
 
 // ============== LAWYER PROFILE ==============
 export const lawyerProfiles = pgTable("lawyer_profiles", {

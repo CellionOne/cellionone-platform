@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   FileText,
   User,
+  UserCircle,
   FolderOpen,
   Settings,
   Users,
@@ -47,7 +48,9 @@ interface NavItem {
 
 const founderItems: NavItem[] = [
   { title: "Dashboard", url: "/founder/dashboard", icon: LayoutDashboard },
+  { title: "Personal Profile", url: "/profile", icon: UserCircle },
   { title: "Identity Verification", url: "/founder/identity", icon: User },
+  { title: "Directors & Shareholders", url: "/founder/company-people", icon: Users },
   { title: "My Applications", url: "/founder/applications", icon: FileText },
   { title: "My Orders", url: "/founder/orders", icon: Receipt },
   { title: "Company Profile", url: "/founder/company-profile", icon: Briefcase },
@@ -63,6 +66,7 @@ const founderItems: NavItem[] = [
 
 const lawyerItems: NavItem[] = [
   { title: "Dashboard", url: "/lawyer/dashboard", icon: LayoutDashboard },
+  { title: "Personal Profile", url: "/profile", icon: UserCircle },
   { title: "Assigned Cases", url: "/lawyer/applications", icon: Scale },
   { title: "Service Requests", url: "/lawyer/service-requests", icon: ClipboardList },
   { title: "Payouts", url: "/lawyer/payouts", icon: Wallet },
@@ -71,6 +75,7 @@ const lawyerItems: NavItem[] = [
 
 const adminItems: NavItem[] = [
   { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
+  { title: "Personal Profile", url: "/profile", icon: UserCircle },
   { title: "Users", url: "/admin/users", icon: Users },
   { title: "Applications", url: "/admin/applications", icon: FileText },
   { title: "Lawyer Applications", url: "/admin/lawyer-applications", icon: UserPlus },

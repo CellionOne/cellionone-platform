@@ -32,6 +32,8 @@ import {
   serviceRequestDocuments, type ServiceRequestDocument, type InsertServiceRequestDocument,
   serviceRequests, type ServiceRequest, type InsertServiceRequest,
   notificationPreferences, type NotificationPreference,
+  companyPeople, type CompanyPerson, type InsertCompanyPerson,
+  sensitiveDataAccessLogs,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -201,6 +203,37 @@ export interface IStorage {
     incorporationUpdates: boolean;
     marketingEmails: boolean;
   }>): Promise<NotificationPreference>;
+
+  // Company People (directors/shareholders)
+  getCompanyPeople(applicationId: number): Promise<CompanyPerson[]>;
+  getCompanyPeopleByFounder(founderId: string): Promise<CompanyPerson[]>;
+  getCompanyPersonByInviteToken(token: string): Promise<CompanyPerson | undefined>;
+  getCompanyPeopleByPersonUserId(personUserId: string): Promise<CompanyPerson[]>;
+  createCompanyPerson(data: InsertCompanyPerson): Promise<CompanyPerson>;
+  updateCompanyPerson(id: number, data: Partial<InsertCompanyPerson>): Promise<CompanyPerson | undefined>;
+  deleteCompanyPerson(id: number): Promise<void>;
+
+  // Sensitive Data Access Logging
+  logSensitiveDataAccess(data: {
+    accessorUserId: string;
+    targetUserId: string;
+    dataType: string;
+    action: string;
+    entityType?: string;
+    entityId?: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }): Promise<void>;
+
+  // 2FA
+  updateUserTwoFactor(userId: string, data: Partial<{
+    twoFactorEnabled: boolean;
+    twoFactorMethod: string;
+    twoFactorPhone: string;
+    twoFactorSecret: string;
+    twoFactorBackupCodes: string;
+    lastTwoFactorAt: Date;
+  }>): Promise<User>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -962,6 +995,71 @@ export class DatabaseStorage implements IStorage {
       .values({ userId, ...data })
       .returning();
     return created;
+  }
+
+  // Company People
+  async getCompanyPeople(applicationId: number): Promise<CompanyPerson[]> {
+    return db.select().from(companyPeople).where(eq(companyPeople.applicationId, applicationId));
+  }
+
+  async getCompanyPeopleByFounder(founderId: string): Promise<CompanyPerson[]> {
+    return db.select().from(companyPeople).where(eq(companyPeople.founderId, founderId));
+  }
+
+  async getCompanyPersonByInviteToken(token: string): Promise<CompanyPerson | undefined> {
+    const [person] = await db.select().from(companyPeople).where(eq(companyPeople.inviteToken, token));
+    return person;
+  }
+
+  async getCompanyPeopleByPersonUserId(personUserId: string): Promise<CompanyPerson[]> {
+    return db.select().from(companyPeople).where(eq(companyPeople.personUserId, personUserId));
+  }
+
+  async createCompanyPerson(data: InsertCompanyPerson): Promise<CompanyPerson> {
+    const [person] = await db.insert(companyPeople).values(data).returning();
+    return person;
+  }
+
+  async updateCompanyPerson(id: number, data: Partial<InsertCompanyPerson>): Promise<CompanyPerson | undefined> {
+    const [updated] = await db.update(companyPeople)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(companyPeople.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteCompanyPerson(id: number): Promise<void> {
+    await db.delete(companyPeople).where(eq(companyPeople.id, id));
+  }
+
+  // Sensitive Data Access Logging
+  async logSensitiveDataAccess(data: {
+    accessorUserId: string;
+    targetUserId: string;
+    dataType: string;
+    action: string;
+    entityType?: string;
+    entityId?: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }): Promise<void> {
+    await db.insert(sensitiveDataAccessLogs).values(data);
+  }
+
+  // 2FA
+  async updateUserTwoFactor(userId: string, data: Partial<{
+    twoFactorEnabled: boolean;
+    twoFactorMethod: string;
+    twoFactorPhone: string;
+    twoFactorSecret: string;
+    twoFactorBackupCodes: string;
+    lastTwoFactorAt: Date;
+  }>): Promise<User> {
+    const [updated] = await db.update(users)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    return updated;
   }
 }
 

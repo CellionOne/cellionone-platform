@@ -43,9 +43,31 @@ Key architectural patterns include:
   - Lawyer Service Requests: Lawyers can view assigned/queued requests, see founder details + company profiles + uploaded documents, and update status (queued → assigned → in_progress → completed). Pages: `client/src/pages/lawyer/service-requests.tsx`, `client/src/pages/lawyer/service-request-detail.tsx`
   - Admin Service Requests: Admin orders page shows service requests per order with lawyer assignment capability. Admin can assign lawyers to queued requests.
 - **Identity Verification (Payment-Based):** One-time NGN 5,000 fee auto-injected at checkout for unverified users. Status reflected on identity page (`client/src/pages/founder/identity.tsx`) based on `user.identityVerified` boolean. No document upload — verification is payment-gated via VERIFY SKU in product catalog.
-- **User Settings Page:** Shared `/settings` page accessible to all roles (founder, lawyer, admin) with three sections:
+- **Personal Profile System:** Comprehensive personal profile with encrypted NIN/BVN storage (AES-256-GCM), document uploads (passport photo, signature specimen, government ID), profile completion tracking (0-100%), and residential address. Shared across all roles.
+  - Frontend: `client/src/pages/personal-profile.tsx` (route: `/profile`)
+  - API: GET/PUT `/api/profile/personal`, POST `/api/profile/personal/upload-url`, POST `/api/profile/personal/upload-complete`, GET `/api/profile/personal/document/:docType`
+  - Schema: `founder_profiles` table with `nin_encrypted`, `bvn_encrypted`, `id_type`, `passport_photo_path`, `signature_path`, `id_document_path`, `profile_completion`, `is_profile_complete`
+  - Encryption: NIN/BVN encrypted via `server/services/encryptionService.ts` using AES-256-GCM. Only last 4 digits displayed to user.
+- **Director/Shareholder Management:** Founders can invite directors, shareholders, and company secretaries via email. Each invitee creates their own account, completes their profile, and undergoes individual verification.
+  - Schema: `company_people` table with invitation workflow (pending → accepted → verified)
+  - Frontend: `client/src/pages/founder/company-people.tsx` (route: `/founder/company-people`)
+  - API: GET/POST `/api/company-people`, PUT/DELETE `/api/company-people/:id`, POST `/api/company-people/accept-invite`, POST `/api/company-people/resend-invite/:id`, GET `/api/company-people/my-invitations`
+  - Email invitations sent via Resend with unique invite tokens
+  - Roles: director, shareholder, director_shareholder, secretary
+  - Share allocation tracking: shares count, percentage, share class (ordinary/preference)
+- **Two-Factor Authentication (2FA):** SMS-based OTP verification via Africa's Talking API with backup codes.
+  - Service: `server/services/twoFactorService.ts` — OTP generation, verification, rate limiting (30s cooldown), max 5 attempts
+  - Setup flow: Enter phone → receive OTP → verify → receive 8 backup codes
+  - Login integration: When 2FA enabled, login returns `requiresTwoFactor: true` + `userId`, then separate verification step creates session
+  - Frontend: Settings page 2FA section (`client/src/pages/settings.tsx`), Login 2FA challenge (`client/src/pages/auth/login.tsx`)
+  - API: GET `/api/settings/two-factor`, POST `/api/settings/two-factor/setup`, POST `/api/settings/two-factor/confirm`, POST `/api/settings/two-factor/disable`, POST `/api/auth/two-factor/send`, POST `/api/auth/two-factor/verify`
+  - Schema: `users` table fields: `two_factor_enabled`, `two_factor_method`, `two_factor_phone`, `two_factor_secret`, `two_factor_backup_codes`, `last_two_factor_at`
+  - Secrets: `AT_API_KEY`, `AT_USERNAME` (Africa's Talking credentials — falls back to console logging when not configured)
+- **Sensitive Data Access Logging:** All access to NIN, BVN, and personal documents is logged in `sensitive_data_access_logs` table with accessor, target, data type, action, IP address, and user agent. Integrated into profile read, update, and document view endpoints.
+- **User Settings Page:** Shared `/settings` page accessible to all roles (founder, lawyer, admin) with four sections:
   - Profile: Edit first/last name, email displayed read-only (`client/src/pages/settings.tsx`)
   - Password: Change password with current password verification, password strength requirements enforced
+  - Two-Factor Authentication: Enable/disable SMS 2FA with backup codes
   - Notification Preferences: Role-adaptive toggles (compliance reminders, service request updates, order updates, incorporation updates, marketing emails). Stored in `notification_preferences` table. Founders see all 5 toggles; lawyers/admins see service request updates and marketing only.
   - API: GET/PUT `/api/settings/profile`, POST `/api/settings/change-password`, GET/PUT `/api/settings/notifications`
 - **Security Hardening Suite:** Multi-layered security protections including:
@@ -63,4 +85,6 @@ Key architectural patterns include:
 - **OpenAI GPT-4o:** Used for AI-powered CAC activity suggestions.
 - **Paystack:** Sole payment gateway for all transactions (NGN). International cards accepted — customer's bank handles currency conversion.
 - **Resend:** Email service for authentication and notifications.
+- **Africa's Talking:** SMS OTP provider for 2FA. Falls back to console logging when API key not configured. Secrets: `AT_API_KEY`, `AT_USERNAME`.
 - **Replit Auth:** For user authentication services.
+- **Replit Object Storage:** For document uploads (passport photos, signatures, ID documents).

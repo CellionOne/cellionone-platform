@@ -51,10 +51,19 @@ Key architectural patterns include:
 - **Director/Shareholder Management:** Founders can invite directors, shareholders, and company secretaries via email. Each invitee creates their own account, completes their profile, and undergoes individual verification.
   - Schema: `company_people` table with invitation workflow (pending → accepted → verified)
   - Frontend: `client/src/pages/founder/company-people.tsx` (route: `/founder/company-people`)
-  - API: GET/POST `/api/company-people`, PUT/DELETE `/api/company-people/:id`, POST `/api/company-people/accept-invite`, POST `/api/company-people/resend-invite/:id`, GET `/api/company-people/my-invitations`
-  - Email invitations sent via Resend with unique invite tokens
+  - API: GET/POST `/api/company-people`, PUT/DELETE `/api/company-people/:id`, POST `/api/company-people/accept-invite`, POST `/api/company-people/resend-invite/:id`, GET `/api/company-people/my-invitations`, GET `/api/company-people/readiness`
+  - Email invitations sent via Resend with unique invite tokens. Links to `/invite/:token` page.
   - Roles: director, shareholder, director_shareholder, secretary
   - Share allocation tracking: shares count, percentage, share class (ordinary/preference)
+  - Invite acceptance flow: `/invite/:token` page shows invite details, links to register or login, auto-accepts for logged-in users (`client/src/pages/invite-accept.tsx`)
+  - Registration page detects `?invite=TOKEN` param, shows invite context and pre-fills email
+  - Login page detects `?invite=TOKEN` param, redirects to invite acceptance page after login
+  - Readiness API: `GET /api/company-people/readiness` returns profile completion %, document status, NIN/BVN status for founder + all company people
+  - Company people page shows per-person profile checklist (passport, signature, ID, NIN, BVN) with progress bars
+  - Team readiness summary card shows overall progress (X of Y ready)
+  - Checkout readiness gate: blocks payment if any team member's profile is incomplete, shows specific names and completion %
+  - Invitation banner on founder dashboard (`client/src/components/invitation-banner.tsx`): shows accepted invitations and profile completion CTA for invited users
+  - Email notifications: founder receives email when a director/shareholder completes their profile
 - **Two-Factor Authentication (2FA):** SMS-based OTP verification via Africa's Talking API with backup codes.
   - Service: `server/services/twoFactorService.ts` — OTP generation, verification, rate limiting (30s cooldown), max 5 attempts
   - Setup flow: Enter phone → receive OTP → verify → receive 8 backup codes

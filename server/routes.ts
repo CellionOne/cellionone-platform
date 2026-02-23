@@ -298,6 +298,32 @@ export async function registerRoutes(
     }
   });
   
+  app.get("/api/invites/:token", async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      if (!token) return res.status(400).json({ message: "Token is required" });
+
+      const person = await storage.getCompanyPersonByInviteToken(token);
+      if (!person) {
+        return res.status(404).json({ message: "Invalid or expired invitation" });
+      }
+
+      const founder = await storage.getUser(person.founderId);
+
+      res.json({
+        id: person.id,
+        role: person.role,
+        inviteEmail: person.inviteEmail,
+        inviteStatus: person.inviteStatus,
+        founderName: founder ? `${founder.firstName || ''} ${founder.lastName || ''}`.trim() : 'A founder',
+        title: person.title,
+      });
+    } catch (error) {
+      console.error("Error looking up invite:", error);
+      res.status(500).json({ message: "Failed to look up invitation" });
+    }
+  });
+
   // Register a new user with email/password
   app.post("/api/auth/register", async (req: any, res) => {
     try {
@@ -1046,6 +1072,69 @@ export async function registerRoutes(
         ipAddress: req.ip,
       });
 
+      if (profileData.isProfileComplete) {
+        const wasComplete = existing?.isProfileComplete ?? false;
+        if (!wasComplete) {
+          const invitations = await storage.getCompanyPeopleByPersonUserId(userId);
+          if (invitations.length > 0) {
+            const currentUser = await storage.getUser(userId);
+            const personName = currentUser
+              ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email
+              : 'A team member';
+
+            for (const invitation of invitations) {
+              try {
+                const founder = await storage.getUser(invitation.founderId);
+                if (founder?.email) {
+                  const { Resend } = await import("resend");
+                  const resend = new Resend(process.env.RESEND_API_KEY);
+                  const roleLabel = invitation.role.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+                  const appUrl = `${req.protocol}://${req.get("host")}`;
+                  await resend.emails.send({
+                    from: "Cellion One <onboarding@resend.dev>",
+                    to: founder.email,
+                    subject: `${personName} has completed their profile`,
+                    html: `
+                      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2>Profile Completed</h2>
+                        <p><strong>${personName}</strong> (${roleLabel}) has completed their personal profile on Cellion One.</p>
+                        <p>You can now review their readiness on your Directors & Shareholders page.</p>
+                        <p><a href="${appUrl}/founder/company-people" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Team Readiness</a></p>
+                        <hr style="margin: 24px 0;" />
+                        <p style="color: #666; font-size: 12px;">This notification was sent from Cellion One.</p>
+                      </div>
+                    `,
+                  });
+                }
+              } catch (emailErr) {
+                console.error(`[Notify] Failed to notify founder ${invitation.founderId}:`, emailErr);
+              }
+            }
+          }
+        }
+      }
+
+      const smileIdService = await import('./services/smileIdService');
+      if (smileIdService.isSmileIdConfigured()) {
+        const crypto = await import("crypto");
+        if (bvn && typeof bvn === 'string' && bvn.length === 11) {
+          const jobId = `bvn_auto_${crypto.randomBytes(8).toString('hex')}`;
+          smileIdService.verifyBvn(bvn, userId, jobId).then(result => {
+            console.log(`[SmileID] Auto BVN verification for ${userId}: ${result.success ? 'verified' : result.resultCode}`);
+          }).catch(err => {
+            console.error(`[SmileID] Auto BVN verification failed for ${userId}:`, err.message);
+          });
+        }
+        if (nin && typeof nin === 'string' && nin.length === 11) {
+          const jobId = `nin_auto_${crypto.randomBytes(8).toString('hex')}`;
+          smileIdService.verifyNin(nin, userId, jobId).then(result => {
+            console.log(`[SmileID] Auto NIN verification for ${userId}: ${result.success ? 'verified' : result.resultCode}`);
+          }).catch(err => {
+            console.error(`[SmileID] Auto NIN verification failed for ${userId}:`, err.message);
+          });
+        }
+      }
+
       res.json({ message: "Profile updated successfully", profileCompletion: profileData.profileCompletion });
     } catch (error) {
       console.error("Error updating personal profile:", error);
@@ -1254,6 +1343,101 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/company-people/readiness", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const people = await storage.getCompanyPeopleByFounder(userId);
+
+      const readiness = await Promise.all(
+        people.map(async (person) => {
+          let profileCompletion = 0;
+          let isProfileComplete = false;
+          let hasPassportPhoto = false;
+          let hasSignature = false;
+          let hasIdDocument = false;
+          let hasNin = false;
+          let hasBvn = false;
+          let firstName: string | null = null;
+          let lastName: string | null = null;
+
+          if (person.personUserId) {
+            const profile = await storage.getFounderProfile(person.personUserId);
+            const user = await storage.getUser(person.personUserId);
+            if (profile) {
+              profileCompletion = profile.profileCompletion ?? 0;
+              isProfileComplete = profile.isProfileComplete ?? false;
+              hasPassportPhoto = !!profile.passportPhotoPath;
+              hasSignature = !!profile.signaturePath;
+              hasIdDocument = !!profile.idDocumentPath;
+              hasNin = !!profile.ninEncrypted;
+              hasBvn = !!profile.bvnEncrypted;
+            }
+            if (user) {
+              firstName = user.firstName;
+              lastName = user.lastName;
+            }
+          }
+
+          return {
+            id: person.id,
+            inviteEmail: person.inviteEmail,
+            role: person.role,
+            inviteStatus: person.inviteStatus,
+            isVerified: person.isVerified,
+            personUserId: person.personUserId,
+            firstName,
+            lastName,
+            profileCompletion,
+            isProfileComplete,
+            hasPassportPhoto,
+            hasSignature,
+            hasIdDocument,
+            hasNin,
+            hasBvn,
+          };
+        })
+      );
+
+      const founderProfile = await storage.getFounderProfile(userId);
+      const founderUser = await storage.getUser(userId);
+
+      const founderReadiness = {
+        id: "founder",
+        inviteEmail: founderUser?.email || null,
+        role: "founder",
+        inviteStatus: "accepted",
+        isVerified: founderUser?.identityVerified ?? false,
+        personUserId: userId,
+        firstName: founderUser?.firstName || null,
+        lastName: founderUser?.lastName || null,
+        profileCompletion: founderProfile?.profileCompletion ?? 0,
+        isProfileComplete: founderProfile?.isProfileComplete ?? false,
+        hasPassportPhoto: !!founderProfile?.passportPhotoPath,
+        hasSignature: !!founderProfile?.signaturePath,
+        hasIdDocument: !!founderProfile?.idDocumentPath,
+        hasNin: !!founderProfile?.ninEncrypted,
+        hasBvn: !!founderProfile?.bvnEncrypted,
+      };
+
+      const allPeople = [founderReadiness, ...readiness];
+      const totalPeople = allPeople.length;
+      const readyCount = allPeople.filter(p => p.isProfileComplete).length;
+      const allReady = readyCount === totalPeople;
+
+      res.json({
+        people: allPeople,
+        summary: {
+          totalPeople,
+          readyCount,
+          allReady,
+        },
+      });
+    } catch (error) {
+      console.error("Error getting readiness data:", error);
+      res.status(500).json({ message: "Failed to get readiness data" });
+    }
+  });
+
   app.get("/api/company-people/my-invitations", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
@@ -1316,8 +1500,8 @@ export async function registerRoutes(
               <h2>Company Director/Shareholder Invitation</h2>
               <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
               <p>To accept this invitation, please create an account or sign in using this link:</p>
-              <p><a href="${appUrl}/register?invite=${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
-              <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/register?invite=${inviteToken}</p>
+              <p><a href="${appUrl}/invite/${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
+              <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/invite/${inviteToken}</p>
               <hr style="margin: 24px 0;" />
               <p style="color: #666; font-size: 12px;">This invitation was sent from Cellion One. If you didn't expect this, you can ignore this email.</p>
             </div>
@@ -1417,6 +1601,13 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invitation already accepted" });
       }
 
+      const currentUser = await storage.getUser(userId);
+      if (!currentUser || currentUser.email?.toLowerCase() !== person.inviteEmail?.toLowerCase()) {
+        return res.status(403).json({
+          message: "You can only accept invitations sent to your email address."
+        });
+      }
+
       await storage.updateCompanyPerson(person.id, {
         personUserId: userId,
         inviteStatus: 'accepted',
@@ -1473,8 +1664,8 @@ export async function registerRoutes(
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
               <h2>Reminder: Company Director/Shareholder Invitation</h2>
               <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
-              <p><a href="${appUrl}/register?invite=${person.inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
-              <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/register?invite=${person.inviteToken}</p>
+              <p><a href="${appUrl}/invite/${person.inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
+              <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/invite/${person.inviteToken}</p>
             </div>
           `,
         });
@@ -1728,6 +1919,24 @@ export async function registerRoutes(
       const user = await storage.getUser(userId);
       if (!user?.email) {
         return res.status(400).json({ message: "User email is required for Paystack payments" });
+      }
+
+      const founderProfile = await storage.getFounderProfile(userId);
+      if (!founderProfile?.isProfileComplete) {
+        return res.status(400).json({ message: "Your personal profile must be complete before checkout. Please complete your profile first." });
+      }
+
+      const companyPeopleAll = await storage.getCompanyPeopleByFounder(userId);
+      const acceptedPeople = companyPeopleAll.filter(p => p.personUserId && p.inviteStatus === 'accepted');
+      for (const person of acceptedPeople) {
+        const personProfile = await storage.getFounderProfile(person.personUserId!);
+        if (!personProfile?.isProfileComplete) {
+          const personUser = await storage.getUser(person.personUserId!);
+          const name = personUser ? `${personUser.firstName || ''} ${personUser.lastName || ''}`.trim() || personUser.email : person.inviteEmail;
+          return res.status(400).json({
+            message: `${name}'s profile is incomplete (${personProfile?.profileCompletion || 0}%). All team members must complete their profiles before checkout.`
+          });
+        }
       }
 
       let finalItems: { sku: string; quantity?: number }[] = items.map((i: { sku: string }) => ({ sku: i.sku }));

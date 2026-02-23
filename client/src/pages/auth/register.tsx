@@ -1,18 +1,19 @@
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Loader2, CheckCircle, Eye, EyeOff } from "lucide-react";
+import { Loader2, CheckCircle, Eye, EyeOff, Users, UserPlus } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const registerSchema = z.object({
   firstName: z.string().min(1, "First name is required"),
@@ -27,12 +28,41 @@ const registerSchema = z.object({
 
 type RegisterForm = z.infer<typeof registerSchema>;
 
+interface InviteInfo {
+  id: number;
+  role: string;
+  inviteEmail: string;
+  inviteStatus: string;
+  founderName: string;
+  title?: string;
+}
+
+function formatRole(role: string): string {
+  return role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
 export default function RegisterPage() {
   const [, setLocation] = useLocation();
+  const searchString = useSearch();
   const { toast } = useToast();
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const params = new URLSearchParams(searchString);
+  const inviteToken = params.get("invite");
+
+  const { data: inviteInfo } = useQuery<InviteInfo>({
+    queryKey: ["/api/invites", inviteToken],
+    queryFn: async () => {
+      const res = await fetch(`/api/invites/${inviteToken}`);
+      if (!res.ok) throw new Error("Invalid invitation");
+      return res.json();
+    },
+    enabled: !!inviteToken,
+  });
+
+  const isInvite = !!inviteToken && !!inviteInfo;
 
   const form = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
@@ -44,6 +74,12 @@ export default function RegisterPage() {
       confirmPassword: "",
     },
   });
+
+  useEffect(() => {
+    if (inviteInfo?.inviteEmail && !form.getValues("email")) {
+      form.setValue("email", inviteInfo.inviteEmail);
+    }
+  }, [inviteInfo, form]);
 
   const registerMutation = useMutation({
     mutationFn: async (data: RegisterForm) => {
@@ -98,6 +134,17 @@ export default function RegisterPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {isInvite && (
+                <Alert>
+                  <Users className="h-4 w-4" />
+                  <AlertDescription>
+                    After verifying your email, log in and accept your invitation to join as {formatRole(inviteInfo.role)}.
+                    {inviteToken && (
+                      <span> Your invite will be linked automatically when you log in with this email.</span>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
               <p className="text-sm text-muted-foreground">
                 Didn't receive the email? Check your spam folder or request a new verification email.
               </p>
@@ -127,12 +174,29 @@ export default function RegisterPage() {
       <div className="flex-1 flex items-center justify-center px-4 pt-20 pb-8">
         <Card className="w-full max-w-md">
           <CardHeader className="space-y-1 text-center">
-            <CardTitle className="text-2xl font-bold">Create an account</CardTitle>
+            <CardTitle className="text-2xl font-bold">
+              {isInvite ? "Accept Invitation" : "Create an account"}
+            </CardTitle>
             <CardDescription>
-              Start your company incorporation journey
+              {isInvite ? (
+                <>
+                  <strong>{inviteInfo.founderName}</strong> has invited you to join as{" "}
+                  <strong>{formatRole(inviteInfo.role)}</strong>
+                </>
+              ) : (
+                "Start your company incorporation journey"
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {isInvite && (
+              <Alert className="mb-4">
+                <UserPlus className="h-4 w-4" />
+                <AlertDescription>
+                  Create your account to accept this invitation. After registering, you'll need to complete your personal profile for verification.
+                </AlertDescription>
+              </Alert>
+            )}
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -182,9 +246,15 @@ export default function RegisterPage() {
                           type="email"
                           placeholder="you@example.com"
                           data-testid="input-email"
+                          readOnly={isInvite}
                           {...field}
                         />
                       </FormControl>
+                      {isInvite && (
+                        <p className="text-xs text-muted-foreground">
+                          This email must match the invitation email.
+                        </p>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -281,7 +351,7 @@ export default function RegisterPage() {
                   {registerMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin mr-2" />
                   ) : null}
-                  Create Account
+                  {isInvite ? "Create Account & Accept Invitation" : "Create Account"}
                 </Button>
               </form>
             </Form>
@@ -289,7 +359,7 @@ export default function RegisterPage() {
           <CardFooter className="flex flex-col gap-4">
             <div className="text-sm text-center text-muted-foreground">
               Already have an account?{" "}
-              <Link href="/login">
+              <Link href={inviteToken ? `/login?invite=${inviteToken}` : "/login"}>
                 <a className="text-primary hover:underline font-medium" data-testid="link-login">
                   Sign in
                 </a>

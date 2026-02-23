@@ -52,6 +52,7 @@ import VerifyEmailPage from "@/pages/auth/verify-email";
 import SettingsPage from "@/pages/settings";
 import PersonalProfilePage from "@/pages/personal-profile";
 import CompanyPeoplePage from "@/pages/founder/company-people";
+import InviteAcceptPage from "@/pages/invite-accept";
 import PaymentCheckoutPage from "@/pages/payment/checkout";
 import PaymentSuccessPage from "@/pages/payment/success";
 import PaymentCancelPage from "@/pages/payment/cancel";
@@ -261,6 +262,7 @@ function Router() {
       
       <Route path="/login" component={LoginPage} />
       <Route path="/register" component={RegisterPage} />
+      <Route path="/invite/:token" component={InviteAcceptPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />

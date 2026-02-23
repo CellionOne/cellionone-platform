@@ -45,6 +45,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import {
   Users,
   UserPlus,
@@ -58,6 +60,11 @@ import {
   Trash2,
   ShieldCheck,
   Percent,
+  FileCheck,
+  Camera,
+  PenTool,
+  CreditCard,
+  Fingerprint,
 } from "lucide-react";
 
 interface CompanyPerson {
@@ -109,6 +116,7 @@ export default function CompanyPeoplePage() {
           <InviteDialog />
         </div>
 
+        <ReadinessSummary />
         <PeopleList />
       </div>
     </DashboardLayout>
@@ -300,12 +308,123 @@ function InviteDialog() {
   );
 }
 
+interface ReadinessData {
+  people: {
+    id: number | string;
+    inviteEmail: string | null;
+    role: string;
+    inviteStatus: string;
+    isVerified: boolean;
+    personUserId: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    profileCompletion: number;
+    isProfileComplete: boolean;
+    hasPassportPhoto: boolean;
+    hasSignature: boolean;
+    hasIdDocument: boolean;
+    hasNin: boolean;
+    hasBvn: boolean;
+  }[];
+  summary: {
+    totalPeople: number;
+    readyCount: number;
+    allReady: boolean;
+  };
+}
+
+function ReadinessSummary() {
+  const { data: readiness, isLoading } = useQuery<ReadinessData>({
+    queryKey: ["/api/company-people/readiness"],
+  });
+
+  if (isLoading || !readiness) return null;
+
+  const { summary } = readiness;
+
+  return (
+    <Card className={summary.allReady ? "border-green-300 dark:border-green-800" : "border-amber-300 dark:border-amber-800"} data-testid="card-readiness-summary">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-sm">Team Readiness</h3>
+          <Badge variant={summary.allReady ? "default" : "secondary"}>
+            {summary.readyCount} / {summary.totalPeople} ready
+          </Badge>
+        </div>
+        <Progress
+          value={(summary.readyCount / summary.totalPeople) * 100}
+          className="h-2"
+        />
+        {summary.allReady ? (
+          <p className="text-xs text-green-600 dark:text-green-400 mt-2">
+            All team members have completed their profiles. You can proceed to checkout.
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground mt-2">
+            {summary.totalPeople - summary.readyCount} team member(s) still need to complete their profiles before you can proceed to checkout.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ProfileChecklist({ person }: { person: ReadinessData["people"][0] }) {
+  if (person.inviteStatus !== "accepted" && person.role !== "founder") return null;
+
+  const items = [
+    { label: "Passport Photo", done: person.hasPassportPhoto, icon: Camera },
+    { label: "Signature", done: person.hasSignature, icon: PenTool },
+    { label: "ID Document", done: person.hasIdDocument, icon: FileCheck },
+    { label: "NIN", done: person.hasNin, icon: Fingerprint },
+    { label: "BVN", done: person.hasBvn, icon: CreditCard },
+  ];
+
+  return (
+    <div className="mt-3 pt-3 border-t space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Profile completion</span>
+        <span className="text-xs font-medium">{person.profileCompletion}%</span>
+      </div>
+      <Progress value={person.profileCompletion} className="h-1.5" />
+      <div className="flex flex-wrap gap-2 mt-1">
+        {items.map(({ label, done, icon: Icon }) => (
+          <div
+            key={label}
+            className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
+              done
+                ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400"
+                : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {done ? <CheckCircle2 className="h-3 w-3" /> : <Icon className="h-3 w-3" />}
+            {label}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PeopleList() {
   const { toast } = useToast();
 
   const { data: people, isLoading } = useQuery<CompanyPerson[]>({
     queryKey: ["/api/company-people"],
   });
+
+  const { data: readiness } = useQuery<ReadinessData>({
+    queryKey: ["/api/company-people/readiness"],
+  });
+
+  const readinessMap = new Map<number, ReadinessData["people"][0]>();
+  if (readiness) {
+    for (const person of readiness.people) {
+      if (typeof person.id === "number") {
+        readinessMap.set(person.id, person);
+      }
+    }
+  }
 
   const resendMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -400,6 +519,9 @@ function PeopleList() {
                   )}
                   {person.shareClass && <span>{person.shareClass} shares</span>}
                 </div>
+                {readinessMap.has(person.id) && (
+                  <ProfileChecklist person={readinessMap.get(person.id)!} />
+                )}
               </div>
               <div className="flex items-center gap-1">
                 {person.inviteStatus === "pending" && (

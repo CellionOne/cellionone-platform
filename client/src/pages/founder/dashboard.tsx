@@ -26,6 +26,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { CompanyApplication, IdentityVerification, CompanyProfile, PostIncorporationTask, ComplianceDeadline } from "@shared/schema";
+import { InvitationBanner } from "@/components/invitation-banner";
 
 interface DashboardData {
   applications: CompanyApplication[];
@@ -101,6 +102,8 @@ export default function FounderDashboard() {
             </Link>
           </Button>
         </div>
+
+        <InvitationBanner />
 
         {isLoading ? (
           <div className="flex justify-center py-12">

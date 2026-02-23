@@ -1,10 +1,12 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
@@ -89,6 +91,30 @@ export default function CheckoutPage() {
   const { data: verificationInfo } = useQuery<VerificationInfo>({
     queryKey: ["/api/checkout/verification-info"],
   });
+
+  interface ReadinessSummary {
+    people: {
+      id: number | string;
+      inviteEmail: string | null;
+      role: string;
+      firstName: string | null;
+      lastName: string | null;
+      profileCompletion: number;
+      isProfileComplete: boolean;
+    }[];
+    summary: {
+      totalPeople: number;
+      readyCount: number;
+      allReady: boolean;
+    };
+  }
+
+  const { data: readiness } = useQuery<ReadinessSummary>({
+    queryKey: ["/api/company-people/readiness"],
+  });
+
+  const profilesReady = readiness?.summary?.allReady ?? true;
+  const incompletePeople = readiness?.people?.filter(p => !p.isProfileComplete) ?? [];
 
   const verifyProduct = useMemo(
     () => products?.find(p => p.sku === "VERIFY") || null,
@@ -600,10 +626,35 @@ export default function CheckoutPage() {
               )}
             </CardContent>
             <CardFooter className="flex flex-col gap-3">
+              {!profilesReady && selectedProducts.length > 0 && (
+                <Alert variant="destructive" className="w-full" data-testid="alert-profiles-incomplete">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Profiles Incomplete</AlertTitle>
+                  <AlertDescription className="space-y-2">
+                    <p>The following people need to complete their profiles before you can proceed:</p>
+                    <ul className="text-xs space-y-1 list-disc ml-4">
+                      {incompletePeople.map((p) => (
+                        <li key={String(p.id)}>
+                          {p.firstName && p.lastName
+                            ? `${p.firstName} ${p.lastName}`
+                            : p.inviteEmail || "Unknown"}{" "}
+                          ({p.role === "founder" ? "You" : p.role.replace(/_/g, " ")}) — {p.profileCompletion}% complete
+                        </li>
+                      ))}
+                    </ul>
+                    <Link href="/founder/company-people">
+                      <Button variant="outline" size="sm" className="mt-2" data-testid="button-manage-people-from-checkout">
+                        <Users className="h-3 w-3 mr-1" />
+                        Manage Team
+                      </Button>
+                    </Link>
+                  </AlertDescription>
+                </Alert>
+              )}
               <Button
                 className="w-full"
                 size="lg"
-                disabled={selectedProducts.length === 0 || checkoutMutation.isPending}
+                disabled={selectedProducts.length === 0 || checkoutMutation.isPending || !profilesReady}
                 onClick={() => checkoutMutation.mutate()}
                 data-testid="button-checkout"
               >
@@ -611,6 +662,11 @@ export default function CheckoutPage() {
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     Processing...
+                  </>
+                ) : !profilesReady ? (
+                  <>
+                    <AlertTriangle className="h-4 w-4 mr-2" />
+                    Complete All Profiles First
                   </>
                 ) : (
                   <>

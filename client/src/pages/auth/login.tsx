@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -28,9 +28,13 @@ type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
+  const searchString = useSearch();
   const { toast } = useToast();
   const [showResendVerification, setShowResendVerification] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  const loginParams = new URLSearchParams(searchString);
+  const inviteToken = loginParams.get("invite");
   const [twoFactorState, setTwoFactorState] = useState<{
     userId: string;
     message: string;
@@ -59,7 +63,11 @@ export default function LoginPage() {
       }
       toast({ title: "Welcome back!", description: "You have been logged in successfully." });
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      setLocation("/");
+      if (inviteToken) {
+        setLocation(`/invite/${inviteToken}`);
+      } else {
+        setLocation("/");
+      }
     },
     onError: (error: any) => {
       const message = error?.message || "Login failed. Please check your credentials.";
@@ -79,7 +87,11 @@ export default function LoginPage() {
       if (data.success) {
         toast({ title: "Welcome back!", description: "You have been logged in successfully." });
         queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-        setLocation("/");
+        if (inviteToken) {
+          setLocation(`/invite/${inviteToken}`);
+        } else {
+          setLocation("/");
+        }
       } else {
         toast({ title: "Verification failed", description: data.message, variant: "destructive" });
       }
@@ -364,7 +376,7 @@ export default function LoginPage() {
           <CardFooter className="flex flex-col gap-4">
             <div className="text-sm text-center text-muted-foreground">
               Don't have an account?{" "}
-              <Link href="/register">
+              <Link href={inviteToken ? `/register?invite=${inviteToken}` : "/register"}>
                 <a className="text-primary hover:underline font-medium" data-testid="link-register">
                   Create one
                 </a>

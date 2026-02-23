@@ -1170,6 +1170,77 @@ export async function registerRoutes(
     }
   });
 
+  // ============== SMILE ID VERIFICATION ROUTES ==============
+
+  app.get("/api/verification/smile-id/status", isAuthenticated, async (req: any, res) => {
+    try {
+      const smileIdService = await import('./services/smileIdService');
+      const status = await smileIdService.getVerificationStatus();
+      res.json(status);
+    } catch (error) {
+      console.error("Error checking Smile ID status:", error);
+      res.status(500).json({ message: "Failed to check verification service status" });
+    }
+  });
+
+  app.post("/api/verification/smile-id/verify-bvn", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { bvn } = req.body;
+
+      if (!bvn || typeof bvn !== 'string' || bvn.length !== 11) {
+        return res.status(400).json({ message: "Valid 11-digit BVN is required" });
+      }
+
+      const smileIdService = await import('./services/smileIdService');
+      const jobId = `bvn_${userId}_${Date.now()}`;
+      const result = await smileIdService.verifyBvn(bvn, userId, jobId);
+
+      await storage.logSensitiveDataAccess({
+        accessorUserId: userId,
+        targetUserId: userId,
+        dataType: 'bvn',
+        action: 'verify_smile_id',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error verifying BVN:", error);
+      res.status(500).json({ message: "BVN verification failed" });
+    }
+  });
+
+  app.post("/api/verification/smile-id/verify-nin", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { nin } = req.body;
+
+      if (!nin || typeof nin !== 'string' || nin.length !== 11) {
+        return res.status(400).json({ message: "Valid 11-digit NIN is required" });
+      }
+
+      const smileIdService = await import('./services/smileIdService');
+      const jobId = `nin_${userId}_${Date.now()}`;
+      const result = await smileIdService.verifyNin(nin, userId, jobId);
+
+      await storage.logSensitiveDataAccess({
+        accessorUserId: userId,
+        targetUserId: userId,
+        dataType: 'nin',
+        action: 'verify_smile_id',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error verifying NIN:", error);
+      res.status(500).json({ message: "NIN verification failed" });
+    }
+  });
+
   // ============== COMPANY PEOPLE (DIRECTORS/SHAREHOLDERS) ROUTES ==============
 
   app.get("/api/company-people", isAuthenticated, async (req: any, res) => {
@@ -1604,6 +1675,38 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/checkout/verification-info", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      const companyPeople = await storage.getCompanyPeopleByFounder(userId);
+
+      const founderVerified = !!user?.isIdentityVerified;
+      const people = companyPeople
+        .filter(p => p.personUserId)
+        .map(p => ({
+          id: p.id,
+          email: p.inviteEmail,
+          role: p.role,
+          isVerified: !!p.isVerified,
+          inviteStatus: p.inviteStatus,
+        }));
+
+      const unverifiedCount = (founderVerified ? 0 : 1) + people.filter(p => !p.isVerified).length;
+
+      res.json({
+        founderVerified,
+        people,
+        unverifiedCount,
+        verificationFeePerPerson: 500000,
+        totalVerificationFee: unverifiedCount * 500000,
+      });
+    } catch (error) {
+      console.error("Error fetching verification info:", error);
+      res.status(500).json({ message: "Failed to fetch verification info" });
+    }
+  });
+
   app.post("/api/checkout/split", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
@@ -1627,11 +1730,20 @@ export async function registerRoutes(
         return res.status(400).json({ message: "User email is required for Paystack payments" });
       }
 
-      let finalItems = items.map((i: { sku: string }) => ({ sku: i.sku }));
-      if (!user.isIdentityVerified) {
-        const hasVerify = finalItems.some((i: { sku: string }) => i.sku === "VERIFY");
-        if (!hasVerify) {
-          finalItems.push({ sku: "VERIFY" });
+      let finalItems: { sku: string; quantity?: number }[] = items.map((i: { sku: string }) => ({ sku: i.sku }));
+
+      const hasVerify = finalItems.some((i) => i.sku === "VERIFY");
+      if (!hasVerify) {
+        let verifyCount = 0;
+        if (!user.isIdentityVerified) {
+          verifyCount = 1;
+        }
+        const companyPeople = await storage.getCompanyPeopleByFounder(userId);
+        const unverifiedPeople = companyPeople.filter(p => !p.isVerified && p.personUserId);
+        verifyCount += unverifiedPeople.length;
+
+        if (verifyCount > 0) {
+          finalItems.push({ sku: "VERIFY", quantity: verifyCount });
         }
       }
 

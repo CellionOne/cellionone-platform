@@ -86,5 +86,6 @@ Key architectural patterns include:
 - **Paystack:** Sole payment gateway for all transactions (NGN). International cards accepted — customer's bank handles currency conversion.
 - **Resend:** Email service for authentication and notifications.
 - **Africa's Talking:** SMS OTP provider for 2FA. Falls back to console logging when API key not configured. Secrets: `AT_API_KEY`, `AT_USERNAME`.
+- **Smile ID:** Identity verification for Nigerian BVN/NIN validation. Uses Enhanced KYC (job_type 5) via `smile-identity-core` npm package. Falls back gracefully when API keys not configured. Secrets: `SMILE_ID_PARTNER_ID`, `SMILE_ID_API_KEY`, `SMILE_ID_ENVIRONMENT` (sandbox/production).
 - **Replit Auth:** For user authentication services.
 - **Replit Object Storage:** For document uploads (passport photos, signatures, ID documents).

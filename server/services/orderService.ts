@@ -6,7 +6,7 @@ import * as catalogService from "./productCatalogService";
 export interface CreateOrderInput {
   founderId: string;
   applicationId?: number;
-  items: { sku: string }[];
+  items: { sku: string; quantity?: number }[];
 }
 
 export async function createOrder(input: CreateOrderInput) {
@@ -17,6 +17,7 @@ export async function createOrder(input: CreateOrderInput) {
   const resolvedItems: {
     product: typeof productCatalog.$inferSelect;
     amounts: { priceNgn: number; cellionCutNgn: number; lawyerNetNgn: number };
+    quantity: number;
   }[] = [];
 
   for (const item of input.items) {
@@ -27,13 +28,14 @@ export async function createOrder(input: CreateOrderInput) {
     if (!product.isActive) {
       throw new Error(`Product is inactive: ${item.sku}`);
     }
+    const qty = item.quantity || 1;
     const amounts = catalogService.computeItemAmounts(product);
-    resolvedItems.push({ product, amounts });
+    resolvedItems.push({ product, amounts, quantity: qty });
   }
 
-  const totalAmount = resolvedItems.reduce((sum, i) => sum + i.amounts.priceNgn, 0);
-  const totalCellionCut = resolvedItems.reduce((sum, i) => sum + i.amounts.cellionCutNgn, 0);
-  const totalLawyerNet = resolvedItems.reduce((sum, i) => sum + i.amounts.lawyerNetNgn, 0);
+  const totalAmount = resolvedItems.reduce((sum, i) => sum + i.amounts.priceNgn * i.quantity, 0);
+  const totalCellionCut = resolvedItems.reduce((sum, i) => sum + i.amounts.cellionCutNgn * i.quantity, 0);
+  const totalLawyerNet = resolvedItems.reduce((sum, i) => sum + i.amounts.lawyerNetNgn * i.quantity, 0);
 
   const [order] = await db.insert(orders).values({
     founderId: input.founderId,
@@ -51,7 +53,7 @@ export async function createOrder(input: CreateOrderInput) {
       orderId: order.id,
       productId: ri.product.id,
       sku: ri.product.sku,
-      quantity: 1,
+      quantity: ri.quantity,
       unitPrice: ri.amounts.priceNgn,
       cellionCut: ri.amounts.cellionCutNgn,
       lawyerNet: ri.amounts.lawyerNetNgn,

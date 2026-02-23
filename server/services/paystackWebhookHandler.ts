@@ -1,6 +1,6 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users } from '@shared/schema';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
@@ -225,7 +225,29 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
           details: { orderId: order.id, method: 'payment', sku: 'VERIFY' },
         });
 
-        console.log(`[Paystack Webhook] User ${order.founderId} marked as identity verified`);
+        const founderPeople = await storage.getCompanyPeopleByFounder(order.founderId);
+        const unverifiedPeople = founderPeople.filter(p => !p.isVerified && p.personUserId);
+        for (const person of unverifiedPeople) {
+          await db.update(companyPeople)
+            .set({ isVerified: true, updatedAt: new Date() })
+            .where(eq(companyPeople.id, person.id));
+
+          if (person.personUserId) {
+            await db.update(users)
+              .set({ isIdentityVerified: true, identityVerifiedAt: new Date(), updatedAt: new Date() })
+              .where(eq(users.id, person.personUserId));
+          }
+
+          await storage.createAuditLog({
+            actorUserId: order.founderId,
+            action: 'company_person_verification_activated',
+            entityType: 'company_person',
+            entityId: String(person.id),
+            details: { orderId: order.id, personUserId: person.personUserId, role: person.role },
+          });
+        }
+
+        console.log(`[Paystack Webhook] User ${order.founderId} and ${unverifiedPeople.length} company people marked as verified`);
       } catch (err) {
         console.error(`[Paystack Webhook] Error marking user as verified:`, err);
       }

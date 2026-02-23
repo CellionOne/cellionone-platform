@@ -78,6 +78,18 @@ export default function CheckoutPage() {
     queryKey: ["/api/products"],
   });
 
+  interface VerificationInfo {
+    founderVerified: boolean;
+    people: { id: number; email: string; role: string; isVerified: boolean; inviteStatus: string }[];
+    unverifiedCount: number;
+    verificationFeePerPerson: number;
+    totalVerificationFee: number;
+  }
+
+  const { data: verificationInfo } = useQuery<VerificationInfo>({
+    queryKey: ["/api/checkout/verification-info"],
+  });
+
   const verifyProduct = useMemo(
     () => products?.find(p => p.sku === "VERIFY") || null,
     [products]
@@ -98,7 +110,8 @@ export default function CheckoutPage() {
     [products]
   );
 
-  const needsVerification = !isVerified && selectedSkus.length > 0;
+  const unverifiedCount = verificationInfo?.unverifiedCount || 0;
+  const needsVerification = unverifiedCount > 0 && selectedSkus.length > 0;
 
   const selectedProducts = useMemo(
     () => products?.filter(p => selectedSkus.includes(p.sku)) || [],
@@ -115,10 +128,10 @@ export default function CheckoutPage() {
   const totalKobo = useMemo(() => {
     let total = selectedProducts.reduce((sum, p) => sum + p.priceNgn, 0);
     if (needsVerification && verifyProduct && !selectedSkus.includes("VERIFY")) {
-      total += verifyProduct.priceNgn;
+      total += verifyProduct.priceNgn * unverifiedCount;
     }
     return total;
-  }, [selectedProducts, needsVerification, verifyProduct, selectedSkus]);
+  }, [selectedProducts, needsVerification, verifyProduct, selectedSkus, unverifiedCount]);
 
   const hasIncorporation = selectedSkus.some(s => s.startsWith("CAC_") || s === "NGO");
 
@@ -543,20 +556,38 @@ export default function CheckoutPage() {
                       <div className="flex items-center justify-between gap-2" data-testid="summary-item-VERIFY">
                         <div className="flex items-center gap-2 min-w-0">
                           <ShieldCheck className="h-4 w-4 text-primary flex-shrink-0" />
-                          <span className="text-sm truncate">{verifyProduct.name}</span>
+                          <span className="text-sm truncate">
+                            {verifyProduct.name} {unverifiedCount > 1 ? `× ${unverifiedCount}` : ""}
+                          </span>
                         </div>
-                        <span className="text-sm font-medium flex-shrink-0">{formatNgn(verifyProduct.priceNgn)}</span>
+                        <span className="text-sm font-medium flex-shrink-0">{formatNgn(verifyProduct.priceNgn * unverifiedCount)}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground pl-6">
-                        One-time fee. Protects the integrity of your registration and provides assurance to regulatory bodies and third parties.
-                      </p>
+                      <div className="text-xs text-muted-foreground pl-6 space-y-1">
+                        <p>
+                          {formatNgn(verifyProduct.priceNgn)} per person — covers identity verification for regulatory compliance.
+                        </p>
+                        {verificationInfo && (
+                          <div className="space-y-0.5">
+                            {!verificationInfo.founderVerified && (
+                              <p className="flex items-center gap-1">
+                                <span className="text-yellow-600 dark:text-yellow-400">•</span> You (founder)
+                              </p>
+                            )}
+                            {verificationInfo.people.filter(p => !p.isVerified).map(p => (
+                              <p key={p.id} className="flex items-center gap-1">
+                                <span className="text-yellow-600 dark:text-yellow-400">•</span> {p.email} ({p.role.replace("_", " ")})
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
 
-                  {isVerified && (
+                  {unverifiedCount === 0 && selectedSkus.length > 0 && (
                     <div className="flex items-center gap-2 text-xs text-primary" data-testid="text-already-verified">
                       <ShieldCheck className="h-3.5 w-3.5" />
-                      <span>Identity verified — no additional verification fee</span>
+                      <span>All identities verified — no additional verification fee</span>
                     </div>
                   )}
 

@@ -52,6 +52,8 @@ import VerifyEmailPage from "@/pages/auth/verify-email";
 import SettingsPage from "@/pages/settings";
 import PersonalProfilePage from "@/pages/personal-profile";
 import CompanyPeoplePage from "@/pages/founder/company-people";
+import FounderDataSharing from "@/pages/founder/data-sharing";
+import VerifyPage from "@/pages/verify";
 import InviteAcceptPage from "@/pages/invite-accept";
 import PaymentCheckoutPage from "@/pages/payment/checkout";
 import PaymentSuccessPage from "@/pages/payment/success";
@@ -178,6 +180,9 @@ function Router() {
       <Route path="/founder/company-people">
         <ProtectedRoute component={CompanyPeoplePage} roles={["founder"]} />
       </Route>
+      <Route path="/founder/data-sharing">
+        <ProtectedRoute component={FounderDataSharing} roles={["founder"]} />
+      </Route>
       <Route path="/founder/checkout">
         <ProtectedRoute component={FounderCheckout} />
       </Route>
@@ -266,6 +271,7 @@ function Router() {
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />
+      <Route path="/verify/:token" component={VerifyPage} />
       
       <Route path="/payment/checkout">
         <ProtectedRoute component={PaymentCheckoutPage} />

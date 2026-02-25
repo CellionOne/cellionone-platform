@@ -32,6 +32,7 @@ Key architectural decisions and features include:
 - **Sensitive Data Access Logging:** All access to sensitive data (NIN, BVN, personal documents) is logged with details of accessor, target, data type, action, IP, and user agent.
 - **User Settings Page:** A unified settings page for all roles, offering profile editing, password changes, 2FA management, and role-adaptive notification preferences.
 - **Security Hardening Suite:** Includes HTTP security headers (Helmet.js), API rate limiting, CORS with origin allowlisting, account lockout, session timeout, file upload validation, and strong password requirements.
+- **Consent-Based Data Sharing:** Founders can create time-limited, revocable consent tokens to share verified data (personal info, verification results, company details, documents, proof of address) with named partners (banks, insurers, government). Partners access data via token-authenticated API endpoints, download PDF verification certificates (Puppeteer-generated), or full ZIP data packages (archiver). All access is logged with IP, user agent, and data returned. Public verification landing page at `/verify/:token`. Tables: `data_sharing_consents`, `data_sharing_access_logs`.
 
 ## External Dependencies
 - **PostgreSQL:** Primary database, hosted via Neon.

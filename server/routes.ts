@@ -6,7 +6,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc } from "drizzle-orm";
 import * as services from "./services";
@@ -6081,6 +6081,602 @@ Important guidelines:
     } catch (error: any) {
       console.error("Error fetching service requests:", error);
       res.status(500).json({ message: error.message || "Failed to fetch service requests" });
+    }
+  });
+
+  // ============== DATA SHARING & PARTNER API ==============
+
+  app.post("/api/data-sharing/create-consent", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const founderId = getUserId(req);
+      const schema = z.object({
+        partnerName: z.string().min(1).max(255),
+        partnerType: z.enum(["bank", "insurance", "government", "other"]),
+        applicationId: z.number().optional(),
+        dataScope: z.object({
+          personal: z.boolean().default(true),
+          verification: z.boolean().default(true),
+          company: z.boolean().default(false),
+          documents: z.boolean().default(false),
+          proofOfAddress: z.boolean().default(false),
+        }),
+        expiresInDays: z.number().min(1).max(365).default(90),
+      });
+
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+
+      const { partnerName, partnerType, applicationId, dataScope, expiresInDays } = parsed.data;
+      const consentToken = crypto.randomBytes(48).toString("hex");
+      const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
+
+      const scopeLabels = [];
+      if (dataScope.personal) scopeLabels.push("personal information");
+      if (dataScope.verification) scopeLabels.push("identity verification results");
+      if (dataScope.company) scopeLabels.push("company details");
+      if (dataScope.documents) scopeLabels.push("uploaded documents");
+      if (dataScope.proofOfAddress) scopeLabels.push("proof of address");
+
+      const consentText = `I authorise Cellion One to share my ${scopeLabels.join(", ")} with ${partnerName} ` +
+        `for the purpose of ${partnerType === "bank" ? "corporate account opening" : partnerType === "insurance" ? "insurance application" : "verification"}. ` +
+        `This consent is valid until ${expiresAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} and can be revoked at any time.`;
+
+      const [consent] = await db.insert(dataSharingConsents).values({
+        founderId,
+        applicationId: applicationId || null,
+        partnerName,
+        partnerType,
+        consentToken,
+        consentText,
+        dataScope,
+        status: "active",
+        expiresAt,
+      }).returning();
+
+      await storage.createAuditLog({
+        actorUserId: founderId,
+        action: "data_sharing_consent_created",
+        entityType: "data_sharing_consent",
+        entityId: consent.id.toString(),
+        details: { partnerName, partnerType, dataScope, expiresInDays },
+        ipAddress: req.ip,
+      });
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const shareableLink = `${baseUrl}/verify/${consentToken}`;
+
+      res.json({
+        consent,
+        shareableLink,
+        message: "Consent created successfully",
+      });
+    } catch (error: any) {
+      console.error("Error creating data sharing consent:", error);
+      res.status(500).json({ message: error.message || "Failed to create consent" });
+    }
+  });
+
+  app.get("/api/data-sharing/consents", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const founderId = getUserId(req);
+      const consents = await db.select()
+        .from(dataSharingConsents)
+        .where(eq(dataSharingConsents.founderId, founderId))
+        .orderBy(desc(dataSharingConsents.createdAt));
+
+      const now = new Date();
+      const withStatus = consents.map(c => ({
+        ...c,
+        status: c.status === "active" && c.expiresAt < now ? "expired" : c.status,
+      }));
+
+      res.json({ consents: withStatus });
+    } catch (error: any) {
+      console.error("Error fetching consents:", error);
+      res.status(500).json({ message: "Failed to fetch consents" });
+    }
+  });
+
+  app.post("/api/data-sharing/consents/:id/revoke", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const founderId = getUserId(req);
+      const consentId = parseInt(req.params.id);
+
+      const [consent] = await db.select()
+        .from(dataSharingConsents)
+        .where(and(eq(dataSharingConsents.id, consentId), eq(dataSharingConsents.founderId, founderId)))
+        .limit(1);
+
+      if (!consent) {
+        return res.status(404).json({ message: "Consent not found" });
+      }
+      if (consent.status !== "active") {
+        return res.status(400).json({ message: "Consent is already revoked or expired" });
+      }
+
+      await db.update(dataSharingConsents)
+        .set({ status: "revoked", revokedAt: new Date() })
+        .where(eq(dataSharingConsents.id, consentId));
+
+      await storage.createAuditLog({
+        actorUserId: founderId,
+        action: "data_sharing_consent_revoked",
+        entityType: "data_sharing_consent",
+        entityId: consentId.toString(),
+        details: { partnerName: consent.partnerName },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Consent revoked successfully" });
+    } catch (error: any) {
+      console.error("Error revoking consent:", error);
+      res.status(500).json({ message: "Failed to revoke consent" });
+    }
+  });
+
+  app.get("/api/data-sharing/consents/:id/access-log", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const founderId = getUserId(req);
+      const consentId = parseInt(req.params.id);
+
+      const [consent] = await db.select()
+        .from(dataSharingConsents)
+        .where(and(eq(dataSharingConsents.id, consentId), eq(dataSharingConsents.founderId, founderId)))
+        .limit(1);
+
+      if (!consent) {
+        return res.status(404).json({ message: "Consent not found" });
+      }
+
+      const logs = await db.select()
+        .from(dataSharingAccessLogs)
+        .where(eq(dataSharingAccessLogs.consentId, consentId))
+        .orderBy(desc(dataSharingAccessLogs.createdAt));
+
+      res.json({ logs });
+    } catch (error: any) {
+      console.error("Error fetching access logs:", error);
+      res.status(500).json({ message: "Failed to fetch access logs" });
+    }
+  });
+
+  // Partner Data API — authenticated by consent token only
+  async function validateConsentToken(token: string) {
+    const [consent] = await db.select()
+      .from(dataSharingConsents)
+      .where(eq(dataSharingConsents.consentToken, token))
+      .limit(1);
+
+    if (!consent) return { valid: false, error: "Invalid verification token", consent: null };
+    if (consent.status === "revoked") return { valid: false, error: "This consent has been revoked by the data owner", consent: null };
+    if (consent.status !== "active" || consent.expiresAt < new Date()) return { valid: false, error: "This consent has expired", consent: null };
+    return { valid: true, error: null, consent };
+  }
+
+  app.get("/api/partner/verified-data/:token", async (req, res) => {
+    try {
+      const { valid, error, consent } = await validateConsentToken(req.params.token);
+      if (!valid || !consent) {
+        return res.status(403).json({ message: error });
+      }
+
+      const scope = consent.dataScope as any;
+      const result: any = {
+        consentId: consent.id,
+        partnerName: consent.partnerName,
+        consentGrantedAt: consent.createdAt,
+        consentExpiresAt: consent.expiresAt,
+      };
+
+      const user = await storage.getUser(consent.founderId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (scope.personal) {
+        const profile = await storage.getFounderProfile(consent.founderId);
+        result.personal = {
+          fullName: `${user.firstName} ${user.lastName}`,
+          email: user.email,
+          phone: profile?.phone || null,
+          dateOfBirth: profile?.dateOfBirth || null,
+          nationality: profile?.nationality || null,
+          gender: profile?.gender || null,
+          address: profile ? {
+            line1: profile.addressLine1,
+            line2: profile.addressLine2,
+            city: profile.city,
+            state: profile.state,
+            postalCode: profile.postalCode,
+            country: profile.country,
+          } : null,
+        };
+      }
+
+      if (scope.verification) {
+        const verification = await storage.getIdentityVerification(consent.founderId);
+        result.verification = verification ? {
+          status: verification.status,
+          method: verification.method,
+          provider: verification.externalProvider,
+          smileIdJobId: verification.externalSessionId,
+          livenessScore: verification.livenessScore,
+          verifiedAt: verification.verifiedAt,
+          expiresAt: verification.expiresAt,
+          bvnVerified: true,
+          ninVerified: true,
+          documentVerified: true,
+          biometricVerified: true,
+          amlCleared: true,
+        } : { status: "not_verified" };
+      }
+
+      if (scope.company && consent.applicationId) {
+        const [companyProfile] = await db.select()
+          .from(companyProfiles)
+          .where(eq(companyProfiles.applicationId, consent.applicationId))
+          .limit(1);
+
+        if (companyProfile) {
+          result.company = {
+            name: companyProfile.companyName,
+            rcNumber: companyProfile.rcNumber,
+            type: companyProfile.companyType,
+            shareCapital: companyProfile.shareCapital,
+            incorporationDate: companyProfile.incorporationDate,
+            directors: companyProfile.directors,
+            shareholders: companyProfile.shareholders,
+            businessActivities: companyProfile.businessActivities,
+          };
+        }
+      }
+
+      if (scope.documents) {
+        const profile = await storage.getFounderProfile(consent.founderId);
+        const objectStorageService = new ObjectStorageService();
+        const docs: any = {};
+
+        if (profile?.passportPhotoPath) {
+          try { docs.passportPhoto = await objectStorageService.getDownloadUrl(profile.passportPhotoPath); } catch {}
+        }
+        if (profile?.signaturePath) {
+          try { docs.signature = await objectStorageService.getDownloadUrl(profile.signaturePath); } catch {}
+        }
+        if (profile?.idDocumentPath) {
+          try { docs.idDocument = await objectStorageService.getDownloadUrl(profile.idDocumentPath); } catch {}
+        }
+        result.documents = docs;
+      }
+
+      if (scope.proofOfAddress) {
+        const [roSub] = await db.select()
+          .from(registeredOfficeSubscriptions)
+          .where(and(
+            eq(registeredOfficeSubscriptions.founderId, consent.founderId),
+            eq(registeredOfficeSubscriptions.useAsRegisteredAddress, true),
+          ))
+          .limit(1);
+
+        if (roSub?.proofOfAddressPath && roSub.proofOfAddressStatus === "verified") {
+          const objectStorageService = new ObjectStorageService();
+          try {
+            result.proofOfAddress = {
+              status: "verified",
+              downloadUrl: await objectStorageService.getDownloadUrl(roSub.proofOfAddressPath),
+            };
+          } catch {}
+        }
+      }
+
+      await db.insert(dataSharingAccessLogs).values({
+        consentId: consent.id,
+        accessType: "api_call",
+        accessedBy: consent.partnerName,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || "unknown",
+        dataReturned: { scopes: Object.keys(scope).filter((k: string) => scope[k]) },
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error serving partner data:", error);
+      res.status(500).json({ message: "Failed to retrieve data" });
+    }
+  });
+
+  app.get("/api/partner/verified-data/:token/certificate", async (req, res) => {
+    try {
+      const { valid, error, consent } = await validateConsentToken(req.params.token);
+      if (!valid || !consent) {
+        return res.status(403).json({ message: error });
+      }
+
+      const user = await storage.getUser(consent.founderId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const verification = await storage.getIdentityVerification(consent.founderId);
+      const isVerified = verification?.status === "verified";
+
+      let companyData = null;
+      if ((consent.dataScope as any).company && consent.applicationId) {
+        const [cp] = await db.select().from(companyProfiles)
+          .where(eq(companyProfiles.applicationId, consent.applicationId)).limit(1);
+        if (cp) {
+          companyData = {
+            name: cp.companyName,
+            rcNumber: cp.rcNumber,
+            type: cp.companyType,
+            shareCapital: cp.shareCapital ? Number(cp.shareCapital) : null,
+            incorporationDate: cp.incorporationDate ? new Date(cp.incorporationDate).toLocaleDateString("en-GB") : null,
+            directors: Array.isArray(cp.directors) ? (cp.directors as any[]).map((d: any) => d.name || `${d.firstName} ${d.lastName}`) : [],
+          };
+        }
+      }
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const { generateVerificationCertificateHTML } = await import("./templates/verification-certificate");
+
+      const certData = {
+        certificateNumber: `CO-${consent.id.toString().padStart(6, "0")}-${consent.founderId.slice(-6).toUpperCase()}`,
+        subjectName: `${user.firstName} ${user.lastName}`,
+        subjectEmail: user.email,
+        verificationDate: verification?.verifiedAt ? new Date(verification.verifiedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "N/A",
+        expiryDate: verification?.expiresAt ? new Date(verification.expiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "N/A",
+        consentDate: consent.createdAt ? new Date(consent.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "N/A",
+        partnerName: consent.partnerName,
+        checks: {
+          bvnValidation: isVerified,
+          ninValidation: isVerified,
+          documentVerification: isVerified,
+          biometricMatch: isVerified,
+          amlScreening: isVerified,
+        },
+        smileIdJobId: verification?.externalSessionId || null,
+        livenessScore: verification?.livenessScore ? Number(verification.livenessScore) : null,
+        company: companyData,
+        verificationUrl: `${baseUrl}/verify/${consent.consentToken}`,
+      };
+
+      const html = generateVerificationCertificateHTML(certData);
+      const puppeteer = await import("puppeteer");
+      const browser = await puppeteer.default.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+      });
+      await browser.close();
+
+      await db.insert(dataSharingAccessLogs).values({
+        consentId: consent.id,
+        accessType: "certificate_download",
+        accessedBy: consent.partnerName,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || "unknown",
+        dataReturned: { type: "verification_certificate" },
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="Cellion_One_Verification_Certificate_${user.lastName}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error("Error generating certificate:", error);
+      res.status(500).json({ message: "Failed to generate certificate" });
+    }
+  });
+
+  app.get("/api/partner/verified-data/:token/package", async (req, res) => {
+    try {
+      const { valid, error, consent } = await validateConsentToken(req.params.token);
+      if (!valid || !consent) {
+        return res.status(403).json({ message: error });
+      }
+
+      const user = await storage.getUser(consent.founderId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const archiver = await import("archiver");
+      const archive = archiver.default("zip", { zlib: { level: 9 } });
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="Cellion_One_Verification_Package_${user.lastName}.zip"`);
+      archive.pipe(res);
+
+      const scope = consent.dataScope as any;
+      const objectStorageService = new ObjectStorageService();
+
+      const dataSummary: any = {
+        generatedAt: new Date().toISOString(),
+        subject: { name: `${user.firstName} ${user.lastName}`, email: user.email },
+        partner: consent.partnerName,
+        consentGrantedAt: consent.createdAt,
+        consentExpiresAt: consent.expiresAt,
+      };
+
+      if (scope.personal) {
+        const profile = await storage.getFounderProfile(consent.founderId);
+        dataSummary.personal = {
+          fullName: `${user.firstName} ${user.lastName}`,
+          phone: profile?.phone,
+          dateOfBirth: profile?.dateOfBirth,
+          nationality: profile?.nationality,
+          gender: profile?.gender,
+          address: profile ? { line1: profile.addressLine1, line2: profile.addressLine2, city: profile.city, state: profile.state, postalCode: profile.postalCode, country: profile.country } : null,
+        };
+      }
+
+      if (scope.verification) {
+        const verification = await storage.getIdentityVerification(consent.founderId);
+        dataSummary.verification = verification ? {
+          status: verification.status,
+          provider: verification.externalProvider,
+          smileIdJobId: verification.externalSessionId,
+          livenessScore: verification.livenessScore,
+          verifiedAt: verification.verifiedAt,
+          expiresAt: verification.expiresAt,
+        } : { status: "not_verified" };
+      }
+
+      if (scope.company && consent.applicationId) {
+        const [cp] = await db.select().from(companyProfiles)
+          .where(eq(companyProfiles.applicationId, consent.applicationId)).limit(1);
+        if (cp) {
+          dataSummary.company = {
+            name: cp.companyName,
+            rcNumber: cp.rcNumber,
+            type: cp.companyType,
+            shareCapital: cp.shareCapital,
+            directors: cp.directors,
+            shareholders: cp.shareholders,
+          };
+        }
+      }
+
+      archive.append(JSON.stringify(dataSummary, null, 2), { name: "data-summary.json" });
+
+      if (scope.documents) {
+        const profile = await storage.getFounderProfile(consent.founderId);
+        const docPaths = [
+          { path: profile?.passportPhotoPath, name: "passport-photo" },
+          { path: profile?.signaturePath, name: "signature" },
+          { path: profile?.idDocumentPath, name: "id-document" },
+        ];
+
+        for (const doc of docPaths) {
+          if (doc.path) {
+            try {
+              const url = await objectStorageService.getDownloadUrl(doc.path);
+              const response = await fetch(url);
+              if (response.ok) {
+                const ext = doc.path.split(".").pop() || "bin";
+                const buffer = Buffer.from(await response.arrayBuffer());
+                archive.append(buffer, { name: `personal-documents/${doc.name}.${ext}` });
+              }
+            } catch {}
+          }
+        }
+      }
+
+      if (scope.proofOfAddress) {
+        const [roSub] = await db.select()
+          .from(registeredOfficeSubscriptions)
+          .where(and(
+            eq(registeredOfficeSubscriptions.founderId, consent.founderId),
+            eq(registeredOfficeSubscriptions.useAsRegisteredAddress, true),
+          ))
+          .limit(1);
+
+        if (roSub?.proofOfAddressPath && roSub.proofOfAddressStatus === "verified") {
+          try {
+            const url = await objectStorageService.getDownloadUrl(roSub.proofOfAddressPath);
+            const response = await fetch(url);
+            if (response.ok) {
+              const ext = roSub.proofOfAddressPath.split(".").pop() || "pdf";
+              const buffer = Buffer.from(await response.arrayBuffer());
+              archive.append(buffer, { name: `proof-of-address.${ext}` });
+            }
+          } catch {}
+        }
+      }
+
+      const readmeContent = `CELLION ONE - VERIFICATION DATA PACKAGE
+========================================
+
+Subject: ${user.firstName} ${user.lastName}
+Generated: ${new Date().toISOString()}
+Partner: ${consent.partnerName}
+Consent ID: ${consent.id}
+
+CONTENTS
+--------
+- data-summary.json: Structured data of all verified information
+- personal-documents/: Passport photo, signature, and ID document
+- proof-of-address.*: Utility bill from virtual office provider (if applicable)
+
+VERIFICATION
+------------
+To verify the authenticity of this package, visit:
+${req.protocol}://${req.get("host")}/verify/${consent.consentToken}
+
+This data was shared with the explicit consent of the data subject.
+Consent was granted on ${consent.createdAt ? new Date(consent.createdAt).toLocaleDateString("en-GB") : "N/A"}
+and expires on ${consent.expiresAt.toLocaleDateString("en-GB")}.
+
+For questions, contact: service@cellionone.com
+
+(c) ${new Date().getFullYear()} Cellion Platforms Nigeria Limited
+`;
+      archive.append(readmeContent, { name: "README.txt" });
+
+      await db.insert(dataSharingAccessLogs).values({
+        consentId: consent.id,
+        accessType: "package_download",
+        accessedBy: consent.partnerName,
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || "unknown",
+        dataReturned: { type: "full_package", scopes: Object.keys(scope).filter((k: string) => scope[k]) },
+      });
+
+      await archive.finalize();
+    } catch (error: any) {
+      console.error("Error generating package:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ message: "Failed to generate package" });
+      }
+    }
+  });
+
+  app.get("/api/partner/verified-data/:token/status", async (req, res) => {
+    try {
+      const [consent] = await db.select()
+        .from(dataSharingConsents)
+        .where(eq(dataSharingConsents.consentToken, req.params.token))
+        .limit(1);
+
+      if (!consent) {
+        return res.status(404).json({ status: "invalid" });
+      }
+
+      const now = new Date();
+      const isExpired = consent.expiresAt < now;
+      const effectiveStatus = consent.status === "active" && isExpired ? "expired" : consent.status;
+
+      const user = await storage.getUser(consent.founderId);
+      const verification = await storage.getIdentityVerification(consent.founderId);
+
+      const scope = consent.dataScope as any;
+      const checksPassed = verification?.status === "verified";
+
+      res.json({
+        status: effectiveStatus,
+        subjectName: user ? `${user.firstName} ${user.lastName}` : null,
+        partnerName: consent.partnerName,
+        partnerType: consent.partnerType,
+        consentGrantedAt: consent.createdAt,
+        expiresAt: consent.expiresAt,
+        dataScope: scope,
+        verification: {
+          isVerified: checksPassed,
+          verifiedAt: verification?.verifiedAt || null,
+          checks: {
+            bvnValidation: checksPassed,
+            ninValidation: checksPassed,
+            documentVerification: checksPassed,
+            biometricMatch: checksPassed,
+            amlScreening: checksPassed,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error("Error fetching consent status:", error);
+      res.status(500).json({ message: "Failed to fetch status" });
     }
   });
 

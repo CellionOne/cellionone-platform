@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, json, serial, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, json, jsonb, serial, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -972,6 +972,45 @@ export const notificationPreferences = pgTable("notification_preferences", {
 export const insertNotificationPreferencesSchema = createInsertSchema(notificationPreferences).omit({ id: true, updatedAt: true });
 export type NotificationPreference = typeof notificationPreferences.$inferSelect;
 export type InsertNotificationPreference = z.infer<typeof insertNotificationPreferencesSchema>;
+
+// ============== DATA SHARING CONSENTS ==============
+export const dataSharingConsents = pgTable("data_sharing_consents", {
+  id: serial("id").primaryKey(),
+  founderId: varchar("founder_id").notNull(),
+  applicationId: integer("application_id"),
+  partnerName: varchar("partner_name", { length: 255 }).notNull(),
+  partnerType: varchar("partner_type", { length: 50 }).notNull(),
+  consentToken: varchar("consent_token", { length: 128 }).notNull().unique(),
+  consentText: text("consent_text").notNull(),
+  dataScope: jsonb("data_scope").notNull(),
+  status: varchar("status", { length: 20 }).default("active").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_dsc_founder").on(table.founderId),
+  index("idx_dsc_token").on(table.consentToken),
+  index("idx_dsc_status").on(table.status),
+]);
+
+export const insertDataSharingConsentSchema = createInsertSchema(dataSharingConsents).omit({ id: true, createdAt: true });
+export type DataSharingConsent = typeof dataSharingConsents.$inferSelect;
+export type InsertDataSharingConsent = z.infer<typeof insertDataSharingConsentSchema>;
+
+export const dataSharingAccessLogs = pgTable("data_sharing_access_logs", {
+  id: serial("id").primaryKey(),
+  consentId: integer("consent_id").notNull(),
+  accessType: varchar("access_type", { length: 50 }).notNull(),
+  accessedBy: varchar("accessed_by", { length: 255 }).notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  dataReturned: jsonb("data_returned"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_dsal_consent").on(table.consentId),
+]);
+
+export type DataSharingAccessLog = typeof dataSharingAccessLogs.$inferSelect;
 
 // ============== SETTINGS SCHEMAS ==============
 export const updateProfileSchema = z.object({

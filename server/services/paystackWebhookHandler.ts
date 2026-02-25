@@ -1,6 +1,6 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog } from '@shared/schema';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
 import { sendNewOrderNotificationEmail, ADMIN_NOTIFICATION_EMAIL } from './emailService';
@@ -96,9 +96,9 @@ export async function processWebhook(
 async function handleChargeSuccess(data: PaystackWebhookEvent['data'], rawPayload: string): Promise<void> {
   const reference = data.reference;
 
-  const isSplitOrder = reference.startsWith('celion_split_');
-
-  if (isSplitOrder) {
+  if (reference.startsWith('kyc_')) {
+    await handleKycPaymentSuccess(data);
+  } else if (reference.startsWith('celion_split_')) {
     await handleSplitOrderSuccess(data, rawPayload);
   } else {
     await handleLegacyPaymentSuccess(data);
@@ -526,6 +526,58 @@ async function activateService(
       }
       break;
     }
+  }
+}
+
+async function handleKycPaymentSuccess(data: PaystackWebhookEvent['data']): Promise<void> {
+  const metadata = data.metadata as any;
+  const verificationRequestId = metadata?.verificationRequestId;
+
+  if (!verificationRequestId) {
+    console.log('[Paystack Webhook] KYC payment missing verificationRequestId in metadata');
+    return;
+  }
+
+  const reqId = parseInt(verificationRequestId);
+  const [request] = await db.select().from(kycVerificationRequests)
+    .where(eq(kycVerificationRequests.id, reqId));
+
+  if (!request) {
+    console.error(`[Paystack Webhook] KYC verification request ${reqId} not found`);
+    return;
+  }
+
+  if (request.paymentStatus === 'paid') {
+    console.log(`[Paystack Webhook] KYC request ${reqId} already paid, skipping`);
+    return;
+  }
+
+  await db.update(kycVerificationRequests)
+    .set({
+      paymentStatus: 'paid',
+      paymentReference: data.reference,
+      status: request.status === 'pending_payment' ? 'in_progress' : request.status,
+      updatedAt: new Date(),
+    })
+    .where(eq(kycVerificationRequests.id, reqId));
+
+  console.log(`[Paystack Webhook] KYC payment processed for request ${reqId}, reference: ${data.reference}`);
+
+  try {
+    const { getResendClient } = await import('./emailService');
+    const { client, fromEmail } = await getResendClient();
+    const amount = data.amount / 100;
+    await client.emails.send({
+      from: fromEmail,
+      to: request.subjectEmail,
+      subject: `Payment of ₦${amount.toLocaleString()} received for your verification`,
+      html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+        <h2 style="color:#0d9668;">Payment Confirmed</h2>
+        <p>Your payment of <strong>₦${amount.toLocaleString()}</strong> for verification has been received. You can now proceed with uploading your documents.</p>
+      </div>`,
+    });
+  } catch (emailError) {
+    console.error('[Paystack Webhook] Failed to send KYC payment email:', emailError);
   }
 }
 

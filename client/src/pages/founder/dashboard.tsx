@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import type { CompanyApplication, IdentityVerification, CompanyProfile, PostIncorporationTask, ComplianceDeadline } from "@shared/schema";
 import { InvitationBanner } from "@/components/invitation-banner";
+import { ClipboardCheck, ExternalLink } from "lucide-react";
 
 interface DashboardData {
   applications: CompanyApplication[];
@@ -75,6 +76,19 @@ export default function FounderDashboard() {
     queryKey: ["/api/founder/company-profiles", firstProfileId, "compliance"],
     enabled: !!firstProfileId,
   });
+
+  const { data: kycOrgs } = useQuery<any[]>({
+    queryKey: ["/api/kyc-service/organisations"],
+  });
+
+  const { data: myVerifications } = useQuery<any[]>({
+    queryKey: ["/api/kyc-service/my-verifications"],
+  });
+
+  const kycOrgCount = kycOrgs?.length || 0;
+  const pendingVerifications = myVerifications?.filter((v: any) => !["verified", "rejected", "expired"].includes(v.status))?.length || 0;
+  const completedVerifications = myVerifications?.filter((v: any) => v.status === "verified")?.length || 0;
+  const hasKycContext = kycOrgCount > 0 || (myVerifications && myVerifications.length > 0);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -371,6 +385,58 @@ export default function FounderDashboard() {
                     </Button>
                   </CardContent>
                 </Card>
+              </div>
+            )}
+
+            {hasKycContext && (
+              <div data-testid="section-kyc-context">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold">KYC Service</h2>
+                  <div className="flex gap-2">
+                    {kycOrgCount > 0 && (
+                      <Button variant="ghost" size="sm" asChild data-testid="link-kyc-orgs">
+                        <Link href="/kyc/orgs">My Organisations</Link>
+                      </Button>
+                    )}
+                    {myVerifications && myVerifications.length > 0 && (
+                      <Button variant="ghost" size="sm" asChild data-testid="link-my-verifications">
+                        <Link href="/kyc/my-verifications">My Verifications</Link>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Card data-testid="stat-kyc-orgs">
+                    <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">KYC Organisations</CardTitle>
+                      <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{kycOrgCount}</div>
+                      <p className="text-xs text-muted-foreground mt-1">Organisations you manage</p>
+                    </CardContent>
+                  </Card>
+                  <Card data-testid="stat-kyc-pending">
+                    <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">Pending Reviews</CardTitle>
+                      <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{pendingVerifications}</div>
+                      <p className="text-xs text-muted-foreground mt-1">Verifications awaiting action</p>
+                    </CardContent>
+                  </Card>
+                  <Card data-testid="stat-kyc-completed">
+                    <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">Verified</CardTitle>
+                      <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{completedVerifications}</div>
+                      <p className="text-xs text-muted-foreground mt-1">Completed verifications</p>
+                    </CardContent>
+                  </Card>
+                </div>
               </div>
             )}
 

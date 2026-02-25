@@ -41,6 +41,7 @@ import AdminReceipts from "@/pages/admin/receipts";
 import AdminLawyerApplications from "@/pages/admin/lawyer-applications";
 import AdminMailroom from "@/pages/admin/mailroom";
 import AdminOrders from "@/pages/admin/orders";
+import AdminKycOverview from "@/pages/admin/kyc-overview";
 import ApplyLawyerPage from "@/pages/apply-lawyer";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
@@ -55,6 +56,7 @@ import CompanyPeoplePage from "@/pages/founder/company-people";
 import FounderDataSharing from "@/pages/founder/data-sharing";
 import VerifyPage from "@/pages/verify";
 import InviteAcceptPage from "@/pages/invite-accept";
+import NotificationsPage from "@/pages/notifications";
 import PaymentCheckoutPage from "@/pages/payment/checkout";
 import PaymentSuccessPage from "@/pages/payment/success";
 import PaymentCancelPage from "@/pages/payment/cancel";
@@ -66,6 +68,8 @@ import KycOrgSettings from "@/pages/kyc-service/org-settings";
 import KycVerifyRequestPage from "@/pages/kyc-service/verify-request";
 import KycEmployeePortalPage from "@/pages/kyc-service/employee-portal";
 import KycSupplierPortalPage from "@/pages/kyc-service/supplier-portal";
+import KycOrgInviteAcceptPage from "@/pages/kyc-service/org-invite-accept";
+import KycMyVerifications from "@/pages/kyc-service/my-verifications";
 
 function ProtectedRoute({ 
   component: Component, 
@@ -260,12 +264,18 @@ function Router() {
       <Route path="/admin/orders">
         <ProtectedRoute component={AdminOrders} roles={["admin"]} />
       </Route>
+      <Route path="/admin/kyc">
+        <ProtectedRoute component={AdminKycOverview} roles={["admin"]} />
+      </Route>
       
       <Route path="/profile">
         <ProtectedRoute component={PersonalProfilePage} />
       </Route>
       <Route path="/settings">
         <ProtectedRoute component={SettingsPage} />
+      </Route>
+      <Route path="/notifications">
+        <ProtectedRoute component={NotificationsPage} />
       </Route>
       
       <Route path="/apply-lawyer" component={ApplyLawyerPage} />
@@ -293,6 +303,10 @@ function Router() {
       <Route path="/kyc/org/:id">
         <ProtectedRoute component={KycOrgDashboard} />
       </Route>
+      <Route path="/kyc/my-verifications">
+        <ProtectedRoute component={KycMyVerifications} />
+      </Route>
+      <Route path="/kyc/org-invite/:token" component={KycOrgInviteAcceptPage} />
       <Route path="/kyc/verify/:token" component={KycVerifyRequestPage} />
       <Route path="/kyc/:slug/employees" component={KycEmployeePortalPage} />
       <Route path="/kyc/:slug/suppliers" component={KycSupplierPortalPage} />

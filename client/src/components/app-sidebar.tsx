@@ -39,6 +39,7 @@ import {
   ShoppingCart,
   Share2,
   ShieldCheck,
+  ClipboardCheck,
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
 
@@ -64,6 +65,7 @@ const founderItems: NavItem[] = [
   { title: "Legal AI", url: "/founder/legal-assistant", icon: MessageSquare },
   { title: "Data Sharing", url: "/founder/data-sharing", icon: Share2 },
   { title: "KYC Service", url: "/kyc/orgs", icon: ShieldCheck },
+  { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
   { title: "Services & Checkout", url: "/founder/checkout", icon: ShoppingCart },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
@@ -74,6 +76,8 @@ const lawyerItems: NavItem[] = [
   { title: "Assigned Cases", url: "/lawyer/applications", icon: Scale },
   { title: "Service Requests", url: "/lawyer/service-requests", icon: ClipboardList },
   { title: "Payouts", url: "/lawyer/payouts", icon: Wallet },
+  { title: "KYC Service", url: "/kyc/orgs", icon: ShieldCheck },
+  { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
@@ -88,6 +92,8 @@ const adminItems: NavItem[] = [
   { title: "AI Events", url: "/admin/ai-events", icon: Brain },
   { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },
   { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
+  { title: "KYC Oversight", url: "/admin/kyc", icon: ShieldCheck },
+  { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
   { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },
   { title: "Settings", url: "/settings", icon: Settings },
 ];

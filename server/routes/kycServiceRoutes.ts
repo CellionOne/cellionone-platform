@@ -7,6 +7,7 @@ import {
   kycOrganisations, kycOrgMembers, kycVerificationTemplates,
   kycDocumentRequirements, kycVerificationRequests,
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
+  userRoles,
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
   type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
   type KycDocumentRequirement, type KycVerificationTemplate,
@@ -274,6 +275,28 @@ export function registerKycServiceRoutes(app: Express) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
       console.error("[KYC] Invite member error:", error);
       res.status(500).json({ message: "Failed to invite member" });
+    }
+  });
+
+  app.get("/api/kyc-service/org-invite/:token", async (req: any, res: Response) => {
+    try {
+      const [member] = await db.select().from(kycOrgMembers)
+        .where(eq(kycOrgMembers.inviteToken, req.params.token));
+      if (!member) return res.status(404).json({ message: "Invite not found or already accepted" });
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, member.orgId));
+
+      res.json({
+        id: member.id,
+        orgId: member.orgId,
+        orgName: org?.name || "Unknown Organisation",
+        role: member.role,
+        inviteEmail: member.inviteEmail,
+        inviteStatus: member.inviteStatus,
+      });
+    } catch (error: any) {
+      console.error("[KYC] Get invite info error:", error);
+      res.status(500).json({ message: "Failed to get invite info" });
     }
   });
 
@@ -1576,51 +1599,8 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
-  app.post("/api/kyc-service/webhooks/paystack", async (req: any, res: Response) => {
-    try {
-      const paystackSecret = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_TEST_SECRET_KEY;
-      if (!paystackSecret) return res.status(500).json({ message: "Not configured" });
-
-      const hash = crypto.createHmac("sha512", paystackSecret).update(JSON.stringify(req.body)).digest("hex");
-      if (hash !== req.headers["x-paystack-signature"]) {
-        return res.status(401).json({ message: "Invalid signature" });
-      }
-
-      const event = req.body;
-      if (event.event === "charge.success") {
-        const metadata = event.data?.metadata;
-        if (metadata?.type === "kyc_verification" && metadata?.verificationRequestId) {
-          const reqId = parseInt(metadata.verificationRequestId);
-          const [request] = await db.select().from(kycVerificationRequests)
-            .where(eq(kycVerificationRequests.id, reqId));
-
-          if (request && request.paymentStatus !== "paid") {
-            await db.update(kycVerificationRequests)
-              .set({
-                paymentStatus: "paid",
-                paymentReference: event.data.reference,
-                status: request.status === "pending_payment" ? "in_progress" : request.status,
-                updatedAt: new Date(),
-              })
-              .where(eq(kycVerificationRequests.id, reqId));
-
-            await sendKycEmail(request.subjectEmail,
-              `Payment of ${event.data.amount / 100 >= 100000 ? "₦100,000" : "₦10,000"} received for your verification`,
-              `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
-                <h2 style="color:#0d9668;">Payment Confirmed</h2>
-                <p>Your payment for verification has been received. You can now proceed with uploading your documents.</p>
-              </div>`
-            );
-          }
-        }
-      }
-
-      res.json({ message: "OK" });
-    } catch (error: any) {
-      console.error("[KYC] Webhook error:", error);
-      res.status(500).json({ message: "Webhook processing failed" });
-    }
-  });
+  // KYC Paystack webhook is now handled by the main webhook handler in paystackWebhookHandler.ts
+  // References starting with 'kyc_' are routed to handleKycPaymentSuccess()
 
   // ==================== AUDIT CERTIFICATE ENDPOINT (T009) ====================
 
@@ -1789,6 +1769,179 @@ export function registerKycServiceRoutes(app: Express) {
     } catch (error: any) {
       console.error("[KYC] Upload URL error:", error);
       res.status(500).json({ message: "Failed to get upload URL" });
+    }
+  });
+
+  // ==================== MY VERIFICATIONS (T005) ====================
+
+  app.get("/api/kyc-service/my-verifications", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const user = await db.select().from(users).where(eq(users.id, userId)).then(r => r[0]);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const requests = await db.select({
+        id: kycVerificationRequests.id,
+        orgId: kycVerificationRequests.orgId,
+        type: kycVerificationRequests.type,
+        status: kycVerificationRequests.status,
+        subjectName: kycVerificationRequests.subjectName,
+        subjectEmail: kycVerificationRequests.subjectEmail,
+        paymentStatus: kycVerificationRequests.paymentStatus,
+        paymentResponsibility: kycVerificationRequests.paymentResponsibility,
+        inviteToken: kycVerificationRequests.inviteToken,
+        riskScore: kycVerificationRequests.riskScore,
+        createdAt: kycVerificationRequests.createdAt,
+        updatedAt: kycVerificationRequests.updatedAt,
+        orgName: kycOrganisations.name,
+      })
+        .from(kycVerificationRequests)
+        .leftJoin(kycOrganisations, eq(kycVerificationRequests.orgId, kycOrganisations.id))
+        .where(
+          or(
+            eq(kycVerificationRequests.subjectUserId, userId),
+            eq(kycVerificationRequests.subjectEmail, user.email)
+          )
+        )
+        .orderBy(desc(kycVerificationRequests.createdAt));
+
+      res.json(requests);
+    } catch (error: any) {
+      console.error("[KYC] My verifications error:", error);
+      res.status(500).json({ message: "Failed to fetch verifications" });
+    }
+  });
+
+  // ==================== ADMIN KYC OVERSIGHT (T003) ====================
+
+  async function requireAdmin(req: any, res: Response, next: NextFunction) {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const roles = await db.select().from(userRoles).where(eq(userRoles.userId, userId));
+    const isAdmin = roles.some(r => r.role === "admin");
+    if (!isAdmin) return res.status(403).json({ message: "Admin access required" });
+    next();
+  }
+
+  app.get("/api/admin/kyc/stats", isAuthenticated, requireAdmin, async (_req: any, res: Response) => {
+    try {
+      const [orgStats] = await db.select({
+        totalOrgs: count(),
+        activeOrgs: sql<number>`COUNT(*) FILTER (WHERE ${kycOrganisations.status} = 'active')`,
+      }).from(kycOrganisations);
+
+      const [reqStats] = await db.select({
+        totalRequests: count(),
+        verified: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'verified')`,
+        pending: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} IN ('pending_invite','pending_payment','in_progress','documents_submitted','under_review'))`,
+        rejected: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'rejected')`,
+      }).from(kycVerificationRequests);
+
+      const [revenueResult] = await db.select({
+        totalRevenue: sql<number>`COALESCE(SUM(CASE WHEN ${kycVerificationRequests.paymentStatus} = 'paid' THEN 1 ELSE 0 END), 0)`,
+      }).from(kycVerificationRequests);
+
+      res.json({
+        totalOrgs: orgStats.totalOrgs,
+        activeOrgs: orgStats.activeOrgs,
+        totalRequests: reqStats.totalRequests,
+        verified: reqStats.verified,
+        pending: reqStats.pending,
+        rejected: reqStats.rejected,
+        paidVerifications: revenueResult.totalRevenue,
+      });
+    } catch (error: any) {
+      console.error("[KYC Admin] Stats error:", error);
+      res.status(500).json({ message: "Failed to fetch KYC stats" });
+    }
+  });
+
+  app.get("/api/admin/kyc/organisations", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    try {
+      const orgs = await db.select().from(kycOrganisations).orderBy(desc(kycOrganisations.createdAt));
+
+      const orgsWithStats = await Promise.all(orgs.map(async (org) => {
+        const [stats] = await db.select({
+          totalRequests: count(),
+          verified: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'verified')`,
+          pending: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} IN ('pending_invite','pending_payment','in_progress','documents_submitted','under_review'))`,
+        }).from(kycVerificationRequests).where(eq(kycVerificationRequests.orgId, org.id));
+
+        const [memberCount] = await db.select({
+          total: count(),
+        }).from(kycOrgMembers).where(and(eq(kycOrgMembers.orgId, org.id), eq(kycOrgMembers.inviteStatus, "accepted")));
+
+        return {
+          ...org,
+          totalRequests: stats.totalRequests,
+          verifiedRequests: stats.verified,
+          pendingRequests: stats.pending,
+          memberCount: memberCount.total,
+        };
+      }));
+
+      res.json(orgsWithStats);
+    } catch (error: any) {
+      console.error("[KYC Admin] List orgs error:", error);
+      res.status(500).json({ message: "Failed to list KYC organisations" });
+    }
+  });
+
+  app.get("/api/admin/kyc/organisations/:id", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      if (isNaN(orgId)) return res.status(400).json({ message: "Invalid org ID" });
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      if (!org) return res.status(404).json({ message: "Organisation not found" });
+
+      const members = await db.select().from(kycOrgMembers).where(eq(kycOrgMembers.orgId, orgId));
+
+      const [stats] = await db.select({
+        total: count(),
+        pending: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} IN ('pending_invite','pending_payment','in_progress','documents_submitted'))`,
+        underReview: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'under_review')`,
+        verified: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'verified')`,
+        rejected: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'rejected')`,
+        expired: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'expired')`,
+      }).from(kycVerificationRequests).where(eq(kycVerificationRequests.orgId, orgId));
+
+      const recentRequests = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.orgId, orgId))
+        .orderBy(desc(kycVerificationRequests.createdAt))
+        .limit(20);
+
+      res.json({ ...org, members, stats, recentRequests });
+    } catch (error: any) {
+      console.error("[KYC Admin] Get org detail error:", error);
+      res.status(500).json({ message: "Failed to get organisation details" });
+    }
+  });
+
+  app.patch("/api/admin/kyc/organisations/:id/status", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      if (isNaN(orgId)) return res.status(400).json({ message: "Invalid org ID" });
+
+      const schema = z.object({
+        status: z.enum(["active", "suspended"]),
+      });
+      const data = schema.parse(req.body);
+
+      const [updated] = await db.update(kycOrganisations)
+        .set({ status: data.status, updatedAt: new Date() })
+        .where(eq(kycOrganisations.id, orgId))
+        .returning();
+
+      if (!updated) return res.status(404).json({ message: "Organisation not found" });
+
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC Admin] Update status error:", error);
+      res.status(500).json({ message: "Failed to update organisation status" });
     }
   });
 

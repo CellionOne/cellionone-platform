@@ -593,6 +593,42 @@ export async function registerRoutes(
     });
   });
 
+  // ============== NOTIFICATION ROUTES ==============
+
+  app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const notifs = await storage.getNotificationsByUser(userId);
+      res.json(notifs);
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+      res.status(500).json({ message: "Failed to fetch notifications" });
+    }
+  });
+
+  app.patch("/api/notifications/:id/read", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid notification ID" });
+      await storage.markNotificationRead(id);
+      res.json({ message: "Notification marked as read" });
+    } catch (error) {
+      console.error("Error marking notification read:", error);
+      res.status(500).json({ message: "Failed to mark notification as read" });
+    }
+  });
+
+  app.post("/api/notifications/mark-all-read", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      await storage.markAllNotificationsRead(userId);
+      res.json({ message: "All notifications marked as read" });
+    } catch (error) {
+      console.error("Error marking all notifications read:", error);
+      res.status(500).json({ message: "Failed to mark all notifications as read" });
+    }
+  });
+
   // ============== SETTINGS ROUTES ==============
 
   // Get user profile for settings

@@ -18,7 +18,10 @@ import {
   BadgeCheck,
   Landmark,
   FileSignature,
-  BriefcaseBusiness
+  BriefcaseBusiness,
+  UserCheck,
+  Building,
+  ShieldCheck
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
 
@@ -144,6 +147,7 @@ export default function LandingPage() {
             <div className="hidden md:flex items-center gap-8">
               <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Features</a>
               <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Pricing</a>
+              <a href="#for-organisations" className="text-sm text-muted-foreground hover:text-foreground transition-colors">For Organisations</a>
               <a href="#services" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Services</a>
               <a href="#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
             </div>
@@ -311,7 +315,86 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
+        <section id="for-organisations" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center mb-16">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium mb-4">
+                <ShieldCheck className="h-4 w-4" />
+                For Organisations
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-bold mb-4">
+                Build Trust Through Verified Compliance
+              </h2>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                Whether you're starting a company, verifying your workforce, or screening suppliers, Cellion One gives you the tools to stay compliant and credible.
+              </p>
+            </div>
+
+            <div className="grid sm:grid-cols-1 lg:grid-cols-3 gap-6">
+              <Card className="hover-elevate group" data-testid="card-offering-incorporate">
+                <CardContent className="p-6 flex flex-col h-full">
+                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+                    <Building2 className="h-6 w-6 text-primary" />
+                  </div>
+                  <h3 className="font-semibold text-lg mb-2">Incorporate a Company</h3>
+                  <p className="text-muted-foreground text-sm mb-4 flex-1">
+                    Register your Nigerian limited liability company with the CAC. Our licensed lawyers handle filings, follow-ups, and deliver your stamped originals.
+                  </p>
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <span className="text-sm font-semibold text-primary">From ₦100,000</span>
+                    <Button size="sm" asChild data-testid="button-offering-incorporate">
+                      <a href="/register" className="gap-1.5">
+                        Get Started <ArrowRight className="h-3.5 w-3.5" />
+                      </a>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="hover-elevate group" data-testid="card-offering-employees">
+                <CardContent className="p-6 flex flex-col h-full">
+                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+                    <UserCheck className="h-6 w-6 text-primary" />
+                  </div>
+                  <h3 className="font-semibold text-lg mb-2">Verify Employees</h3>
+                  <p className="text-muted-foreground text-sm mb-4 flex-1">
+                    Run individual identity verification on employees and team members. Includes BVN/NIN validation, document checks, biometrics, and AML screening.
+                  </p>
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <span className="text-sm font-semibold text-primary">₦10,000 / person</span>
+                    <Button size="sm" asChild data-testid="button-offering-employees">
+                      <a href="/register" className="gap-1.5">
+                        Get Started <ArrowRight className="h-3.5 w-3.5" />
+                      </a>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="hover-elevate group" data-testid="card-offering-suppliers">
+                <CardContent className="p-6 flex flex-col h-full">
+                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+                    <Building className="h-6 w-6 text-primary" />
+                  </div>
+                  <h3 className="font-semibold text-lg mb-2">Verify Suppliers</h3>
+                  <p className="text-muted-foreground text-sm mb-4 flex-1">
+                    Comprehensive corporate due diligence for your vendors and suppliers. Verify company registration, directors, financials, and compliance status.
+                  </p>
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <span className="text-sm font-semibold text-primary">₦100,000 / company</span>
+                    <Button size="sm" asChild data-testid="button-offering-suppliers">
+                      <a href="/register" className="gap-1.5">
+                        Get Started <ArrowRight className="h-3.5 w-3.5" />
+                      </a>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </section>
+
+        <section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8">
           <div className="max-w-7xl mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-3xl sm:text-4xl font-bold mb-4">Company Incorporation Pricing</h2>
@@ -422,10 +505,10 @@ export default function LandingPage() {
         <section className="py-20 px-4 sm:px-6 lg:px-8">
           <div className="max-w-4xl mx-auto text-center">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-              Ready to Register Your Company?
+              Ready to Get Started?
             </h2>
             <p className="text-lg text-muted-foreground mb-8 max-w-2xl mx-auto">
-              Join thousands of entrepreneurs who have successfully registered their Nigerian companies through Cellion One.
+              Whether you need to incorporate a company or verify your employees and suppliers, Cellion One makes compliance simple and reliable.
             </p>
             <Button size="lg" asChild className="gap-2" data-testid="button-cta-start">
               <a href="/register">

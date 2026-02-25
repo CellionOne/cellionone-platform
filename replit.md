@@ -50,7 +50,13 @@ Key architectural decisions and features include:
   - Full email notification lifecycle via Resend
   - Backend routes: `server/routes/kycServiceRoutes.ts`
   - Tables: `kyc_organisations`, `kyc_org_members`, `kyc_verification_templates`, `kyc_document_requirements`, `kyc_verification_requests`, `kyc_supplier_profiles`, `kyc_submitted_documents`, `kyc_supplier_people`
-  - Frontend pages: `client/src/pages/kyc-service/` (orgs, org-dashboard, verification-detail, org-settings, verify-request, employee-portal, supplier-portal, terms)
+  - Consolidated webhook: KYC payments handled by main `paystackWebhookHandler.ts` (references starting with `kyc_`)
+  - Admin KYC oversight: `client/src/pages/admin/kyc-overview.tsx` at `/admin/kyc`
+  - My Verifications page: `client/src/pages/kyc-service/my-verifications.tsx` at `/kyc/my-verifications` (all roles)
+  - Org invite acceptance: `client/src/pages/kyc-service/org-invite-accept.tsx` at `/kyc/org-invite/:token`
+  - Frontend pages: `client/src/pages/kyc-service/` (orgs, org-dashboard, verification-detail, org-settings, verify-request, employee-portal, supplier-portal, terms, my-verifications, org-invite-accept)
+- **Notification Centre:** Bell icon with unread count in dashboard header, notification popover with mark-as-read, full notifications page at `/notifications`. API: `GET /api/notifications`, `PATCH /api/notifications/:id/read`, `POST /api/notifications/mark-all-read`.
+- **Founder Dashboard KYC Context:** Shows KYC org count, pending reviews, and completed verifications when user has KYC activity.
 
 ## External Dependencies
 - **PostgreSQL:** Primary database, hosted via Neon.

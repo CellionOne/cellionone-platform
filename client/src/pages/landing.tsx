@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,63 @@ import {
   ShieldCheck
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
+
+const heroSlides = [
+  {
+    headline: "Register Your Nigerian Company",
+    accent: "With Confidence",
+    subtitle: "Complete your company incorporation in Nigeria with a seamless digital experience. Verified lawyers handle your CAC filings while you focus on building your business.",
+    primaryCta: { text: "Start Incorporation", href: "/register" },
+    secondaryCta: { text: "View Pricing", href: "#pricing" },
+    cardTitle: "Your Company Dashboard",
+    cardSubtitle: "Track all your applications",
+    cardIcon: Building2,
+    cardItems: [
+      { name: "TechStart Ventures Ltd", status: "Completed", color: "green" },
+      { name: "GreenFood Nigeria Ltd", status: "Under Review", color: "blue" },
+      { name: "FastLogix Enterprises", status: "Draft", color: "yellow" },
+    ],
+    cardAction: "View All Applications",
+  },
+  {
+    headline: "Verify Your Employees",
+    accent: "With Certainty",
+    subtitle: "Run compliant identity verification on employees and team members. AI-powered document checks, BVN/NIN validation, and audit-ready certificates.",
+    primaryCta: { text: "Start Verifying", href: "/register" },
+    secondaryCta: { text: "Learn More", href: "#for-organisations" },
+    cardTitle: "Verification Dashboard",
+    cardSubtitle: "Track employee verifications",
+    cardIcon: UserCheck,
+    cardItems: [
+      { name: "Adebayo Ogunlesi", status: "Verified", color: "green" },
+      { name: "Chidinma Eze", status: "In Progress", color: "blue" },
+      { name: "Femi Adeyemi", status: "Pending", color: "yellow" },
+    ],
+    cardAction: "View All Verifications",
+  },
+  {
+    headline: "Onboard Suppliers",
+    accent: "With Compliance",
+    subtitle: "Comprehensive corporate due diligence for suppliers and vendors. Verify directors, check documents, and generate compliance reports automatically.",
+    primaryCta: { text: "Verify Suppliers", href: "/register" },
+    secondaryCta: { text: "Learn More", href: "#for-organisations" },
+    cardTitle: "Supplier Verification",
+    cardSubtitle: "Corporate due diligence tracker",
+    cardIcon: ShieldCheck,
+    cardItems: [
+      { name: "Dangote Supplies Ltd", status: "Verified", color: "green" },
+      { name: "Zenith Logistics Co", status: "Under Review", color: "blue" },
+      { name: "Kobo Tech Solutions", status: "Pending", color: "yellow" },
+    ],
+    cardAction: "View All Suppliers",
+  },
+];
+
+const statusColors: Record<string, string> = {
+  green: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  blue: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  yellow: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+};
 
 const features = [
   {
@@ -137,6 +195,28 @@ const comingSoon = [
 ];
 
 export default function LandingPage() {
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [isAnimating, setIsAnimating] = useState(false);
+
+  const goToSlide = useCallback((index: number) => {
+    if (index === activeSlide || isAnimating) return;
+    setIsAnimating(true);
+    setTimeout(() => {
+      setActiveSlide(index);
+      setTimeout(() => setIsAnimating(false), 50);
+    }, 300);
+  }, [activeSlide, isAnimating]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      goToSlide((activeSlide + 1) % heroSlides.length);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [activeSlide, goToSlide]);
+
+  const slide = heroSlides[activeSlide];
+  const SlideIcon = slide.cardIcon;
+
   return (
     <div className="min-h-screen bg-background">
       <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-background/80 border-b">
@@ -177,28 +257,55 @@ export default function LandingPage() {
               <div className="space-y-8">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium">
                   <Sparkles className="h-4 w-4" />
-                  Nigeria's Premier Incorporation Platform
+                  Nigeria's Premier Legal Tech Platform
                 </div>
                 
-                <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight">
-                  Register Your Nigerian Company{" "}
-                  <span className="text-primary">With Confidence</span>
-                </h1>
+                <div className="min-h-[180px] sm:min-h-[160px]" data-testid="hero-text-container">
+                  <div
+                    key={activeSlide}
+                    className="space-y-4 transition-all duration-500 ease-out"
+                    style={{
+                      opacity: isAnimating ? 0 : 1,
+                      transform: isAnimating ? "translateY(16px)" : "translateY(0)",
+                    }}
+                  >
+                    <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight" data-testid="hero-headline">
+                      {slide.headline}{" "}
+                      <span className="text-primary">{slide.accent}</span>
+                    </h1>
+                  </div>
+                </div>
+
+                <div className="min-h-[72px]">
+                  <p
+                    key={`sub-${activeSlide}`}
+                    className="text-lg text-muted-foreground max-w-xl transition-all duration-500 ease-out"
+                    style={{
+                      opacity: isAnimating ? 0 : 1,
+                      transform: isAnimating ? "translateY(12px)" : "translateY(0)",
+                    }}
+                    data-testid="hero-subtitle"
+                  >
+                    {slide.subtitle}
+                  </p>
+                </div>
                 
-                <p className="text-lg text-muted-foreground max-w-xl">
-                  Complete your company incorporation in Nigeria with a seamless digital experience. 
-                  Verified lawyers handle your CAC filings while you focus on building your business.
-                </p>
-                
-                <div className="flex flex-col sm:flex-row gap-4">
-                  <Button size="lg" asChild className="gap-2" data-testid="button-start-incorporation">
-                    <a href="/register">
-                      Start Incorporation
+                <div
+                  key={`cta-${activeSlide}`}
+                  className="flex flex-col sm:flex-row gap-4 transition-all duration-500 ease-out"
+                  style={{
+                    opacity: isAnimating ? 0 : 1,
+                    transform: isAnimating ? "translateY(8px)" : "translateY(0)",
+                  }}
+                >
+                  <Button size="lg" asChild className="gap-2" data-testid="button-hero-primary">
+                    <a href={slide.primaryCta.href}>
+                      {slide.primaryCta.text}
                       <ArrowRight className="h-4 w-4" />
                     </a>
                   </Button>
-                  <Button size="lg" variant="outline" asChild data-testid="button-view-pricing">
-                    <a href="#pricing">View Pricing</a>
+                  <Button size="lg" variant="outline" asChild data-testid="button-hero-secondary">
+                    <a href={slide.secondaryCta.href}>{slide.secondaryCta.text}</a>
                   </Button>
                 </div>
                 
@@ -216,38 +323,56 @@ export default function LandingPage() {
                     <span className="text-sm text-muted-foreground">Expert support</span>
                   </div>
                 </div>
+
+                <div className="flex items-center gap-2 pt-2" data-testid="hero-slide-dots">
+                  {heroSlides.map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => goToSlide(i)}
+                      className={`h-2 rounded-full transition-all duration-300 ${
+                        i === activeSlide 
+                          ? "w-8 bg-primary" 
+                          : "w-2 bg-muted-foreground/30 hover:bg-muted-foreground/50"
+                      }`}
+                      aria-label={`Go to slide ${i + 1}`}
+                      data-testid={`button-slide-${i}`}
+                    />
+                  ))}
+                </div>
               </div>
               
               <div className="relative hidden lg:block">
-                <div className="relative z-10 rounded-2xl bg-card border shadow-2xl p-8">
+                <div
+                  key={`card-${activeSlide}`}
+                  className="relative z-10 rounded-2xl bg-card border shadow-2xl p-8 transition-all duration-500 ease-out"
+                  style={{
+                    opacity: isAnimating ? 0 : 1,
+                    transform: isAnimating ? "translateY(16px)" : "translateY(0)",
+                  }}
+                  data-testid="hero-preview-card"
+                >
                   <div className="space-y-6">
                     <div className="flex items-center gap-4">
                       <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Building2 className="h-6 w-6 text-primary" />
+                        <SlideIcon className="h-6 w-6 text-primary" />
                       </div>
                       <div>
-                        <h3 className="font-semibold">Your Company Dashboard</h3>
-                        <p className="text-sm text-muted-foreground">Track all your applications</p>
+                        <h3 className="font-semibold">{slide.cardTitle}</h3>
+                        <p className="text-sm text-muted-foreground">{slide.cardSubtitle}</p>
                       </div>
                     </div>
                     
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                        <span className="text-sm">TechStart Ventures Ltd</span>
-                        <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">Completed</span>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                        <span className="text-sm">GreenFood Nigeria Ltd</span>
-                        <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">Under Review</span>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                        <span className="text-sm">FastLogix Enterprises</span>
-                        <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">Draft</span>
-                      </div>
+                      {slide.cardItems.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                          <span className="text-sm">{item.name}</span>
+                          <span className={`text-xs px-2 py-1 rounded-full ${statusColors[item.color]}`}>{item.status}</span>
+                        </div>
+                      ))}
                     </div>
                     
                     <Button className="w-full" variant="secondary">
-                      View All Applications
+                      {slide.cardAction}
                     </Button>
                   </div>
                 </div>

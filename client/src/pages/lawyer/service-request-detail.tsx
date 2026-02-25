@@ -10,9 +10,27 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Loader2, ArrowLeft, CheckCircle2, Clock, XCircle, FileText,
-  User, Building2, Download,
+  User, Building2, Download, MapPin, ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
+
+interface RegisteredOfficeData {
+  subscription: {
+    id: number;
+    status: string | null;
+    proofOfAddressStatus: string | null;
+    registeredAddressConfirmedAt: string | null;
+    registeredAddressConsentText: string | null;
+  };
+  address: {
+    label: string;
+    line1: string;
+    line2: string | null;
+    city: string;
+    state: string;
+    country: string | null;
+  } | null;
+}
 
 function getStatusBadge(status: string) {
   switch (status) {
@@ -37,6 +55,18 @@ function getServiceLabel(serviceType: string): string {
     TIN: "TIN Registration",
   };
   return labels[serviceType] || serviceType;
+}
+
+function getPoaBadge(status: string | null) {
+  switch (status) {
+    case "verified":
+      return <Badge variant="default"><CheckCircle2 className="h-3 w-3 mr-1" /> Verified</Badge>;
+    case "uploaded":
+      return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" /> Uploaded</Badge>;
+    case "pending":
+    default:
+      return <Badge variant="outline"><Clock className="h-3 w-3 mr-1" /> Pending</Badge>;
+  }
 }
 
 export default function LawyerServiceRequestDetailPage() {
@@ -94,6 +124,7 @@ export default function LawyerServiceRequestDetailPage() {
       firstName: string | null;
       lastName: string | null;
     };
+    registeredOffice: RegisteredOfficeData | null;
   }>({
     queryKey: ["/api/lawyer/service-requests", srId],
   });
@@ -110,6 +141,21 @@ export default function LawyerServiceRequestDetailPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Update failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const poaDownloadMutation = useMutation({
+    mutationFn: async (subscriptionId: number) => {
+      const res = await apiRequest("GET", `/api/lawyer/registered-office/${subscriptionId}/proof-of-address`);
+      return res.json() as Promise<{ downloadUrl: string }>;
+    },
+    onSuccess: (result) => {
+      if (result.downloadUrl) {
+        window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Download failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -136,7 +182,7 @@ export default function LawyerServiceRequestDetailPage() {
     );
   }
 
-  const { serviceRequest: sr, profile, documents, founder } = data;
+  const { serviceRequest: sr, profile, documents, founder, registeredOffice } = data;
   const founderName = founder.firstName && founder.lastName
     ? `${founder.firstName} ${founder.lastName}`
     : founder.email || "Unknown";
@@ -189,6 +235,84 @@ export default function LawyerServiceRequestDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {registeredOffice && registeredOffice.address && (
+        <Card data-testid="card-registered-address">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <MapPin className="h-5 w-5" /> Registered Address
+            </CardTitle>
+            <CardDescription>
+              Confirmed registered office address for this founder
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-2">
+              <p className="font-medium" data-testid="text-address-label">{registeredOffice.address.label}</p>
+              <p className="text-sm text-muted-foreground" data-testid="text-address-full">
+                {registeredOffice.address.line1}
+                {registeredOffice.address.line2 && `, ${registeredOffice.address.line2}`}
+                <br />
+                {registeredOffice.address.city}, {registeredOffice.address.state}
+                <br />
+                {registeredOffice.address.country || "Nigeria"}
+              </p>
+            </div>
+
+            {registeredOffice.subscription.registeredAddressConfirmedAt && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="text-consent-record">
+                <ShieldCheck className="h-4 w-4 text-primary flex-shrink-0" />
+                <span>
+                  Founder consented on{" "}
+                  {new Date(registeredOffice.subscription.registeredAddressConfirmedAt).toLocaleDateString("en-NG", {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </span>
+              </div>
+            )}
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-muted-foreground">Proof of Address Status</span>
+                {getPoaBadge(registeredOffice.subscription.proofOfAddressStatus)}
+              </div>
+
+              {registeredOffice.subscription.proofOfAddressStatus === "verified" && (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Utility bill provided by the virtual office provider — use for CAC filing
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => poaDownloadMutation.mutate(registeredOffice.subscription.id)}
+                    disabled={poaDownloadMutation.isPending}
+                    data-testid="button-download-poa"
+                  >
+                    {poaDownloadMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Download className="h-4 w-4 mr-2" />
+                    )}
+                    Download Proof of Address
+                  </Button>
+                </div>
+              )}
+
+              {registeredOffice.subscription.proofOfAddressStatus !== "verified" && (
+                <p className="text-xs text-muted-foreground">
+                  {registeredOffice.subscription.proofOfAddressStatus === "uploaded"
+                    ? "Utility bill has been uploaded and is pending verification by an admin."
+                    : "Waiting for admin to upload the utility bill from the virtual office provider."}
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {profile ? (
         <Card data-testid="card-company-profile">

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -9,6 +10,8 @@ import { EmptyState } from "@/components/empty-state";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Link } from "wouter";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Building2,
   MapPin,
@@ -23,6 +26,8 @@ import {
   Package,
   FileCheck,
   Info,
+  FileText,
+  Loader2,
 } from "lucide-react";
 
 interface SubscriptionData {
@@ -36,6 +41,10 @@ interface SubscriptionData {
     paymentStatus: string;
     priceNgn: number;
     termMonths: number;
+    useAsRegisteredAddress: boolean;
+    registeredAddressConfirmedAt: string | null;
+    registeredAddressConsentText: string | null;
+    proofOfAddressStatus: string;
   } | null;
   address: {
     id: number;
@@ -48,6 +57,11 @@ interface SubscriptionData {
     country: string;
   } | null;
   applicationId: number | null;
+}
+
+interface PoaStatusData {
+  status: string;
+  uploadedAt: string | null;
 }
 
 interface OptionsData {
@@ -67,8 +81,12 @@ interface ServicePolicy {
   officialMailOnly: boolean;
 }
 
+const CONSENT_TEXT = "I confirm that I want to use this address as the registered office for my company. A proof of address (utility bill) will be obtained from the virtual office provider. This document will be shared with my assigned lawyer for CAC filing and with authorised third parties (e.g. banks) for registrations processed through Celion One. I understand that I will not be able to download the proof of address directly \u2014 it is shared only with verified parties to prevent fraud.";
+
 export default function RegisteredOfficePage() {
   const { toast } = useToast();
+  const [showConsentDialog, setShowConsentDialog] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
 
   const { data: subscription, isLoading: loadingSubscription } = useQuery<SubscriptionData>({
     queryKey: ["/api/registered-office/subscription"],
@@ -85,6 +103,36 @@ export default function RegisteredOfficePage() {
   const { data: servicePolicy } = useQuery<ServicePolicy>({
     queryKey: ["/api/registered-office/service-policy"],
     enabled: subscription?.subscription?.tier === "office_plus_mail",
+  });
+
+  const { data: poaStatus } = useQuery<PoaStatusData>({
+    queryKey: ["/api/registered-office/proof-of-address-status"],
+    enabled: !!subscription?.subscription?.useAsRegisteredAddress,
+  });
+
+  const confirmRegisteredAddressMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/registered-office/confirm-as-registered-address", {
+        consentText: CONSENT_TEXT,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/registered-office/subscription"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/registered-office/proof-of-address-status"] });
+      setShowConsentDialog(false);
+      setConsentChecked(false);
+      toast({
+        title: "Address confirmed",
+        description: "This address has been confirmed as your company's registered office.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Confirmation failed",
+        description: error.message || "Please try again.",
+        variant: "destructive",
+      });
+    },
   });
 
   const subscribeMutation = useMutation({
@@ -295,6 +343,180 @@ export default function RegisteredOfficePage() {
             </CardContent>
           </Card>
         )}
+
+        {hasActiveSubscription && subscription?.address && (
+          <Card data-testid="card-registered-address-section">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary" />
+                Use as Your Company's Registered Address
+              </CardTitle>
+              <CardDescription>
+                Confirm this address for company incorporation and third-party registrations
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {subscription.subscription?.useAsRegisteredAddress ? (
+                <>
+                  <div className="flex items-start gap-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="font-medium text-green-800 dark:text-green-200" data-testid="text-registered-address-confirmed">
+                        Confirmed as Registered Address
+                      </p>
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        Confirmed on{" "}
+                        <span data-testid="text-confirmed-date">
+                          {subscription.subscription.registeredAddressConfirmedAt
+                            ? new Date(subscription.subscription.registeredAddressConfirmedAt).toLocaleDateString("en-GB", {
+                                day: "numeric",
+                                month: "long",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "—"}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <FileCheck className="h-4 w-4 text-primary" />
+                      Proof of Address (Utility Bill)
+                    </p>
+                    <div className="flex items-center gap-3" data-testid="poa-status-indicator">
+                      {(() => {
+                        const status = poaStatus?.status || subscription.subscription.proofOfAddressStatus || "pending";
+                        switch (status) {
+                          case "verified":
+                            return (
+                              <div className="flex items-center gap-2 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-3 w-full">
+                                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0" />
+                                <div>
+                                  <p className="font-medium text-green-800 dark:text-green-200" data-testid="text-poa-status">Verified</p>
+                                  <p className="text-sm text-green-700 dark:text-green-300">
+                                    The utility bill has been verified and is ready for use in filings
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          case "uploaded":
+                            return (
+                              <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 w-full">
+                                <FileCheck className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0" />
+                                <div>
+                                  <p className="font-medium text-blue-800 dark:text-blue-200" data-testid="text-poa-status">Uploaded</p>
+                                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                                    Utility bill received and pending verification by our team
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          default:
+                            return (
+                              <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 w-full">
+                                <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                                <div>
+                                  <p className="font-medium text-amber-800 dark:text-amber-200" data-testid="text-poa-status">Pending</p>
+                                  <p className="text-sm text-amber-700 dark:text-amber-300">
+                                    Waiting for the virtual office provider to supply the utility bill
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                        }
+                      })()}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      The proof of address is shared only with your assigned lawyer and authorised third parties. You cannot download it directly for fraud prevention.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <div className="text-sm text-muted-foreground space-y-2">
+                    <p>
+                      You can designate this virtual office address as the registered office for your company.
+                      This is required for company incorporation at the CAC and for third-party registrations (e.g. bank accounts).
+                    </p>
+                    <p>
+                      A proof of address (utility bill) will be obtained from the virtual office provider and shared securely with your assigned lawyer.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      setConsentChecked(false);
+                      setShowConsentDialog(true);
+                    }}
+                    className="gap-2"
+                    data-testid="button-confirm-registered-address"
+                  >
+                    <Building2 className="h-4 w-4" />
+                    Confirm as Registered Address
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        <Dialog open={showConsentDialog} onOpenChange={setShowConsentDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Confirm Registered Address Usage</DialogTitle>
+              <DialogDescription>
+                Please read and agree to the following before confirming
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="text-sm space-y-3 bg-muted/50 rounded-lg p-4">
+                <p>I confirm that I want to use this address as the registered office for my company.</p>
+                <p>A proof of address (utility bill) will be obtained from the virtual office provider.</p>
+                <p>
+                  This document will be shared with my assigned lawyer for CAC filing and with authorised third parties
+                  (e.g. banks) for registrations processed through Celion One.
+                </p>
+                <p>
+                  I understand that I will not be able to download the proof of address directly — it is shared only
+                  with verified parties to prevent fraud.
+                </p>
+              </div>
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="consent-checkbox"
+                  checked={consentChecked}
+                  onCheckedChange={(checked) => setConsentChecked(checked === true)}
+                  data-testid="checkbox-consent"
+                />
+                <label htmlFor="consent-checkbox" className="text-sm leading-tight cursor-pointer">
+                  I have read and agree to the above terms regarding the use of this address as my company's registered office
+                </label>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setShowConsentDialog(false)}
+                data-testid="button-cancel-consent"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => confirmRegisteredAddressMutation.mutate()}
+                disabled={!consentChecked || confirmRegisteredAddressMutation.isPending}
+                data-testid="button-submit-consent"
+              >
+                {confirmRegisteredAddressMutation.isPending ? (
+                  <LoadingSpinner size="sm" />
+                ) : (
+                  "Confirm"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {hasPendingSubscription && !hasActiveSubscription && (
           <Card className="border-yellow-500/30 bg-yellow-50 dark:bg-yellow-950/20">

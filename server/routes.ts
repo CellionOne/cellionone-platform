@@ -6,7 +6,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc } from "drizzle-orm";
 import * as services from "./services";
@@ -2204,7 +2204,40 @@ export async function registerRoutes(
         lastName: usersTable.lastName,
       }).from(usersTable).where(eq(usersTable.id, sr.founderId));
 
-      res.json({ serviceRequest: sr, profile, documents, founder });
+      let registeredOffice = null;
+      const subs = await db.select()
+        .from(registeredOfficeSubscriptions)
+        .where(and(
+          eq(registeredOfficeSubscriptions.founderId, sr.founderId),
+          eq(registeredOfficeSubscriptions.useAsRegisteredAddress, true)
+        ))
+        .limit(1);
+      if (subs.length > 0) {
+        const sub = subs[0];
+        const [addr] = await db.select()
+          .from(serviceAddresses)
+          .where(eq(serviceAddresses.id, sub.serviceAddressId))
+          .limit(1);
+        registeredOffice = {
+          subscription: {
+            id: sub.id,
+            status: sub.status,
+            proofOfAddressStatus: sub.proofOfAddressStatus,
+            registeredAddressConfirmedAt: sub.registeredAddressConfirmedAt,
+            registeredAddressConsentText: sub.registeredAddressConsentText,
+          },
+          address: addr ? {
+            label: addr.label,
+            line1: addr.line1,
+            line2: addr.line2,
+            city: addr.city,
+            state: addr.state,
+            country: addr.country,
+          } : null,
+        };
+      }
+
+      res.json({ serviceRequest: sr, profile, documents, founder, registeredOffice });
     } catch (error) {
       console.error("Error fetching service request detail:", error);
       res.status(500).json({ message: "Failed to fetch service request" });
@@ -4326,6 +4359,77 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  app.post("/api/registered-office/confirm-as-registered-address", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const subscription = await registeredOfficeService.getSubscription({ founderId: userId, standalone: true });
+
+      if (!subscription || subscription.status !== "active") {
+        return res.status(400).json({ message: "You need an active registered office subscription first" });
+      }
+
+      if (subscription.useAsRegisteredAddress) {
+        return res.status(400).json({ message: "This address is already confirmed as your registered address" });
+      }
+
+      const consentText = "I confirm that I want to use this address as the registered office for my company. " +
+        "A proof of address (utility bill) will be obtained from the virtual office provider and shared with my assigned lawyer for CAC filing " +
+        "and with authorised third parties (e.g. banks) for registrations processed through Cellion One. " +
+        "I understand that I will not be able to download the proof of address directly — it is shared only with verified parties to prevent fraud.";
+
+      const [updated] = await db.update(registeredOfficeSubscriptions)
+        .set({
+          useAsRegisteredAddress: true,
+          registeredAddressConfirmedAt: new Date(),
+          registeredAddressConsentText: consentText,
+          proofOfAddressStatus: "pending",
+          updatedAt: new Date(),
+        })
+        .where(eq(registeredOfficeSubscriptions.id, subscription.id))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "registered_address_consent_given",
+        entityType: "registered_office_subscription",
+        entityId: subscription.id.toString(),
+        details: { consentText },
+        ipAddress: req.ip,
+      });
+
+      const address = await registeredOfficeService.getAddressForSubscription(subscription.id);
+
+      res.json({
+        message: "Address confirmed as your registered office",
+        subscription: updated,
+        address,
+      });
+    } catch (error: any) {
+      console.error("Error confirming registered address:", error);
+      res.status(500).json({ message: error.message || "Failed to confirm registered address" });
+    }
+  });
+
+  app.get("/api/registered-office/proof-of-address-status", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const subscription = await registeredOfficeService.getSubscription({ founderId: userId, standalone: true });
+
+      if (!subscription) {
+        return res.json({ status: null });
+      }
+
+      res.json({
+        useAsRegisteredAddress: subscription.useAsRegisteredAddress,
+        proofOfAddressStatus: subscription.proofOfAddressStatus,
+        confirmedAt: subscription.registeredAddressConfirmedAt,
+      });
+    } catch (error: any) {
+      console.error("Error fetching PoA status:", error);
+      res.status(500).json({ message: "Failed to fetch proof of address status" });
+    }
+  });
+
   // POST /api/registered-office/preferences - Set mail handling preferences
   app.post("/api/registered-office/preferences", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
@@ -4451,6 +4555,174 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error: any) {
       console.error("Error activating subscription:", error);
       res.status(500).json({ message: error.message || "Failed to activate subscription" });
+    }
+  });
+
+  app.get("/api/admin/registered-office/proof-of-address-requests", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const requests = await db.select({
+        subscription: registeredOfficeSubscriptions,
+        founder: {
+          id: usersTable.id,
+          email: usersTable.email,
+          firstName: usersTable.firstName,
+          lastName: usersTable.lastName,
+        },
+      })
+        .from(registeredOfficeSubscriptions)
+        .innerJoin(usersTable, eq(registeredOfficeSubscriptions.founderId, usersTable.id))
+        .where(eq(registeredOfficeSubscriptions.useAsRegisteredAddress, true))
+        .orderBy(desc(registeredOfficeSubscriptions.registeredAddressConfirmedAt));
+
+      const withAddresses = await Promise.all(
+        requests.map(async (r) => {
+          const address = await registeredOfficeService.getAddressForSubscription(r.subscription.id);
+          return { ...r, address };
+        })
+      );
+
+      res.json({ requests: withAddresses });
+    } catch (error: any) {
+      console.error("Error fetching PoA requests:", error);
+      res.status(500).json({ message: "Failed to fetch proof of address requests" });
+    }
+  });
+
+  app.post("/api/admin/registered-office/:subscriptionId/upload-proof-of-address", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const subscriptionId = parseInt(req.params.subscriptionId);
+
+      const subscription = await registeredOfficeService.getSubscriptionById(subscriptionId);
+      if (!subscription) {
+        return res.status(404).json({ message: "Subscription not found" });
+      }
+      if (!subscription.useAsRegisteredAddress) {
+        return res.status(400).json({ message: "This subscription has not been confirmed for registered address use" });
+      }
+
+      const { fileName, contentType } = req.body;
+      if (!fileName || !contentType) {
+        return res.status(400).json({ message: "fileName and contentType are required" });
+      }
+
+      const allowedTypes = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+      if (!allowedTypes.includes(contentType)) {
+        return res.status(400).json({ message: "Only PDF, JPEG, PNG, and WebP files are allowed" });
+      }
+
+      const objectPath = `.private/proof-of-address/${subscriptionId}/${Date.now()}-${fileName}`;
+      const objectStorageService = new ObjectStorageService();
+      const uploadUrl = await objectStorageService.getUploadUrl(objectPath, contentType);
+
+      await db.update(registeredOfficeSubscriptions)
+        .set({
+          proofOfAddressPath: objectPath,
+          proofOfAddressUploadedAt: new Date(),
+          proofOfAddressStatus: "uploaded",
+          updatedAt: new Date(),
+        })
+        .where(eq(registeredOfficeSubscriptions.id, subscriptionId));
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "proof_of_address_uploaded",
+        entityType: "registered_office_subscription",
+        entityId: subscriptionId.toString(),
+        details: { fileName, founderId: subscription.founderId },
+        ipAddress: req.ip,
+      });
+
+      res.json({ uploadUrl, objectPath });
+    } catch (error: any) {
+      console.error("Error generating PoA upload URL:", error);
+      res.status(500).json({ message: error.message || "Failed to generate upload URL" });
+    }
+  });
+
+  app.post("/api/admin/registered-office/:subscriptionId/verify-proof-of-address", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const subscriptionId = parseInt(req.params.subscriptionId);
+
+      const subscription = await registeredOfficeService.getSubscriptionById(subscriptionId);
+      if (!subscription) {
+        return res.status(404).json({ message: "Subscription not found" });
+      }
+      if (subscription.proofOfAddressStatus !== "uploaded") {
+        return res.status(400).json({ message: "Proof of address must be uploaded before it can be verified" });
+      }
+
+      await db.update(registeredOfficeSubscriptions)
+        .set({
+          proofOfAddressStatus: "verified",
+          updatedAt: new Date(),
+        })
+        .where(eq(registeredOfficeSubscriptions.id, subscriptionId));
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "proof_of_address_verified",
+        entityType: "registered_office_subscription",
+        entityId: subscriptionId.toString(),
+        details: { founderId: subscription.founderId },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Proof of address verified successfully" });
+    } catch (error: any) {
+      console.error("Error verifying PoA:", error);
+      res.status(500).json({ message: error.message || "Failed to verify proof of address" });
+    }
+  });
+
+  app.get("/api/admin/registered-office/:subscriptionId/proof-of-address/view", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const subscriptionId = parseInt(req.params.subscriptionId);
+      const subscription = await registeredOfficeService.getSubscriptionById(subscriptionId);
+      if (!subscription || !subscription.proofOfAddressPath) {
+        return res.status(404).json({ message: "Proof of address not found" });
+      }
+
+      const objectStorageService = new ObjectStorageService();
+      const downloadUrl = await objectStorageService.getDownloadUrl(subscription.proofOfAddressPath);
+      res.json({ downloadUrl });
+    } catch (error: any) {
+      console.error("Error getting PoA view URL:", error);
+      res.status(500).json({ message: "Failed to get proof of address" });
+    }
+  });
+
+  app.get("/api/lawyer/registered-office/:subscriptionId/proof-of-address", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const lawyerId = getUserId(req);
+      const subscriptionId = parseInt(req.params.subscriptionId);
+
+      const subscription = await registeredOfficeService.getSubscriptionById(subscriptionId);
+      if (!subscription || !subscription.proofOfAddressPath) {
+        return res.status(404).json({ message: "Proof of address not found" });
+      }
+
+      if (subscription.proofOfAddressStatus !== "verified") {
+        return res.status(400).json({ message: "Proof of address has not been verified yet" });
+      }
+
+      const objectStorageService = new ObjectStorageService();
+      const downloadUrl = await objectStorageService.getDownloadUrl(subscription.proofOfAddressPath);
+
+      await storage.logSensitiveDataAccess({
+        accessorUserId: lawyerId,
+        targetUserId: subscription.founderId,
+        dataType: "proof_of_address",
+        action: "download",
+        ipAddress: req.ip,
+        userAgent: req.get("user-agent") || "unknown",
+      });
+
+      res.json({ downloadUrl });
+    } catch (error: any) {
+      console.error("Error getting PoA for lawyer:", error);
+      res.status(500).json({ message: "Failed to get proof of address" });
     }
   });
 

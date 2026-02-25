@@ -38,6 +38,9 @@ import {
   AlertTriangle,
   MapPin,
   Mail,
+  Download,
+  ShieldCheck,
+  Loader2,
 } from "lucide-react";
 import type { 
   CompanyApplication, 
@@ -56,6 +59,10 @@ interface RegisteredOfficeInfo {
     status: string;
     startDate: string | null;
     endDate: string | null;
+    useAsRegisteredAddress: boolean | null;
+    registeredAddressConfirmedAt: string | null;
+    registeredAddressConsentText: string | null;
+    proofOfAddressStatus: string | null;
   };
   address: {
     label: string;
@@ -232,8 +239,24 @@ function OverviewTab({
   payment: Payment | null;
   registeredOffice: RegisteredOfficeInfo | null;
 }) {
+  const { toast } = useToast();
   const completedDocs = checklist.filter(item => item.status === "provided" || item.status === "accepted").length;
   const totalDocs = checklist.length;
+
+  const poaDownloadMutation = useMutation({
+    mutationFn: async (subscriptionId: number) => {
+      const res = await apiRequest("GET", `/api/lawyer/registered-office/${subscriptionId}/proof-of-address`);
+      return res.json() as Promise<{ downloadUrl: string }>;
+    },
+    onSuccess: (result) => {
+      if (result.downloadUrl) {
+        window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Download failed", description: error.message, variant: "destructive" });
+    },
+  });
 
   const getRegisteredOfficeBadge = (status: string) => {
     switch (status) {
@@ -325,6 +348,54 @@ function OverviewTab({
                     <span>Expires: {new Date(registeredOffice.subscription.endDate).toLocaleDateString()}</span>
                   )}
                 </div>
+                {registeredOffice.subscription.useAsRegisteredAddress && (
+                  <div className="mt-3 pt-3 border-t border-primary/20 space-y-2">
+                    {registeredOffice.subscription.registeredAddressConfirmedAt && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="text-app-consent-record">
+                        <ShieldCheck className="h-3 w-3 text-primary flex-shrink-0" />
+                        <span>
+                          Founder consented on{" "}
+                          {new Date(registeredOffice.subscription.registeredAddressConfirmedAt).toLocaleDateString("en-NG", {
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                          })}
+                        </span>
+                      </div>
+                    )}
+                    {registeredOffice.subscription.proofOfAddressStatus === "verified" && (
+                      <div className="space-y-2" data-testid="poa-download-section">
+                        <p className="text-xs text-muted-foreground">
+                          Utility bill provided by the virtual office provider — use for CAC filing
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => poaDownloadMutation.mutate(registeredOffice.subscription.id)}
+                          disabled={poaDownloadMutation.isPending}
+                          data-testid="button-download-poa-app"
+                        >
+                          {poaDownloadMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <Download className="h-4 w-4 mr-2" />
+                          )}
+                          Download Proof of Address
+                        </Button>
+                      </div>
+                    )}
+                    {registeredOffice.subscription.proofOfAddressStatus === "uploaded" && (
+                      <p className="text-xs text-muted-foreground">
+                        Utility bill uploaded, pending verification by admin.
+                      </p>
+                    )}
+                    {registeredOffice.subscription.proofOfAddressStatus === "pending" && (
+                      <p className="text-xs text-muted-foreground">
+                        Waiting for admin to upload the utility bill.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             ) : registeredOffice?.subscription ? (
               <div className="rounded-lg border border-yellow-500/30 bg-yellow-50 dark:bg-yellow-950/20 p-4" data-testid="registered-office-pending">

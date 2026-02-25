@@ -573,13 +573,19 @@ export type InsertServiceAddress = z.infer<typeof insertServiceAddressSchema>;
 export const registeredOfficeSubscriptions = pgTable("registered_office_subscriptions", {
   id: serial("id").primaryKey(),
   founderId: varchar("founder_id").notNull(),
-  applicationId: integer("application_id"), // Nullable - linked if purchased via wizard
-  tier: varchar("tier", { length: 50 }).notNull(), // 'office_only' | 'office_plus_mail'
+  applicationId: integer("application_id"),
+  tier: varchar("tier", { length: 50 }).notNull(),
   serviceAddressId: integer("service_address_id").notNull(),
-  status: varchar("status", { length: 50 }).default("selected"), // selected, pending_payment, active, expired, cancelled
+  status: varchar("status", { length: 50 }).default("selected"),
   startDate: timestamp("start_date"),
   endDate: timestamp("end_date"),
-  paymentId: integer("payment_id"), // Nullable FK to Payment
+  paymentId: integer("payment_id"),
+  useAsRegisteredAddress: boolean("use_as_registered_address").default(false),
+  registeredAddressConfirmedAt: timestamp("registered_address_confirmed_at"),
+  registeredAddressConsentText: text("registered_address_consent_text"),
+  proofOfAddressPath: text("proof_of_address_path"),
+  proofOfAddressUploadedAt: timestamp("proof_of_address_uploaded_at"),
+  proofOfAddressStatus: varchar("proof_of_address_status", { length: 20 }).default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

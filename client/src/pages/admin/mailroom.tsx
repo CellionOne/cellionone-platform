@@ -30,6 +30,9 @@ import {
   User,
   Building2,
   Zap,
+  MapPin,
+  Shield,
+  ExternalLink,
 } from "lucide-react";
 import {
   Dialog,
@@ -76,6 +79,32 @@ interface MailroomStats {
   totalActive: number;
 }
 
+interface PoaRequest {
+  subscription: {
+    id: number;
+    founderId: number;
+    status: string;
+    tier: string;
+    useAsRegisteredAddress: boolean;
+    registeredAddressConfirmedAt: string | null;
+    proofOfAddressPath: string | null;
+    proofOfAddressUploadedAt: string | null;
+    proofOfAddressStatus: string;
+  };
+  founder: {
+    id: number;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+  };
+  address: {
+    fullAddress?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+  } | null;
+}
+
 export default function AdminMailroom() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("inbox");
@@ -86,6 +115,11 @@ export default function AdminMailroom() {
   const [selectedItem, setSelectedItem] = useState<MailItem | null>(null);
   const [betaDialogOpen, setBetaDialogOpen] = useState(false);
   const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
+  const [poaUploadDialogOpen, setPoaUploadDialogOpen] = useState(false);
+  const [poaPreviewDialogOpen, setPoaPreviewDialogOpen] = useState(false);
+  const [selectedPoaRequest, setSelectedPoaRequest] = useState<PoaRequest | null>(null);
+  const [poaPreviewUrl, setPoaPreviewUrl] = useState<string | null>(null);
+  const [poaFileInput, setPoaFileInput] = useState<File | null>(null);
 
   // Intake form state
   const [intakeForm, setIntakeForm] = useState({
@@ -113,6 +147,63 @@ export default function AdminMailroom() {
   const { data: subscriptions, isLoading: loadingSubscriptions } = useQuery<Subscription[]>({
     queryKey: ["/api/admin/mailroom/subscriptions"],
   });
+
+  const { data: poaData, isLoading: loadingPoa } = useQuery<{ requests: PoaRequest[] }>({
+    queryKey: ["/api/admin/registered-office/proof-of-address-requests"],
+  });
+
+  const poaRequests = poaData?.requests || [];
+
+  const poaUploadMutation = useMutation({
+    mutationFn: async ({ subscriptionId, file }: { subscriptionId: number; file: File }) => {
+      const response = await apiRequest("POST", `/api/admin/registered-office/${subscriptionId}/upload-proof-of-address`, {
+        fileName: file.name,
+        contentType: file.type,
+      });
+      const data = await response.json();
+      await fetch(data.uploadUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type },
+      });
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/registered-office/proof-of-address-requests"] });
+      toast({ title: "Proof of address uploaded successfully" });
+      setPoaUploadDialogOpen(false);
+      setSelectedPoaRequest(null);
+      setPoaFileInput(null);
+    },
+    onError: () => {
+      toast({ title: "Failed to upload proof of address", variant: "destructive" });
+    },
+  });
+
+  const poaVerifyMutation = useMutation({
+    mutationFn: async (subscriptionId: number) => {
+      return apiRequest("POST", `/api/admin/registered-office/${subscriptionId}/verify-proof-of-address`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/registered-office/proof-of-address-requests"] });
+      toast({ title: "Proof of address verified successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to verify proof of address", variant: "destructive" });
+    },
+  });
+
+  const handlePreviewPoa = async (request: PoaRequest) => {
+    try {
+      const res = await apiRequest("GET", `/api/admin/registered-office/${request.subscription.id}/proof-of-address/view`);
+      const data = await res.json();
+      setPoaPreviewUrl(data.downloadUrl);
+      setSelectedPoaRequest(request);
+      setPoaPreviewDialogOpen(true);
+    } catch {
+      toast({ title: "Failed to load document preview", variant: "destructive" });
+    }
+  };
 
   const intakeMutation = useMutation({
     mutationFn: async (data: typeof intakeForm) => {
@@ -191,7 +282,20 @@ export default function AdminMailroom() {
     },
   });
 
-  const isLoading = loadingStats || loadingMail || loadingSubscriptions;
+  const isLoading = loadingStats || loadingMail || loadingSubscriptions || loadingPoa;
+
+  const getPoaStatusBadge = (status: string) => {
+    switch (status) {
+      case "pending":
+        return <Badge variant="outline" className="gap-1 border-yellow-500 text-yellow-600"><Clock className="h-3 w-3" />Pending</Badge>;
+      case "uploaded":
+        return <Badge variant="secondary" className="gap-1"><Upload className="h-3 w-3" />Uploaded</Badge>;
+      case "verified":
+        return <Badge className="gap-1 bg-primary"><CheckCircle2 className="h-3 w-3" />Verified</Badge>;
+      default:
+        return <Badge variant="secondary">{status}</Badge>;
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -359,6 +463,9 @@ export default function AdminMailroom() {
                 To Forward {(stats?.pendingForward ?? 0) > 0 && <Badge variant="secondary" className="ml-1">{stats?.pendingForward}</Badge>}
               </TabsTrigger>
               <TabsTrigger value="completed" data-testid="tab-completed">Completed</TabsTrigger>
+              <TabsTrigger value="proof_of_address" data-testid="tab-proof-of-address">
+                Proof of Address {poaRequests.length > 0 && <Badge variant="secondary" className="ml-1">{poaRequests.length}</Badge>}
+              </TabsTrigger>
             </TabsList>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -372,6 +479,103 @@ export default function AdminMailroom() {
             </div>
           </div>
 
+          {activeTab === "proof_of_address" ? (
+            <TabsContent value="proof_of_address" className="mt-4">
+              {poaRequests.length === 0 ? (
+                <EmptyState
+                  icon={FileText}
+                  title="No proof of address requests"
+                  description="No founders have confirmed their subscription for registered address use yet."
+                />
+              ) : (
+                <Card>
+                  <CardContent className="p-0">
+                    <div className="divide-y">
+                      {poaRequests.map((request) => (
+                        <div
+                          key={request.subscription.id}
+                          className="flex items-center justify-between p-4 gap-4"
+                          data-testid={`poa-row-${request.subscription.id}`}
+                        >
+                          <div className="flex items-start gap-4 min-w-0">
+                            <MapPin className="h-8 w-8 text-muted-foreground p-1.5 bg-muted rounded flex-shrink-0" />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-medium" data-testid={`poa-founder-name-${request.subscription.id}`}>
+                                  {request.founder.firstName} {request.founder.lastName}
+                                </p>
+                                <Badge variant="secondary">
+                                  {request.subscription.tier === "office_plus_mail" ? "Office + Mail" : "Office Only"}
+                                </Badge>
+                                <Badge variant={request.subscription.status === "active" ? "secondary" : "outline"}>
+                                  {request.subscription.status}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground" data-testid={`poa-email-${request.subscription.id}`}>
+                                {request.founder.email}
+                              </p>
+                              {request.address && (
+                                <p className="text-sm text-muted-foreground" data-testid={`poa-address-${request.subscription.id}`}>
+                                  {request.address.fullAddress || [request.address.street, request.address.city, request.address.state].filter(Boolean).join(", ")}
+                                </p>
+                              )}
+                              {request.subscription.registeredAddressConfirmedAt && (
+                                <p className="text-xs text-muted-foreground">
+                                  Confirmed: {new Date(request.subscription.registeredAddressConfirmedAt).toLocaleString()}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            {getPoaStatusBadge(request.subscription.proofOfAddressStatus)}
+                            <div className="flex items-center gap-1">
+                              {request.subscription.proofOfAddressStatus === "pending" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setSelectedPoaRequest(request);
+                                    setPoaFileInput(null);
+                                    setPoaUploadDialogOpen(true);
+                                  }}
+                                  data-testid={`button-upload-poa-${request.subscription.id}`}
+                                >
+                                  <Upload className="h-4 w-4 mr-1" />
+                                  Upload
+                                </Button>
+                              )}
+                              {(request.subscription.proofOfAddressStatus === "uploaded" || request.subscription.proofOfAddressStatus === "verified") && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handlePreviewPoa(request)}
+                                  data-testid={`button-preview-poa-${request.subscription.id}`}
+                                >
+                                  <Eye className="h-4 w-4 mr-1" />
+                                  Preview
+                                </Button>
+                              )}
+                              {request.subscription.proofOfAddressStatus === "uploaded" && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => poaVerifyMutation.mutate(request.subscription.id)}
+                                  disabled={poaVerifyMutation.isPending}
+                                  data-testid={`button-verify-poa-${request.subscription.id}`}
+                                >
+                                  <Shield className="h-4 w-4 mr-1" />
+                                  {poaVerifyMutation.isPending ? <LoadingSpinner size="sm" /> : "Verify"}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+          ) : (
           <TabsContent value={activeTab} className="mt-4">
             {filteredItems.length === 0 ? (
               <EmptyState
@@ -462,8 +666,99 @@ export default function AdminMailroom() {
               </Card>
             )}
           </TabsContent>
+          )}
         </Tabs>
       </div>
+
+      <Dialog open={poaUploadDialogOpen} onOpenChange={setPoaUploadDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upload Proof of Address</DialogTitle>
+            <DialogDescription>
+              Upload the utility bill for {selectedPoaRequest?.founder.firstName} {selectedPoaRequest?.founder.lastName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Document (PDF, JPEG, PNG, or WebP)</Label>
+              <Input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                onChange={(e) => setPoaFileInput(e.target.files?.[0] || null)}
+                data-testid="input-poa-file"
+              />
+              <p className="text-xs text-muted-foreground">
+                Upload the utility bill from the virtual office provider as proof of address
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPoaUploadDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (selectedPoaRequest && poaFileInput) {
+                  poaUploadMutation.mutate({
+                    subscriptionId: selectedPoaRequest.subscription.id,
+                    file: poaFileInput,
+                  });
+                }
+              }}
+              disabled={!poaFileInput || poaUploadMutation.isPending}
+              data-testid="button-submit-poa-upload"
+            >
+              {poaUploadMutation.isPending ? <LoadingSpinner size="sm" /> : "Upload"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={poaPreviewDialogOpen} onOpenChange={setPoaPreviewDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Proof of Address Preview</DialogTitle>
+            <DialogDescription>
+              Document for {selectedPoaRequest?.founder.firstName} {selectedPoaRequest?.founder.lastName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 min-h-[400px]">
+            {poaPreviewUrl ? (
+              poaPreviewUrl.match(/\.(jpg|jpeg|png|webp)/i) ? (
+                <img
+                  src={poaPreviewUrl}
+                  alt="Proof of address document"
+                  className="w-full h-auto rounded-md"
+                  data-testid="img-poa-preview"
+                />
+              ) : (
+                <iframe
+                  src={poaPreviewUrl}
+                  className="w-full h-[400px] rounded-md border"
+                  title="Proof of address document"
+                  data-testid="iframe-poa-preview"
+                />
+              )
+            ) : (
+              <div className="flex items-center justify-center h-[400px]">
+                <LoadingSpinner size="lg" />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            {poaPreviewUrl && (
+              <Button
+                variant="outline"
+                onClick={() => window.open(poaPreviewUrl, "_blank")}
+                className="gap-1"
+                data-testid="button-open-poa-new-tab"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Open in New Tab
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setPoaPreviewDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={intakeDialogOpen} onOpenChange={setIntakeDialogOpen}>
         <DialogContent>

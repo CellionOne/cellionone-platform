@@ -277,6 +277,33 @@ export async function registerRoutes(
   const authService = await import("./services/authService");
   const emailService = await import("./services/emailService");
   
+  app.get("/api/admin/proposals/bank-partnership", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateBankPartnershipProposalHTML } = await import("./templates/bank-partnership-proposal");
+      const puppeteer = await import("puppeteer");
+      const browser = await puppeteer.default.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+      const page = await browser.newPage();
+      const html = generateBankPartnershipProposalHTML();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '40px', right: '50px', bottom: '40px', left: '50px' },
+      });
+      await browser.close();
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="Cellion_One_Bank_Partnership_Proposal.pdf"');
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error("Error generating proposal PDF:", error);
+      res.status(500).json({ message: "Failed to generate PDF", error: error.message });
+    }
+  });
+
   // Debug endpoint to test email sending (temporary)
   app.get("/api/test-email", async (req, res) => {
     try {

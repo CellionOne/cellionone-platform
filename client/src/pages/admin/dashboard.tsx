@@ -14,6 +14,7 @@ import {
   TrendingUp,
   CheckCircle2,
   Clock,
+  Download,
 } from "lucide-react";
 
 interface AdminDashboardData {
@@ -44,12 +45,26 @@ export default function AdminDashboard() {
     <DashboardLayout role="admin" breadcrumbs={[{ label: "Dashboard" }]}>
       <div className="space-y-8">
         <div>
-          <h1 className="text-2xl font-bold">
-            Admin Dashboard
-          </h1>
-          <p className="text-muted-foreground">
-            Overview of platform activity and metrics
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold">
+                Admin Dashboard
+              </h1>
+              <p className="text-muted-foreground">
+                Overview of platform activity and metrics
+              </p>
+            </div>
+            <Button
+              data-testid="button-download-bank-proposal"
+              variant="outline"
+              onClick={() => {
+                window.open("/api/admin/proposals/bank-partnership", "_blank");
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Bank Proposal PDF
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (

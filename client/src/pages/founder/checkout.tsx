@@ -678,6 +678,9 @@ export default function CheckoutPage() {
               <p className="text-xs text-muted-foreground text-center">
                 You will be redirected to Paystack to complete your payment securely.
               </p>
+              <p className="text-xs text-muted-foreground text-center mt-1" data-testid="text-managed-service-note">
+                Your payment covers a fully managed service — our licensed lawyers handle all filings, follow-ups, and correspondence with government agencies on your behalf.
+              </p>
             </CardFooter>
           </Card>
         </div>

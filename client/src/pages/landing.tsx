@@ -349,6 +349,13 @@ export default function LandingPage() {
             <p className="text-center text-sm text-muted-foreground mt-8">
               All prices are in Nigerian Naira (NGN). A one-time identity verification fee of ₦10,000 per person applies to cover BVN/NIN validation, document verification, biometric checks, and AML screening.
             </p>
+
+            <div className="max-w-3xl mx-auto mt-10 p-6 rounded-xl border border-border bg-card/50" data-testid="card-managed-service-note">
+              <h3 className="text-sm font-semibold mb-2">Why use a managed service?</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                While the Corporate Affairs Commission (CAC) and other Nigerian agencies have digitised parts of their processes, company registration in Nigeria still requires in-person follow-ups, portal submissions/physical document submissions, and coordination with regulatory offices. Many registrations — including SCUML, TIN, and trademark filings — can technically be done by registering online or visiting the relevant offices yourself, but they often involve multiple trips, long wait times, and bureaucratic delays. What you're paying for is a managed service: our network of licensed lawyers handles all filings, follow-ups, and correspondence on your behalf so you don't have to.
+              </p>
+            </div>
           </div>
         </section>
 

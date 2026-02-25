@@ -347,7 +347,7 @@ export default function LandingPage() {
             </div>
             
             <p className="text-center text-sm text-muted-foreground mt-8">
-              All prices are in Nigerian Naira (NGN). A one-time identity verification fee of ₦5,000 applies for new users.
+              All prices are in Nigerian Naira (NGN). A one-time identity verification fee of ₦10,000 per person applies to cover BVN/NIN validation, document verification, biometric checks, and AML screening.
             </p>
           </div>
         </section>

@@ -98,7 +98,7 @@ export default function IdentityVerificationPage() {
                 <div className="rounded-lg border border-border p-4 space-y-3">
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-sm text-muted-foreground">Verification Fee (per person)</span>
-                    <span className="font-bold text-lg">{formatNgn(verificationInfo?.verificationFeePerPerson || 500000)}</span>
+                    <span className="font-bold text-lg">{formatNgn(verificationInfo?.verificationFeePerPerson || 1000000)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-sm text-muted-foreground">Persons needing verification</span>
@@ -201,7 +201,7 @@ export default function IdentityVerificationPage() {
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-                <span>The verification fee is {formatNgn(500000)} per person, added to your checkout</span>
+                <span>The verification fee is {formatNgn(1000000)} per person, added to your checkout</span>
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
@@ -212,6 +212,12 @@ export default function IdentityVerificationPage() {
                 <span>Protects both you and the legal professionals processing your requests</span>
               </li>
             </ul>
+            <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-border">
+              <p className="text-sm font-medium mb-2">Why do we charge for verification?</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Your {formatNgn(1000000)} verification fee covers a comprehensive 4-step identity check powered by Smile ID, a trusted third-party provider. This includes: (1) BVN/NIN validation against national databases, (2) government-issued ID document authenticity verification, (3) biometric selfie with liveness detection to confirm you are who you claim to be, and (4) AML and sanctions screening. These checks are required to comply with Nigerian regulatory standards and to give banks, the CAC, and other third parties full confidence in your identity.
+              </p>
+            </div>
           </CardContent>
         </Card>
 

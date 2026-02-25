@@ -58,7 +58,7 @@ export async function seedDatabase() {
       { sku: "TM", name: "Trademark Registration (2 Stages)", category: "post_incorporation", priceNgn: 25000000, cellionCutNgn: 3500000 },
       { sku: "TIN", name: "TIN Registration (FIRS)", category: "post_incorporation", priceNgn: 2000000, cellionCutNgn: 1000000, metadata: { note: "Price may vary by company location" } },
       { sku: "NGO", name: "Registration of Incorporated Trustees (NGO)", category: "incorporation", priceNgn: 25000000, cellionCutNgn: 4000000, metadata: { note: "Includes filing fees, newspaper publications, constitution and legal charges" } },
-      { sku: "VERIFY", name: "Identity & Company Verification", category: "verification", priceNgn: 500000, cellionCutNgn: 500000, metadata: { note: "One-time verification fee. Covers identity, company and document verification through trusted third-party verification providers." } },
+      { sku: "VERIFY", name: "Identity & Company Verification", category: "verification", priceNgn: 1000000, cellionCutNgn: 1000000, metadata: { note: "One-time verification fee per person. Covers BVN/NIN validation, government ID document verification, biometric selfie matching, and AML/sanctions screening through Smile ID." } },
     ];
     for (const item of catalogItems) {
       await db.insert(productCatalog).values(item).onConflictDoNothing();

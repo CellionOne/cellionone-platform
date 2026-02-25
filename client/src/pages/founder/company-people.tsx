@@ -566,7 +566,7 @@ function PeopleList() {
       ))}
 
       <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-4 rounded-lg text-sm text-blue-800 dark:text-blue-300">
-        <strong>How it works:</strong> Each person you invite receives an email with a link to create their Cellion One account. Once they sign up and complete their personal profile, they can be individually verified. A verification fee of NGN 5,000 per person applies and will be included in your checkout total.
+        <strong>How it works:</strong> Each person you invite receives an email with a link to create their Cellion One account. Once they sign up and complete their personal profile, they can be individually verified. A verification fee of NGN 10,000 per person applies and will be included in your checkout total. This covers BVN/NIN validation, document verification, biometric selfie matching, and AML screening.
       </div>
     </div>
   );

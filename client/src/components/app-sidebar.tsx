@@ -38,6 +38,7 @@ import {
   Briefcase,
   ShoppingCart,
   Share2,
+  ShieldCheck,
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
 
@@ -62,6 +63,7 @@ const founderItems: NavItem[] = [
   { title: "Mail Handling", url: "/founder/mail", icon: Mail },
   { title: "Legal AI", url: "/founder/legal-assistant", icon: MessageSquare },
   { title: "Data Sharing", url: "/founder/data-sharing", icon: Share2 },
+  { title: "KYC Service", url: "/kyc/orgs", icon: ShieldCheck },
   { title: "Services & Checkout", url: "/founder/checkout", icon: ShoppingCart },
   { title: "Settings", url: "/settings", icon: Settings },
 ];

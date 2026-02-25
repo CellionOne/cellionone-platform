@@ -1,0 +1,1796 @@
+import type { Express, Request, Response, NextFunction } from "express";
+import { db } from "../db";
+import { eq, and, desc, asc, or, ilike, sql, count, isNull } from "drizzle-orm";
+import { z } from "zod";
+import crypto from "crypto";
+import {
+  kycOrganisations, kycOrgMembers, kycVerificationTemplates,
+  kycDocumentRequirements, kycVerificationRequests,
+  kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
+  type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
+  type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
+  type KycDocumentRequirement, type KycVerificationTemplate,
+} from "@shared/schema";
+import { isAuthenticated } from "../replit_integrations/auth";
+import { ObjectStorageService } from "../replit_integrations/object_storage";
+import { getResendClient } from "../services/emailService";
+import { getPaystackPrice } from "../config/priceBook";
+
+const TERMS_VERSION = "1.0";
+const objectStorageService = new ObjectStorageService();
+
+function getUserId(req: any): string {
+  return req.user?.claims?.sub;
+}
+
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 100);
+}
+
+function generateToken(): string {
+  return crypto.randomBytes(48).toString("hex");
+}
+
+async function getOrgMembership(orgId: number, userId: string): Promise<KycOrgMember | undefined> {
+  const [member] = await db
+    .select()
+    .from(kycOrgMembers)
+    .where(and(eq(kycOrgMembers.orgId, orgId), eq(kycOrgMembers.userId, userId), eq(kycOrgMembers.inviteStatus, "accepted")));
+  return member;
+}
+
+function requireOrgMember(allowedRoles?: string[]) {
+  return async (req: any, res: Response, next: NextFunction) => {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const orgId = parseInt(req.params.id);
+    if (isNaN(orgId)) return res.status(400).json({ message: "Invalid org ID" });
+
+    const member = await getOrgMembership(orgId, userId);
+    if (!member) return res.status(403).json({ message: "Not a member of this organisation" });
+
+    if (allowedRoles && !allowedRoles.includes(member.role)) {
+      return res.status(403).json({ message: `Requires one of: ${allowedRoles.join(", ")}` });
+    }
+
+    (req as any).orgMember = member;
+    next();
+  };
+}
+
+function calculateRiskScore(docs: KycSubmittedDocument[], requirements: KycDocumentRequirement[], people?: KycSupplierPerson[]): string {
+  const mandatoryReqs = requirements.filter(r => r.isMandatory && r.isActive);
+  const mandatoryReqIds = new Set(mandatoryReqs.map(r => r.id));
+
+  const submittedForMandatory = docs.filter(d => mandatoryReqIds.has(d.requirementId));
+  const allMandatorySubmitted = mandatoryReqs.every(r => docs.some(d => d.requirementId === r.id));
+  const allMandatoryAccepted = mandatoryReqs.every(r => docs.some(d => d.requirementId === r.id && d.status === "accepted"));
+
+  const now = new Date();
+  const thirtyDays = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const hasExpired = docs.some(d => d.expiryDate && new Date(d.expiryDate) < now);
+  const hasExpiringSoon = docs.some(d => d.expiryDate && new Date(d.expiryDate) < thirtyDays && new Date(d.expiryDate) >= now);
+
+  const peopleFailed = people?.some(p => p.verificationStatus === "failed");
+  const peopleAllVerified = !people?.length || people.filter(p => p.requiresVerification).every(p => p.verificationStatus === "verified");
+
+  if (!allMandatorySubmitted || hasExpired || peopleFailed) return "red";
+  if (!allMandatoryAccepted || hasExpiringSoon || !peopleAllVerified) return "amber";
+  return "green";
+}
+
+async function sendKycEmail(to: string, subject: string, html: string) {
+  try {
+    const { client, fromEmail } = await getResendClient();
+    await client.emails.send({ from: fromEmail, to, subject, html });
+  } catch (error) {
+    console.error("[KYC Email] Failed to send:", error);
+  }
+}
+
+export function registerKycServiceRoutes(app: Express) {
+
+  // ==================== ORGANISATION MANAGEMENT (T002) ====================
+
+  app.post("/api/kyc-service/organisations", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const schema = z.object({
+        name: z.string().min(2).max(255),
+        category: z.enum(["corporate", "government", "ngo", "educational"]),
+        contactEmail: z.string().email(),
+        contactPhone: z.string().optional(),
+        address: z.string().optional(),
+        termsAccepted: z.literal(true, { errorMap: () => ({ message: "You must accept the KYC Service Agreement" }) }),
+      });
+
+      const data = schema.parse(req.body);
+      let slug = slugify(data.name);
+
+      const [existing] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.slug, slug));
+      if (existing) slug = `${slug}-${Date.now().toString(36)}`;
+
+      const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "unknown";
+
+      const [org] = await db.insert(kycOrganisations).values({
+        name: data.name,
+        slug,
+        category: data.category,
+        contactEmail: data.contactEmail,
+        contactPhone: data.contactPhone || null,
+        address: data.address || null,
+        createdByUserId: userId,
+        status: "active",
+        settings: {},
+        employeePortalEnabled: true,
+        supplierPortalEnabled: true,
+        termsAcceptedAt: new Date(),
+        termsVersion: TERMS_VERSION,
+        termsAcceptedByUserId: userId,
+        termsAcceptedIp: clientIp,
+      }).returning();
+
+      await db.insert(kycOrgMembers).values({
+        orgId: org.id,
+        userId,
+        role: "org_admin",
+        inviteEmail: data.contactEmail,
+        inviteStatus: "accepted",
+      });
+
+      res.status(201).json(org);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Create org error:", error);
+      res.status(500).json({ message: "Failed to create organisation" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const memberships = await db.select().from(kycOrgMembers)
+        .where(and(eq(kycOrgMembers.userId, userId), eq(kycOrgMembers.inviteStatus, "accepted")));
+
+      if (!memberships.length) return res.json([]);
+
+      const orgIds = memberships.map(m => m.orgId);
+      const orgs = await db.select().from(kycOrganisations)
+        .where(sql`${kycOrganisations.id} IN (${sql.join(orgIds.map(id => sql`${id}`), sql`, `)})`);
+
+      const orgsWithRole = orgs.map(org => ({
+        ...org,
+        memberRole: memberships.find(m => m.orgId === org.id)?.role,
+      }));
+
+      res.json(orgsWithRole);
+    } catch (error: any) {
+      console.error("[KYC] List orgs error:", error);
+      res.status(500).json({ message: "Failed to list organisations" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations/:id", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      if (!org) return res.status(404).json({ message: "Organisation not found" });
+
+      const members = await db.select().from(kycOrgMembers).where(eq(kycOrgMembers.orgId, orgId));
+
+      const [stats] = await db.select({
+        total: count(),
+        pending: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} IN ('pending_invite', 'pending_payment', 'in_progress', 'documents_submitted'))`,
+        underReview: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'under_review')`,
+        verified: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'verified')`,
+        rejected: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'rejected')`,
+        expired: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.status} = 'expired')`,
+        riskGreen: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.riskScore} = 'green')`,
+        riskAmber: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.riskScore} = 'amber')`,
+        riskRed: sql<number>`COUNT(*) FILTER (WHERE ${kycVerificationRequests.riskScore} = 'red')`,
+      }).from(kycVerificationRequests).where(eq(kycVerificationRequests.orgId, orgId));
+
+      res.json({ ...org, members, stats });
+    } catch (error: any) {
+      console.error("[KYC] Get org error:", error);
+      res.status(500).json({ message: "Failed to get organisation" });
+    }
+  });
+
+  app.patch("/api/kyc-service/organisations/:id", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const schema = z.object({
+        name: z.string().min(2).max(255).optional(),
+        contactEmail: z.string().email().optional(),
+        contactPhone: z.string().optional(),
+        address: z.string().optional(),
+        logoPath: z.string().optional(),
+        settings: z.record(z.unknown()).optional(),
+        employeePortalEnabled: z.boolean().optional(),
+        supplierPortalEnabled: z.boolean().optional(),
+      });
+
+      const data = schema.parse(req.body);
+      const [updated] = await db.update(kycOrganisations)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(kycOrganisations.id, orgId))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Update org error:", error);
+      res.status(500).json({ message: "Failed to update organisation" });
+    }
+  });
+
+  // ---- Org Members ----
+
+  app.post("/api/kyc-service/organisations/:id/members", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const schema = z.object({
+        email: z.string().email(),
+        role: z.enum(["org_admin", "org_reviewer", "org_viewer"]),
+      });
+      const data = schema.parse(req.body);
+
+      const [existingMember] = await db.select().from(kycOrgMembers)
+        .where(and(eq(kycOrgMembers.orgId, orgId), eq(kycOrgMembers.inviteEmail, data.email)));
+      if (existingMember) return res.status(409).json({ message: "Member already invited" });
+
+      const inviteToken = generateToken();
+      const [member] = await db.insert(kycOrgMembers).values({
+        orgId,
+        role: data.role,
+        inviteEmail: data.email,
+        inviteStatus: "pending",
+        inviteToken,
+      }).returning();
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      await sendKycEmail(data.email, `You've been invited to ${org?.name || "an organisation"} on Cellion One`,
+        `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#0d9668;">You've Been Invited</h2>
+          <p>${org?.name || "An organisation"} has invited you to join their KYC verification team on Cellion One as a <strong>${data.role.replace("org_", "")}</strong>.</p>
+          <a href="${baseUrl}/kyc/org-invite/${inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Accept Invitation</a>
+          <p style="color:#666;font-size:12px;">If you didn't expect this invitation, you can safely ignore this email.</p>
+        </div>`
+      );
+
+      res.status(201).json(member);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Invite member error:", error);
+      res.status(500).json({ message: "Failed to invite member" });
+    }
+  });
+
+  app.post("/api/kyc-service/org-invite/:token/accept", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const [member] = await db.select().from(kycOrgMembers)
+        .where(and(eq(kycOrgMembers.inviteToken, req.params.token), eq(kycOrgMembers.inviteStatus, "pending")));
+      if (!member) return res.status(404).json({ message: "Invite not found or already accepted" });
+
+      const [updated] = await db.update(kycOrgMembers)
+        .set({ userId, inviteStatus: "accepted", inviteToken: null })
+        .where(eq(kycOrgMembers.id, member.id))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[KYC] Accept invite error:", error);
+      res.status(500).json({ message: "Failed to accept invite" });
+    }
+  });
+
+  app.delete("/api/kyc-service/organisations/:id/members/:memberId", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const memberId = parseInt(req.params.memberId);
+      const orgId = parseInt(req.params.id);
+
+      const [member] = await db.select().from(kycOrgMembers)
+        .where(and(eq(kycOrgMembers.id, memberId), eq(kycOrgMembers.orgId, orgId)));
+      if (!member) return res.status(404).json({ message: "Member not found" });
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      if (org && member.userId === org.createdByUserId) {
+        return res.status(400).json({ message: "Cannot remove the organisation creator" });
+      }
+
+      await db.delete(kycOrgMembers).where(eq(kycOrgMembers.id, memberId));
+      res.json({ message: "Member removed" });
+    } catch (error: any) {
+      console.error("[KYC] Remove member error:", error);
+      res.status(500).json({ message: "Failed to remove member" });
+    }
+  });
+
+  // ---- Document Requirements ----
+
+  app.get("/api/kyc-service/organisations/:id/document-requirements", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const typeFilter = req.query.type as string | undefined;
+
+      let query = db.select().from(kycDocumentRequirements)
+        .where(
+          and(
+            or(eq(kycDocumentRequirements.orgId, orgId), isNull(kycDocumentRequirements.orgId)),
+            eq(kycDocumentRequirements.isActive, true),
+            typeFilter ? eq(kycDocumentRequirements.type, typeFilter) : undefined
+          )
+        )
+        .orderBy(asc(kycDocumentRequirements.documentCategory), asc(kycDocumentRequirements.documentName));
+
+      const requirements = await query;
+      res.json(requirements);
+    } catch (error: any) {
+      console.error("[KYC] List requirements error:", error);
+      res.status(500).json({ message: "Failed to list requirements" });
+    }
+  });
+
+  app.post("/api/kyc-service/organisations/:id/document-requirements", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const schema = z.object({
+        type: z.enum(["individual", "supplier"]),
+        documentName: z.string().min(2).max(255),
+        documentDescription: z.string().optional(),
+        documentCategory: z.enum(["registration", "tax", "financial", "identity", "compliance", "other"]),
+        isMandatory: z.boolean().default(true),
+        hasExpiry: z.boolean().default(false),
+      });
+      const data = schema.parse(req.body);
+
+      const [requirement] = await db.insert(kycDocumentRequirements).values({
+        orgId,
+        ...data,
+        documentDescription: data.documentDescription || null,
+        isStandard: false,
+        isActive: true,
+      }).returning();
+
+      res.status(201).json(requirement);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Create requirement error:", error);
+      res.status(500).json({ message: "Failed to create requirement" });
+    }
+  });
+
+  app.patch("/api/kyc-service/organisations/:id/document-requirements/:reqId", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const reqId = parseInt(req.params.reqId);
+      const orgId = parseInt(req.params.id);
+
+      const [existing] = await db.select().from(kycDocumentRequirements).where(eq(kycDocumentRequirements.id, reqId));
+      if (!existing) return res.status(404).json({ message: "Requirement not found" });
+      if (existing.isStandard && existing.orgId === null) {
+        return res.status(400).json({ message: "Cannot modify standard platform requirements" });
+      }
+
+      const schema = z.object({
+        isMandatory: z.boolean().optional(),
+        isActive: z.boolean().optional(),
+        hasExpiry: z.boolean().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const [updated] = await db.update(kycDocumentRequirements).set(data).where(eq(kycDocumentRequirements.id, reqId)).returning();
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Update requirement error:", error);
+      res.status(500).json({ message: "Failed to update requirement" });
+    }
+  });
+
+  app.delete("/api/kyc-service/organisations/:id/document-requirements/:reqId", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const reqId = parseInt(req.params.reqId);
+      const [existing] = await db.select().from(kycDocumentRequirements).where(eq(kycDocumentRequirements.id, reqId));
+      if (!existing) return res.status(404).json({ message: "Requirement not found" });
+      if (existing.isStandard) return res.status(400).json({ message: "Cannot delete standard requirements" });
+
+      await db.delete(kycDocumentRequirements).where(eq(kycDocumentRequirements.id, reqId));
+      res.json({ message: "Requirement deleted" });
+    } catch (error: any) {
+      console.error("[KYC] Delete requirement error:", error);
+      res.status(500).json({ message: "Failed to delete requirement" });
+    }
+  });
+
+  // ---- Verification Templates ----
+
+  app.get("/api/kyc-service/organisations/:id/templates", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const templates = await db.select().from(kycVerificationTemplates)
+        .where(eq(kycVerificationTemplates.orgId, orgId))
+        .orderBy(asc(kycVerificationTemplates.name));
+      res.json(templates);
+    } catch (error: any) {
+      console.error("[KYC] List templates error:", error);
+      res.status(500).json({ message: "Failed to list templates" });
+    }
+  });
+
+  app.post("/api/kyc-service/organisations/:id/templates", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const schema = z.object({
+        name: z.string().min(2).max(255),
+        type: z.enum(["individual", "supplier"]),
+        description: z.string().optional(),
+        requireDirectorVerification: z.boolean().default(false),
+        documentRequirementIds: z.array(z.number()).default([]),
+        isDefault: z.boolean().default(false),
+      });
+      const data = schema.parse(req.body);
+
+      if (data.isDefault) {
+        await db.update(kycVerificationTemplates)
+          .set({ isDefault: false })
+          .where(and(eq(kycVerificationTemplates.orgId, orgId), eq(kycVerificationTemplates.type, data.type)));
+      }
+
+      const [template] = await db.insert(kycVerificationTemplates).values({
+        orgId,
+        ...data,
+        description: data.description || null,
+      }).returning();
+
+      res.status(201).json(template);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Create template error:", error);
+      res.status(500).json({ message: "Failed to create template" });
+    }
+  });
+
+  app.patch("/api/kyc-service/organisations/:id/templates/:tid", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const tid = parseInt(req.params.tid);
+      const orgId = parseInt(req.params.id);
+
+      const schema = z.object({
+        name: z.string().min(2).max(255).optional(),
+        description: z.string().optional(),
+        requireDirectorVerification: z.boolean().optional(),
+        documentRequirementIds: z.array(z.number()).optional(),
+        isDefault: z.boolean().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      if (data.isDefault) {
+        const [existing] = await db.select().from(kycVerificationTemplates).where(eq(kycVerificationTemplates.id, tid));
+        if (existing) {
+          await db.update(kycVerificationTemplates)
+            .set({ isDefault: false })
+            .where(and(eq(kycVerificationTemplates.orgId, orgId), eq(kycVerificationTemplates.type, existing.type)));
+        }
+      }
+
+      const [updated] = await db.update(kycVerificationTemplates)
+        .set(data)
+        .where(and(eq(kycVerificationTemplates.id, tid), eq(kycVerificationTemplates.orgId, orgId)))
+        .returning();
+
+      if (!updated) return res.status(404).json({ message: "Template not found" });
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Update template error:", error);
+      res.status(500).json({ message: "Failed to update template" });
+    }
+  });
+
+  app.delete("/api/kyc-service/organisations/:id/templates/:tid", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const tid = parseInt(req.params.tid);
+      const orgId = parseInt(req.params.id);
+      const result = await db.delete(kycVerificationTemplates)
+        .where(and(eq(kycVerificationTemplates.id, tid), eq(kycVerificationTemplates.orgId, orgId)));
+      res.json({ message: "Template deleted" });
+    } catch (error: any) {
+      console.error("[KYC] Delete template error:", error);
+      res.status(500).json({ message: "Failed to delete template" });
+    }
+  });
+
+  // ==================== VERIFICATION REQUESTS (T003) ====================
+
+  app.post("/api/kyc-service/organisations/:id/verification-requests", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const userId = getUserId(req);
+
+      const schema = z.object({
+        type: z.enum(["individual", "supplier"]),
+        subjectEmail: z.string().email(),
+        subjectName: z.string().min(1).max(255),
+        templateId: z.number().optional(),
+        expiresInDays: z.number().min(1).max(365).default(30),
+        notes: z.string().optional(),
+        paymentResponsibility: z.enum(["organisation", "subject"]).default("organisation"),
+      });
+      const data = schema.parse(req.body);
+
+      const inviteToken = generateToken();
+      const expiresAt = new Date(Date.now() + data.expiresInDays * 24 * 60 * 60 * 1000);
+
+      const paymentStatus = data.paymentResponsibility === "organisation" ? "not_required" : "pending";
+
+      const [request] = await db.insert(kycVerificationRequests).values({
+        orgId,
+        templateId: data.templateId || null,
+        requestedByUserId: userId,
+        type: data.type,
+        status: "pending_invite",
+        subjectEmail: data.subjectEmail,
+        subjectName: data.subjectName,
+        notes: data.notes || null,
+        paymentResponsibility: data.paymentResponsibility,
+        paymentStatus,
+        inviteToken,
+        expiresAt,
+      }).returning();
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const typeLabel = data.type === "individual" ? "employee identity verification" : "supplier due diligence verification";
+
+      await sendKycEmail(data.subjectEmail, `${org?.name || "An organisation"} has requested you to complete verification via Cellion One`,
+        `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#0d9668;">Verification Request</h2>
+          <p><strong>${org?.name || "An organisation"}</strong> has requested you to complete ${typeLabel} via Cellion One.</p>
+          <p>Please click the link below to begin the verification process. This link expires on <strong>${expiresAt.toLocaleDateString("en-NG", { dateStyle: "long" })}</strong>.</p>
+          <a href="${baseUrl}/kyc/verify/${inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Begin Verification</a>
+          <p style="color:#666;font-size:12px;">If you didn't expect this request, please contact ${org?.contactEmail || "the requesting organisation"}.</p>
+        </div>`
+      );
+
+      res.status(201).json(request);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Create request error:", error);
+      res.status(500).json({ message: "Failed to create verification request" });
+    }
+  });
+
+  app.post("/api/kyc-service/organisations/:id/verification-requests/bulk", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const userId = getUserId(req);
+
+      const schema = z.object({
+        entries: z.array(z.object({
+          name: z.string().min(1),
+          email: z.string().email(),
+        })).min(1).max(500),
+        type: z.enum(["individual", "supplier"]),
+        templateId: z.number().optional(),
+        paymentResponsibility: z.enum(["organisation", "subject"]).default("organisation"),
+        expiresInDays: z.number().min(1).max(365).default(30),
+      });
+      const data = schema.parse(req.body);
+
+      const expiresAt = new Date(Date.now() + data.expiresInDays * 24 * 60 * 60 * 1000);
+      const paymentStatus = data.paymentResponsibility === "organisation" ? "not_required" : "pending";
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+      const created: KycVerificationRequest[] = [];
+
+      for (const entry of data.entries) {
+        const inviteToken = generateToken();
+        const [request] = await db.insert(kycVerificationRequests).values({
+          orgId,
+          templateId: data.templateId || null,
+          requestedByUserId: userId,
+          type: data.type,
+          status: "pending_invite",
+          subjectEmail: entry.email,
+          subjectName: entry.name,
+          paymentResponsibility: data.paymentResponsibility,
+          paymentStatus,
+          inviteToken,
+          expiresAt,
+        }).returning();
+        created.push(request);
+
+        await sendKycEmail(entry.email, `${org?.name || "An organisation"} has requested you to complete verification via Cellion One`,
+          `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+            <h2 style="color:#0d9668;">Verification Request</h2>
+            <p><strong>${org?.name || "An organisation"}</strong> has requested you to complete verification via Cellion One.</p>
+            <a href="${baseUrl}/kyc/verify/${inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Begin Verification</a>
+          </div>`
+        );
+      }
+
+      res.status(201).json({ created: created.length, requests: created });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Bulk create error:", error);
+      res.status(500).json({ message: "Failed to create bulk requests" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations/:id/verification-requests", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const { type, status, riskScore, search, page = "1", limit = "20" } = req.query as Record<string, string>;
+
+      const conditions = [eq(kycVerificationRequests.orgId, orgId)];
+      if (type) conditions.push(eq(kycVerificationRequests.type, type));
+      if (status) conditions.push(eq(kycVerificationRequests.status, status));
+      if (riskScore) conditions.push(eq(kycVerificationRequests.riskScore, riskScore));
+      if (search) {
+        conditions.push(
+          or(
+            ilike(kycVerificationRequests.subjectName, `%${search}%`),
+            ilike(kycVerificationRequests.subjectEmail, `%${search}%`)
+          )!
+        );
+      }
+
+      const offset = (parseInt(page) - 1) * parseInt(limit);
+      const requests = await db.select().from(kycVerificationRequests)
+        .where(and(...conditions))
+        .orderBy(desc(kycVerificationRequests.createdAt))
+        .limit(parseInt(limit))
+        .offset(offset);
+
+      const [countResult] = await db.select({ total: count() }).from(kycVerificationRequests).where(and(...conditions));
+
+      res.json({ requests, total: countResult?.total || 0, page: parseInt(page), limit: parseInt(limit) });
+    } catch (error: any) {
+      console.error("[KYC] List requests error:", error);
+      res.status(500).json({ message: "Failed to list verification requests" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations/:id/verification-requests/:reqId", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const reqId = parseInt(req.params.reqId);
+
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(and(eq(kycVerificationRequests.id, reqId), eq(kycVerificationRequests.orgId, orgId)));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const documents = await db.select().from(kycSubmittedDocuments)
+        .where(eq(kycSubmittedDocuments.verificationRequestId, reqId));
+
+      const requirements = await db.select().from(kycDocumentRequirements)
+        .where(and(
+          or(eq(kycDocumentRequirements.orgId, orgId), isNull(kycDocumentRequirements.orgId)),
+          eq(kycDocumentRequirements.type, request.type),
+          eq(kycDocumentRequirements.isActive, true)
+        ));
+
+      let supplierProfile: KycSupplierProfile | undefined;
+      let people: KycSupplierPerson[] = [];
+
+      if (request.type === "supplier") {
+        const [profile] = await db.select().from(kycSupplierProfiles)
+          .where(eq(kycSupplierProfiles.verificationRequestId, reqId));
+        supplierProfile = profile;
+
+        if (profile) {
+          people = await db.select().from(kycSupplierPeople)
+            .where(eq(kycSupplierPeople.supplierProfileId, profile.id));
+        }
+      }
+
+      const docsWithUrls = await Promise.all(documents.map(async (doc) => {
+        try {
+          const downloadUrl = await objectStorageService.getObjectEntityDownloadURL(doc.filePath);
+          return { ...doc, downloadUrl };
+        } catch {
+          return { ...doc, downloadUrl: null };
+        }
+      }));
+
+      res.json({ ...request, documents: docsWithUrls, requirements, supplierProfile, people });
+    } catch (error: any) {
+      console.error("[KYC] Get request detail error:", error);
+      res.status(500).json({ message: "Failed to get verification request" });
+    }
+  });
+
+  app.patch("/api/kyc-service/organisations/:id/verification-requests/:reqId/review", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const reqId = parseInt(req.params.reqId);
+      const userId = getUserId(req);
+
+      const schema = z.object({
+        action: z.enum(["approve", "reject"]),
+        reviewNotes: z.string().optional(),
+        documentReviews: z.array(z.object({
+          documentId: z.number(),
+          status: z.enum(["accepted", "rejected"]),
+          reviewNote: z.string().optional(),
+        })).optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(and(eq(kycVerificationRequests.id, reqId), eq(kycVerificationRequests.orgId, orgId)));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      if (data.documentReviews) {
+        for (const review of data.documentReviews) {
+          await db.update(kycSubmittedDocuments)
+            .set({
+              status: review.status,
+              reviewNote: review.reviewNote || null,
+              reviewedByUserId: userId,
+              reviewedAt: new Date(),
+            })
+            .where(and(
+              eq(kycSubmittedDocuments.id, review.documentId),
+              eq(kycSubmittedDocuments.verificationRequestId, reqId)
+            ));
+        }
+      }
+
+      const newStatus = data.action === "approve" ? "verified" : "rejected";
+
+      const documents = await db.select().from(kycSubmittedDocuments)
+        .where(eq(kycSubmittedDocuments.verificationRequestId, reqId));
+      const requirements = await db.select().from(kycDocumentRequirements)
+        .where(and(
+          or(eq(kycDocumentRequirements.orgId, orgId), isNull(kycDocumentRequirements.orgId)),
+          eq(kycDocumentRequirements.type, request.type),
+          eq(kycDocumentRequirements.isActive, true)
+        ));
+
+      let people: KycSupplierPerson[] = [];
+      if (request.type === "supplier") {
+        const [profile] = await db.select().from(kycSupplierProfiles)
+          .where(eq(kycSupplierProfiles.verificationRequestId, reqId));
+        if (profile) {
+          people = await db.select().from(kycSupplierPeople).where(eq(kycSupplierPeople.supplierProfileId, profile.id));
+        }
+      }
+
+      const riskScore = calculateRiskScore(documents, requirements, people);
+
+      const [updated] = await db.update(kycVerificationRequests)
+        .set({
+          status: newStatus,
+          reviewedByUserId: userId,
+          reviewedAt: new Date(),
+          reviewNotes: data.reviewNotes || null,
+          riskScore,
+          updatedAt: new Date(),
+        })
+        .where(eq(kycVerificationRequests.id, reqId))
+        .returning();
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      const statusLabel = data.action === "approve" ? "approved" : "requires attention";
+      await sendKycEmail(request.subjectEmail,
+        data.action === "approve"
+          ? `Your verification has been approved by ${org?.name || "the organisation"}`
+          : `Your verification for ${org?.name || "the organisation"} requires attention`,
+        `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:${data.action === "approve" ? "#0d9668" : "#dc2626"};">Verification ${data.action === "approve" ? "Approved" : "Needs Attention"}</h2>
+          <p>Your verification with <strong>${org?.name || "the organisation"}</strong> has been ${statusLabel}.</p>
+          ${data.reviewNotes ? `<p><strong>Reviewer notes:</strong> ${data.reviewNotes}</p>` : ""}
+        </div>`
+      );
+
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Review request error:", error);
+      res.status(500).json({ message: "Failed to review request" });
+    }
+  });
+
+  app.post("/api/kyc-service/organisations/:id/verification-requests/:reqId/resend-invite", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const reqId = parseInt(req.params.reqId);
+
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(and(eq(kycVerificationRequests.id, reqId), eq(kycVerificationRequests.orgId, orgId)));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+      await sendKycEmail(request.subjectEmail, `Reminder: ${org?.name || "An organisation"} needs you to complete verification`,
+        `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#0d9668;">Verification Reminder</h2>
+          <p><strong>${org?.name || "An organisation"}</strong> is waiting for you to complete your verification on Cellion One.</p>
+          <a href="${baseUrl}/kyc/verify/${request.inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Complete Verification</a>
+        </div>`
+      );
+
+      res.json({ message: "Invite resent" });
+    } catch (error: any) {
+      console.error("[KYC] Resend invite error:", error);
+      res.status(500).json({ message: "Failed to resend invite" });
+    }
+  });
+
+  // ==================== SUBJECT-FACING ENDPOINTS ====================
+
+  app.get("/api/kyc-service/verify-request/:token", async (req: any, res: Response) => {
+    try {
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Verification request not found" });
+
+      if (new Date(request.expiresAt) < new Date()) {
+        return res.status(410).json({ message: "This verification request has expired" });
+      }
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, request.orgId));
+
+      const requirements = await db.select().from(kycDocumentRequirements)
+        .where(and(
+          or(eq(kycDocumentRequirements.orgId, request.orgId), isNull(kycDocumentRequirements.orgId)),
+          eq(kycDocumentRequirements.type, request.type),
+          eq(kycDocumentRequirements.isActive, true)
+        ));
+
+      const documents = await db.select().from(kycSubmittedDocuments)
+        .where(eq(kycSubmittedDocuments.verificationRequestId, request.id));
+
+      let supplierProfile: KycSupplierProfile | undefined;
+      let people: KycSupplierPerson[] = [];
+
+      if (request.type === "supplier") {
+        const [profile] = await db.select().from(kycSupplierProfiles)
+          .where(eq(kycSupplierProfiles.verificationRequestId, request.id));
+        supplierProfile = profile;
+        if (profile) {
+          people = await db.select().from(kycSupplierPeople)
+            .where(eq(kycSupplierPeople.supplierProfileId, profile.id));
+        }
+      }
+
+      res.json({
+        request: {
+          id: request.id,
+          type: request.type,
+          status: request.status,
+          subjectName: request.subjectName,
+          subjectEmail: request.subjectEmail,
+          paymentResponsibility: request.paymentResponsibility,
+          paymentStatus: request.paymentStatus,
+          termsAcceptedAt: request.termsAcceptedAt,
+          expiresAt: request.expiresAt,
+          selfRegistered: request.selfRegistered,
+        },
+        organisation: org ? {
+          id: org.id,
+          name: org.name,
+          logoPath: org.logoPath,
+          contactEmail: org.contactEmail,
+        } : null,
+        requirements,
+        documents,
+        supplierProfile,
+        people,
+      });
+    } catch (error: any) {
+      console.error("[KYC] Get verify request error:", error);
+      res.status(500).json({ message: "Failed to get verification request" });
+    }
+  });
+
+  app.post("/api/kyc-service/verify-request/:token/accept", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const schema = z.object({
+        termsAccepted: z.literal(true, { errorMap: () => ({ message: "You must accept the Verification Consent & Terms" }) }),
+      });
+      schema.parse(req.body);
+
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Verification request not found" });
+
+      if (new Date(request.expiresAt) < new Date()) {
+        return res.status(410).json({ message: "This verification request has expired" });
+      }
+
+      if (request.subjectUserId && request.subjectUserId !== userId) {
+        return res.status(403).json({ message: "This request is linked to a different user" });
+      }
+
+      const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "unknown";
+
+      const newStatus = request.paymentStatus === "pending" ? "pending_payment" : "in_progress";
+
+      const [updated] = await db.update(kycVerificationRequests)
+        .set({
+          subjectUserId: userId,
+          status: newStatus,
+          termsAcceptedAt: new Date(),
+          termsVersion: TERMS_VERSION,
+          termsAcceptedIp: clientIp,
+          updatedAt: new Date(),
+        })
+        .where(eq(kycVerificationRequests.id, request.id))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Accept request error:", error);
+      res.status(500).json({ message: "Failed to accept request" });
+    }
+  });
+
+  app.post("/api/kyc-service/verify-request/:token/supplier-profile", async (req: any, res: Response) => {
+    try {
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      if (request.type !== "supplier") return res.status(400).json({ message: "Not a supplier verification" });
+      if (!request.termsAcceptedAt) return res.status(403).json({ message: "Terms must be accepted first" });
+
+      const schema = z.object({
+        companyName: z.string().min(1).max(255),
+        rcNumber: z.string().optional(),
+        tinNumber: z.string().optional(),
+        vatRegistered: z.boolean().default(false),
+        yearEstablished: z.number().optional(),
+        industryCategory: z.string().optional(),
+        headOfficeAddress: z.string().optional(),
+        websiteUrl: z.string().optional(),
+        contactPersonName: z.string().min(1).max(255),
+        contactPersonEmail: z.string().email(),
+        contactPersonPhone: z.string().optional(),
+        contactPersonRole: z.string().optional(),
+        bankName: z.string().optional(),
+        bankAccountNumber: z.string().optional(),
+        bankAccountName: z.string().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const [existing] = await db.select().from(kycSupplierProfiles)
+        .where(eq(kycSupplierProfiles.verificationRequestId, request.id));
+
+      let profile: KycSupplierProfile;
+      if (existing) {
+        const [updated] = await db.update(kycSupplierProfiles)
+          .set({ ...data, updatedAt: new Date() })
+          .where(eq(kycSupplierProfiles.id, existing.id))
+          .returning();
+        profile = updated;
+      } else {
+        const [created] = await db.insert(kycSupplierProfiles)
+          .values({ verificationRequestId: request.id, ...data })
+          .returning();
+        profile = created;
+      }
+
+      res.json(profile);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Supplier profile error:", error);
+      res.status(500).json({ message: "Failed to save supplier profile" });
+    }
+  });
+
+  app.post("/api/kyc-service/verify-request/:token/documents", async (req: any, res: Response) => {
+    try {
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      if (!request.termsAcceptedAt) return res.status(403).json({ message: "Terms must be accepted first" });
+
+      const schema = z.object({
+        requirementId: z.number(),
+        fileName: z.string().min(1),
+        filePath: z.string().min(1),
+        fileSize: z.number().optional(),
+        mimeType: z.string().optional(),
+        expiryDate: z.string().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const [requirement] = await db.select().from(kycDocumentRequirements)
+        .where(eq(kycDocumentRequirements.id, data.requirementId));
+      if (!requirement) return res.status(404).json({ message: "Document requirement not found" });
+
+      const [doc] = await db.insert(kycSubmittedDocuments).values({
+        verificationRequestId: request.id,
+        requirementId: data.requirementId,
+        fileName: data.fileName,
+        filePath: data.filePath,
+        fileSize: data.fileSize || null,
+        mimeType: data.mimeType || null,
+        expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
+        status: "uploaded",
+      }).returning();
+
+      // Trigger async extraction
+      try {
+        const { processDocumentExtraction } = await import("../services/documentExtractionService");
+        processDocumentExtraction(doc.id).catch(err =>
+          console.error("[KYC] Background extraction failed for doc", doc.id, err)
+        );
+      } catch (err) {
+        console.error("[KYC] Could not start extraction:", err);
+      }
+
+      // Update request status
+      if (request.status === "pending_invite" || request.status === "in_progress") {
+        await db.update(kycVerificationRequests)
+          .set({ status: "in_progress", updatedAt: new Date() })
+          .where(eq(kycVerificationRequests.id, request.id));
+      }
+
+      // Notify org reviewers
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, request.orgId));
+      const reviewers = await db.select().from(kycOrgMembers)
+        .where(and(
+          eq(kycOrgMembers.orgId, request.orgId),
+          eq(kycOrgMembers.inviteStatus, "accepted"),
+          or(eq(kycOrgMembers.role, "org_admin"), eq(kycOrgMembers.role, "org_reviewer"))
+        ));
+
+      for (const reviewer of reviewers) {
+        if (reviewer.inviteEmail) {
+          await sendKycEmail(reviewer.inviteEmail,
+            `New document uploaded: ${request.subjectName}`,
+            `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+              <h2 style="color:#0d9668;">New Document Uploaded</h2>
+              <p><strong>${request.subjectName}</strong> has uploaded a new document: <strong>${data.fileName}</strong> for their ${request.type} verification.</p>
+            </div>`
+          );
+        }
+      }
+
+      res.status(201).json(doc);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Upload document error:", error);
+      res.status(500).json({ message: "Failed to upload document" });
+    }
+  });
+
+  app.post("/api/kyc-service/verify-request/:token/documents/:docId/confirm-extraction", async (req: any, res: Response) => {
+    try {
+      const docId = parseInt(req.params.docId);
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const [doc] = await db.select().from(kycSubmittedDocuments)
+        .where(and(eq(kycSubmittedDocuments.id, docId), eq(kycSubmittedDocuments.verificationRequestId, request.id)));
+      if (!doc) return res.status(404).json({ message: "Document not found" });
+
+      const [updated] = await db.update(kycSubmittedDocuments)
+        .set({ extractionConfirmed: true })
+        .where(eq(kycSubmittedDocuments.id, docId))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[KYC] Confirm extraction error:", error);
+      res.status(500).json({ message: "Failed to confirm extraction" });
+    }
+  });
+
+  app.delete("/api/kyc-service/verify-request/:token/documents/:docId", async (req: any, res: Response) => {
+    try {
+      const docId = parseInt(req.params.docId);
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const [doc] = await db.select().from(kycSubmittedDocuments)
+        .where(and(eq(kycSubmittedDocuments.id, docId), eq(kycSubmittedDocuments.verificationRequestId, request.id)));
+      if (!doc) return res.status(404).json({ message: "Document not found" });
+
+      await db.delete(kycSubmittedDocuments).where(eq(kycSubmittedDocuments.id, docId));
+      res.json({ message: "Document deleted" });
+    } catch (error: any) {
+      console.error("[KYC] Delete document error:", error);
+      res.status(500).json({ message: "Failed to delete document" });
+    }
+  });
+
+  app.post("/api/kyc-service/verify-request/:token/submit", async (req: any, res: Response) => {
+    try {
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      if (!request.termsAcceptedAt) return res.status(403).json({ message: "Terms must be accepted first" });
+
+      if (request.paymentResponsibility === "subject" && request.paymentStatus !== "paid") {
+        return res.status(400).json({ message: "Payment is required before submission" });
+      }
+
+      const requirements = await db.select().from(kycDocumentRequirements)
+        .where(and(
+          or(eq(kycDocumentRequirements.orgId, request.orgId), isNull(kycDocumentRequirements.orgId)),
+          eq(kycDocumentRequirements.type, request.type),
+          eq(kycDocumentRequirements.isActive, true),
+          eq(kycDocumentRequirements.isMandatory, true)
+        ));
+
+      const documents = await db.select().from(kycSubmittedDocuments)
+        .where(eq(kycSubmittedDocuments.verificationRequestId, request.id));
+
+      const mandatoryReqIds = requirements.map(r => r.id);
+      const submittedReqIds = new Set(documents.map(d => d.requirementId));
+      const missing = mandatoryReqIds.filter(id => !submittedReqIds.has(id));
+
+      if (missing.length > 0) {
+        const missingNames = requirements.filter(r => missing.includes(r.id)).map(r => r.documentName);
+        return res.status(400).json({
+          message: "Missing mandatory documents",
+          missingDocuments: missingNames,
+        });
+      }
+
+      if (request.type === "supplier") {
+        const [profile] = await db.select().from(kycSupplierProfiles)
+          .where(eq(kycSupplierProfiles.verificationRequestId, request.id));
+        if (!profile) {
+          return res.status(400).json({ message: "Supplier profile must be completed before submission" });
+        }
+      }
+
+      const allRequirements = await db.select().from(kycDocumentRequirements)
+        .where(and(
+          or(eq(kycDocumentRequirements.orgId, request.orgId), isNull(kycDocumentRequirements.orgId)),
+          eq(kycDocumentRequirements.type, request.type),
+          eq(kycDocumentRequirements.isActive, true)
+        ));
+
+      let people: KycSupplierPerson[] = [];
+      if (request.type === "supplier") {
+        const [profile] = await db.select().from(kycSupplierProfiles)
+          .where(eq(kycSupplierProfiles.verificationRequestId, request.id));
+        if (profile) {
+          people = await db.select().from(kycSupplierPeople).where(eq(kycSupplierPeople.supplierProfileId, profile.id));
+        }
+      }
+
+      const riskScore = calculateRiskScore(documents, allRequirements, people);
+
+      const [updated] = await db.update(kycVerificationRequests)
+        .set({ status: "documents_submitted", riskScore, updatedAt: new Date() })
+        .where(eq(kycVerificationRequests.id, request.id))
+        .returning();
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, request.orgId));
+      const reviewers = await db.select().from(kycOrgMembers)
+        .where(and(
+          eq(kycOrgMembers.orgId, request.orgId),
+          eq(kycOrgMembers.inviteStatus, "accepted"),
+          or(eq(kycOrgMembers.role, "org_admin"), eq(kycOrgMembers.role, "org_reviewer"))
+        ));
+
+      for (const reviewer of reviewers) {
+        if (reviewer.inviteEmail) {
+          await sendKycEmail(reviewer.inviteEmail,
+            `${request.subjectName} has submitted all documents and is ready for review`,
+            `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+              <h2 style="color:#0d9668;">Ready for Review</h2>
+              <p><strong>${request.subjectName}</strong> has submitted all required documents for their ${request.type} verification and is ready for your review.</p>
+            </div>`
+          );
+        }
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[KYC] Submit request error:", error);
+      res.status(500).json({ message: "Failed to submit verification" });
+    }
+  });
+
+  // ---- Supplier People ----
+
+  app.get("/api/kyc-service/verify-request/:token/people", async (req: any, res: Response) => {
+    try {
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const [profile] = await db.select().from(kycSupplierProfiles)
+        .where(eq(kycSupplierProfiles.verificationRequestId, request.id));
+      if (!profile) return res.json([]);
+
+      const people = await db.select().from(kycSupplierPeople)
+        .where(eq(kycSupplierPeople.supplierProfileId, profile.id));
+      res.json(people);
+    } catch (error: any) {
+      console.error("[KYC] List people error:", error);
+      res.status(500).json({ message: "Failed to list people" });
+    }
+  });
+
+  app.post("/api/kyc-service/verify-request/:token/people", async (req: any, res: Response) => {
+    try {
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      if (request.type !== "supplier") return res.status(400).json({ message: "Only supplier verifications have people" });
+      if (!request.termsAcceptedAt) return res.status(403).json({ message: "Terms must be accepted first" });
+
+      const [profile] = await db.select().from(kycSupplierProfiles)
+        .where(eq(kycSupplierProfiles.verificationRequestId, request.id));
+      if (!profile) return res.status(400).json({ message: "Create supplier profile first" });
+
+      const schema = z.object({
+        fullName: z.string().min(1).max(255),
+        email: z.string().email(),
+        role: z.enum(["director", "shareholder", "signatory", "beneficial_owner"]),
+        requiresVerification: z.boolean().default(false),
+      });
+      const data = schema.parse(req.body);
+
+      const [person] = await db.insert(kycSupplierPeople).values({
+        supplierProfileId: profile.id,
+        verificationRequestId: request.id,
+        fullName: data.fullName,
+        email: data.email,
+        role: data.role,
+        requiresVerification: data.requiresVerification,
+        verificationStatus: data.requiresVerification ? "pending" : "not_required",
+      }).returning();
+
+      res.status(201).json(person);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Add person error:", error);
+      res.status(500).json({ message: "Failed to add person" });
+    }
+  });
+
+  app.delete("/api/kyc-service/verify-request/:token/people/:personId", async (req: any, res: Response) => {
+    try {
+      const personId = parseInt(req.params.personId);
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      await db.delete(kycSupplierPeople).where(and(
+        eq(kycSupplierPeople.id, personId),
+        eq(kycSupplierPeople.verificationRequestId, request.id)
+      ));
+      res.json({ message: "Person removed" });
+    } catch (error: any) {
+      console.error("[KYC] Delete person error:", error);
+      res.status(500).json({ message: "Failed to remove person" });
+    }
+  });
+
+  app.post("/api/kyc-service/verify-request/:token/people/:personId/send-verification", async (req: any, res: Response) => {
+    try {
+      const personId = parseInt(req.params.personId);
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      const [person] = await db.select().from(kycSupplierPeople)
+        .where(and(eq(kycSupplierPeople.id, personId), eq(kycSupplierPeople.verificationRequestId, request.id)));
+      if (!person) return res.status(404).json({ message: "Person not found" });
+
+      if (person.individualRequestId) {
+        return res.status(400).json({ message: "Verification already sent for this person" });
+      }
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, request.orgId));
+
+      const directorInviteToken = generateToken();
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+      const [individualRequest] = await db.insert(kycVerificationRequests).values({
+        orgId: request.orgId,
+        requestedByUserId: request.requestedByUserId,
+        type: "individual",
+        status: "pending_invite",
+        subjectEmail: person.email,
+        subjectName: person.fullName,
+        paymentResponsibility: request.paymentResponsibility,
+        paymentStatus: request.paymentResponsibility === "organisation" ? "not_required" : "pending",
+        inviteToken: directorInviteToken,
+        expiresAt,
+      }).returning();
+
+      await db.update(kycSupplierPeople)
+        .set({
+          individualRequestId: individualRequest.id,
+          verificationStatus: "in_progress",
+          inviteToken: directorInviteToken,
+          inviteSentAt: new Date(),
+        })
+        .where(eq(kycSupplierPeople.id, personId));
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      await sendKycEmail(person.email,
+        `${org?.name || "An organisation"} requires you to verify your identity`,
+        `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#0d9668;">Director Verification Required</h2>
+          <p>You have been listed as a <strong>${person.role}</strong> of a company undergoing verification with <strong>${org?.name || "an organisation"}</strong>.</p>
+          <p>Please complete your individual identity verification by clicking the link below.</p>
+          <a href="${baseUrl}/kyc/verify/${directorInviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Verify Your Identity</a>
+        </div>`
+      );
+
+      res.json({ message: "Verification sent", individualRequestId: individualRequest.id });
+    } catch (error: any) {
+      console.error("[KYC] Send person verification error:", error);
+      res.status(500).json({ message: "Failed to send verification" });
+    }
+  });
+
+  // ==================== SELF-REGISTRATION PORTALS ====================
+
+  app.get("/api/kyc-service/portal/:slug/employees", async (req: any, res: Response) => {
+    try {
+      const [org] = await db.select().from(kycOrganisations)
+        .where(and(eq(kycOrganisations.slug, req.params.slug), eq(kycOrganisations.status, "active")));
+      if (!org) return res.status(404).json({ message: "Organisation not found" });
+      if (!org.employeePortalEnabled) return res.status(403).json({ message: "Employee portal is not enabled" });
+
+      const requirements = await db.select().from(kycDocumentRequirements)
+        .where(and(
+          or(eq(kycDocumentRequirements.orgId, org.id), isNull(kycDocumentRequirements.orgId)),
+          eq(kycDocumentRequirements.type, "individual"),
+          eq(kycDocumentRequirements.isActive, true)
+        ));
+
+      res.json({
+        organisation: {
+          id: org.id,
+          name: org.name,
+          slug: org.slug,
+          logoPath: org.logoPath,
+          contactEmail: org.contactEmail,
+        },
+        requirements,
+      });
+    } catch (error: any) {
+      console.error("[KYC] Employee portal error:", error);
+      res.status(500).json({ message: "Failed to load employee portal" });
+    }
+  });
+
+  app.post("/api/kyc-service/portal/:slug/employees", async (req: any, res: Response) => {
+    try {
+      const [org] = await db.select().from(kycOrganisations)
+        .where(and(eq(kycOrganisations.slug, req.params.slug), eq(kycOrganisations.status, "active")));
+      if (!org) return res.status(404).json({ message: "Organisation not found" });
+      if (!org.employeePortalEnabled) return res.status(403).json({ message: "Employee portal is not enabled" });
+
+      const schema = z.object({
+        name: z.string().min(1).max(255),
+        email: z.string().email(),
+      });
+      const data = schema.parse(req.body);
+
+      const settings = (org.settings as any) || {};
+      const paymentResponsibility = settings.defaultPaymentResponsibility || "organisation";
+      const expiresInDays = settings.defaultExpiryDays || 30;
+
+      const inviteToken = generateToken();
+      const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
+
+      const [request] = await db.insert(kycVerificationRequests).values({
+        orgId: org.id,
+        type: "individual",
+        status: "pending_invite",
+        subjectEmail: data.email,
+        subjectName: data.name,
+        paymentResponsibility,
+        paymentStatus: paymentResponsibility === "organisation" ? "not_required" : "pending",
+        inviteToken,
+        selfRegistered: true,
+        expiresAt,
+      }).returning();
+
+      await sendKycEmail(data.email,
+        `Your verification request for ${org.name} has been received`,
+        `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#0d9668;">Verification Request Received</h2>
+          <p>Your verification request for <strong>${org.name}</strong> has been received. Please click below to begin.</p>
+          <a href="${req.protocol}://${req.get("host")}/kyc/verify/${inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Begin Verification</a>
+        </div>`
+      );
+
+      res.status(201).json({ inviteToken, requestId: request.id });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Employee self-register error:", error);
+      res.status(500).json({ message: "Failed to register" });
+    }
+  });
+
+  app.get("/api/kyc-service/portal/:slug/suppliers", async (req: any, res: Response) => {
+    try {
+      const [org] = await db.select().from(kycOrganisations)
+        .where(and(eq(kycOrganisations.slug, req.params.slug), eq(kycOrganisations.status, "active")));
+      if (!org) return res.status(404).json({ message: "Organisation not found" });
+      if (!org.supplierPortalEnabled) return res.status(403).json({ message: "Supplier portal is not enabled" });
+
+      const requirements = await db.select().from(kycDocumentRequirements)
+        .where(and(
+          or(eq(kycDocumentRequirements.orgId, org.id), isNull(kycDocumentRequirements.orgId)),
+          eq(kycDocumentRequirements.type, "supplier"),
+          eq(kycDocumentRequirements.isActive, true)
+        ));
+
+      res.json({
+        organisation: {
+          id: org.id,
+          name: org.name,
+          slug: org.slug,
+          logoPath: org.logoPath,
+          contactEmail: org.contactEmail,
+        },
+        requirements,
+      });
+    } catch (error: any) {
+      console.error("[KYC] Supplier portal error:", error);
+      res.status(500).json({ message: "Failed to load supplier portal" });
+    }
+  });
+
+  app.post("/api/kyc-service/portal/:slug/suppliers", async (req: any, res: Response) => {
+    try {
+      const [org] = await db.select().from(kycOrganisations)
+        .where(and(eq(kycOrganisations.slug, req.params.slug), eq(kycOrganisations.status, "active")));
+      if (!org) return res.status(404).json({ message: "Organisation not found" });
+      if (!org.supplierPortalEnabled) return res.status(403).json({ message: "Supplier portal is not enabled" });
+
+      const schema = z.object({
+        companyName: z.string().min(1).max(255),
+        contactName: z.string().min(1).max(255),
+        contactEmail: z.string().email(),
+      });
+      const data = schema.parse(req.body);
+
+      const settings = (org.settings as any) || {};
+      const paymentResponsibility = settings.defaultPaymentResponsibility || "organisation";
+      const expiresInDays = settings.defaultExpiryDays || 30;
+
+      const inviteToken = generateToken();
+      const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000);
+
+      const [request] = await db.insert(kycVerificationRequests).values({
+        orgId: org.id,
+        type: "supplier",
+        status: "pending_invite",
+        subjectEmail: data.contactEmail,
+        subjectName: data.companyName,
+        paymentResponsibility,
+        paymentStatus: paymentResponsibility === "organisation" ? "not_required" : "pending",
+        inviteToken,
+        selfRegistered: true,
+        expiresAt,
+      }).returning();
+
+      await sendKycEmail(data.contactEmail,
+        `Your verification request for ${org.name} has been received`,
+        `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#0d9668;">Supplier Verification Request Received</h2>
+          <p>Your supplier verification request for <strong>${org.name}</strong> has been received. Please click below to begin.</p>
+          <a href="${req.protocol}://${req.get("host")}/kyc/verify/${inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Begin Verification</a>
+        </div>`
+      );
+
+      res.status(201).json({ inviteToken, requestId: request.id });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Supplier self-register error:", error);
+      res.status(500).json({ message: "Failed to register" });
+    }
+  });
+
+  // ==================== PAYMENT ENDPOINTS ====================
+
+  app.post("/api/kyc-service/verify-request/:token/initialize-payment", async (req: any, res: Response) => {
+    try {
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.inviteToken, req.params.token));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+
+      if (request.paymentResponsibility !== "subject") {
+        return res.status(400).json({ message: "Payment is not required from the subject" });
+      }
+      if (request.paymentStatus === "paid") {
+        return res.status(400).json({ message: "Payment already completed" });
+      }
+
+      const sku = request.type === "individual" ? "kyc_individual" : "kyc_corporate";
+      const priceEntry = getPaystackPrice(sku as any);
+      if (!priceEntry) return res.status(500).json({ message: "Price configuration not found" });
+
+      const paystackSecret = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_TEST_SECRET_KEY;
+      if (!paystackSecret) return res.status(500).json({ message: "Payment not configured" });
+
+      const reference = `kyc_${request.id}_${Date.now()}`;
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+      const response = await fetch("https://api.paystack.co/transaction/initialize", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${paystackSecret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: request.subjectEmail,
+          amount: priceEntry.amount,
+          reference,
+          callback_url: `${baseUrl}/kyc/verify/${request.inviteToken}?payment=success`,
+          metadata: {
+            type: "kyc_verification",
+            verificationRequestId: request.id,
+            verificationType: request.type,
+            sku,
+          },
+        }),
+      });
+
+      const result = await response.json() as any;
+      if (!result.status) {
+        return res.status(500).json({ message: "Failed to initialize payment" });
+      }
+
+      await db.update(kycVerificationRequests)
+        .set({ paymentReference: reference, updatedAt: new Date() })
+        .where(eq(kycVerificationRequests.id, request.id));
+
+      res.json({
+        authorizationUrl: result.data.authorization_url,
+        reference: result.data.reference,
+        accessCode: result.data.access_code,
+      });
+    } catch (error: any) {
+      console.error("[KYC] Initialize payment error:", error);
+      res.status(500).json({ message: "Failed to initialize payment" });
+    }
+  });
+
+  app.post("/api/kyc-service/webhooks/paystack", async (req: any, res: Response) => {
+    try {
+      const paystackSecret = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_TEST_SECRET_KEY;
+      if (!paystackSecret) return res.status(500).json({ message: "Not configured" });
+
+      const hash = crypto.createHmac("sha512", paystackSecret).update(JSON.stringify(req.body)).digest("hex");
+      if (hash !== req.headers["x-paystack-signature"]) {
+        return res.status(401).json({ message: "Invalid signature" });
+      }
+
+      const event = req.body;
+      if (event.event === "charge.success") {
+        const metadata = event.data?.metadata;
+        if (metadata?.type === "kyc_verification" && metadata?.verificationRequestId) {
+          const reqId = parseInt(metadata.verificationRequestId);
+          const [request] = await db.select().from(kycVerificationRequests)
+            .where(eq(kycVerificationRequests.id, reqId));
+
+          if (request && request.paymentStatus !== "paid") {
+            await db.update(kycVerificationRequests)
+              .set({
+                paymentStatus: "paid",
+                paymentReference: event.data.reference,
+                status: request.status === "pending_payment" ? "in_progress" : request.status,
+                updatedAt: new Date(),
+              })
+              .where(eq(kycVerificationRequests.id, reqId));
+
+            await sendKycEmail(request.subjectEmail,
+              `Payment of ${event.data.amount / 100 >= 100000 ? "₦100,000" : "₦10,000"} received for your verification`,
+              `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+                <h2 style="color:#0d9668;">Payment Confirmed</h2>
+                <p>Your payment for verification has been received. You can now proceed with uploading your documents.</p>
+              </div>`
+            );
+          }
+        }
+      }
+
+      res.json({ message: "OK" });
+    } catch (error: any) {
+      console.error("[KYC] Webhook error:", error);
+      res.status(500).json({ message: "Webhook processing failed" });
+    }
+  });
+
+  // ==================== AUDIT CERTIFICATE ENDPOINT (T009) ====================
+
+  app.get("/api/kyc-service/organisations/:id/verification-requests/:reqId/audit-certificate", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const reqId = parseInt(req.params.reqId);
+
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(and(eq(kycVerificationRequests.id, reqId), eq(kycVerificationRequests.orgId, orgId)));
+      if (!request) return res.status(404).json({ message: "Verification request not found" });
+
+      if (request.status !== "verified") {
+        return res.status(400).json({ message: "Audit certificate is only available for verified requests" });
+      }
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      if (!org) return res.status(404).json({ message: "Organisation not found" });
+
+      const documents = await db.select().from(kycSubmittedDocuments)
+        .where(eq(kycSubmittedDocuments.verificationRequestId, reqId));
+
+      const requirementIdSet = new Set(documents.map(d => d.requirementId));
+      const requirementIds = Array.from(requirementIdSet);
+      let requirementsMap: Record<number, typeof kycDocumentRequirements.$inferSelect> = {};
+      if (requirementIds.length > 0) {
+        const requirements = await db.select().from(kycDocumentRequirements)
+          .where(sql`${kycDocumentRequirements.id} IN (${sql.join(requirementIds.map(id => sql`${id}`), sql`, `)})`);
+        for (const r of requirements) {
+          requirementsMap[r.id] = r;
+        }
+      }
+
+      const certificateNumber = `KYC-${org.slug.toUpperCase().slice(0, 8)}-${reqId.toString().padStart(6, "0")}`;
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const verificationUrl = `${baseUrl}/kyc/org/${orgId}/requests/${reqId}`;
+
+      const verificationDate = request.reviewedAt
+        ? new Date(request.reviewedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+        : new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+      const issuedDate = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
+      const docsList = documents.map(doc => {
+        const req = requirementsMap[doc.requirementId];
+        return {
+          name: req?.documentName || doc.fileName,
+          category: req?.documentCategory || "other",
+          status: doc.status,
+          expiryDate: doc.expiryDate
+            ? new Date(doc.expiryDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+            : null,
+          reviewedAt: doc.reviewedAt
+            ? new Date(doc.reviewedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+            : null,
+        };
+      });
+
+      let supplierData: any = undefined;
+      let directorsData: any[] | undefined = undefined;
+
+      if (request.type === "supplier") {
+        const [profile] = await db.select().from(kycSupplierProfiles)
+          .where(eq(kycSupplierProfiles.verificationRequestId, reqId));
+        if (profile) {
+          supplierData = {
+            companyName: profile.companyName,
+            rcNumber: profile.rcNumber,
+            tinNumber: profile.tinNumber,
+            vatRegistered: profile.vatRegistered,
+            yearEstablished: profile.yearEstablished,
+            industryCategory: profile.industryCategory,
+            headOfficeAddress: profile.headOfficeAddress,
+            contactPersonName: profile.contactPersonName,
+            contactPersonEmail: profile.contactPersonEmail,
+          };
+
+          const people = await db.select().from(kycSupplierPeople)
+            .where(eq(kycSupplierPeople.supplierProfileId, profile.id));
+          if (people.length > 0) {
+            directorsData = people.map(p => ({
+              fullName: p.fullName,
+              role: p.role,
+              verificationStatus: p.verificationStatus,
+            }));
+          }
+        }
+      }
+
+      let individualData: any = undefined;
+      if (request.type === "individual") {
+        individualData = {
+          subjectName: request.subjectName,
+          subjectEmail: request.subjectEmail,
+          smileIdChecks: {
+            bvnValidation: true,
+            ninValidation: true,
+            documentVerification: true,
+            biometricMatch: true,
+            amlScreening: true,
+          },
+          smileIdJobId: null,
+          livenessScore: null,
+        };
+      }
+
+      const { generateKycAuditCertificateHTML } = await import("../templates/kyc-audit-certificate");
+      const html = generateKycAuditCertificateHTML({
+        certificateNumber,
+        type: request.type as "individual" | "supplier",
+        orgName: org.name,
+        orgCategory: org.category,
+        verificationDate,
+        issuedDate,
+        verificationUrl,
+        individual: individualData,
+        supplier: supplierData,
+        documents: docsList,
+        directors: directorsData,
+        riskScore: request.riskScore,
+        reviewNotes: request.reviewNotes,
+        reviewedBy: request.reviewedByUserId,
+      });
+
+      const format = req.query.format;
+      if (format === "html") {
+        res.setHeader("Content-Type", "text/html");
+        return res.send(html);
+      }
+
+      try {
+        const puppeteer = await import("puppeteer");
+        const browser = await puppeteer.default.launch({
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        });
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: "networkidle0" });
+        const pdfBuffer = await page.pdf({
+          format: "A4",
+          margin: { top: "20px", right: "20px", bottom: "20px", left: "20px" },
+          printBackground: true,
+        });
+        await browser.close();
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="kyc-certificate-${certificateNumber}.pdf"`);
+        return res.send(pdfBuffer);
+      } catch (puppeteerError: any) {
+        console.error("[KYC] Puppeteer PDF generation failed, falling back to HTML:", puppeteerError.message);
+        res.setHeader("Content-Type", "text/html");
+        res.setHeader("Content-Disposition", `attachment; filename="kyc-certificate-${certificateNumber}.html"`);
+        return res.send(html);
+      }
+    } catch (error: any) {
+      console.error("[KYC] Audit certificate error:", error);
+      res.status(500).json({ message: "Failed to generate audit certificate" });
+    }
+  });
+
+  // ==================== UPLOAD URL ENDPOINT ====================
+
+  app.post("/api/kyc-service/upload-url", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      res.json({ uploadURL });
+    } catch (error: any) {
+      console.error("[KYC] Upload URL error:", error);
+      res.status(500).json({ message: "Failed to get upload URL" });
+    }
+  });
+
+  console.log("[KYC Service] Routes registered");
+}

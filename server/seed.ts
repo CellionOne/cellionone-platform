@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
-import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog } from "@shared/schema";
+import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements } from "@shared/schema";
 
 export async function seedDatabase() {
   try {
@@ -148,6 +148,26 @@ export async function seedDatabase() {
       }
     }
     
+    // Seed KYC standard document requirements (global, orgId = null)
+    const kycStandardDocs = [
+      { type: "supplier", documentName: "CAC Certificate of Incorporation", documentDescription: "Official certificate issued by the Corporate Affairs Commission confirming company registration", documentCategory: "registration", isStandard: true, isMandatory: true, isActive: true, hasExpiry: false },
+      { type: "supplier", documentName: "CAC Form CO2/CO7 — Particulars of Directors", documentDescription: "Official filing showing allotment of shares and particulars of directors", documentCategory: "registration", isStandard: true, isMandatory: true, isActive: true, hasExpiry: false },
+      { type: "supplier", documentName: "Tax Identification Number (TIN) Certificate", documentDescription: "Certificate issued by the Federal Inland Revenue Service", documentCategory: "tax", isStandard: true, isMandatory: true, isActive: true, hasExpiry: false },
+      { type: "supplier", documentName: "VAT Registration Certificate", documentDescription: "Value Added Tax registration certificate from FIRS", documentCategory: "tax", isStandard: true, isMandatory: false, isActive: true, hasExpiry: false },
+      { type: "supplier", documentName: "Current Tax Clearance Certificate", documentDescription: "Annual tax clearance certificate confirming tax compliance", documentCategory: "tax", isStandard: true, isMandatory: true, isActive: true, hasExpiry: true },
+      { type: "supplier", documentName: "Memorandum & Articles of Association", documentDescription: "Company's constitutional documents filed with CAC", documentCategory: "registration", isStandard: true, isMandatory: false, isActive: true, hasExpiry: false },
+      { type: "supplier", documentName: "Bank Reference Letter", documentDescription: "Reference letter from the company's primary bank", documentCategory: "financial", isStandard: true, isMandatory: false, isActive: true, hasExpiry: true },
+      { type: "supplier", documentName: "Proof of Business Address", documentDescription: "Utility bill, lease agreement, or other proof of registered business address", documentCategory: "compliance", isStandard: true, isMandatory: false, isActive: true, hasExpiry: false },
+      { type: "individual", documentName: "Government-Issued ID", documentDescription: "Valid government-issued identification (driver's licence, international passport, NIN slip, voter's card)", documentCategory: "identity", isStandard: true, isMandatory: true, isActive: true, hasExpiry: true },
+      { type: "individual", documentName: "Passport Photograph", documentDescription: "Recent passport-sized photograph with white background", documentCategory: "identity", isStandard: true, isMandatory: true, isActive: true, hasExpiry: false },
+      { type: "individual", documentName: "Proof of Residential Address", documentDescription: "Utility bill, bank statement, or government letter showing current residential address (dated within 3 months)", documentCategory: "compliance", isStandard: true, isMandatory: false, isActive: true, hasExpiry: true },
+    ];
+
+    for (const doc of kycStandardDocs) {
+      await db.insert(kycDocumentRequirements).values(doc).onConflictDoNothing();
+    }
+    console.log("Synced KYC standard document requirements");
+
     console.log("Database seeding complete");
   } catch (error) {
     console.error("Seed error:", error);

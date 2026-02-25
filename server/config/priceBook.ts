@@ -12,7 +12,7 @@
  *   - Tiers: office_only, office_plus_mail
  */
 
-export type ServiceType = 'verification' | 'incorporation' | 'registered_office';
+export type ServiceType = 'verification' | 'incorporation' | 'registered_office' | 'kyc_individual' | 'kyc_corporate';
 export type RegisteredOfficeTier = 'office_only' | 'office_plus_mail';
 export type PaymentProvider = 'paystack';
 export type Currency = 'NGN';
@@ -69,6 +69,24 @@ const PRICE_BOOK: PriceEntry[] = [
     isRecurring: true,
     recurringInterval: 'year',
     description: 'Registered Office Address (Office + Mail Handling)',
+  },
+  {
+    serviceType: 'kyc_individual',
+    provider: 'paystack',
+    currency: 'NGN',
+    amount: 1000000, // ₦10,000 in kobo
+    amountDisplay: '₦10,000',
+    isRecurring: false,
+    description: 'KYC Individual Identity Verification',
+  },
+  {
+    serviceType: 'kyc_corporate',
+    provider: 'paystack',
+    currency: 'NGN',
+    amount: 10000000, // ₦100,000 in kobo
+    amountDisplay: '₦100,000',
+    isRecurring: false,
+    description: 'KYC Corporate/Supplier Verification',
   },
 ];
 

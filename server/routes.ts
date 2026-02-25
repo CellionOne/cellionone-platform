@@ -13,6 +13,7 @@ import * as services from "./services";
 import { registeredOfficeService } from "./services/registeredOfficeService";
 import { mailroomService } from "./services/mailroomService";
 import * as verificationService from "./services/verificationService";
+import { registerKycServiceRoutes } from "./routes/kycServiceRoutes";
 
 // Validation schemas
 const createApplicationSchema = insertCompanyApplicationSchema.pick({
@@ -6679,6 +6680,9 @@ For questions, contact: service@cellionone.com
       res.status(500).json({ message: "Failed to fetch status" });
     }
   });
+
+  // ============== KYC SERVICE ROUTES ==============
+  registerKycServiceRoutes(app);
 
   return httpServer;
 }

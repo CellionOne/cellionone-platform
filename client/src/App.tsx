@@ -58,6 +58,14 @@ import InviteAcceptPage from "@/pages/invite-accept";
 import PaymentCheckoutPage from "@/pages/payment/checkout";
 import PaymentSuccessPage from "@/pages/payment/success";
 import PaymentCancelPage from "@/pages/payment/cancel";
+import KycTermsPage from "@/pages/kyc-service/terms";
+import KycOrgsPage from "@/pages/kyc-service/orgs";
+import KycOrgDashboard from "@/pages/kyc-service/org-dashboard";
+import KycVerificationDetail from "@/pages/kyc-service/verification-detail";
+import KycOrgSettings from "@/pages/kyc-service/org-settings";
+import KycVerifyRequestPage from "@/pages/kyc-service/verify-request";
+import KycEmployeePortalPage from "@/pages/kyc-service/employee-portal";
+import KycSupplierPortalPage from "@/pages/kyc-service/supplier-portal";
 
 function ProtectedRoute({ 
   component: Component, 
@@ -272,6 +280,22 @@ function Router() {
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />
       <Route path="/verify/:token" component={VerifyPage} />
+      <Route path="/kyc/terms" component={KycTermsPage} />
+      <Route path="/kyc/orgs">
+        <ProtectedRoute component={KycOrgsPage} />
+      </Route>
+      <Route path="/kyc/org/:id/requests/:reqId">
+        <ProtectedRoute component={KycVerificationDetail} />
+      </Route>
+      <Route path="/kyc/org/:id/settings">
+        <ProtectedRoute component={KycOrgSettings} />
+      </Route>
+      <Route path="/kyc/org/:id">
+        <ProtectedRoute component={KycOrgDashboard} />
+      </Route>
+      <Route path="/kyc/verify/:token" component={KycVerifyRequestPage} />
+      <Route path="/kyc/:slug/employees" component={KycEmployeePortalPage} />
+      <Route path="/kyc/:slug/suppliers" component={KycSupplierPortalPage} />
       
       <Route path="/payment/checkout">
         <ProtectedRoute component={PaymentCheckoutPage} />

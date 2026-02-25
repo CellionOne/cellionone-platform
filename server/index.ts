@@ -5,6 +5,7 @@ import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { startSubscriptionScheduler } from "./services/subscriptionScheduler";
 import { runComplianceDeadlineCheck } from "./services/complianceScheduler";
+import { runKycExpiryCheck } from "./services/kycSchedulerService";
 import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUploadMiddleware } from "./middleware/security";
 
 const app = express();
@@ -195,6 +196,9 @@ app.use((req, res, next) => {
       
       // Run compliance deadline check daily
       runComplianceDeadlineCheck().catch(console.error);
+      
+      // Run KYC document expiry check daily
+      runKycExpiryCheck().catch(console.error);
     },
   );
 })();

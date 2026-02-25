@@ -33,6 +33,24 @@ Key architectural decisions and features include:
 - **User Settings Page:** A unified settings page for all roles, offering profile editing, password changes, 2FA management, and role-adaptive notification preferences.
 - **Security Hardening Suite:** Includes HTTP security headers (Helmet.js), API rate limiting, CORS with origin allowlisting, account lockout, session timeout, file upload validation, and strong password requirements.
 - **Consent-Based Data Sharing:** Founders can create time-limited, revocable consent tokens to share verified data (personal info, verification results, company details, documents, proof of address) with named partners (banks, insurers, government). Partners access data via token-authenticated API endpoints, download PDF verification certificates (Puppeteer-generated), or full ZIP data packages (archiver). All access is logged with IP, user agent, and data returned. Public verification landing page at `/verify/:token`. Tables: `data_sharing_consents`, `data_sharing_access_logs`.
+- **KYC-as-a-Service Module:** Full KYC verification service enabling organisations to verify individuals (₦10,000/person) and suppliers/corporates (₦100,000/company). Features:
+  - Organisation onboarding with team member management (org_admin, org_reviewer, org_viewer roles)
+  - Two verification tracks: Individual (employee identity) and Supplier (corporate due diligence)
+  - Self-registration portals: `/kyc/{slug}/employees` and `/kyc/{slug}/suppliers`
+  - AI-powered document extraction using OpenAI Vision with auto-classification and confidence scoring
+  - Standard + custom document requirements per verification type
+  - Verification templates (e.g. "IT Vendor", "Standard Employee")
+  - Risk scoring (green/amber/red) based on document completeness and expiry
+  - Director verification: supplier verification auto-creates individual requests for directors
+  - Document expiry tracking with daily scheduler and email alerts (30-day and 7-day warnings)
+  - Paystack payment integration (subject-pays or org-pays flows)
+  - Audit certificate generation (PDF via Puppeteer) for compliance files
+  - Bulk CSV import for employee verification requests
+  - KYC Service Terms & Conditions with mandatory acceptance (TERMS_VERSION = "1.0")
+  - Full email notification lifecycle via Resend
+  - Backend routes: `server/routes/kycServiceRoutes.ts`
+  - Tables: `kyc_organisations`, `kyc_org_members`, `kyc_verification_templates`, `kyc_document_requirements`, `kyc_verification_requests`, `kyc_supplier_profiles`, `kyc_submitted_documents`, `kyc_supplier_people`
+  - Frontend pages: `client/src/pages/kyc-service/` (orgs, org-dashboard, verification-detail, org-settings, verify-request, employee-portal, supplier-portal, terms)
 
 ## External Dependencies
 - **PostgreSQL:** Primary database, hosted via Neon.

@@ -978,6 +978,7 @@ export const dataSharingConsents = pgTable("data_sharing_consents", {
   id: serial("id").primaryKey(),
   founderId: varchar("founder_id").notNull(),
   applicationId: integer("application_id"),
+  kycVerificationRequestId: integer("kyc_verification_request_id"),
   partnerName: varchar("partner_name", { length: 255 }).notNull(),
   partnerType: varchar("partner_type", { length: 50 }).notNull(),
   consentToken: varchar("consent_token", { length: 128 }).notNull().unique(),
@@ -1011,6 +1012,202 @@ export const dataSharingAccessLogs = pgTable("data_sharing_access_logs", {
 ]);
 
 export type DataSharingAccessLog = typeof dataSharingAccessLogs.$inferSelect;
+
+// ============== KYC-AS-A-SERVICE ==============
+
+export const kycOrganisations = pgTable("kyc_organisations", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull().unique(),
+  category: varchar("category", { length: 50 }).notNull(),
+  contactEmail: varchar("contact_email", { length: 255 }).notNull(),
+  contactPhone: varchar("contact_phone", { length: 50 }),
+  address: text("address"),
+  logoPath: varchar("logo_path", { length: 500 }),
+  createdByUserId: varchar("created_by_user_id").notNull(),
+  status: varchar("status", { length: 20 }).default("active").notNull(),
+  settings: jsonb("settings").default({}),
+  employeePortalEnabled: boolean("employee_portal_enabled").default(true),
+  supplierPortalEnabled: boolean("supplier_portal_enabled").default(true),
+  termsAcceptedAt: timestamp("terms_accepted_at"),
+  termsVersion: varchar("terms_version", { length: 20 }),
+  termsAcceptedByUserId: varchar("terms_accepted_by_user_id"),
+  termsAcceptedIp: varchar("terms_accepted_ip", { length: 45 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_org_slug").on(table.slug),
+  index("idx_kyc_org_status").on(table.status),
+]);
+
+export const insertKycOrganisationSchema = createInsertSchema(kycOrganisations).omit({ id: true, createdAt: true, updatedAt: true });
+export type KycOrganisation = typeof kycOrganisations.$inferSelect;
+export type InsertKycOrganisation = z.infer<typeof insertKycOrganisationSchema>;
+
+export const kycOrgMembers = pgTable("kyc_org_members", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull(),
+  userId: varchar("user_id"),
+  role: varchar("role", { length: 30 }).notNull(),
+  inviteEmail: varchar("invite_email", { length: 255 }).notNull(),
+  inviteStatus: varchar("invite_status", { length: 20 }).default("pending").notNull(),
+  inviteToken: varchar("invite_token", { length: 128 }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_om_org").on(table.orgId),
+  index("idx_kyc_om_user").on(table.userId),
+]);
+
+export const insertKycOrgMemberSchema = createInsertSchema(kycOrgMembers).omit({ id: true, createdAt: true });
+export type KycOrgMember = typeof kycOrgMembers.$inferSelect;
+
+export const kycVerificationTemplates = pgTable("kyc_verification_templates", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  type: varchar("type", { length: 20 }).notNull(),
+  description: text("description"),
+  requireDirectorVerification: boolean("require_director_verification").default(false),
+  documentRequirementIds: jsonb("document_requirement_ids").default([]),
+  isDefault: boolean("is_default").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_vt_org").on(table.orgId),
+]);
+
+export const insertKycVerificationTemplateSchema = createInsertSchema(kycVerificationTemplates).omit({ id: true, createdAt: true });
+export type KycVerificationTemplate = typeof kycVerificationTemplates.$inferSelect;
+
+export const kycDocumentRequirements = pgTable("kyc_document_requirements", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id"),
+  type: varchar("type", { length: 20 }).notNull(),
+  documentName: varchar("document_name", { length: 255 }).notNull(),
+  documentDescription: text("document_description"),
+  documentCategory: varchar("document_category", { length: 30 }).notNull(),
+  isStandard: boolean("is_standard").default(false).notNull(),
+  isMandatory: boolean("is_mandatory").default(true).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  hasExpiry: boolean("has_expiry").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_dr_org").on(table.orgId),
+  index("idx_kyc_dr_type").on(table.type),
+]);
+
+export const insertKycDocumentRequirementSchema = createInsertSchema(kycDocumentRequirements).omit({ id: true, createdAt: true });
+export type KycDocumentRequirement = typeof kycDocumentRequirements.$inferSelect;
+
+export const kycVerificationRequests = pgTable("kyc_verification_requests", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull(),
+  templateId: integer("template_id"),
+  requestedByUserId: varchar("requested_by_user_id"),
+  type: varchar("type", { length: 20 }).notNull(),
+  status: varchar("status", { length: 30 }).default("pending_invite").notNull(),
+  subjectEmail: varchar("subject_email", { length: 255 }).notNull(),
+  subjectName: varchar("subject_name", { length: 255 }).notNull(),
+  subjectUserId: varchar("subject_user_id"),
+  notes: text("notes"),
+  reviewedByUserId: varchar("reviewed_by_user_id"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
+  riskScore: varchar("risk_score", { length: 10 }),
+  paymentResponsibility: varchar("payment_responsibility", { length: 20 }).default("organisation").notNull(),
+  paymentStatus: varchar("payment_status", { length: 20 }).default("not_required").notNull(),
+  paymentReference: varchar("payment_reference", { length: 128 }),
+  inviteToken: varchar("invite_token", { length: 128 }).notNull().unique(),
+  selfRegistered: boolean("self_registered").default(false),
+  termsAcceptedAt: timestamp("terms_accepted_at"),
+  termsVersion: varchar("terms_version", { length: 20 }),
+  termsAcceptedIp: varchar("terms_accepted_ip", { length: 45 }),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_vr_org").on(table.orgId),
+  index("idx_kyc_vr_token").on(table.inviteToken),
+  index("idx_kyc_vr_status").on(table.status),
+  index("idx_kyc_vr_subject").on(table.subjectUserId),
+]);
+
+export const insertKycVerificationRequestSchema = createInsertSchema(kycVerificationRequests).omit({ id: true, createdAt: true, updatedAt: true });
+export type KycVerificationRequest = typeof kycVerificationRequests.$inferSelect;
+
+export const kycSupplierProfiles = pgTable("kyc_supplier_profiles", {
+  id: serial("id").primaryKey(),
+  verificationRequestId: integer("verification_request_id").notNull().unique(),
+  companyName: varchar("company_name", { length: 255 }).notNull(),
+  rcNumber: varchar("rc_number", { length: 50 }),
+  tinNumber: varchar("tin_number", { length: 50 }),
+  vatRegistered: boolean("vat_registered").default(false),
+  yearEstablished: integer("year_established"),
+  industryCategory: varchar("industry_category", { length: 100 }),
+  headOfficeAddress: text("head_office_address"),
+  websiteUrl: varchar("website_url", { length: 500 }),
+  contactPersonName: varchar("contact_person_name", { length: 255 }).notNull(),
+  contactPersonEmail: varchar("contact_person_email", { length: 255 }).notNull(),
+  contactPersonPhone: varchar("contact_person_phone", { length: 50 }),
+  contactPersonRole: varchar("contact_person_role", { length: 100 }),
+  bankName: varchar("bank_name", { length: 255 }),
+  bankAccountNumber: varchar("bank_account_number", { length: 50 }),
+  bankAccountName: varchar("bank_account_name", { length: 255 }),
+  extractedData: jsonb("extracted_data"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_sp_vr").on(table.verificationRequestId),
+]);
+
+export const insertKycSupplierProfileSchema = createInsertSchema(kycSupplierProfiles).omit({ id: true, createdAt: true, updatedAt: true });
+export type KycSupplierProfile = typeof kycSupplierProfiles.$inferSelect;
+
+export const kycSubmittedDocuments = pgTable("kyc_submitted_documents", {
+  id: serial("id").primaryKey(),
+  verificationRequestId: integer("verification_request_id").notNull(),
+  requirementId: integer("requirement_id").notNull(),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  filePath: varchar("file_path", { length: 500 }).notNull(),
+  fileSize: integer("file_size"),
+  mimeType: varchar("mime_type", { length: 100 }),
+  status: varchar("status", { length: 20 }).default("uploaded").notNull(),
+  detectedDocumentType: varchar("detected_document_type", { length: 100 }),
+  extractedData: jsonb("extracted_data"),
+  extractionConfirmed: boolean("extraction_confirmed").default(false),
+  expiryDate: timestamp("expiry_date"),
+  reviewNote: text("review_note"),
+  reviewedByUserId: varchar("reviewed_by_user_id"),
+  reviewedAt: timestamp("reviewed_at"),
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_sd_vr").on(table.verificationRequestId),
+  index("idx_kyc_sd_req").on(table.requirementId),
+]);
+
+export const insertKycSubmittedDocumentSchema = createInsertSchema(kycSubmittedDocuments).omit({ id: true, uploadedAt: true });
+export type KycSubmittedDocument = typeof kycSubmittedDocuments.$inferSelect;
+
+export const kycSupplierPeople = pgTable("kyc_supplier_people", {
+  id: serial("id").primaryKey(),
+  supplierProfileId: integer("supplier_profile_id").notNull(),
+  verificationRequestId: integer("verification_request_id").notNull(),
+  individualRequestId: integer("individual_request_id"),
+  fullName: varchar("full_name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull(),
+  role: varchar("role", { length: 50 }).notNull(),
+  userId: varchar("user_id"),
+  requiresVerification: boolean("requires_verification").default(false).notNull(),
+  verificationStatus: varchar("verification_status", { length: 20 }).default("not_required").notNull(),
+  inviteToken: varchar("invite_token", { length: 128 }),
+  inviteSentAt: timestamp("invite_sent_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_spp_sp").on(table.supplierProfileId),
+  index("idx_kyc_spp_vr").on(table.verificationRequestId),
+]);
+
+export const insertKycSupplierPersonSchema = createInsertSchema(kycSupplierPeople).omit({ id: true, createdAt: true });
+export type KycSupplierPerson = typeof kycSupplierPeople.$inferSelect;
 
 // ============== SETTINGS SCHEMAS ==============
 export const updateProfileSchema = z.object({

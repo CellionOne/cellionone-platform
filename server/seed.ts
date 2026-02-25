@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { eq, and } from "drizzle-orm";
 import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog } from "@shared/schema";
 
 export async function seedDatabase() {
@@ -81,7 +82,6 @@ export async function seedDatabase() {
       }
       console.log("Synced demo users");
 
-      // Always sync roles (in case they're missing)
       const demoRoles = [
         { userId: "demo-admin-001", role: "admin" },
         { userId: "demo-lawyer-001", role: "lawyer" },
@@ -90,8 +90,13 @@ export async function seedDatabase() {
         { userId: "demo-founder-002", role: "founder" },
       ];
       
-      for (const role of demoRoles) {
-        await db.insert(userRoles).values(role).onConflictDoNothing();
+      for (const r of demoRoles) {
+        const existing = await db.select().from(userRoles)
+          .where(and(eq(userRoles.userId, r.userId), eq(userRoles.role, r.role)))
+          .limit(1);
+        if (existing.length === 0) {
+          await db.insert(userRoles).values(r);
+        }
       }
       console.log("Synced demo user roles");
       

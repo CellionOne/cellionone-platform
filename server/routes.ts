@@ -3645,6 +3645,14 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       
       const { role, action } = parsed.data;
       const adminId = getUserId(req);
+
+      if (role === "admin") {
+        const adminUser = await storage.getUser(adminId);
+        const SUPER_ADMIN_EMAIL = "service@cellionone.com";
+        if (!adminUser || adminUser.email.toLowerCase() !== SUPER_ADMIN_EMAIL) {
+          return res.status(403).json({ message: "Only the super admin can assign or remove the admin role" });
+        }
+      }
       
       if (action === "add") {
         await storage.addUserRole(userId, role);

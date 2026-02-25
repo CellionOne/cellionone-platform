@@ -47,3 +47,5 @@ integrations = ["javascript_log_in_with_replit:2.0.0", "javascript_openai_ai_int
 REGISTERED_OFFICE_MAIL_ITEMS_INCLUDED_PER_MONTH = "5"
 REGISTERED_OFFICE_STORAGE_DAYS = "30"
 REGISTERED_OFFICE_OFFICIAL_MAIL_ONLY = "true"
+SMILE_ID_PARTNER_ID = "8352"
+SMILE_ID_ENVIRONMENT = "production"

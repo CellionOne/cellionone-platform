@@ -1086,12 +1086,12 @@ export async function registerRoutes(
               try {
                 const founder = await storage.getUser(invitation.founderId);
                 if (founder?.email) {
-                  const { Resend } = await import("resend");
-                  const resend = new Resend(process.env.RESEND_API_KEY);
+                  const emailSvc = await import("./services/emailService");
+                  const { client: resendClient, fromEmail } = await emailSvc.getResendClient();
                   const roleLabel = invitation.role.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
                   const appUrl = `${req.protocol}://${req.get("host")}`;
-                  await resend.emails.send({
-                    from: "Cellion One <onboarding@resend.dev>",
+                  await resendClient.emails.send({
+                    from: fromEmail,
                     to: founder.email,
                     subject: `${personName} has completed their profile`,
                     html: `
@@ -1481,8 +1481,8 @@ export async function registerRoutes(
       });
 
       try {
-        const { Resend } = await import("resend");
-        const resend = new Resend(process.env.RESEND_API_KEY);
+        const emailSvc = await import("./services/emailService");
+        const { client: resend, fromEmail } = await emailSvc.getResendClient();
         const appUrl = process.env.REPLIT_DEV_DOMAIN
           ? `https://${process.env.REPLIT_DEV_DOMAIN}`
           : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
@@ -1492,7 +1492,7 @@ export async function registerRoutes(
         const founderName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'A founder';
 
         await resend.emails.send({
-          from: "Cellion One <onboarding@resend.dev>",
+          from: fromEmail,
           to: inviteEmail.toLowerCase().trim(),
           subject: `You've been invited as a ${roleLabel} on Cellion One`,
           html: `
@@ -1646,8 +1646,8 @@ export async function registerRoutes(
       }
 
       try {
-        const { Resend } = await import("resend");
-        const resend = new Resend(process.env.RESEND_API_KEY);
+        const emailSvc = await import("./services/emailService");
+        const { client: resend, fromEmail } = await emailSvc.getResendClient();
         const appUrl = process.env.REPLIT_DEV_DOMAIN
           ? `https://${process.env.REPLIT_DEV_DOMAIN}`
           : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
@@ -1657,7 +1657,7 @@ export async function registerRoutes(
         const founderName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'A founder';
 
         await resend.emails.send({
-          from: "Cellion One <onboarding@resend.dev>",
+          from: fromEmail,
           to: person.inviteEmail,
           subject: `Reminder: You've been invited as a ${roleLabel} on Cellion One`,
           html: `
@@ -2221,6 +2221,24 @@ export async function registerRoutes(
         ipAddress: req.ip,
       });
 
+      try {
+        if (sr.founderId) {
+          const founder = await storage.getUser(sr.founderId);
+          if (founder?.email) {
+            const emailService = await import("./services/emailService");
+            await emailService.sendServiceRequestStatusUpdateEmail(founder.email, {
+              founderName: founder.firstName || founder.email,
+              serviceType: sr.serviceType || 'Unknown',
+              serviceRequestId: srId,
+              newStatus: status,
+              notes: notes || undefined,
+            });
+          }
+        }
+      } catch (emailErr) {
+        console.error("Error sending service request status email:", emailErr);
+      }
+
       res.json(updated);
     } catch (error) {
       console.error("Error updating service request:", error);
@@ -2277,6 +2295,22 @@ export async function registerRoutes(
         details: { assignedLawyerId },
         ipAddress: req.ip,
       });
+
+      try {
+        const lawyer = await storage.getUser(assignedLawyerId);
+        const founder = updated.founderId ? await storage.getUser(updated.founderId) : null;
+        if (lawyer?.email) {
+          const emailService = await import("./services/emailService");
+          await emailService.sendServiceRequestAssignedEmail(lawyer.email, {
+            serviceType: updated.serviceType || 'Unknown',
+            founderName: founder ? `${founder.firstName || ''} ${founder.lastName || ''}`.trim() || founder.email || 'Unknown' : 'Unknown',
+            founderEmail: founder?.email || 'Unknown',
+            serviceRequestId: srId,
+          });
+        }
+      } catch (emailErr) {
+        console.error("Error sending lawyer assignment email:", emailErr);
+      }
 
       res.json(updated);
     } catch (error) {

@@ -1,8 +1,9 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople } from '@shared/schema';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
+import { sendNewOrderNotificationEmail, ADMIN_NOTIFICATION_EMAIL } from './emailService';
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
 
 export interface PaystackWebhookEvent {
@@ -290,6 +291,29 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
     type: 'success',
     linkUrl: `/founder/orders/${order.id}`,
   });
+
+  try {
+    const founder = await storage.getUser(order.founderId);
+    const catalogItems = await db.select().from(productCatalog);
+    const itemDetails = items.map(item => {
+      const catalogItem = catalogItems.find(c => c.sku === item.sku);
+      return {
+        sku: item.sku,
+        name: catalogItem?.name || item.sku,
+        unitPrice: item.unitPrice,
+      };
+    });
+
+    await sendNewOrderNotificationEmail(ADMIN_NOTIFICATION_EMAIL, {
+      orderId: order.id,
+      founderName: founder ? `${founder.firstName || ''} ${founder.lastName || ''}`.trim() || founder.email || 'Unknown' : 'Unknown',
+      founderEmail: founder?.email || 'Unknown',
+      totalAmount: order.totalAmount,
+      items: itemDetails,
+    });
+  } catch (emailErr) {
+    console.error(`[Paystack Webhook] Failed to send admin order notification email:`, emailErr);
+  }
 
   console.log(`[Paystack Webhook] Split payment processed for order #${order.id}, reference: ${reference}`);
 }

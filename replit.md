@@ -93,7 +93,7 @@ Key architectural patterns include:
 - **PostgreSQL:** Primary database, hosted via Neon.
 - **OpenAI GPT-4o:** Used for AI-powered CAC activity suggestions.
 - **Paystack:** Sole payment gateway for all transactions (NGN). International cards accepted — customer's bank handles currency conversion.
-- **Resend:** Email service for authentication and notifications.
+- **Resend:** Email service for authentication, notifications, and service request lifecycle emails. All emails sent from `noreply@send.cellionone.com` via centralized `emailService.ts`. Admin notifications (new orders) sent to `service@cellionone.com`.
 - **Africa's Talking:** SMS OTP provider for 2FA. Falls back to console logging when API key not configured. Secrets: `AT_API_KEY`, `AT_USERNAME`.
 - **Smile ID:** Identity verification for Nigerian BVN/NIN validation. Uses Enhanced KYC (job_type 5) via `smile-identity-core` npm package. Falls back gracefully when API keys not configured. Secrets: `SMILE_ID_PARTNER_ID`, `SMILE_ID_API_KEY`, `SMILE_ID_ENVIRONMENT` (sandbox/production).
 - **Replit Auth:** For user authentication services.

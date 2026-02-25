@@ -1,5 +1,7 @@
 import { Resend } from 'resend';
 
+export const ADMIN_NOTIFICATION_EMAIL = 'service@cellionone.com';
+
 let connectionSettings: any;
 
 async function getCredentials() {
@@ -596,5 +598,221 @@ export async function sendIncorporationCompleteEmail(
     `
   });
 
+  return result;
+}
+
+export async function sendNewOrderNotificationEmail(
+  adminEmail: string,
+  orderDetails: {
+    orderId: number;
+    founderName: string;
+    founderEmail: string;
+    totalAmount: number;
+    items: Array<{ sku: string; name: string; unitPrice: number }>;
+  }
+) {
+  const { client, fromEmail } = await getResendClient();
+  const formatNgn = (kobo: number) => `₦${(kobo / 100).toLocaleString()}`;
+
+  const itemRows = orderDetails.items.map(item =>
+    `<tr>
+      <td style="padding: 8px 12px; border-bottom: 1px solid #e4e4e7; font-size: 14px; color: #52525b;">${item.name}</td>
+      <td style="padding: 8px 12px; border-bottom: 1px solid #e4e4e7; font-size: 14px; color: #52525b; text-align: right;">${formatNgn(item.unitPrice)}</td>
+    </tr>`
+  ).join('');
+
+  console.log(`[Email] Sending new order notification to admin: ${adminEmail}, order #${orderDetails.orderId}`);
+
+  const result = await client.emails.send({
+    from: fromEmail,
+    to: adminEmail,
+    subject: `New Order #${orderDetails.orderId} — ${formatNgn(orderDetails.totalAmount)}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+          <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="text-align: center; margin-bottom: 32px;">
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
+              <p style="color: #71717a; font-size: 14px; margin: 4px 0 0 0;">New Order Notification</p>
+            </div>
+
+            <div style="background: #f0fdf4; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+              <p style="color: #166534; font-size: 16px; font-weight: 600; margin: 0;">Order #${orderDetails.orderId} has been paid</p>
+            </div>
+
+            <div style="margin-bottom: 24px;">
+              <p style="color: #52525b; font-size: 14px; margin: 0 0 4px 0;"><strong>Customer:</strong> ${orderDetails.founderName}</p>
+              <p style="color: #52525b; font-size: 14px; margin: 0 0 4px 0;"><strong>Email:</strong> ${orderDetails.founderEmail}</p>
+              <p style="color: #52525b; font-size: 14px; margin: 0;"><strong>Total:</strong> ${formatNgn(orderDetails.totalAmount)}</p>
+            </div>
+
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+              <thead>
+                <tr>
+                  <th style="padding: 8px 12px; border-bottom: 2px solid #e4e4e7; text-align: left; font-size: 12px; color: #71717a; text-transform: uppercase;">Item</th>
+                  <th style="padding: 8px 12px; border-bottom: 2px solid #e4e4e7; text-align: right; font-size: 12px; color: #71717a; text-transform: uppercase;">Price</th>
+                </tr>
+              </thead>
+              <tbody>${itemRows}</tbody>
+            </table>
+
+            <p style="color: #71717a; font-size: 14px;">Log in to the admin dashboard to assign lawyers and manage this order.</p>
+
+            <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 32px 0;">
+            <p style="color: #a1a1aa; font-size: 12px; text-align: center;">&copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.</p>
+          </div>
+        </body>
+      </html>
+    `
+  });
+
+  console.log(`[Email] New order notification sent to ${adminEmail}`);
+  return result;
+}
+
+export async function sendServiceRequestAssignedEmail(
+  lawyerEmail: string,
+  details: {
+    serviceType: string;
+    founderName: string;
+    founderEmail: string;
+    serviceRequestId: number;
+  }
+) {
+  const { client, fromEmail } = await getResendClient();
+
+  const serviceNames: Record<string, string> = {
+    SCUML: 'SCUML Certificate (EFCC)',
+    TM: 'Trademark Registration',
+    TIN: 'TIN Registration (FIRS)',
+  };
+  const serviceName = serviceNames[details.serviceType] || details.serviceType;
+
+  console.log(`[Email] Sending service request assignment to lawyer: ${lawyerEmail}, request #${details.serviceRequestId}`);
+
+  const result = await client.emails.send({
+    from: fromEmail,
+    to: lawyerEmail,
+    subject: `New Assignment: ${serviceName} — Request #${details.serviceRequestId}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+          <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="text-align: center; margin-bottom: 32px;">
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
+              <p style="color: #71717a; font-size: 14px; margin: 4px 0 0 0;">Service Request Assignment</p>
+            </div>
+
+            <div style="background: #eff6ff; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+              <p style="color: #1e40af; font-size: 16px; font-weight: 600; margin: 0;">You have been assigned a new service request</p>
+            </div>
+
+            <div style="margin-bottom: 24px;">
+              <p style="color: #52525b; font-size: 14px; margin: 0 0 4px 0;"><strong>Service:</strong> ${serviceName}</p>
+              <p style="color: #52525b; font-size: 14px; margin: 0 0 4px 0;"><strong>Request ID:</strong> #${details.serviceRequestId}</p>
+              <p style="color: #52525b; font-size: 14px; margin: 0 0 4px 0;"><strong>Client:</strong> ${details.founderName}</p>
+              <p style="color: #52525b; font-size: 14px; margin: 0;"><strong>Client Email:</strong> ${details.founderEmail}</p>
+            </div>
+
+            <p style="color: #52525b; font-size: 14px; line-height: 1.6; margin-bottom: 24px;">
+              Please log in to your lawyer dashboard to review the request details, view uploaded documents, and begin processing.
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 32px 0;">
+            <p style="color: #a1a1aa; font-size: 12px; text-align: center;">&copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.</p>
+          </div>
+        </body>
+      </html>
+    `
+  });
+
+  console.log(`[Email] Service request assignment sent to ${lawyerEmail}`);
+  return result;
+}
+
+export async function sendServiceRequestStatusUpdateEmail(
+  founderEmail: string,
+  details: {
+    founderName: string;
+    serviceType: string;
+    serviceRequestId: number;
+    newStatus: string;
+    notes?: string;
+  }
+) {
+  const { client, fromEmail } = await getResendClient();
+
+  const serviceNames: Record<string, string> = {
+    SCUML: 'SCUML Certificate (EFCC)',
+    TM: 'Trademark Registration',
+    TIN: 'TIN Registration (FIRS)',
+  };
+  const serviceName = serviceNames[details.serviceType] || details.serviceType;
+
+  const statusLabels: Record<string, string> = {
+    in_progress: 'In Progress',
+    completed: 'Completed',
+    cancelled: 'Cancelled',
+    assigned: 'Assigned to Lawyer',
+  };
+  const statusLabel = statusLabels[details.newStatus] || details.newStatus;
+
+  const statusColor = details.newStatus === 'completed' ? '#166534' :
+    details.newStatus === 'cancelled' ? '#991b1b' : '#1e40af';
+  const statusBg = details.newStatus === 'completed' ? '#f0fdf4' :
+    details.newStatus === 'cancelled' ? '#fef2f2' : '#eff6ff';
+
+  const notesSection = details.notes ? `
+    <div style="background: #f8f9fa; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+      <p style="color: #71717a; font-size: 12px; text-transform: uppercase; margin: 0 0 4px 0;">Notes from your lawyer</p>
+      <p style="color: #52525b; font-size: 14px; margin: 0;">${details.notes}</p>
+    </div>
+  ` : '';
+
+  console.log(`[Email] Sending service request status update to founder: ${founderEmail}, request #${details.serviceRequestId}, status: ${details.newStatus}`);
+
+  const result = await client.emails.send({
+    from: fromEmail,
+    to: founderEmail,
+    subject: `Service Request Update: ${serviceName} — ${statusLabel}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+          <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="text-align: center; margin-bottom: 32px;">
+              <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
+              <p style="color: #71717a; font-size: 14px; margin: 4px 0 0 0;">Service Request Update</p>
+            </div>
+
+            <p style="color: #52525b; font-size: 16px; margin-bottom: 16px;">Hi ${details.founderName},</p>
+
+            <div style="background: ${statusBg}; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+              <p style="color: ${statusColor}; font-size: 16px; font-weight: 600; margin: 0;">Status: ${statusLabel}</p>
+            </div>
+
+            <div style="margin-bottom: 24px;">
+              <p style="color: #52525b; font-size: 14px; margin: 0 0 4px 0;"><strong>Service:</strong> ${serviceName}</p>
+              <p style="color: #52525b; font-size: 14px; margin: 0;"><strong>Request ID:</strong> #${details.serviceRequestId}</p>
+            </div>
+
+            ${notesSection}
+
+            <p style="color: #71717a; font-size: 14px;">Log in to your dashboard to view full details and track progress.</p>
+
+            <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 32px 0;">
+            <p style="color: #a1a1aa; font-size: 12px; text-align: center;">&copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.</p>
+          </div>
+        </body>
+      </html>
+    `
+  });
+
+  console.log(`[Email] Service request status update sent to ${founderEmail}`);
   return result;
 }

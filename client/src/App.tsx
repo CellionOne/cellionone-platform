@@ -309,7 +309,9 @@ function Router() {
       
       <Route path="/apply-lawyer" component={ApplyLawyerPage} />
       
-      <Route path="/platform-overview" component={PlatformOverview} />
+      <Route path="/platform-overview">
+        <ProtectedRoute component={PlatformOverview} roles={["admin"]} />
+      </Route>
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
       

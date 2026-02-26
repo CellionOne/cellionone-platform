@@ -4308,29 +4308,36 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         
         res.json({ message: "Application rejected", application: updated });
       } else {
-        // Approve: Create user account and lawyer profile
-        const authService = await import("./services/authService");
-        const tempPassword = crypto.randomBytes(12).toString("base64").slice(0, 12) + "Ax1!";
-        
-        // Register the user with a temporary password
-        const registerResult = await authService.registerUser({
-          email: application.email,
-          password: tempPassword,
-          firstName: application.firstName,
-          lastName: application.lastName,
-        }, `${req.protocol}://${req.get("host")}`);
-        
-        if (!registerResult.success || !registerResult.user) {
-          console.error("[Lawyer Approval] Registration failed:", registerResult.message);
-          return res.status(500).json({ message: registerResult.message || "Failed to create lawyer user account" });
+        let userId: string;
+        let isExistingAccount = false;
+
+        const existingUser = await storage.getUserByEmail(application.email.toLowerCase());
+
+        if (existingUser) {
+          userId = existingUser.id;
+          isExistingAccount = true;
+          console.log(`[Lawyer Approval] Existing account found for ${application.email}, adding lawyer role`);
+        } else {
+          const authService = await import("./services/authService");
+          const tempPassword = crypto.randomBytes(12).toString("base64").slice(0, 12) + "Ax1!";
+
+          const registerResult = await authService.registerUser({
+            email: application.email,
+            password: tempPassword,
+            firstName: application.firstName,
+            lastName: application.lastName,
+          }, `${req.protocol}://${req.get("host")}`);
+
+          if (!registerResult.success || !registerResult.user) {
+            console.error("[Lawyer Approval] Registration failed:", registerResult.message);
+            return res.status(500).json({ message: registerResult.message || "Failed to create lawyer user account" });
+          }
+
+          userId = registerResult.user.id;
         }
-        
-        const userId = registerResult.user.id;
-        
-        // Add lawyer role
+
         await storage.addUserRole(userId, "lawyer");
-        
-        // Create lawyer profile
+
         await storage.upsertLawyerProfile({
           userId,
           firmName: application.firmName || undefined,
@@ -4338,28 +4345,28 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           serviceRegions: application.serviceRegions || [],
           isActive: true,
         });
-        
-        // Update application as approved
+
         const updated = await storage.updateLawyerApplication(applicationId, {
           status: "approved",
           reviewedBy: adminId,
           reviewedAt: new Date(),
           createdUserId: userId,
         });
-        
+
         await storage.createAuditLog({
           actorUserId: adminId,
           action: "lawyer_application_approved",
           entityType: "lawyer_application",
           entityId: applicationId.toString(),
-          details: { email: application.email, userId },
+          details: { email: application.email, userId, isExistingAccount },
           ipAddress: req.ip,
         });
-        
-        res.json({ 
-          message: "Application approved. Lawyer account created and verification email sent.",
-          application: updated,
-        });
+
+        const message = isExistingAccount
+          ? "Application approved. Lawyer role added to existing account."
+          : "Application approved. Lawyer account created and verification email sent.";
+
+        res.json({ message, application: updated });
       }
     } catch (error: any) {
       console.error("Error reviewing lawyer application:", error);

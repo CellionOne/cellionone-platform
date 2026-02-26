@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 
 interface AuthUser {
   id: string;
@@ -13,30 +14,43 @@ export default function PlatformOverview() {
     queryKey: ["/api/auth/user"],
   });
 
+  useEffect(() => {
+    const root = document.documentElement;
+    const wasDark = root.classList.contains("dark");
+    root.classList.remove("dark");
+    root.style.colorScheme = "light";
+    return () => {
+      if (wasDark) {
+        root.classList.add("dark");
+        root.style.colorScheme = "dark";
+      }
+    };
+  }, []);
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-white">
-        <p className="text-gray-500">Loading...</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'white' }}>
+        <p style={{ color: '#888' }}>Loading...</p>
       </div>
     );
   }
 
   if (!user || user.email?.toLowerCase() !== SUPER_ADMIN_EMAIL) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-white">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
-          <p className="text-gray-500">This page is restricted to the super administrator.</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'white' }}>
+        <div style={{ textAlign: 'center' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111', marginBottom: '8px' }}>Access Denied</h1>
+          <p style={{ color: '#888' }}>This page is restricted to the super administrator.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white text-gray-900 min-h-screen print:min-h-0">
+    <div style={{ background: 'white', color: '#111', minHeight: '100vh' }}>
       <style>{`
         @media print {
-          body { margin: 0; padding: 0; }
+          html, body { margin: 0 !important; padding: 0 !important; background: white !important; color: black !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           .no-print { display: none !important; }
           .page-break { page-break-before: always; }
           h1, h2, h3 { page-break-after: avoid; }

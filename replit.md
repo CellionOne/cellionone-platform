@@ -59,6 +59,8 @@ Key architectural decisions and features include:
 - **Founder Dashboard KYC Context:** Shows KYC org count, pending reviews, and completed verifications when user has KYC activity.
 - **Digital Signature Pad:** Personal profile page offers both draw-on-screen (via `react-signature-canvas`) and upload-scan options for signature specimens. Consent notice explains signature usage and authorisation requirements. Stored securely in Object Storage.
 - **Landing Page:** Animated hero carousel (3 slides: incorporation, employee verification, supplier verification), FAQ accordion section, contact form with `POST /api/contact` (rate-limited, HTML-sanitized, sends to admin via Resend).
+- **Admin Proposals Page:** Admin-only page at `/admin/proposals` for viewing partnership proposals as formatted HTML with browser-native Print/Save-as-PDF. Replaces server-side Puppeteer PDF generation. API: `GET /api/admin/proposals/bank-partnership/html`.
+- **Certificate HTML Fallback:** Verification certificates and KYC audit certificates support `?format=html` query param for browser-rendered viewing when PDF generation is unavailable. Endpoints return helpful `htmlUrl` in error responses on PDF failure.
 
 ## External Dependencies
 - **PostgreSQL:** Primary database, hosted via Neon.

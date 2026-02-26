@@ -390,6 +390,18 @@ export async function registerRoutes(
   const authService = await import("./services/authService");
   const emailService = await import("./services/emailService");
   
+  app.get("/api/admin/proposals/bank-partnership/html", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateBankPartnershipProposalHTML } = await import("./templates/bank-partnership-proposal");
+      const html = generateBankPartnershipProposalHTML();
+      res.setHeader("Content-Type", "text/html");
+      res.send(html);
+    } catch (error: any) {
+      console.error("Error generating proposal HTML:", error);
+      res.status(500).json({ message: "Failed to generate proposal HTML", error: error.message });
+    }
+  });
+
   app.get("/api/admin/proposals/bank-partnership", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const { generateBankPartnershipProposalHTML } = await import("./templates/bank-partnership-proposal");
@@ -405,7 +417,8 @@ export async function registerRoutes(
       res.send(pdfBuffer);
     } catch (error: any) {
       console.error("Error generating proposal PDF:", error);
-      res.status(500).json({ message: "Failed to generate PDF", error: error.message });
+      const htmlUrl = "/api/admin/proposals/bank-partnership/html";
+      res.status(500).json({ message: "Failed to generate PDF. You can view the proposal as HTML instead.", htmlUrl });
     }
   });
 
@@ -6581,21 +6594,43 @@ Important guidelines:
       };
 
       const html = generateVerificationCertificateHTML(certData);
-      const { generatePdf } = await import("./services/pdfService");
-      const pdfBuffer = await generatePdf(html);
 
-      await db.insert(dataSharingAccessLogs).values({
-        consentId: consent.id,
-        accessType: "certificate_download",
-        accessedBy: consent.partnerName,
-        ipAddress: req.ip,
-        userAgent: req.get("user-agent") || "unknown",
-        dataReturned: { type: "verification_certificate" },
-      });
+      const format = req.query.format;
+      if (format === "html") {
+        await db.insert(dataSharingAccessLogs).values({
+          consentId: consent.id,
+          accessType: "certificate_download",
+          accessedBy: consent.partnerName,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || "unknown",
+          dataReturned: { type: "verification_certificate_html" },
+        });
 
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="Cellion_One_Verification_Certificate_${user.lastName}.pdf"`);
-      res.send(pdfBuffer);
+        res.setHeader("Content-Type", "text/html");
+        return res.send(html);
+      }
+
+      try {
+        const { generatePdf } = await import("./services/pdfService");
+        const pdfBuffer = await generatePdf(html);
+
+        await db.insert(dataSharingAccessLogs).values({
+          consentId: consent.id,
+          accessType: "certificate_download",
+          accessedBy: consent.partnerName,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || "unknown",
+          dataReturned: { type: "verification_certificate" },
+        });
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="Cellion_One_Verification_Certificate_${user.lastName}.pdf"`);
+        return res.send(pdfBuffer);
+      } catch (pdfError: any) {
+        console.error("PDF generation failed for certificate, returning error with HTML fallback:", pdfError.message);
+        const htmlUrl = `/api/partner/verified-data/${req.params.token}/certificate?format=html`;
+        return res.status(500).json({ message: "Failed to generate PDF. You can view the certificate as HTML instead.", htmlUrl });
+      }
     } catch (error: any) {
       console.error("Error generating certificate:", error);
       res.status(500).json({ message: "Failed to generate certificate" });

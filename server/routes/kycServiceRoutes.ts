@@ -1738,10 +1738,9 @@ export function registerKycServiceRoutes(app: Express) {
         res.setHeader("Content-Disposition", `attachment; filename="kyc-certificate-${certificateNumber}.pdf"`);
         return res.send(pdfBuffer);
       } catch (puppeteerError: any) {
-        console.error("[KYC] Puppeteer PDF generation failed, falling back to HTML:", puppeteerError.message);
-        res.setHeader("Content-Type", "text/html");
-        res.setHeader("Content-Disposition", `attachment; filename="kyc-certificate-${certificateNumber}.html"`);
-        return res.send(html);
+        console.error("[KYC] Puppeteer PDF generation failed:", puppeteerError.message);
+        const htmlUrl = `/api/kyc-service/organisations/${orgId}/verification-requests/${reqId}/audit-certificate?format=html`;
+        return res.status(500).json({ message: "Failed to generate PDF. You can view the certificate as HTML instead.", htmlUrl });
       }
     } catch (error: any) {
       console.error("[KYC] Audit certificate error:", error);

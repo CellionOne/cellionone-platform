@@ -92,6 +92,7 @@ const adminItems: NavItem[] = [
   { title: "AI Events", url: "/admin/ai-events", icon: Brain },
   { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },
   { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
+  { title: "Proposals", url: "/admin/proposals", icon: FileText },
   { title: "KYC Oversight", url: "/admin/kyc", icon: ShieldCheck },
   { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
   { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },

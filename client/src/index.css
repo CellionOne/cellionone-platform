@@ -286,3 +286,25 @@
     inset: -1px;
   }
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .proposal-content,
+  .proposal-content * {
+    visibility: visible !important;
+  }
+  .proposal-content {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .print-hide-controls,
+  [data-sidebar],
+  header,
+  nav {
+    display: none !important;
+  }
+}

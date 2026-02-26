@@ -44,6 +44,7 @@ import AdminOrders from "@/pages/admin/orders";
 import AdminKycOverview from "@/pages/admin/kyc-overview";
 import AdminProposals from "@/pages/admin/proposals";
 import AdminRegisteredOffices from "@/pages/admin/registered-offices";
+import PlatformOverview from "@/pages/platform-overview";
 import ApplyLawyerPage from "@/pages/apply-lawyer";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
@@ -308,6 +309,7 @@ function Router() {
       
       <Route path="/apply-lawyer" component={ApplyLawyerPage} />
       
+      <Route path="/platform-overview" component={PlatformOverview} />
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
       

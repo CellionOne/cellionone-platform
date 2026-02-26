@@ -7036,6 +7036,38 @@ For questions, contact: service@cellionone.com
     }
   });
 
+  app.delete("/api/admin/service-addresses/:id", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const addressId = parseInt(req.params.id);
+      if (isNaN(addressId)) return res.status(400).json({ message: "Invalid address ID" });
+
+      const address = await storage.getServiceAddressById(addressId);
+      if (!address) return res.status(404).json({ message: "Service address not found" });
+
+      const subs = await storage.getSubscriptionsByServiceAddressId(addressId);
+      if (subs.length > 0) {
+        return res.status(400).json({ message: `Cannot delete: ${subs.length} active subscription(s) are using this address. Deactivate it instead.` });
+      }
+
+      await db.delete(serviceAddresses).where(eq(serviceAddresses.id, addressId));
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "service_address_deleted",
+        entityType: "service_address",
+        entityId: addressId.toString(),
+        details: { label: address.label },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Service address deleted" });
+    } catch (error) {
+      console.error("Error deleting service address:", error);
+      res.status(500).json({ message: "Failed to delete service address" });
+    }
+  });
+
   // ============== BUILDING MANAGER ENDPOINTS ==============
 
   const buildingManagerLocationUpdateSchema = z.object({

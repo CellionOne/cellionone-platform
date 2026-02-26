@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Building2, Plus, UserPlus, MapPin } from "lucide-react";
+import { Building2, Plus, UserPlus, MapPin, Trash2 } from "lucide-react";
 import type { ServiceAddress } from "@shared/schema";
 import type { User } from "@shared/models/auth";
 
@@ -78,6 +78,20 @@ export default function AdminRegisteredOffices() {
     },
     onError: () => {
       toast({ title: "Failed to create address", variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (addressId: number) => {
+      return apiRequest("DELETE", `/api/admin/service-addresses/${addressId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/service-addresses"] });
+      toast({ title: "Location deleted" });
+    },
+    onError: async (error: any) => {
+      const msg = error?.message || "Failed to delete location";
+      toast({ title: msg, variant: "destructive" });
     },
   });
 
@@ -280,6 +294,7 @@ export default function AdminRegisteredOffices() {
                         <p className="text-muted-foreground">Hours: {addr.operatingHours}</p>
                       )}
                     </div>
+                    <div className="flex items-center gap-2">
                     <Dialog open={assignDialogOpen && selectedAddressId === addr.id} onOpenChange={(open) => {
                       setAssignDialogOpen(open);
                       if (!open) { setSelectedAddressId(null); setSelectedManagerId(""); }
@@ -356,6 +371,20 @@ export default function AdminRegisteredOffices() {
                         )}
                       </DialogContent>
                     </Dialog>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      data-testid={`button-delete-address-${addr.id}`}
+                      onClick={() => {
+                        if (confirm(`Delete "${addr.label}"? This cannot be undone.`)) {
+                          deleteMutation.mutate(addr.id);
+                        }
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

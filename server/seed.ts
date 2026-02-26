@@ -51,13 +51,15 @@ export async function seedDatabase() {
         isActive: true,
       });
     } else if (existingAddresses.length > 1) {
-      // Clean up duplicates: keep the lowest ID per unique label+line1+city
-      const keepIds = await db.execute(sql`SELECT MIN(id) as id FROM service_addresses GROUP BY label, line_1, city, state`);
+      // Clean up duplicates: keep the lowest ID per unique line1+city+state
+      const keepIds = await db.execute(sql`SELECT MIN(id) as id FROM service_addresses GROUP BY line_1, city, state`);
       const idsToKeep = (keepIds.rows as any[]).map((r: any) => r.id);
       if (idsToKeep.length > 0) {
         await db.execute(sql`DELETE FROM service_addresses WHERE id NOT IN (${sql.join(idsToKeep.map(id => sql`${id}`), sql`, `)})`);
         console.log(`Cleaned up duplicate service addresses, kept ${idsToKeep.length}`);
       }
+      // Fix any old "Celion" typo labels
+      await db.execute(sql`UPDATE service_addresses SET label = 'Cellion One Registered Office (Ikoyi)' WHERE label LIKE 'Celion%'`);
     }
     console.log("Synced service addresses");
 

@@ -1,6 +1,8 @@
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements } from "@shared/schema";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 export async function seedDatabase() {
   try {
@@ -65,6 +67,43 @@ export async function seedDatabase() {
       await db.insert(productCatalog).values(item).onConflictDoNothing();
     }
     console.log("Synced product catalog");
+
+    const SUPER_ADMIN_EMAIL = "service@cellionone.com";
+    const existingSuperAdmin = await db.select().from(users).where(eq(users.email, SUPER_ADMIN_EMAIL)).limit(1);
+    if (existingSuperAdmin.length === 0) {
+      const initialPassword = crypto.randomBytes(16).toString("hex");
+      const passwordHash = await bcrypt.hash(initialPassword, 12);
+      const superAdminId = crypto.randomUUID();
+      await db.insert(users).values({
+        id: superAdminId,
+        email: SUPER_ADMIN_EMAIL,
+        firstName: "Super",
+        lastName: "Admin",
+        passwordHash,
+        emailVerified: true,
+      });
+      const existingRole = await db.select().from(userRoles)
+        .where(and(eq(userRoles.userId, superAdminId), eq(userRoles.role, "admin")))
+        .limit(1);
+      if (existingRole.length === 0) {
+        await db.insert(userRoles).values({ userId: superAdminId, role: "admin" });
+      }
+      console.log("==========================================================");
+      console.log("SUPER ADMIN ACCOUNT CREATED");
+      console.log(`Email: ${SUPER_ADMIN_EMAIL}`);
+      console.log(`Initial Password: ${initialPassword}`);
+      console.log("IMPORTANT: Change this password immediately after first login!");
+      console.log("==========================================================");
+    } else {
+      const adminUser = existingSuperAdmin[0];
+      const existingRole = await db.select().from(userRoles)
+        .where(and(eq(userRoles.userId, adminUser.id), eq(userRoles.role, "admin")))
+        .limit(1);
+      if (existingRole.length === 0) {
+        await db.insert(userRoles).values({ userId: adminUser.id, role: "admin" });
+        console.log("Super admin role assigned to existing user: " + SUPER_ADMIN_EMAIL);
+      }
+    }
 
     // Seed demo users if in development
     if (process.env.NODE_ENV !== "production") {

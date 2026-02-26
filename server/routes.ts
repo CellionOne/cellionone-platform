@@ -393,20 +393,12 @@ export async function registerRoutes(
   app.get("/api/admin/proposals/bank-partnership", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const { generateBankPartnershipProposalHTML } = await import("./templates/bank-partnership-proposal");
-      const puppeteer = await import("puppeteer");
-      const browser = await puppeteer.default.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-      });
-      const page = await browser.newPage();
+      const { generatePdf } = await import("./services/pdfService");
       const html = generateBankPartnershipProposalHTML();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      const pdfBuffer = await page.pdf({
+      const pdfBuffer = await generatePdf(html, {
         format: 'A4',
-        printBackground: true,
         margin: { top: '40px', right: '50px', bottom: '40px', left: '50px' },
       });
-      await browser.close();
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', 'attachment; filename="Cellion_One_Bank_Partnership_Proposal.pdf"');
@@ -6589,19 +6581,8 @@ Important guidelines:
       };
 
       const html = generateVerificationCertificateHTML(certData);
-      const puppeteer = await import("puppeteer");
-      const browser = await puppeteer.default.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-      });
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      const pdfBuffer = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
-      });
-      await browser.close();
+      const { generatePdf } = await import("./services/pdfService");
+      const pdfBuffer = await generatePdf(html);
 
       await db.insert(dataSharingAccessLogs).values({
         consentId: consent.id,

@@ -1731,19 +1731,8 @@ export function registerKycServiceRoutes(app: Express) {
       }
 
       try {
-        const puppeteer = await import("puppeteer");
-        const browser = await puppeteer.default.launch({
-          headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        });
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "networkidle0" });
-        const pdfBuffer = await page.pdf({
-          format: "A4",
-          margin: { top: "20px", right: "20px", bottom: "20px", left: "20px" },
-          printBackground: true,
-        });
-        await browser.close();
+        const { generatePdf } = await import("../services/pdfService");
+        const pdfBuffer = await generatePdf(html);
 
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="kyc-certificate-${certificateNumber}.pdf"`);

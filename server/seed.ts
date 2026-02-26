@@ -37,17 +37,20 @@ export async function seedDatabase() {
     }
     console.log("Synced feature flags");
 
-    // Seed service address for registered office
-    await db.insert(serviceAddresses).values({
-      label: "Cellion One Registered Office (Ikoyi)",
-      line1: "51 Raymond Njoku Street, Off Awolowo Road",
-      line2: "Ikoyi",
-      floorDetails: "First Floor",
-      city: "Lagos",
-      state: "Lagos",
-      country: "Nigeria",
-      isActive: true,
-    }).onConflictDoNothing();
+    // Seed service address for registered office (only if none exist)
+    const existingAddresses = await db.select().from(serviceAddresses);
+    if (existingAddresses.length === 0) {
+      await db.insert(serviceAddresses).values({
+        label: "Cellion One Registered Office (Ikoyi)",
+        line1: "51 Raymond Njoku Street, Off Awolowo Road",
+        line2: "Ikoyi",
+        floorDetails: "First Floor",
+        city: "Lagos",
+        state: "Lagos",
+        country: "Nigeria",
+        isActive: true,
+      });
+    }
     console.log("Synced service addresses");
 
     // Seed product catalog with fixed-cut SKUs (prices in kobo: ₦1 = 100 kobo)

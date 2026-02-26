@@ -10,7 +10,7 @@ const SUPER_ADMIN_EMAIL = "service@cellionone.com";
 
 export default function PlatformOverview() {
   const { data: user, isLoading } = useQuery<AuthUser>({
-    queryKey: ["/api/auth/me"],
+    queryKey: ["/api/auth/user"],
   });
 
   if (isLoading) {

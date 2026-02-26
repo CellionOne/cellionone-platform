@@ -57,6 +57,8 @@ Key architectural decisions and features include:
   - Frontend pages: `client/src/pages/kyc-service/` (orgs, org-dashboard, verification-detail, org-settings, verify-request, employee-portal, supplier-portal, terms, my-verifications, org-invite-accept)
 - **Notification Centre:** Bell icon with unread count in dashboard header, notification popover with mark-as-read, full notifications page at `/notifications`. API: `GET /api/notifications`, `PATCH /api/notifications/:id/read`, `POST /api/notifications/mark-all-read`.
 - **Founder Dashboard KYC Context:** Shows KYC org count, pending reviews, and completed verifications when user has KYC activity.
+- **Digital Signature Pad:** Personal profile page offers both draw-on-screen (via `react-signature-canvas`) and upload-scan options for signature specimens. Consent notice explains signature usage and authorisation requirements. Stored securely in Object Storage.
+- **Landing Page:** Animated hero carousel (3 slides: incorporation, employee verification, supplier verification), FAQ accordion section, contact form with `POST /api/contact` (rate-limited, HTML-sanitized, sends to admin via Resend).
 
 ## External Dependencies
 - **PostgreSQL:** Primary database, hosted via Neon.

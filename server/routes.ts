@@ -235,6 +235,118 @@ export async function registerRoutes(
   // Seed feature flags
   await seedFeatureFlags();
 
+  // ============== PUBLIC CONTACT FORM ==============
+  const contactSchema = z.object({
+    name: z.string().min(1, "Name is required").max(200),
+    email: z.string().email("Valid email is required"),
+    subject: z.enum(["General Inquiry", "Incorporation Help", "KYC/Verification", "Technical Support", "Other"]),
+    message: z.string().min(10, "Message must be at least 10 characters").max(5000),
+  });
+
+  const rateLimit = (await import("express-rate-limit")).default;
+  const contactLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: { message: "Too many requests. Please try again later." },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  function escapeHtml(str: string): string {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+
+  app.post("/api/contact", contactLimiter, async (req: any, res) => {
+    try {
+      const parsed = contactSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors.map(e => e.message).join(", ") });
+      }
+      const { name, email, subject, message } = parsed.data;
+      const safeName = escapeHtml(name);
+      const safeEmail = escapeHtml(email);
+      const safeMessage = escapeHtml(message);
+
+      const { getResendClient, ADMIN_NOTIFICATION_EMAIL } = await import("./services/emailService");
+      const { client, fromEmail } = await getResendClient();
+
+      await client.emails.send({
+        from: fromEmail,
+        to: ADMIN_NOTIFICATION_EMAIL,
+        subject: `[Contact Form] ${subject} - from ${safeName}`,
+        replyTo: email,
+        html: `
+          <!DOCTYPE html>
+          <html>
+            <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+            <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+              <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <div style="text-align: center; margin-bottom: 32px;">
+                  <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                    <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
+                  </div>
+                  <h1 style="color: #18181b; font-size: 24px; margin: 0;">Contact Form Submission</h1>
+                </div>
+                <table style="width: 100%; border-collapse: collapse;">
+                  <tr><td style="padding: 8px 0; color: #71717a; font-size: 14px; width: 100px;">Name</td><td style="padding: 8px 0; color: #18181b; font-size: 14px;">${safeName}</td></tr>
+                  <tr><td style="padding: 8px 0; color: #71717a; font-size: 14px;">Email</td><td style="padding: 8px 0; color: #18181b; font-size: 14px;"><a href="mailto:${safeEmail}">${safeEmail}</a></td></tr>
+                  <tr><td style="padding: 8px 0; color: #71717a; font-size: 14px;">Subject</td><td style="padding: 8px 0; color: #18181b; font-size: 14px;">${subject}</td></tr>
+                </table>
+                <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 16px 0;">
+                <p style="color: #18181b; font-size: 14px; line-height: 1.6; white-space: pre-wrap;">${safeMessage}</p>
+                <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 32px 0;">
+                <p style="color: #a1a1aa; font-size: 12px; text-align: center;">&copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited.</p>
+              </div>
+            </body>
+          </html>
+        `,
+      });
+
+      try {
+        await client.emails.send({
+          from: fromEmail,
+          to: email,
+          subject: "We received your message - Cellion One",
+          html: `
+            <!DOCTYPE html>
+            <html>
+              <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+              <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+                <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                  <div style="text-align: center; margin-bottom: 32px;">
+                    <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                      <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
+                    </div>
+                    <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
+                  </div>
+                  <h2 style="color: #18181b; font-size: 20px; margin-bottom: 16px;">Thank you for contacting us, ${safeName}!</h2>
+                  <p style="color: #52525b; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
+                    We have received your message regarding <strong>${subject}</strong> and our team will get back to you as soon as possible.
+                  </p>
+                  <div style="background: #f0fdf4; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+                    <p style="color: #166534; font-size: 14px; margin: 0;">Your message has been forwarded to our support team. We typically respond within 24 business hours.</p>
+                  </div>
+                  <p style="color: #71717a; font-size: 14px; line-height: 1.6;">
+                    If your matter is urgent, you can also reach us directly at service@cellionone.com.
+                  </p>
+                  <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 32px 0;">
+                  <p style="color: #a1a1aa; font-size: 12px; text-align: center;">&copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.</p>
+                </div>
+              </body>
+            </html>
+          `,
+        });
+      } catch (confirmationError: any) {
+        console.error("[Contact] Confirmation email failed:", confirmationError);
+      }
+
+      res.json({ message: "Your message has been sent successfully." });
+    } catch (error: any) {
+      console.error("[Contact] Failed to send contact form:", error);
+      res.status(500).json({ message: "Failed to send your message. Please try again or email us directly at service@cellionone.com." });
+    }
+  });
+
   // ============== AUTH ROUTES ==============
   // IMPORTANT: Do not register Replit default auth routes.
   // This endpoint must return role-aware user payloads.

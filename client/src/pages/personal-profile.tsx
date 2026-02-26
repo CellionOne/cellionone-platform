@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import SignatureCanvas from "react-signature-canvas";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Form,
   FormControl,
@@ -42,6 +44,9 @@ import {
   AlertCircle,
   CheckCircle2,
   Eye,
+  Pen,
+  Eraser,
+  Info,
 } from "lucide-react";
 
 const NIGERIAN_STATES = [
@@ -638,6 +643,69 @@ function IdentitySection() {
   );
 }
 
+function SignaturePad({ onSave, saving }: { onSave: (file: File) => void; saving: boolean }) {
+  const sigRef = useRef<SignatureCanvas>(null);
+  const [isEmpty, setIsEmpty] = useState(true);
+
+  const handleClear = useCallback(() => {
+    sigRef.current?.clear();
+    setIsEmpty(true);
+  }, []);
+
+  const handleSave = useCallback(() => {
+    if (!sigRef.current || sigRef.current.isEmpty()) return;
+    const canvas = sigRef.current.getTrimmedCanvas();
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const file = new File([blob], "signature.png", { type: "image/png" });
+        onSave(file);
+      }
+    }, "image/png");
+  }, [onSave]);
+
+  return (
+    <div className="space-y-3" data-testid="signature-pad-container">
+      <div className="border-2 border-dashed rounded-lg bg-white dark:bg-gray-50 overflow-hidden">
+        <SignatureCanvas
+          ref={sigRef}
+          penColor="#000000"
+          canvasProps={{
+            className: "w-full",
+            style: { width: "100%", height: "160px" },
+            "data-testid": "canvas-signature-pad",
+          } as any}
+          onBegin={() => setIsEmpty(false)}
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleClear}
+          disabled={isEmpty || saving}
+          data-testid="button-clear-signature"
+        >
+          <Eraser className="h-4 w-4 mr-1" />
+          Clear
+        </Button>
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={isEmpty || saving}
+          data-testid="button-save-signature"
+        >
+          {saving ? (
+            <Loader2 className="h-4 w-4 animate-spin mr-1" />
+          ) : (
+            <Check className="h-4 w-4 mr-1" />
+          )}
+          Save Signature
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function DocumentsSection() {
   const { toast } = useToast();
   const [uploading, setUploading] = useState<string | null>(null);
@@ -697,7 +765,7 @@ function DocumentsSection() {
     );
   }
 
-  const documents = [
+  const otherDocuments = [
     {
       type: "passport_photo",
       label: "Passport Photograph",
@@ -705,14 +773,6 @@ function DocumentsSection() {
       icon: Camera,
       uploaded: profile?.hasPassportPhoto || false,
       accept: "image/jpeg,image/png",
-    },
-    {
-      type: "signature",
-      label: "Signature Specimen",
-      description: "Clear scan or photo of your signature on white paper",
-      icon: FileSignature,
-      uploaded: profile?.hasSignature || false,
-      accept: "image/jpeg,image/png,application/pdf",
     },
     {
       type: "id_document",
@@ -724,78 +784,178 @@ function DocumentsSection() {
     },
   ];
 
+  const hasSignature = profile?.hasSignature || false;
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Required Documents</CardTitle>
-        <CardDescription>Upload clear copies of the following documents. Max 5MB per file (JPEG, PNG, or PDF).</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          {documents.map((doc) => (
-            <div
-              key={doc.type}
-              className="flex items-center gap-4 p-4 border rounded-lg"
-              data-testid={`document-row-${doc.type}`}
-            >
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${doc.uploaded ? "bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400" : "bg-muted text-muted-foreground"}`}>
-                <doc.icon className="h-5 w-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">{doc.label}</span>
-                  {doc.uploaded && (
-                    <Badge variant="default" className="gap-1 text-xs">
-                      <CheckCircle2 className="h-3 w-3" /> Uploaded
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">{doc.description}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {doc.uploaded && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleViewDocument(doc.type)}
-                    data-testid={`button-view-${doc.type}`}
-                  >
-                    <Eye className="h-4 w-4" />
-                  </Button>
-                )}
-                <label>
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept={doc.accept}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleUpload(doc.type, file);
-                      e.target.value = "";
-                    }}
-                    data-testid={`input-upload-${doc.type}`}
-                  />
-                  <Button
-                    variant={doc.uploaded ? "outline" : "default"}
-                    size="sm"
-                    asChild
-                    disabled={uploading === doc.type}
-                  >
-                    <span className="cursor-pointer">
-                      {uploading === doc.type ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                      ) : (
-                        <Upload className="h-4 w-4 mr-1" />
-                      )}
-                      {doc.uploaded ? "Replace" : "Upload"}
-                    </span>
-                  </Button>
-                </label>
-              </div>
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <FileSignature className="h-5 w-5" />
+            Signature Specimen
+            {hasSignature && (
+              <Badge variant="default" className="gap-1 text-xs">
+                <CheckCircle2 className="h-3 w-3" /> Saved
+              </Badge>
+            )}
+          </CardTitle>
+          <CardDescription>Your signature is required for company filings and legal documents.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg text-sm text-blue-800 dark:text-blue-300 flex gap-2" data-testid="signature-consent-notice">
+            <Info className="h-4 w-4 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-medium mb-1">How your signature is used</p>
+              <p>Your signature will only be used for applications and filings you have explicitly authorised. It will be securely stored and shared only with assigned lawyers handling your approved applications. You can update or delete your signature at any time.</p>
             </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+          </div>
+
+          {hasSignature && (
+            <div className="flex items-center gap-2 p-3 border rounded-lg bg-muted/30" data-testid="signature-preview-row">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400">
+                <FileSignature className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <span className="font-medium text-sm">Current Signature</span>
+                <p className="text-xs text-muted-foreground">Your saved signature specimen</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleViewDocument("signature")}
+                data-testid="button-view-signature"
+              >
+                <Eye className="h-4 w-4 mr-1" />
+                View
+              </Button>
+            </div>
+          )}
+
+          <Tabs defaultValue="draw" data-testid="signature-tabs">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="draw" data-testid="tab-draw-signature">
+                <Pen className="h-4 w-4 mr-1" />
+                Draw Signature
+              </TabsTrigger>
+              <TabsTrigger value="upload" data-testid="tab-upload-signature">
+                <Upload className="h-4 w-4 mr-1" />
+                Upload Scan
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="draw" className="mt-4">
+              <p className="text-sm text-muted-foreground mb-3">Draw your signature below using your mouse, trackpad, or touchscreen.</p>
+              <SignaturePad
+                onSave={(file) => handleUpload("signature", file)}
+                saving={uploading === "signature"}
+              />
+            </TabsContent>
+            <TabsContent value="upload" className="mt-4">
+              <p className="text-sm text-muted-foreground mb-3">Upload a clear scan or photo of your signature on white paper. Max 5MB (JPEG, PNG, or PDF).</p>
+              <label>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/jpeg,image/png,application/pdf"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleUpload("signature", file);
+                    e.target.value = "";
+                  }}
+                  data-testid="input-upload-signature"
+                />
+                <Button
+                  variant={hasSignature ? "outline" : "default"}
+                  size="sm"
+                  asChild
+                  disabled={uploading === "signature"}
+                >
+                  <span className="cursor-pointer">
+                    {uploading === "signature" ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                    ) : (
+                      <Upload className="h-4 w-4 mr-1" />
+                    )}
+                    {hasSignature ? "Replace Signature" : "Upload Signature"}
+                  </span>
+                </Button>
+              </label>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Other Required Documents</CardTitle>
+          <CardDescription>Upload clear copies of the following documents. Max 5MB per file (JPEG, PNG, or PDF).</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {otherDocuments.map((doc) => (
+              <div
+                key={doc.type}
+                className="flex items-center gap-4 p-4 border rounded-lg"
+                data-testid={`document-row-${doc.type}`}
+              >
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${doc.uploaded ? "bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400" : "bg-muted text-muted-foreground"}`}>
+                  <doc.icon className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{doc.label}</span>
+                    {doc.uploaded && (
+                      <Badge variant="default" className="gap-1 text-xs">
+                        <CheckCircle2 className="h-3 w-3" /> Uploaded
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{doc.description}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {doc.uploaded && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleViewDocument(doc.type)}
+                      data-testid={`button-view-${doc.type}`}
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <label>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept={doc.accept}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleUpload(doc.type, file);
+                        e.target.value = "";
+                      }}
+                      data-testid={`input-upload-${doc.type}`}
+                    />
+                    <Button
+                      variant={doc.uploaded ? "outline" : "default"}
+                      size="sm"
+                      asChild
+                      disabled={uploading === doc.type}
+                    >
+                      <span className="cursor-pointer">
+                        {uploading === doc.type ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                        ) : (
+                          <Upload className="h-4 w-4 mr-1" />
+                        )}
+                        {doc.uploaded ? "Replace" : "Upload"}
+                      </span>
+                    </Button>
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

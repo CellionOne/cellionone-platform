@@ -2,7 +2,25 @@ import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import { 
   Building2, 
   Shield, 
@@ -22,7 +40,10 @@ import {
   BriefcaseBusiness,
   UserCheck,
   Building,
-  ShieldCheck
+  ShieldCheck,
+  Send,
+  Loader2,
+  Mail
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
 
@@ -188,11 +209,183 @@ const pricingTiers = [
   }
 ];
 
+const faqItems = [
+  {
+    question: "What is Cellion One?",
+    answer: "Cellion One is Nigeria's premier legal tech platform that simplifies company incorporation, identity verification, and regulatory compliance. We connect you with verified lawyers who handle all filings with the Corporate Affairs Commission (CAC) and other regulatory bodies, while you track progress through our digital dashboard."
+  },
+  {
+    question: "How long does company incorporation take?",
+    answer: "Typical company incorporation takes 7–14 business days from the point of submitting a complete application with all required documents. Timelines may vary depending on CAC processing times, name availability checks, and the completeness of your application. We keep you updated at every stage."
+  },
+  {
+    question: "What documents do I need to register a company?",
+    answer: "You'll need valid government-issued IDs (International Passport, Driver's Licence, or National ID) for all directors and shareholders, passport photographs, proof of address (utility bill or bank statement), and your proposed company details including preferred names, share capital structure, and registered office address."
+  },
+  {
+    question: "How does the KYC verification service work?",
+    answer: "Our KYC service lets organisations verify the identity of employees, suppliers, and other stakeholders. You create an organisation on the platform, invite team members, and submit verification requests. Each request goes through BVN/NIN validation, document checks, biometric verification, and AML screening, with results delivered as audit-ready certificates."
+  },
+  {
+    question: "How much does it cost?",
+    answer: "Company incorporation starts from ₦100,000 for a Starter package (up to ₦1M share capital). Employee verification is ₦10,000 per person, and supplier verification is ₦100,000 per company. Additional services like TIN registration, SCUML certification, and trademark registration are priced separately. All pricing is transparent with no hidden fees."
+  },
+  {
+    question: "Is my personal data secure?",
+    answer: "Absolutely. We use industry-standard encryption for all data at rest and in transit. Your documents are stored in a secure digital vault with strict access controls. Personal information is only shared with assigned lawyers handling your approved applications, and you can update or delete your data at any time."
+  },
+  {
+    question: "What happens after my company is registered?",
+    answer: "After registration, you receive your Certificate of Incorporation, CAC status report, and other statutory documents in your digital vault. We also deliver physical stamped originals to your doorstep via tracked courier. You can then proceed with add-on services like TIN registration, SCUML certification, and opening a corporate bank account."
+  },
+  {
+    question: "Can I verify employees and suppliers separately?",
+    answer: "Yes. Our KYC verification service supports both individual (employee) and corporate (supplier) verification as separate workflows. You can run employee identity checks and supplier due diligence independently, each with their own dashboards, audit trails, and compliance certificates."
+  },
+  {
+    question: "How do I track my application status?",
+    answer: "Once you submit an application, you can track its status in real time from your dashboard. You'll see each stage of the process — from document review to CAC submission to final approval — along with any clarification requests from your assigned lawyer. You also receive email notifications at key milestones."
+  },
+  {
+    question: "What payment methods do you accept?",
+    answer: "We accept payments via Paystack, which supports Nigerian bank cards (Visa, Mastercard, Verve), bank transfers, and USSD. All payments are processed securely, and you receive a digital receipt for every transaction, accessible from your dashboard at any time."
+  }
+];
+
 const comingSoon = [
   { icon: Landmark, title: "Bank Account Opening", description: "Open corporate bank accounts seamlessly after incorporation" },
   { icon: FileSignature, title: "Annual Returns Filing", description: "Automated CAC annual returns preparation and filing" },
   { icon: BriefcaseBusiness, title: "Company Secretary Services", description: "Ongoing statutory compliance and company secretarial support" }
 ];
+
+function ContactSection() {
+  const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactSubject, setContactSubject] = useState("");
+  const [contactMessage, setContactMessage] = useState("");
+
+  const handleContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contactName || !contactEmail || !contactSubject || !contactMessage) {
+      toast({ title: "Please fill in all fields", variant: "destructive" });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await apiRequest("POST", "/api/contact", {
+        name: contactName,
+        email: contactEmail,
+        subject: contactSubject,
+        message: contactMessage,
+      });
+      toast({ title: "Message sent", description: "We'll get back to you shortly." });
+      setContactName("");
+      setContactEmail("");
+      setContactSubject("");
+      setContactMessage("");
+    } catch (error: any) {
+      toast({
+        title: "Failed to send message",
+        description: error.message || "Please try again later.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <section id="contact" className="py-20 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="text-center mb-16">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium mb-4">
+            <Mail className="h-4 w-4" />
+            Get In Touch
+          </div>
+          <h2 className="text-3xl sm:text-4xl font-bold mb-4" data-testid="text-contact-heading">Contact Us</h2>
+          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+            Have a question or need help? Fill out the form below and our team will get back to you as soon as possible.
+          </p>
+        </div>
+
+        <div className="max-w-2xl mx-auto">
+          <Card>
+            <CardContent className="p-6">
+              <form onSubmit={handleContactSubmit} className="space-y-4">
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="contact-name">Name</Label>
+                    <Input
+                      id="contact-name"
+                      placeholder="Your full name"
+                      value={contactName}
+                      onChange={(e) => setContactName(e.target.value)}
+                      required
+                      data-testid="input-contact-name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="contact-email">Email</Label>
+                    <Input
+                      id="contact-email"
+                      type="email"
+                      placeholder="you@example.com"
+                      value={contactEmail}
+                      onChange={(e) => setContactEmail(e.target.value)}
+                      required
+                      data-testid="input-contact-email"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="contact-subject">Subject</Label>
+                  <Select value={contactSubject} onValueChange={setContactSubject}>
+                    <SelectTrigger data-testid="select-contact-subject">
+                      <SelectValue placeholder="Select a subject" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="General Inquiry">General Inquiry</SelectItem>
+                      <SelectItem value="Incorporation Help">Incorporation Help</SelectItem>
+                      <SelectItem value="KYC/Verification">KYC/Verification</SelectItem>
+                      <SelectItem value="Technical Support">Technical Support</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="contact-message">Message</Label>
+                  <Textarea
+                    id="contact-message"
+                    placeholder="How can we help you?"
+                    rows={5}
+                    value={contactMessage}
+                    onChange={(e) => setContactMessage(e.target.value)}
+                    required
+                    className="resize-none"
+                    data-testid="input-contact-message"
+                  />
+                </div>
+
+                <Button type="submit" className="w-full gap-2" disabled={isSubmitting} data-testid="button-contact-submit">
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  {isSubmitting ? "Sending..." : "Send Message"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function LandingPage() {
   const [activeSlide, setActiveSlide] = useState(0);
@@ -230,6 +423,8 @@ export default function LandingPage() {
               <a href="#for-organisations" className="text-sm text-muted-foreground hover:text-foreground transition-colors">For Organisations</a>
               <a href="#services" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Services</a>
               <a href="#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
+              <a href="#contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Contact</a>
+              <a href="#faq" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-faq">FAQ</a>
             </div>
             
             <div className="flex items-center gap-2">
@@ -627,6 +822,32 @@ export default function LandingPage() {
           </div>
         </section>
 
+        <section id="faq" className="py-20 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-3xl mx-auto">
+            <div className="text-center mb-16">
+              <h2 className="text-3xl sm:text-4xl font-bold mb-4">Frequently Asked Questions</h2>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                Find answers to common questions about our services
+              </p>
+            </div>
+
+            <Accordion type="single" collapsible className="w-full" data-testid="faq-accordion">
+              {faqItems.map((item, index) => (
+                <AccordionItem key={index} value={`faq-${index}`} data-testid={`faq-item-${index}`}>
+                  <AccordionTrigger className="text-left" data-testid={`faq-trigger-${index}`}>
+                    {item.question}
+                  </AccordionTrigger>
+                  <AccordionContent data-testid={`faq-content-${index}`}>
+                    <p className="text-muted-foreground">{item.answer}</p>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </div>
+        </section>
+
+        <ContactSection />
+
         <section className="py-20 px-4 sm:px-6 lg:px-8">
           <div className="max-w-4xl mx-auto text-center">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">
@@ -660,7 +881,7 @@ export default function LandingPage() {
                 <a href="/privacy" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-privacy">
                   Privacy Policy
                 </a>
-                <a href="mailto:service@cellionone.com" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-contact">
+                <a href="#contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-contact">
                   Contact
                 </a>
               </div>

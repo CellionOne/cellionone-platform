@@ -238,12 +238,9 @@ export function sessionTimeout(req: Request, res: Response, next: NextFunction):
   
   if (sessionAge > maxSessionAge) {
     console.log(`[Security] Session absolute timeout exceeded for user`);
-    (req as any).logout?.((err: any) => {
-      if (err) console.error("Logout error:", err);
-    });
-    (req as any).session?.destroy?.((err: any) => {
-      if (err) console.error("Session destroy error:", err);
-    });
+    try {
+      (req as any).session?.destroy?.(() => {});
+    } catch (e) {}
     return res.status(401).json({ 
       message: "Session expired. Please log in again.",
       reason: "absolute_timeout"
@@ -256,12 +253,9 @@ export function sessionTimeout(req: Request, res: Response, next: NextFunction):
   
   if (idleTime > maxIdleTime) {
     console.log(`[Security] Session idle timeout exceeded for user`);
-    (req as any).logout?.((err: any) => {
-      if (err) console.error("Logout error:", err);
-    });
-    (req as any).session?.destroy?.((err: any) => {
-      if (err) console.error("Session destroy error:", err);
-    });
+    try {
+      (req as any).session?.destroy?.(() => {});
+    } catch (e) {}
     return res.status(401).json({ 
       message: "Session expired due to inactivity. Please log in again.",
       reason: "idle_timeout"

@@ -8,6 +8,14 @@ import { runComplianceDeadlineCheck } from "./services/complianceScheduler";
 import { runKycExpiryCheck } from "./services/kycSchedulerService";
 import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUploadMiddleware } from "./middleware/security";
 
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception (process kept alive):', err.message || err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled rejection (process kept alive):', reason);
+});
+
 const app = express();
 const httpServer = createServer(app);
 

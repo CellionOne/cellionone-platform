@@ -22,8 +22,8 @@ import {
   executionDeclarations, type ExecutionDeclaration, type InsertExecutionDeclaration,
   applicationAIEvents, type ApplicationAIEvent, type InsertApplicationAIEvent,
   lawyerApplications, type LawyerApplication, type InsertLawyerApplication,
-  serviceAddresses, type ServiceAddress,
-  registeredOfficeSubscriptions, type RegisteredOfficeSubscription,
+  serviceAddresses, type ServiceAddress, type InsertServiceAddress,
+  registeredOfficeSubscriptions, type RegisteredOfficeSubscription, type InsertRegisteredOfficeSubscription,
   mailHandlingPreferences, type MailHandlingPreference,
   mailItems, type MailItem,
   mailApprovalRequests, type MailApprovalRequest,
@@ -235,6 +235,26 @@ export interface IStorage {
     twoFactorBackupCodes: string;
     lastTwoFactorAt: Date;
   }>): Promise<User>;
+
+  // Service Addresses
+  getServiceAddresses(): Promise<ServiceAddress[]>;
+  getServiceAddressById(id: number): Promise<ServiceAddress | undefined>;
+  getServiceAddressByManagerUserId(userId: string): Promise<ServiceAddress | undefined>;
+  getAllServiceAddresses(): Promise<ServiceAddress[]>;
+  createServiceAddress(data: Omit<ServiceAddress, "id" | "createdAt" | "updatedAt">): Promise<ServiceAddress>;
+  updateServiceAddress(id: number, data: Partial<ServiceAddress>): Promise<ServiceAddress | undefined>;
+  getSubscriptionsByServiceAddressId(serviceAddressId: number): Promise<RegisteredOfficeSubscription[]>;
+
+  // Registered Office Subscriptions
+  getRegisteredOfficeSubscriptionById(id: number): Promise<RegisteredOfficeSubscription | undefined>;
+  getUserActiveRegisteredOfficeSubscription(userId: string): Promise<RegisteredOfficeSubscription | undefined>;
+  getUserRegisteredOfficeSubscriptions(userId: string): Promise<RegisteredOfficeSubscription[]>;
+  getAllRegisteredOfficeSubscriptions(): Promise<RegisteredOfficeSubscription[]>;
+  updateRegisteredOfficeSubscription(id: number, data: Partial<RegisteredOfficeSubscription>): Promise<RegisteredOfficeSubscription | undefined>;
+
+  // Mail Items
+  getMailItemsBySubscription(subscriptionId: number): Promise<MailItem[]>;
+  getAllMailItems(): Promise<MailItem[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -742,6 +762,38 @@ export class DatabaseStorage implements IStorage {
   async getServiceAddressById(id: number): Promise<ServiceAddress | undefined> {
     const [address] = await db.select().from(serviceAddresses).where(eq(serviceAddresses.id, id));
     return address;
+  }
+
+  async getServiceAddressByManagerUserId(userId: string): Promise<ServiceAddress | undefined> {
+    const [address] = await db.select().from(serviceAddresses)
+      .where(and(eq(serviceAddresses.managerUserId, userId), eq(serviceAddresses.isActive, true)));
+    return address;
+  }
+
+  async getAllServiceAddresses(): Promise<ServiceAddress[]> {
+    return db.select().from(serviceAddresses).orderBy(desc(serviceAddresses.createdAt));
+  }
+
+  async createServiceAddress(data: Omit<ServiceAddress, "id" | "createdAt" | "updatedAt">): Promise<ServiceAddress> {
+    const [address] = await db.insert(serviceAddresses).values(data).returning();
+    return address;
+  }
+
+  async updateServiceAddress(id: number, data: Partial<ServiceAddress>): Promise<ServiceAddress | undefined> {
+    const [address] = await db.update(serviceAddresses)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(serviceAddresses.id, id))
+      .returning();
+    return address;
+  }
+
+  async getSubscriptionsByServiceAddressId(serviceAddressId: number): Promise<RegisteredOfficeSubscription[]> {
+    return db.select().from(registeredOfficeSubscriptions)
+      .where(and(
+        eq(registeredOfficeSubscriptions.serviceAddressId, serviceAddressId),
+        eq(registeredOfficeSubscriptions.status, "active")
+      ))
+      .orderBy(desc(registeredOfficeSubscriptions.createdAt));
   }
 
   // Registered Office Subscriptions

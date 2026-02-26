@@ -33,7 +33,7 @@ const assignLawyerSchema = z.object({
 });
 
 const roleChangeSchema = z.object({
-  role: z.enum(["lawyer", "admin"]),
+  role: z.enum(["lawyer", "admin", "building_manager"]),
   action: z.enum(["add", "remove"]),
 });
 
@@ -4835,13 +4835,28 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     try {
       const subscriptionId = parseInt(req.params.subscriptionId);
       const subscription = await registeredOfficeService.getSubscriptionById(subscriptionId);
-      if (!subscription || !subscription.proofOfAddressPath) {
-        return res.status(404).json({ message: "Proof of address not found" });
+      if (!subscription) {
+        return res.status(404).json({ message: "Subscription not found" });
       }
 
       const objectStorageService = new ObjectStorageService();
-      const downloadUrl = await objectStorageService.getDownloadUrl(subscription.proofOfAddressPath);
-      res.json({ downloadUrl });
+      let proofPath = subscription.proofOfAddressPath;
+      let source = "subscription";
+
+      if (!proofPath) {
+        const building = await storage.getServiceAddressById(subscription.serviceAddressId);
+        if (building?.utilityBillPath && building.utilityBillStatus === "current") {
+          proofPath = building.utilityBillPath;
+          source = "building";
+        }
+      }
+
+      if (!proofPath) {
+        return res.status(404).json({ message: "Proof of address not found" });
+      }
+
+      const downloadUrl = await objectStorageService.getDownloadUrl(proofPath);
+      res.json({ downloadUrl, source });
     } catch (error: any) {
       console.error("Error getting PoA view URL:", error);
       res.status(500).json({ message: "Failed to get proof of address" });
@@ -4854,16 +4869,33 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const subscriptionId = parseInt(req.params.subscriptionId);
 
       const subscription = await registeredOfficeService.getSubscriptionById(subscriptionId);
-      if (!subscription || !subscription.proofOfAddressPath) {
-        return res.status(404).json({ message: "Proof of address not found" });
-      }
-
-      if (subscription.proofOfAddressStatus !== "verified") {
-        return res.status(400).json({ message: "Proof of address has not been verified yet" });
+      if (!subscription) {
+        return res.status(404).json({ message: "Subscription not found" });
       }
 
       const objectStorageService = new ObjectStorageService();
-      const downloadUrl = await objectStorageService.getDownloadUrl(subscription.proofOfAddressPath);
+      let proofPath = subscription.proofOfAddressPath;
+      let proofStatus = subscription.proofOfAddressStatus;
+      let source = "subscription";
+
+      if (!proofPath) {
+        const building = await storage.getServiceAddressById(subscription.serviceAddressId);
+        if (building?.utilityBillPath && building.utilityBillStatus === "current") {
+          proofPath = building.utilityBillPath;
+          proofStatus = "verified";
+          source = "building";
+        }
+      }
+
+      if (!proofPath) {
+        return res.status(404).json({ message: "Proof of address not found" });
+      }
+
+      if (proofStatus !== "verified") {
+        return res.status(400).json({ message: "Proof of address has not been verified yet" });
+      }
+
+      const downloadUrl = await objectStorageService.getDownloadUrl(proofPath);
 
       await storage.logSensitiveDataAccess({
         accessorUserId: lawyerId,
@@ -4874,7 +4906,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         userAgent: req.get("user-agent") || "unknown",
       });
 
-      res.json({ downloadUrl });
+      res.json({ downloadUrl, source });
     } catch (error: any) {
       console.error("Error getting PoA for lawyer:", error);
       res.status(500).json({ message: "Failed to get proof of address" });
@@ -6843,6 +6875,465 @@ For questions, contact: service@cellionone.com
     } catch (error: any) {
       console.error("Error fetching consent status:", error);
       res.status(500).json({ message: "Failed to fetch status" });
+    }
+  });
+
+  // ============== ADMIN REGISTERED OFFICES / SERVICE ADDRESSES ==============
+
+  app.get("/api/admin/service-addresses", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const addresses = await storage.getAllServiceAddresses();
+      const addressesWithManager = await Promise.all(
+        addresses.map(async (addr) => {
+          let managerUser = null;
+          if (addr.managerUserId) {
+            const user = await storage.getUser(addr.managerUserId);
+            if (user) {
+              managerUser = { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName };
+            }
+          }
+          return { ...addr, managerUser };
+        })
+      );
+      res.json(addressesWithManager);
+    } catch (error) {
+      console.error("Error fetching service addresses:", error);
+      res.status(500).json({ message: "Failed to fetch service addresses" });
+    }
+  });
+
+  const createServiceAddressSchema = z.object({
+    label: z.string().min(1, "Label is required"),
+    line1: z.string().min(1, "Address line 1 is required"),
+    line2: z.string().optional(),
+    floorDetails: z.string().optional(),
+    city: z.string().min(1, "City is required"),
+    state: z.string().min(1, "State is required"),
+    country: z.string().optional(),
+    contactPhone: z.string().optional(),
+    contactEmail: z.string().email().optional().or(z.literal("")),
+    operatingHours: z.string().optional(),
+  });
+
+  app.post("/api/admin/service-addresses", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const parsed = createServiceAddressSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+      const address = await storage.createServiceAddress({
+        ...parsed.data,
+        line2: parsed.data.line2 || null,
+        floorDetails: parsed.data.floorDetails || null,
+        country: parsed.data.country || "Nigeria",
+        contactPhone: parsed.data.contactPhone || null,
+        contactEmail: parsed.data.contactEmail || null,
+        operatingHours: parsed.data.operatingHours || null,
+        isActive: true,
+        managerUserId: null,
+        utilityBillPath: null,
+        utilityBillUploadedAt: null,
+        utilityBillExpiresAt: null,
+        utilityBillStatus: null,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: getUserId(req),
+        action: "create_service_address",
+        entityType: "service_address",
+        entityId: String(address.id),
+        details: { label: address.label },
+        ipAddress: req.ip,
+      });
+
+      res.json(address);
+    } catch (error) {
+      console.error("Error creating service address:", error);
+      res.status(500).json({ message: "Failed to create service address" });
+    }
+  });
+
+  app.put("/api/admin/service-addresses/:id/manager", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const addressId = parseInt(req.params.id);
+      if (isNaN(addressId)) return res.status(400).json({ message: "Invalid address ID" });
+
+      const { managerUserId } = req.body;
+      if (managerUserId !== null && typeof managerUserId !== "string") {
+        return res.status(400).json({ message: "managerUserId must be a string or null" });
+      }
+
+      if (managerUserId) {
+        const user = await storage.getUser(managerUserId);
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        const roles = await storage.getUserRoles(managerUserId);
+        if (!roles.includes("building_manager")) {
+          return res.status(400).json({ message: "User does not have the building_manager role. Assign the role first." });
+        }
+      }
+
+      const address = await storage.getServiceAddressById(addressId);
+      if (!address) return res.status(404).json({ message: "Service address not found" });
+
+      const updated = await storage.updateServiceAddress(addressId, { managerUserId: managerUserId || null });
+
+      await storage.createAuditLog({
+        actorUserId: getUserId(req),
+        action: "assign_building_manager",
+        entityType: "service_address",
+        entityId: String(addressId),
+        details: { managerUserId, label: address.label },
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error assigning manager:", error);
+      res.status(500).json({ message: "Failed to assign manager" });
+    }
+  });
+
+  app.put("/api/admin/service-addresses/:id", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const addressId = parseInt(req.params.id);
+      if (isNaN(addressId)) return res.status(400).json({ message: "Invalid address ID" });
+
+      const address = await storage.getServiceAddressById(addressId);
+      if (!address) return res.status(404).json({ message: "Service address not found" });
+
+      const updateSchema = z.object({
+        label: z.string().min(1).optional(),
+        line1: z.string().min(1).optional(),
+        line2: z.string().optional(),
+        floorDetails: z.string().optional(),
+        city: z.string().min(1).optional(),
+        state: z.string().min(1).optional(),
+        country: z.string().optional(),
+        contactPhone: z.string().optional(),
+        contactEmail: z.string().email().optional().or(z.literal("")),
+        operatingHours: z.string().optional(),
+        isActive: z.boolean().optional(),
+      });
+
+      const parsed = updateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+
+      const updated = await storage.updateServiceAddress(addressId, parsed.data);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating service address:", error);
+      res.status(500).json({ message: "Failed to update service address" });
+    }
+  });
+
+  // ============== BUILDING MANAGER ENDPOINTS ==============
+
+  const buildingManagerLocationUpdateSchema = z.object({
+    contactPhone: z.string().optional(),
+    contactEmail: z.string().email().optional().or(z.literal("")),
+    operatingHours: z.string().optional(),
+  });
+
+  const buildingManagerMailIntakeSchema = z.object({
+    subscriptionId: z.number(),
+    senderName: z.string().min(1, "Sender name required"),
+    senderType: z.string().min(1, "Sender type required"),
+    envelopePhotoDocId: z.number().optional(),
+    isSensitive: z.boolean().optional(),
+  });
+
+  app.get("/api/building-manager/location", isAuthenticated, requireRole("building_manager"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const location = await storage.getServiceAddressByManagerUserId(userId);
+      if (!location) {
+        return res.status(404).json({ message: "No location assigned to this manager" });
+      }
+      res.json(location);
+    } catch (error) {
+      console.error("Error fetching building manager location:", error);
+      res.status(500).json({ message: "Failed to fetch location" });
+    }
+  });
+
+  app.put("/api/building-manager/location", isAuthenticated, requireRole("building_manager"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const location = await storage.getServiceAddressByManagerUserId(userId);
+      if (!location) {
+        return res.status(404).json({ message: "No location assigned to this manager" });
+      }
+
+      const parsed = buildingManagerLocationUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+
+      const updateData: Record<string, any> = {};
+      if (parsed.data.contactPhone !== undefined) updateData.contactPhone = parsed.data.contactPhone || null;
+      if (parsed.data.contactEmail !== undefined) updateData.contactEmail = parsed.data.contactEmail || null;
+      if (parsed.data.operatingHours !== undefined) updateData.operatingHours = parsed.data.operatingHours || null;
+
+      const updated = await storage.updateServiceAddress(location.id, updateData);
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "building_manager_update_location",
+        entityType: "service_address",
+        entityId: String(location.id),
+        details: updateData,
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating building manager location:", error);
+      res.status(500).json({ message: "Failed to update location" });
+    }
+  });
+
+  app.post("/api/building-manager/utility-bill/upload-url", isAuthenticated, requireRole("building_manager"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const location = await storage.getServiceAddressByManagerUserId(userId);
+      if (!location) {
+        return res.status(404).json({ message: "No location assigned to this manager" });
+      }
+
+      const objectStorageService = new ObjectStorageService();
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+
+      res.json({ uploadUrl: uploadURL, storagePath: objectPath, locationId: location.id });
+    } catch (error) {
+      console.error("Error generating utility bill upload URL:", error);
+      res.status(500).json({ message: "Failed to generate upload URL" });
+    }
+  });
+
+  app.post("/api/building-manager/utility-bill/upload-complete", isAuthenticated, requireRole("building_manager"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const location = await storage.getServiceAddressByManagerUserId(userId);
+      if (!location) {
+        return res.status(404).json({ message: "No location assigned to this manager" });
+      }
+
+      const storagePath = req.body.storagePath || req.body.uploadedPath;
+      if (!storagePath || typeof storagePath !== "string") {
+        return res.status(400).json({ message: "storagePath is required" });
+      }
+
+      const normalizedPath = storagePath;
+
+      const now = new Date();
+      const expiresAt = new Date(now);
+      expiresAt.setMonth(expiresAt.getMonth() + 3);
+
+      const updated = await storage.updateServiceAddress(location.id, {
+        utilityBillPath: normalizedPath,
+        utilityBillUploadedAt: now,
+        utilityBillExpiresAt: expiresAt,
+        utilityBillStatus: "current",
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "building_manager_upload_utility_bill",
+        entityType: "service_address",
+        entityId: String(location.id),
+        details: { path: normalizedPath, expiresAt: expiresAt.toISOString() },
+        ipAddress: req.ip,
+      });
+
+      res.json({
+        message: "Utility bill uploaded successfully",
+        utilityBillPath: normalizedPath,
+        utilityBillUploadedAt: now,
+        utilityBillExpiresAt: expiresAt,
+        utilityBillStatus: "current",
+      });
+    } catch (error) {
+      console.error("Error completing utility bill upload:", error);
+      res.status(500).json({ message: "Failed to complete upload" });
+    }
+  });
+
+  app.get("/api/building-manager/utility-bill", isAuthenticated, requireRole("building_manager"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const location = await storage.getServiceAddressByManagerUserId(userId);
+      if (!location) {
+        return res.status(404).json({ message: "No location assigned to this manager" });
+      }
+
+      if (!location.utilityBillPath) {
+        return res.json({ hasBill: false, utilityBill: null });
+      }
+
+      let downloadURL: string | null = null;
+      try {
+        const objectStorageService = new ObjectStorageService();
+        if (location.utilityBillPath.startsWith("/objects/")) {
+          downloadURL = await objectStorageService.getObjectEntityDownloadURL(location.utilityBillPath);
+        } else {
+          downloadURL = await (objectStorageService as any).getDownloadUrl(location.utilityBillPath);
+        }
+      } catch (e) {
+        console.error("Error generating download URL for utility bill:", e);
+      }
+
+      const now = new Date();
+      let effectiveStatus = location.utilityBillStatus;
+      if (location.utilityBillExpiresAt && location.utilityBillExpiresAt < now) {
+        effectiveStatus = "expired";
+      }
+
+      res.json({
+        hasBill: true,
+        utilityBill: {
+          path: location.utilityBillPath,
+          uploadedAt: location.utilityBillUploadedAt,
+          expiresAt: location.utilityBillExpiresAt,
+          status: effectiveStatus,
+          downloadURL,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching utility bill:", error);
+      res.status(500).json({ message: "Failed to fetch utility bill" });
+    }
+  });
+
+  app.get("/api/building-manager/subscribers", isAuthenticated, requireRole("building_manager"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const location = await storage.getServiceAddressByManagerUserId(userId);
+      if (!location) {
+        return res.status(404).json({ message: "No location assigned to this manager" });
+      }
+
+      const subscriptions = await storage.getSubscriptionsByServiceAddressId(location.id);
+
+      const subscribersData = await Promise.all(
+        subscriptions.map(async (sub) => {
+          const founder = await storage.getUser(sub.founderId);
+          let companyName: string | null = null;
+          if (sub.applicationId) {
+            const app = await storage.getApplication(sub.applicationId);
+            companyName = app?.companyName1 || null;
+          }
+          return {
+            subscriptionId: sub.id,
+            founderName: founder ? `${founder.firstName || ""} ${founder.lastName || ""}`.trim() : "Unknown",
+            founderEmail: founder?.email || null,
+            companyName,
+            tier: sub.tier,
+            status: sub.status,
+            startDate: sub.startDate,
+            endDate: sub.endDate,
+          };
+        })
+      );
+
+      res.json(subscribersData);
+    } catch (error) {
+      console.error("Error fetching subscribers:", error);
+      res.status(500).json({ message: "Failed to fetch subscribers" });
+    }
+  });
+
+  app.get("/api/building-manager/mail", isAuthenticated, requireRole("building_manager"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const location = await storage.getServiceAddressByManagerUserId(userId);
+      if (!location) {
+        return res.status(404).json({ message: "No location assigned to this manager" });
+      }
+
+      const subscriptions = await storage.getSubscriptionsByServiceAddressId(location.id);
+      const subscriptionIds = subscriptions.map((s) => s.id);
+
+      const allMailItems: any[] = [];
+      for (const subId of subscriptionIds) {
+        const items = await storage.getMailItemsBySubscription(subId);
+        const sub = subscriptions.find((s) => s.id === subId);
+        for (const item of items) {
+          const founder = sub ? await storage.getUser(sub.founderId) : null;
+          allMailItems.push({
+            ...item,
+            subscriberName: founder ? `${founder.firstName || ""} ${founder.lastName || ""}`.trim() : "Unknown",
+          });
+        }
+      }
+
+      allMailItems.sort((a, b) => {
+        const dateA = a.receivedAt ? new Date(a.receivedAt).getTime() : 0;
+        const dateB = b.receivedAt ? new Date(b.receivedAt).getTime() : 0;
+        return dateB - dateA;
+      });
+
+      res.json(allMailItems);
+    } catch (error) {
+      console.error("Error fetching mail items:", error);
+      res.status(500).json({ message: "Failed to fetch mail items" });
+    }
+  });
+
+  app.post("/api/building-manager/mail/intake", isAuthenticated, requireRole("building_manager"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const location = await storage.getServiceAddressByManagerUserId(userId);
+      if (!location) {
+        return res.status(404).json({ message: "No location assigned to this manager" });
+      }
+
+      const parsed = buildingManagerMailIntakeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+
+      const { subscriptionId, senderName, senderType, envelopePhotoDocId, isSensitive } = parsed.data;
+
+      const subscription = await storage.getRegisteredOfficeSubscriptionById(subscriptionId);
+      if (!subscription) {
+        return res.status(404).json({ message: "Subscription not found" });
+      }
+      if (subscription.serviceAddressId !== location.id) {
+        return res.status(403).json({ message: "This subscription is not at your location" });
+      }
+
+      const result = await mailroomService.intakeMail(
+        subscriptionId,
+        senderName,
+        senderType,
+        envelopePhotoDocId,
+        isSensitive ?? false,
+        { confirmedOfficialMail: true }
+      );
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "building_manager_mail_intake",
+        entityType: "mail_item",
+        entityId: String(result.mailItem.id),
+        details: { subscriptionId, senderName, senderType, locationId: location.id },
+        ipAddress: req.ip,
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error recording mail intake:", error);
+      if (error.code === "SUBSCRIPTION_EXPIRED") {
+        return res.status(400).json({ message: error.message, code: error.code });
+      }
+      if (error.code === "OVERAGE_REASON_REQUIRED") {
+        return res.status(400).json({ message: error.message, code: error.code });
+      }
+      res.status(500).json({ message: error.message || "Failed to record mail intake" });
     }
   });
 

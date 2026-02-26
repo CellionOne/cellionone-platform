@@ -49,6 +49,7 @@ export default function AdminUsers() {
     switch (role) {
       case "admin": return "destructive";
       case "lawyer": return "secondary";
+      case "building_manager": return "default";
       default: return "outline";
     }
   };
@@ -153,6 +154,30 @@ export default function AdminUsers() {
                               })}
                             >
                               Make Admin
+                            </DropdownMenuItem>
+                          )}
+                          {!user.roles?.includes("building_manager") && (
+                            <DropdownMenuItem
+                              data-testid={`action-add-building-manager-${user.id}`}
+                              onClick={() => toggleRoleMutation.mutate({ 
+                                userId: user.id, 
+                                role: "building_manager", 
+                                action: "add" 
+                              })}
+                            >
+                              Make Building Manager
+                            </DropdownMenuItem>
+                          )}
+                          {user.roles?.includes("building_manager") && (
+                            <DropdownMenuItem
+                              data-testid={`action-remove-building-manager-${user.id}`}
+                              onClick={() => toggleRoleMutation.mutate({ 
+                                userId: user.id, 
+                                role: "building_manager", 
+                                action: "remove" 
+                              })}
+                            >
+                              Remove Building Manager Role
                             </DropdownMenuItem>
                           )}
                         </DropdownMenuContent>

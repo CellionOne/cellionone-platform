@@ -553,14 +553,22 @@ export type InsertLawyerApplication = z.infer<typeof insertLawyerApplicationSche
 // ============== SERVICE ADDRESS (for registered office) ==============
 export const serviceAddresses = pgTable("service_addresses", {
   id: serial("id").primaryKey(),
-  label: varchar("label", { length: 255 }).notNull(), // e.g., "Celion One Registered Office (Ikoyi)"
-  line1: varchar("line_1", { length: 255 }).notNull(), // Private - only shown after payment
+  label: varchar("label", { length: 255 }).notNull(),
+  line1: varchar("line_1", { length: 255 }).notNull(),
   line2: varchar("line_2", { length: 255 }),
   floorDetails: varchar("floor_details", { length: 255 }),
-  city: varchar("city", { length: 100 }).notNull(), // Public
-  state: varchar("state", { length: 100 }).notNull(), // Public
-  country: varchar("country", { length: 100 }).default("Nigeria"), // Public
+  city: varchar("city", { length: 100 }).notNull(),
+  state: varchar("state", { length: 100 }).notNull(),
+  country: varchar("country", { length: 100 }).default("Nigeria"),
   isActive: boolean("is_active").default(true),
+  managerUserId: varchar("manager_user_id"),
+  contactPhone: varchar("contact_phone", { length: 50 }),
+  contactEmail: varchar("contact_email", { length: 255 }),
+  operatingHours: varchar("operating_hours", { length: 255 }),
+  utilityBillPath: text("utility_bill_path"),
+  utilityBillUploadedAt: timestamp("utility_bill_uploaded_at"),
+  utilityBillExpiresAt: timestamp("utility_bill_expires_at"),
+  utilityBillStatus: varchar("utility_bill_status", { length: 20 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

@@ -43,6 +43,7 @@ import AdminMailroom from "@/pages/admin/mailroom";
 import AdminOrders from "@/pages/admin/orders";
 import AdminKycOverview from "@/pages/admin/kyc-overview";
 import AdminProposals from "@/pages/admin/proposals";
+import AdminRegisteredOffices from "@/pages/admin/registered-offices";
 import ApplyLawyerPage from "@/pages/apply-lawyer";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
@@ -71,6 +72,10 @@ import KycEmployeePortalPage from "@/pages/kyc-service/employee-portal";
 import KycSupplierPortalPage from "@/pages/kyc-service/supplier-portal";
 import KycOrgInviteAcceptPage from "@/pages/kyc-service/org-invite-accept";
 import KycMyVerifications from "@/pages/kyc-service/my-verifications";
+import BuildingManagerDashboard from "@/pages/building-manager/dashboard";
+import BuildingManagerUtilityBill from "@/pages/building-manager/utility-bill";
+import BuildingManagerSubscribers from "@/pages/building-manager/subscribers";
+import BuildingManagerMailIntake from "@/pages/building-manager/mail-intake";
 
 function ProtectedRoute({ 
   component: Component, 
@@ -96,11 +101,12 @@ function ProtectedRoute({
     const hasRequiredRole = roles.some(role => userRoles.includes(role));
     
     if (!hasRequiredRole) {
-      // Redirect to appropriate dashboard based on user role
       if (userRoles.includes("admin")) {
         window.location.href = "/admin/dashboard";
       } else if (userRoles.includes("lawyer")) {
         window.location.href = "/lawyer/dashboard";
+      } else if (userRoles.includes("building_manager")) {
+        window.location.href = "/building-manager/dashboard";
       } else {
         window.location.href = "/founder/dashboard";
       }
@@ -135,6 +141,8 @@ function RoleBasedRedirect() {
     return <Redirect to="/admin/dashboard" />;
   } else if (roles.includes("lawyer")) {
     return <Redirect to="/lawyer/dashboard" />;
+  } else if (roles.includes("building_manager")) {
+    return <Redirect to="/building-manager/dashboard" />;
   } else if (roles.includes("founder")) {
     return <Redirect to="/founder/dashboard" />;
   } else {
@@ -270,6 +278,22 @@ function Router() {
       </Route>
       <Route path="/admin/proposals">
         <ProtectedRoute component={AdminProposals} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/registered-offices">
+        <ProtectedRoute component={AdminRegisteredOffices} roles={["admin"]} />
+      </Route>
+      
+      <Route path="/building-manager/dashboard">
+        <ProtectedRoute component={BuildingManagerDashboard} roles={["building_manager"]} />
+      </Route>
+      <Route path="/building-manager/utility-bill">
+        <ProtectedRoute component={BuildingManagerUtilityBill} roles={["building_manager"]} />
+      </Route>
+      <Route path="/building-manager/subscribers">
+        <ProtectedRoute component={BuildingManagerSubscribers} roles={["building_manager"]} />
+      </Route>
+      <Route path="/building-manager/mail-intake">
+        <ProtectedRoute component={BuildingManagerMailIntake} roles={["building_manager"]} />
       </Route>
       
       <Route path="/profile">

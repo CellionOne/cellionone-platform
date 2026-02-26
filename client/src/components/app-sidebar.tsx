@@ -81,6 +81,15 @@ const lawyerItems: NavItem[] = [
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
+const buildingManagerItems: NavItem[] = [
+  { title: "Dashboard", url: "/building-manager/dashboard", icon: LayoutDashboard },
+  { title: "Personal Profile", url: "/profile", icon: UserCircle },
+  { title: "Utility Bill", url: "/building-manager/utility-bill", icon: FileText },
+  { title: "Subscribers", url: "/building-manager/subscribers", icon: Users },
+  { title: "Mail Intake", url: "/building-manager/mail-intake", icon: Mail },
+  { title: "Settings", url: "/settings", icon: Settings },
+];
+
 const adminItems: NavItem[] = [
   { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
   { title: "Personal Profile", url: "/profile", icon: UserCircle },
@@ -93,6 +102,7 @@ const adminItems: NavItem[] = [
   { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },
   { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
   { title: "Proposals", url: "/admin/proposals", icon: FileText },
+  { title: "Registered Offices", url: "/admin/registered-offices", icon: Building2 },
   { title: "KYC Oversight", url: "/admin/kyc", icon: ShieldCheck },
   { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
   { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },
@@ -100,15 +110,15 @@ const adminItems: NavItem[] = [
 ];
 
 interface AppSidebarProps {
-  role: "founder" | "lawyer" | "admin";
+  role: "founder" | "lawyer" | "admin" | "building_manager";
 }
 
 export function AppSidebar({ role }: AppSidebarProps) {
   const [location] = useLocation();
   const { user, logout } = useAuth();
 
-  const items = role === "founder" ? founderItems : role === "lawyer" ? lawyerItems : adminItems;
-  const roleLabel = role === "founder" ? "Founder Portal" : role === "lawyer" ? "Lawyer Portal" : "Admin Portal";
+  const items = role === "founder" ? founderItems : role === "lawyer" ? lawyerItems : role === "building_manager" ? buildingManagerItems : adminItems;
+  const roleLabel = role === "founder" ? "Founder Portal" : role === "lawyer" ? "Lawyer Portal" : role === "building_manager" ? "Building Manager" : "Admin Portal";
 
   const getInitials = () => {
     if (user?.firstName && user?.lastName) {

@@ -152,7 +152,7 @@ function NotificationBell() {
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
-  role: "founder" | "lawyer" | "admin";
+  role: "founder" | "lawyer" | "admin" | "building_manager";
   breadcrumbs?: { label: string; href?: string }[];
 }
 

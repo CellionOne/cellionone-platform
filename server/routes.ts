@@ -4310,7 +4310,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       } else {
         // Approve: Create user account and lawyer profile
         const authService = await import("./services/authService");
-        const tempPassword = crypto.randomBytes(8).toString("hex");
+        const tempPassword = crypto.randomBytes(12).toString("base64").slice(0, 12) + "Ax1!";
         
         // Register the user with a temporary password
         const registerResult = await authService.registerUser({
@@ -4321,7 +4321,8 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         }, `${req.protocol}://${req.get("host")}`);
         
         if (!registerResult.success || !registerResult.user) {
-          return res.status(500).json({ message: "Failed to create lawyer user account" });
+          console.error("[Lawyer Approval] Registration failed:", registerResult.message);
+          return res.status(500).json({ message: registerResult.message || "Failed to create lawyer user account" });
         }
         
         const userId = registerResult.user.id;

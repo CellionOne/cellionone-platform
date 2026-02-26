@@ -62,10 +62,11 @@ async function buildAll() {
 }
 
 async function installChrome() {
-  console.log("installing Chrome for Puppeteer...");
+  console.log("installing Chrome for Puppeteer into project directory...");
   try {
-    execSync("npx puppeteer browsers install chrome", { stdio: "inherit" });
-    console.log("Chrome installed for Puppeteer");
+    const cacheDir = `${process.cwd()}/.puppeteer-cache`;
+    execSync(`PUPPETEER_CACHE_DIR="${cacheDir}" npx puppeteer browsers install chrome`, { stdio: "inherit" });
+    console.log(`Chrome installed at ${cacheDir}`);
   } catch (err) {
     console.warn("Warning: Failed to install Chrome for Puppeteer. PDF generation may not work.", err);
   }

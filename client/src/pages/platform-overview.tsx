@@ -1,4 +1,37 @@
+import { useQuery } from "@tanstack/react-query";
+
+interface AuthUser {
+  id: string;
+  email: string;
+  roles?: string[];
+}
+
+const SUPER_ADMIN_EMAIL = "service@cellionone.com";
+
 export default function PlatformOverview() {
+  const { data: user, isLoading } = useQuery<AuthUser>({
+    queryKey: ["/api/auth/me"],
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-white">
+        <p className="text-gray-500">Loading...</p>
+      </div>
+    );
+  }
+
+  if (!user || user.email?.toLowerCase() !== SUPER_ADMIN_EMAIL) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-white">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
+          <p className="text-gray-500">This page is restricted to the super administrator.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white text-gray-900 min-h-screen print:min-h-0">
       <style>{`

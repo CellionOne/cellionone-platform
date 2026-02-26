@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements } from "@shared/schema";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
@@ -37,7 +37,7 @@ export async function seedDatabase() {
     }
     console.log("Synced feature flags");
 
-    // Seed service address for registered office (only if none exist)
+    // Seed service address for registered office (deduplicate on startup)
     const existingAddresses = await db.select().from(serviceAddresses);
     if (existingAddresses.length === 0) {
       await db.insert(serviceAddresses).values({
@@ -50,6 +50,14 @@ export async function seedDatabase() {
         country: "Nigeria",
         isActive: true,
       });
+    } else if (existingAddresses.length > 1) {
+      // Clean up duplicates: keep the lowest ID per unique label+line1+city
+      const keepIds = await db.execute(sql`SELECT MIN(id) as id FROM service_addresses GROUP BY label, line_1, city, state`);
+      const idsToKeep = (keepIds.rows as any[]).map((r: any) => r.id);
+      if (idsToKeep.length > 0) {
+        await db.execute(sql`DELETE FROM service_addresses WHERE id NOT IN (${sql.join(idsToKeep.map(id => sql`${id}`), sql`, `)})`);
+        console.log(`Cleaned up duplicate service addresses, kept ${idsToKeep.length}`);
+      }
     }
     console.log("Synced service addresses");
 

@@ -96,7 +96,9 @@ export async function processWebhook(
 async function handleChargeSuccess(data: PaystackWebhookEvent['data'], rawPayload: string): Promise<void> {
   const reference = data.reference;
 
-  if (reference.startsWith('kyc_')) {
+  if (reference.startsWith('kyc_credit_')) {
+    await handleKycCreditPurchaseSuccess(data);
+  } else if (reference.startsWith('kyc_')) {
     await handleKycPaymentSuccess(data);
   } else if (reference.startsWith('celion_split_')) {
     await handleSplitOrderSuccess(data, rawPayload);
@@ -578,6 +580,34 @@ async function handleKycPaymentSuccess(data: PaystackWebhookEvent['data']): Prom
     });
   } catch (emailError) {
     console.error('[Paystack Webhook] Failed to send KYC payment email:', emailError);
+  }
+}
+
+async function handleKycCreditPurchaseSuccess(data: PaystackWebhookEvent['data']): Promise<void> {
+  const metadata = data.metadata as any;
+  const organisationId = metadata?.organisationId;
+  const quantity = metadata?.quantity;
+  const verificationType = metadata?.verificationType;
+
+  if (!organisationId || !quantity || !verificationType) {
+    console.error('[Paystack Webhook] KYC credit purchase missing required metadata');
+    return;
+  }
+
+  try {
+    const { addCredits } = await import('./kycBillingService');
+    const unitLabel = verificationType === 'supplier' ? 'supplier' : 'individual';
+    await addCredits(
+      organisationId,
+      quantity,
+      verificationType,
+      `Purchased ${quantity} ${unitLabel} verification credit${quantity > 1 ? 's' : ''} via Paystack`,
+      data.reference
+    );
+
+    console.log(`[Paystack Webhook] KYC credit purchase processed: ${quantity} ${unitLabel} credits for org ${organisationId}, reference: ${data.reference}`);
+  } catch (err) {
+    console.error(`[Paystack Webhook] Error processing KYC credit purchase:`, err);
   }
 }
 

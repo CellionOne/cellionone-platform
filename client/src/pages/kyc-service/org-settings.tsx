@@ -14,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { useToast } from "@/hooks/use-toast";
@@ -23,13 +24,26 @@ import {
   Building2,
   Users,
   FileText,
-  Settings,
   Plus,
   Trash2,
   UserPlus,
   Layers,
+  Key,
+  Webhook,
+  CreditCard,
+  Copy,
+  Eye,
+  EyeOff,
+  Send,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Clock,
 } from "lucide-react";
-import type { KycOrganisation, KycOrgMember, KycDocumentRequirement, KycVerificationTemplate } from "@shared/schema";
+import type {
+  KycOrganisation, KycOrgMember, KycDocumentRequirement, KycVerificationTemplate,
+  KycApiKey, KycWebhookConfig, KycWebhookDeliveryLog, KycBillingAccount, KycCreditTransaction, KycInvoice, KycBillingRequest,
+} from "@shared/schema";
 
 interface OrgDetail extends KycOrganisation {
   members: KycOrgMember[];
@@ -274,11 +288,14 @@ export default function OrgSettingsPage() {
         </div>
 
         <Tabs defaultValue="profile">
-          <TabsList data-testid="tabs-settings">
+          <TabsList data-testid="tabs-settings" className="flex-wrap">
             <TabsTrigger value="profile" data-testid="tab-profile">Profile</TabsTrigger>
             <TabsTrigger value="team" data-testid="tab-team">Team</TabsTrigger>
             <TabsTrigger value="requirements" data-testid="tab-requirements">Documents</TabsTrigger>
             <TabsTrigger value="templates" data-testid="tab-templates">Templates</TabsTrigger>
+            <TabsTrigger value="api-keys" data-testid="tab-api-keys">API Keys</TabsTrigger>
+            <TabsTrigger value="webhooks" data-testid="tab-webhooks">Webhooks</TabsTrigger>
+            <TabsTrigger value="billing" data-testid="tab-billing">Billing</TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile" className="space-y-4 mt-4">
@@ -549,6 +566,10 @@ export default function OrgSettingsPage() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <ApiKeysTab orgId={orgId!} />
+          <WebhooksTab orgId={orgId!} />
+          <BillingTab orgId={orgId!} />
         </Tabs>
       </div>
 
@@ -727,5 +748,937 @@ export default function OrgSettingsPage() {
         </DialogContent>
       </Dialog>
     </DashboardLayout>
+  );
+}
+
+function formatDate(d: string | Date | null | undefined): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-NG", { year: "numeric", month: "short", day: "numeric" });
+}
+
+function formatCurrency(kobo: number): string {
+  return `\u20A6${(kobo / 100).toLocaleString("en-NG")}`;
+}
+
+function ApiKeysTab({ orgId }: { orgId: string }) {
+  const { toast } = useToast();
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyPermissions, setNewKeyPermissions] = useState<string[]>(["verify:individual", "verify:supplier"]);
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [showKey, setShowKey] = useState(false);
+  const [revokeDialogOpen, setRevokeDialogOpen] = useState(false);
+  const [revokeKeyId, setRevokeKeyId] = useState<number | null>(null);
+
+  const { data: apiKeys, isLoading } = useQuery<KycApiKey[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "api-keys"],
+  });
+
+  const { data: usageStats } = useQuery<{ totalRequests: number; last24h: number; last7d: number; last30d: number }>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "api-usage"],
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: async (data: { name: string; permissions: string[] }) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/api-keys`, data);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      setGeneratedKey(data.key);
+      setShowKey(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "api-keys"] });
+      toast({ title: "API key generated" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to generate key", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: async (keyId: number) => {
+      const res = await apiRequest("DELETE", `/api/kyc-service/organisations/${orgId}/api-keys/${keyId}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "api-keys"] });
+      setRevokeDialogOpen(false);
+      setRevokeKeyId(null);
+      toast({ title: "API key revoked" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to revoke key", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const availablePermissions = [
+    { value: "verify:individual", label: "Individual Verification" },
+    { value: "verify:supplier", label: "Supplier Verification" },
+  ];
+
+  function handleTogglePermission(perm: string) {
+    setNewKeyPermissions(prev =>
+      prev.includes(perm) ? prev.filter(p => p !== perm) : [...prev, perm]
+    );
+  }
+
+  function handleCopyKey() {
+    if (generatedKey) {
+      navigator.clipboard.writeText(generatedKey);
+      toast({ title: "API key copied to clipboard" });
+    }
+  }
+
+  function handleCloseGenerateDialog() {
+    setGenerateDialogOpen(false);
+    setNewKeyName("");
+    setNewKeyPermissions(["verify:individual", "verify:supplier"]);
+    setGeneratedKey(null);
+    setShowKey(false);
+  }
+
+  return (
+    <TabsContent value="api-keys" className="space-y-4 mt-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Key className="h-4 w-4" />
+              API Keys
+            </CardTitle>
+            <CardDescription>Manage API keys for programmatic access to KYC verification.</CardDescription>
+          </div>
+          <Button onClick={() => setGenerateDialogOpen(true)} data-testid="button-generate-api-key">
+            <Plus className="h-4 w-4 mr-2" />
+            Generate Key
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {usageStats && (
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Total Requests</p>
+                <p className="text-lg font-semibold" data-testid="text-usage-total">{usageStats.totalRequests}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Last 24h</p>
+                <p className="text-lg font-semibold" data-testid="text-usage-24h">{usageStats.last24h}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Last 7 Days</p>
+                <p className="text-lg font-semibold" data-testid="text-usage-7d">{usageStats.last7d}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Last 30 Days</p>
+                <p className="text-lg font-semibold" data-testid="text-usage-30d">{usageStats.last30d}</p>
+              </div>
+            </div>
+          )}
+
+          {isLoading ? (
+            <div className="flex justify-center py-8"><LoadingSpinner /></div>
+          ) : !apiKeys?.length ? (
+            <EmptyState icon={Key} title="No API keys" description="Generate an API key to start using the KYC verification API." />
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Key Prefix</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead>Last Used</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {apiKeys.map((key) => (
+                    <TableRow key={key.id} data-testid={`row-api-key-${key.id}`}>
+                      <TableCell className="text-sm font-medium">{key.name}</TableCell>
+                      <TableCell className="text-sm font-mono text-muted-foreground">{key.keyPrefix}...</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{formatDate(key.createdAt)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{key.lastUsedAt ? formatDate(key.lastUsedAt) : "Never"}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className={`border-0 ${key.isActive ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+                          {key.isActive ? "Active" : "Revoked"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {key.isActive && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => { setRevokeKeyId(key.id); setRevokeDialogOpen(true); }}
+                            data-testid={`button-revoke-key-${key.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={generateDialogOpen} onOpenChange={(open) => { if (!open) handleCloseGenerateDialog(); else setGenerateDialogOpen(true); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{generatedKey ? "API Key Generated" : "Generate New API Key"}</DialogTitle>
+            <DialogDescription>
+              {generatedKey
+                ? "Copy your API key now. It will not be shown again."
+                : "Create a new API key for programmatic access."}
+            </DialogDescription>
+          </DialogHeader>
+          {generatedKey ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 rounded-md border bg-muted/50 p-3">
+                <code className="flex-1 text-sm break-all" data-testid="text-generated-key">
+                  {showKey ? generatedKey : generatedKey.slice(0, 12) + "•".repeat(20)}
+                </code>
+                <Button variant="ghost" size="icon" onClick={() => setShowKey(!showKey)} data-testid="button-toggle-key-visibility">
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <Button variant="ghost" size="icon" onClick={handleCopyKey} data-testid="button-copy-key">
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 p-3 dark:border-yellow-700 dark:bg-yellow-900/20">
+                <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                  This key will only be displayed once. Store it securely.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Key Name</Label>
+                <Input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="e.g. Production API" data-testid="input-api-key-name" />
+              </div>
+              <div className="space-y-2">
+                <Label>Permissions</Label>
+                <div className="space-y-2">
+                  {availablePermissions.map((perm) => (
+                    <div key={perm.value} className="flex items-center gap-2">
+                      <Checkbox
+                        checked={newKeyPermissions.includes(perm.value)}
+                        onCheckedChange={() => handleTogglePermission(perm.value)}
+                        data-testid={`checkbox-perm-${perm.value}`}
+                      />
+                      <Label className="text-sm font-normal">{perm.label}</Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            {generatedKey ? (
+              <Button onClick={handleCloseGenerateDialog} data-testid="button-close-key-dialog">Done</Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={handleCloseGenerateDialog}>Cancel</Button>
+                <Button
+                  onClick={() => generateMutation.mutate({ name: newKeyName, permissions: newKeyPermissions })}
+                  disabled={!newKeyName || newKeyPermissions.length === 0 || generateMutation.isPending}
+                  data-testid="button-confirm-generate-key"
+                >
+                  {generateMutation.isPending ? "Generating..." : "Generate Key"}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={revokeDialogOpen} onOpenChange={setRevokeDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Revoke API Key</DialogTitle>
+            <DialogDescription>Are you sure you want to revoke this API key? This action cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevokeDialogOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => revokeKeyId && revokeMutation.mutate(revokeKeyId)}
+              disabled={revokeMutation.isPending}
+              data-testid="button-confirm-revoke-key"
+            >
+              {revokeMutation.isPending ? "Revoking..." : "Revoke Key"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </TabsContent>
+  );
+}
+
+const WEBHOOK_EVENTS = [
+  { value: "verification.completed", label: "Verification Completed" },
+  { value: "verification.failed", label: "Verification Failed" },
+  { value: "document.expiring", label: "Document Expiring (30 days)" },
+  { value: "document.expired", label: "Document Expired" },
+  { value: "verification.risk_updated", label: "Risk Score Updated" },
+];
+
+function WebhooksTab({ orgId }: { orgId: string }) {
+  const { toast } = useToast();
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editWebhook, setEditWebhook] = useState<any>(null);
+  const [newWebhookUrl, setNewWebhookUrl] = useState("");
+  const [newWebhookEvents, setNewWebhookEvents] = useState<string[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteWebhookId, setDeleteWebhookId] = useState<number | null>(null);
+  const [viewLogsId, setViewLogsId] = useState<number | null>(null);
+
+  const { data: webhooks, isLoading } = useQuery<Array<Omit<KycWebhookConfig, "secret"> & { secret?: string }>>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"],
+  });
+
+  const { data: deliveryLogs } = useQuery<KycWebhookDeliveryLog[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "webhooks", String(viewLogsId), "deliveries"],
+    enabled: !!viewLogsId,
+  });
+
+  const addMutation = useMutation({
+    mutationFn: async (data: { url: string; events: string[] }) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/webhooks`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"] });
+      setAddDialogOpen(false);
+      setNewWebhookUrl("");
+      setNewWebhookEvents([]);
+      toast({ title: "Webhook registered" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to register webhook", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: any }) => {
+      const res = await apiRequest("PATCH", `/api/kyc-service/organisations/${orgId}/webhooks/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"] });
+      setEditDialogOpen(false);
+      setEditWebhook(null);
+      toast({ title: "Webhook updated" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update webhook", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/kyc-service/organisations/${orgId}/webhooks/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"] });
+      setDeleteDialogOpen(false);
+      setDeleteWebhookId(null);
+      toast({ title: "Webhook deleted" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to delete webhook", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: async (whId: number) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/webhooks/${whId}/test`);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      if (viewLogsId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "webhooks", String(viewLogsId), "deliveries"] });
+      }
+      toast({
+        title: data.deliveredAt ? "Test event delivered" : "Test event failed to deliver",
+        variant: data.deliveredAt ? "default" : "destructive",
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to send test", description: error.message, variant: "destructive" });
+    },
+  });
+
+  function handleToggleEvent(event: string, list: string[], setter: (v: string[]) => void) {
+    setter(list.includes(event) ? list.filter(e => e !== event) : [...list, event]);
+  }
+
+  function openEditDialog(wh: any) {
+    setEditWebhook({ ...wh });
+    setEditDialogOpen(true);
+  }
+
+  return (
+    <TabsContent value="webhooks" className="space-y-4 mt-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Webhook className="h-4 w-4" />
+              Webhooks
+            </CardTitle>
+            <CardDescription>Receive real-time notifications when verification events occur.</CardDescription>
+          </div>
+          <Button onClick={() => setAddDialogOpen(true)} data-testid="button-add-webhook">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Webhook
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="flex justify-center py-8"><LoadingSpinner /></div>
+          ) : !webhooks?.length ? (
+            <EmptyState icon={Webhook} title="No webhooks" description="Register a webhook URL to receive verification event notifications." />
+          ) : (
+            <div className="space-y-3">
+              {webhooks.map((wh) => (
+                <div key={wh.id} className="rounded-md border p-4 space-y-2" data-testid={`card-webhook-${wh.id}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" data-testid={`text-webhook-url-${wh.id}`}>{wh.url}</p>
+                      <div className="flex flex-wrap items-center gap-1 mt-1">
+                        {(wh.events as string[] || []).map((ev) => (
+                          <Badge key={ev} variant="secondary" className="border-0 text-xs">{ev}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="secondary" className={`border-0 ${wh.isActive ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+                        {wh.isActive ? "Active" : "Inactive"}
+                      </Badge>
+                      <Button variant="ghost" size="icon" onClick={() => testMutation.mutate(wh.id)} disabled={testMutation.isPending} data-testid={`button-test-webhook-${wh.id}`}>
+                        <Send className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(wh)} data-testid={`button-edit-webhook-${wh.id}`}>
+                        <FileText className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => setViewLogsId(viewLogsId === wh.id ? null : wh.id)} data-testid={`button-logs-webhook-${wh.id}`}>
+                        <Clock className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => { setDeleteWebhookId(wh.id); setDeleteDialogOpen(true); }} data-testid={`button-delete-webhook-${wh.id}`}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  {viewLogsId === wh.id && (
+                    <div className="mt-3 rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Event</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Attempts</TableHead>
+                            <TableHead>Time</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {!deliveryLogs?.length ? (
+                            <TableRow>
+                              <TableCell colSpan={4} className="text-center text-sm text-muted-foreground py-4">No delivery logs</TableCell>
+                            </TableRow>
+                          ) : deliveryLogs.map((log) => (
+                            <TableRow key={log.id} data-testid={`row-delivery-${log.id}`}>
+                              <TableCell className="text-sm">{log.event}</TableCell>
+                              <TableCell>
+                                {log.deliveredAt ? (
+                                  <Badge variant="secondary" className="border-0 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                    {log.responseStatus}
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="border-0 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                                    {log.responseStatus || "Failed"}
+                                  </Badge>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-sm">{log.attempts}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground">{formatDate(log.createdAt)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Webhook</DialogTitle>
+            <DialogDescription>Register a URL to receive event notifications.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Callback URL</Label>
+              <Input value={newWebhookUrl} onChange={(e) => setNewWebhookUrl(e.target.value)} placeholder="https://your-app.com/webhooks/kyc" data-testid="input-webhook-url" />
+            </div>
+            <div className="space-y-2">
+              <Label>Events</Label>
+              <div className="space-y-2">
+                {WEBHOOK_EVENTS.map((ev) => (
+                  <div key={ev.value} className="flex items-center gap-2">
+                    <Checkbox
+                      checked={newWebhookEvents.includes(ev.value)}
+                      onCheckedChange={() => handleToggleEvent(ev.value, newWebhookEvents, setNewWebhookEvents)}
+                      data-testid={`checkbox-event-${ev.value}`}
+                    />
+                    <Label className="text-sm font-normal">{ev.label}</Label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => addMutation.mutate({ url: newWebhookUrl, events: newWebhookEvents })}
+              disabled={!newWebhookUrl || newWebhookEvents.length === 0 || addMutation.isPending}
+              data-testid="button-confirm-add-webhook"
+            >
+              {addMutation.isPending ? "Adding..." : "Add Webhook"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Webhook</DialogTitle>
+            <DialogDescription>Update the webhook URL and event subscriptions.</DialogDescription>
+          </DialogHeader>
+          {editWebhook && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Callback URL</Label>
+                <Input value={editWebhook.url} onChange={(e) => setEditWebhook({ ...editWebhook, url: e.target.value })} data-testid="input-edit-webhook-url" />
+              </div>
+              <div className="space-y-2">
+                <Label>Events</Label>
+                <div className="space-y-2">
+                  {WEBHOOK_EVENTS.map((ev) => (
+                    <div key={ev.value} className="flex items-center gap-2">
+                      <Checkbox
+                        checked={(editWebhook.events || []).includes(ev.value)}
+                        onCheckedChange={() => setEditWebhook({ ...editWebhook, events: (editWebhook.events || []).includes(ev.value) ? editWebhook.events.filter((e: string) => e !== ev.value) : [...(editWebhook.events || []), ev.value] })}
+                        data-testid={`checkbox-edit-event-${ev.value}`}
+                      />
+                      <Label className="text-sm font-normal">{ev.label}</Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <Label>Active</Label>
+                <Switch checked={editWebhook.isActive} onCheckedChange={(checked) => setEditWebhook({ ...editWebhook, isActive: checked })} data-testid="switch-edit-webhook-active" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => editWebhook && updateMutation.mutate({ id: editWebhook.id, data: { url: editWebhook.url, events: editWebhook.events, isActive: editWebhook.isActive } })}
+              disabled={updateMutation.isPending}
+              data-testid="button-confirm-edit-webhook"
+            >
+              {updateMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Webhook</DialogTitle>
+            <DialogDescription>Are you sure you want to delete this webhook? This action cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteWebhookId && deleteMutation.mutate(deleteWebhookId)}
+              disabled={deleteMutation.isPending}
+              data-testid="button-confirm-delete-webhook"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete Webhook"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </TabsContent>
+  );
+}
+
+function BillingTab({ orgId }: { orgId: string }) {
+  const { toast } = useToast();
+  const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
+  const [purchaseType, setPurchaseType] = useState("individual");
+  const [purchaseQuantity, setPurchaseQuantity] = useState(10);
+  const [requestInvoicedOpen, setRequestInvoicedOpen] = useState(false);
+  const [reqCompanyName, setReqCompanyName] = useState("");
+  const [reqEmail, setReqEmail] = useState("");
+  const [reqVolume, setReqVolume] = useState("");
+  const [reqMessage, setReqMessage] = useState("");
+
+  const { data: billing, isLoading } = useQuery<KycBillingAccount>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "billing"],
+  });
+
+  const { data: transactions } = useQuery<KycCreditTransaction[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "billing", "transactions"],
+  });
+
+  const { data: invoices } = useQuery<KycInvoice[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "billing", "invoices"],
+    enabled: billing?.billingMode === "invoiced",
+  });
+
+  const purchaseMutation = useMutation({
+    mutationFn: async (data: { quantity: number; verificationType: string }) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/billing/purchase-credits`, data);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      setPurchaseDialogOpen(false);
+      if (data.authorizationUrl) {
+        window.location.href = data.authorizationUrl;
+      } else {
+        toast({ title: "Payment initiated" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Purchase failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const requestInvoicedMutation = useMutation({
+    mutationFn: async (data: { companyName: string; email: string; estimatedMonthlyVolume: string; message: string }) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/billing/request-invoiced`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "billing"] });
+      setRequestInvoicedOpen(false);
+      setReqCompanyName("");
+      setReqEmail("");
+      setReqVolume("");
+      setReqMessage("");
+      toast({ title: "Request submitted", description: "We'll review your request and get back to you." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Request failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const individualPrice = 1000000;
+  const supplierPrice = 10000000;
+
+  function getPurchaseTotal(): number {
+    const unitPrice = purchaseType === "supplier" ? supplierPrice : individualPrice;
+    return unitPrice * purchaseQuantity;
+  }
+
+  if (isLoading) {
+    return (
+      <TabsContent value="billing" className="space-y-4 mt-4">
+        <div className="flex justify-center py-8"><LoadingSpinner /></div>
+      </TabsContent>
+    );
+  }
+
+  return (
+    <TabsContent value="billing" className="space-y-4 mt-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <CreditCard className="h-4 w-4" />
+            Billing Overview
+          </CardTitle>
+          <CardDescription>Manage your billing account and purchase verification credits.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">Billing Mode</p>
+              <p className="text-lg font-semibold capitalize" data-testid="text-billing-mode">{billing?.billingMode || "prepaid"}</p>
+            </div>
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">Credit Balance</p>
+              <p className="text-lg font-semibold" data-testid="text-credit-balance">{billing?.creditBalance ?? 0}</p>
+            </div>
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">Status</p>
+              <Badge variant="secondary" className={`border-0 mt-1 ${billing?.isActive ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`} data-testid="text-billing-status">
+                {billing?.isActive ? "Active" : "Inactive"}
+              </Badge>
+            </div>
+          </div>
+
+          {billing?.billingMode === "invoiced" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Credit Limit</p>
+                <p className="text-lg font-semibold" data-testid="text-credit-limit">{billing.creditLimit ?? "Unlimited"}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Payment Terms</p>
+                <p className="text-lg font-semibold">{billing.paymentTermsDays ?? 30} days</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {billing?.billingMode === "prepaid" && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0">
+            <div>
+              <CardTitle className="text-base">Purchase Credits</CardTitle>
+              <CardDescription>Buy verification credits to use with the API. Minimum 10 credits per purchase.</CardDescription>
+            </div>
+            <Button onClick={() => setPurchaseDialogOpen(true)} data-testid="button-buy-credits">
+              <CreditCard className="h-4 w-4 mr-2" />
+              Buy Credits
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-md border p-3">
+                <p className="text-sm font-medium">Individual Verification</p>
+                <p className="text-lg font-semibold">{formatCurrency(individualPrice)}</p>
+                <p className="text-xs text-muted-foreground">per credit</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-sm font-medium">Supplier Verification</p>
+                <p className="text-lg font-semibold">{formatCurrency(supplierPrice)}</p>
+                <p className="text-xs text-muted-foreground">per credit</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {billing?.billingMode !== "invoiced" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Invoiced Billing</CardTitle>
+            <CardDescription>For established organisations with high-volume verification needs.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              Invoiced billing allows you to verify at scale and pay monthly based on usage. Contact us to apply.
+            </p>
+            <Button variant="outline" onClick={() => setRequestInvoicedOpen(true)} data-testid="button-request-invoiced">
+              Contact Us for Invoiced Billing
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {billing?.billingMode === "invoiced" && invoices && invoices.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Invoices</CardTitle>
+            <CardDescription>Your billing invoices and payment status.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Invoice #</TableHead>
+                    <TableHead>Period</TableHead>
+                    <TableHead>Total</TableHead>
+                    <TableHead>Due Date</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.map((inv) => (
+                    <TableRow key={inv.id} data-testid={`row-invoice-${inv.id}`}>
+                      <TableCell className="text-sm font-medium">{inv.invoiceNumber}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{formatDate(inv.periodStart)} - {formatDate(inv.periodEnd)}</TableCell>
+                      <TableCell className="text-sm">{formatCurrency(inv.total)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{formatDate(inv.dueDate)}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className={`border-0 ${
+                          inv.status === "paid" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
+                          inv.status === "overdue" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                          "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                        }`}>
+                          {inv.status}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Transaction History</CardTitle>
+          <CardDescription>Recent credit transactions for your billing account.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!transactions?.length ? (
+            <EmptyState icon={CreditCard} title="No transactions" description="Credit transactions will appear here once you start using the API." />
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Balance</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {transactions.map((tx) => (
+                    <TableRow key={tx.id} data-testid={`row-transaction-${tx.id}`}>
+                      <TableCell>
+                        <Badge variant="secondary" className={`border-0 ${
+                          tx.type === "purchase" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
+                          tx.type === "usage" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
+                          tx.type === "refund" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
+                          ""
+                        }`}>
+                          {tx.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className={`text-sm font-medium ${tx.amount > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                        {tx.amount > 0 ? "+" : ""}{tx.amount}
+                      </TableCell>
+                      <TableCell className="text-sm">{tx.balance}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">{tx.description}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{formatDate(tx.createdAt)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={purchaseDialogOpen} onOpenChange={setPurchaseDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Purchase Credits</DialogTitle>
+            <DialogDescription>Buy verification credits. Minimum 10 credits per purchase.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Verification Type</Label>
+              <Select value={purchaseType} onValueChange={setPurchaseType}>
+                <SelectTrigger data-testid="select-purchase-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="individual">Individual ({formatCurrency(individualPrice)}/credit)</SelectItem>
+                  <SelectItem value="supplier">Supplier ({formatCurrency(supplierPrice)}/credit)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Quantity (min. 10)</Label>
+              <Input
+                type="number"
+                min={10}
+                value={purchaseQuantity}
+                onChange={(e) => setPurchaseQuantity(Math.max(10, parseInt(e.target.value) || 10))}
+                data-testid="input-purchase-quantity"
+              />
+            </div>
+            <Separator />
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm font-medium">Total</span>
+              <span className="text-lg font-bold" data-testid="text-purchase-total">{formatCurrency(getPurchaseTotal())}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {purchaseQuantity} {purchaseType} verification credit{purchaseQuantity !== 1 ? "s" : ""} = {formatCurrency(getPurchaseTotal())}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPurchaseDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => purchaseMutation.mutate({ quantity: purchaseQuantity, verificationType: purchaseType })}
+              disabled={purchaseQuantity < 10 || purchaseMutation.isPending}
+              data-testid="button-confirm-purchase"
+            >
+              {purchaseMutation.isPending ? "Processing..." : "Proceed to Payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={requestInvoicedOpen} onOpenChange={setRequestInvoicedOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request Invoiced Billing</DialogTitle>
+            <DialogDescription>Tell us about your organisation and verification needs.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Company Name</Label>
+              <Input value={reqCompanyName} onChange={(e) => setReqCompanyName(e.target.value)} placeholder="Your company name" data-testid="input-req-company-name" />
+            </div>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input type="email" value={reqEmail} onChange={(e) => setReqEmail(e.target.value)} placeholder="billing@company.com" data-testid="input-req-email" />
+            </div>
+            <div className="space-y-2">
+              <Label>Estimated Monthly Volume</Label>
+              <Input value={reqVolume} onChange={(e) => setReqVolume(e.target.value)} placeholder="e.g. 500 verifications/month" data-testid="input-req-volume" />
+            </div>
+            <div className="space-y-2">
+              <Label>Message</Label>
+              <Textarea value={reqMessage} onChange={(e) => setReqMessage(e.target.value)} placeholder="Tell us about your verification needs..." data-testid="input-req-message" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRequestInvoicedOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => requestInvoicedMutation.mutate({
+                companyName: reqCompanyName,
+                email: reqEmail,
+                estimatedMonthlyVolume: reqVolume,
+                message: reqMessage,
+              })}
+              disabled={!reqCompanyName || !reqEmail || !reqVolume || requestInvoicedMutation.isPending}
+              data-testid="button-confirm-request-invoiced"
+            >
+              {requestInvoicedMutation.isPending ? "Submitting..." : "Submit Request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </TabsContent>
   );
 }

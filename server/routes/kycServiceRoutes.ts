@@ -7,11 +7,14 @@ import {
   kycOrganisations, kycOrgMembers, kycVerificationTemplates,
   kycDocumentRequirements, kycVerificationRequests,
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
+  kycApiKeys, kycApiUsageLogs, kycBillingAccounts, kycBillingRequests, kycCreditTransactions, kycInvoices,
   userRoles,
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
   type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
   type KycDocumentRequirement, type KycVerificationTemplate,
 } from "@shared/schema";
+import * as kycApiKeyService from "../services/kycApiKeyService";
+import * as billingService from "../services/kycBillingService";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { ObjectStorageService } from "../replit_integrations/object_storage";
 import { getResendClient } from "../services/emailService";
@@ -1930,6 +1933,482 @@ export function registerKycServiceRoutes(app: Express) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
       console.error("[KYC Admin] Update status error:", error);
       res.status(500).json({ message: "Failed to update organisation status" });
+    }
+  });
+
+  // ==================== API KEY MANAGEMENT ====================
+
+  app.post("/api/kyc-service/organisations/:id/api-keys", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+
+      const [billingAccount] = await db.select().from(kycBillingAccounts)
+        .where(and(eq(kycBillingAccounts.organisationId, orgId), eq(kycBillingAccounts.isActive, true)));
+
+      if (!billingAccount) {
+        return res.status(400).json({ message: "A billing account must be set up before generating API keys" });
+      }
+
+      const schema = z.object({
+        name: z.string().min(1).max(255),
+        permissions: z.array(z.string()).min(1),
+      });
+      const data = schema.parse(req.body);
+
+      const { key, apiKey } = await kycApiKeyService.generateApiKey(orgId, data.name, data.permissions);
+
+      res.status(201).json({
+        key,
+        apiKey: {
+          id: apiKey.id,
+          name: apiKey.name,
+          keyPrefix: apiKey.keyPrefix,
+          permissions: apiKey.permissions,
+          rateLimitPerMinute: apiKey.rateLimitPerMinute,
+          isActive: apiKey.isActive,
+          createdAt: apiKey.createdAt,
+        },
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Generate API key error:", error);
+      res.status(500).json({ message: "Failed to generate API key" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations/:id/api-keys", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const keys = await kycApiKeyService.listApiKeys(orgId);
+
+      const safeKeys = keys.map(k => ({
+        id: k.id,
+        name: k.name,
+        keyPrefix: k.keyPrefix,
+        permissions: k.permissions,
+        rateLimitPerMinute: k.rateLimitPerMinute,
+        isActive: k.isActive,
+        lastUsedAt: k.lastUsedAt,
+        expiresAt: k.expiresAt,
+        createdAt: k.createdAt,
+      }));
+
+      res.json(safeKeys);
+    } catch (error: any) {
+      console.error("[KYC] List API keys error:", error);
+      res.status(500).json({ message: "Failed to list API keys" });
+    }
+  });
+
+  app.delete("/api/kyc-service/organisations/:id/api-keys/:keyId", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const keyId = parseInt(req.params.keyId);
+      if (isNaN(keyId)) return res.status(400).json({ message: "Invalid key ID" });
+
+      const revoked = await kycApiKeyService.revokeApiKey(keyId, orgId);
+      if (!revoked) return res.status(404).json({ message: "API key not found" });
+
+      res.json({ message: "API key revoked" });
+    } catch (error: any) {
+      console.error("[KYC] Revoke API key error:", error);
+      res.status(500).json({ message: "Failed to revoke API key" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations/:id/api-usage", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const stats = await kycApiKeyService.getApiUsageStats(orgId);
+      res.json(stats);
+    } catch (error: any) {
+      console.error("[KYC] API usage stats error:", error);
+      res.status(500).json({ message: "Failed to get API usage stats" });
+    }
+  });
+
+  // ==================== WEBHOOK MANAGEMENT ====================
+
+  app.post("/api/kyc-service/organisations/:id/webhooks", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const schema = z.object({
+        url: z.string().url().max(1000),
+        secret: z.string().optional(),
+        events: z.array(z.string()).min(1, "At least one event is required"),
+      });
+      const data = schema.parse(req.body);
+
+      const { registerWebhook } = await import("../services/kycWebhookService");
+      const webhook = await registerWebhook(orgId, data.url, data.secret, data.events);
+
+      res.status(201).json(webhook);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Register webhook error:", error);
+      res.status(500).json({ message: "Failed to register webhook" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations/:id/webhooks", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const { listWebhooks } = await import("../services/kycWebhookService");
+      const webhooks = await listWebhooks(orgId);
+      const safeWebhooks = webhooks.map(wh => ({
+        ...wh,
+        secret: wh.secret.substring(0, 8) + "..." ,
+      }));
+      res.json(safeWebhooks);
+    } catch (error: any) {
+      console.error("[KYC] List webhooks error:", error);
+      res.status(500).json({ message: "Failed to list webhooks" });
+    }
+  });
+
+  app.patch("/api/kyc-service/organisations/:id/webhooks/:whId", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const whId = parseInt(req.params.whId);
+
+      const { getWebhook, updateWebhook } = await import("../services/kycWebhookService");
+      const existing = await getWebhook(whId);
+      if (!existing || existing.organisationId !== orgId) {
+        return res.status(404).json({ message: "Webhook not found" });
+      }
+
+      const schema = z.object({
+        url: z.string().url().max(1000).optional(),
+        events: z.array(z.string()).min(1).optional(),
+        isActive: z.boolean().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const updated = await updateWebhook(whId, data);
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC] Update webhook error:", error);
+      res.status(500).json({ message: "Failed to update webhook" });
+    }
+  });
+
+  app.delete("/api/kyc-service/organisations/:id/webhooks/:whId", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const whId = parseInt(req.params.whId);
+
+      const { getWebhook, deleteWebhook } = await import("../services/kycWebhookService");
+      const existing = await getWebhook(whId);
+      if (!existing || existing.organisationId !== orgId) {
+        return res.status(404).json({ message: "Webhook not found" });
+      }
+
+      await deleteWebhook(whId);
+      res.json({ message: "Webhook deleted" });
+    } catch (error: any) {
+      console.error("[KYC] Delete webhook error:", error);
+      res.status(500).json({ message: "Failed to delete webhook" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations/:id/webhooks/:whId/deliveries", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const whId = parseInt(req.params.whId);
+
+      const { getWebhook, getDeliveryLogs } = await import("../services/kycWebhookService");
+      const existing = await getWebhook(whId);
+      if (!existing || existing.organisationId !== orgId) {
+        return res.status(404).json({ message: "Webhook not found" });
+      }
+
+      const logs = await getDeliveryLogs(whId);
+      res.json(logs);
+    } catch (error: any) {
+      console.error("[KYC] Get delivery logs error:", error);
+      res.status(500).json({ message: "Failed to get delivery logs" });
+    }
+  });
+
+  app.post("/api/kyc-service/organisations/:id/webhooks/:whId/test", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const whId = parseInt(req.params.whId);
+
+      const { getWebhook, sendTestEvent } = await import("../services/kycWebhookService");
+      const existing = await getWebhook(whId);
+      if (!existing || existing.organisationId !== orgId) {
+        return res.status(404).json({ message: "Webhook not found" });
+      }
+
+      const deliveryLog = await sendTestEvent(whId);
+      res.json(deliveryLog);
+    } catch (error: any) {
+      console.error("[KYC] Test webhook error:", error);
+      res.status(500).json({ message: "Failed to send test event" });
+    }
+  });
+
+  // ==================== BILLING ROUTES (T003) ====================
+
+  app.get("/api/kyc-service/organisations/:id/billing", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      let account = await billingService.getBillingAccount(orgId);
+      if (!account) {
+        account = await billingService.createBillingAccount(orgId);
+      }
+
+      const [pendingRequest] = await db.select().from(kycBillingRequests)
+        .where(and(
+          eq(kycBillingRequests.organisationId, orgId),
+          eq(kycBillingRequests.status, "pending")
+        ));
+
+      res.json({ ...account, pendingInvoicedRequest: pendingRequest || null });
+    } catch (error: any) {
+      console.error("[KYC Billing] Get billing error:", error);
+      res.status(500).json({ message: "Failed to get billing account" });
+    }
+  });
+
+  app.post("/api/kyc-service/organisations/:id/billing/purchase-credits", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const userId = getUserId(req);
+
+      const schema = z.object({
+        quantity: z.number().int().min(10, "Minimum purchase is 10 credits"),
+        verificationType: z.enum(["individual", "supplier"]),
+      });
+      const data = schema.parse(req.body);
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      if (!org) return res.status(404).json({ message: "Organisation not found" });
+
+      let account = await billingService.getBillingAccount(orgId);
+      if (!account) {
+        account = await billingService.createBillingAccount(orgId);
+      }
+
+      const result = await billingService.purchaseCredits(
+        orgId,
+        data.quantity,
+        data.verificationType,
+        org.contactEmail
+      );
+
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC Billing] Purchase credits error:", error);
+      res.status(500).json({ message: error.message || "Failed to purchase credits" });
+    }
+  });
+
+  app.post("/api/kyc-service/organisations/:id/billing/request-invoiced", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const userId = getUserId(req);
+
+      const schema = z.object({
+        companyName: z.string().min(2).max(255),
+        companyEmail: z.string().email(),
+        estimatedMonthlyVolume: z.string().min(1),
+        message: z.string().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const request = await billingService.requestInvoicedBilling(
+        orgId,
+        userId,
+        data.companyName,
+        data.companyEmail,
+        data.estimatedMonthlyVolume,
+        data.message || ""
+      );
+
+      res.status(201).json(request);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC Billing] Request invoiced error:", error);
+      res.status(400).json({ message: error.message || "Failed to submit request" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations/:id/billing/transactions", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const limit = parseInt(req.query.limit as string) || 50;
+      const transactions = await billingService.getTransactions(orgId, limit);
+      res.json(transactions);
+    } catch (error: any) {
+      console.error("[KYC Billing] Get transactions error:", error);
+      res.status(500).json({ message: "Failed to get transactions" });
+    }
+  });
+
+  app.get("/api/kyc-service/organisations/:id/billing/invoices", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const invoices = await billingService.getInvoices(orgId);
+      res.json(invoices);
+    } catch (error: any) {
+      console.error("[KYC Billing] Get invoices error:", error);
+      res.status(500).json({ message: "Failed to get invoices" });
+    }
+  });
+
+  // ==================== ADMIN BILLING ROUTES (T003) ====================
+
+  app.get("/api/admin/kyc/billing-requests", isAuthenticated, requireAdmin, async (_req: any, res: Response) => {
+    try {
+      const requests = await billingService.getPendingBillingRequests();
+      res.json(requests);
+    } catch (error: any) {
+      console.error("[KYC Admin] List billing requests error:", error);
+      res.status(500).json({ message: "Failed to list billing requests" });
+    }
+  });
+
+  app.patch("/api/admin/kyc/billing-requests/:reqId", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    try {
+      const reqId = parseInt(req.params.reqId);
+      const userId = getUserId(req);
+
+      const schema = z.object({
+        action: z.enum(["approve", "reject"]),
+        creditLimit: z.number().int().min(0).optional(),
+        notes: z.string().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      if (data.action === "approve") {
+        const result = await billingService.approveInvoicedBilling(
+          reqId,
+          userId,
+          data.creditLimit || 1000
+        );
+        res.json(result);
+      } else {
+        const result = await billingService.rejectInvoicedBilling(
+          reqId,
+          userId,
+          data.notes || "Request rejected by admin"
+        );
+        res.json(result);
+      }
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC Admin] Billing request action error:", error);
+      res.status(400).json({ message: error.message || "Failed to process billing request" });
+    }
+  });
+
+  app.patch("/api/admin/kyc/organisations/:id/billing", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const userId = getUserId(req);
+
+      const schema = z.object({
+        creditLimit: z.number().int().min(0).optional(),
+        creditAdjustment: z.number().int().optional(),
+        adjustmentReason: z.string().optional(),
+        isActive: z.boolean().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      let account = await billingService.getBillingAccount(orgId);
+      if (!account) return res.status(404).json({ message: "Billing account not found" });
+
+      if (data.creditLimit !== undefined) {
+        await db.update(kycBillingAccounts)
+          .set({ creditLimit: data.creditLimit, updatedAt: new Date() })
+          .where(eq(kycBillingAccounts.organisationId, orgId));
+      }
+
+      if (data.isActive !== undefined) {
+        await db.update(kycBillingAccounts)
+          .set({ isActive: data.isActive, updatedAt: new Date() })
+          .where(eq(kycBillingAccounts.organisationId, orgId));
+      }
+
+      let transaction = null;
+      if (data.creditAdjustment && data.adjustmentReason) {
+        transaction = await billingService.adjustCredits(
+          orgId,
+          data.creditAdjustment,
+          data.adjustmentReason,
+          userId
+        );
+      }
+
+      account = await billingService.getBillingAccount(orgId);
+      res.json({ account, transaction });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC Admin] Update billing error:", error);
+      res.status(400).json({ message: error.message || "Failed to update billing" });
+    }
+  });
+
+  app.get("/api/admin/kyc/billing-accounts", isAuthenticated, requireAdmin, async (_req: any, res: Response) => {
+    try {
+      const accounts = await billingService.getAllBillingAccounts();
+      res.json(accounts);
+    } catch (error: any) {
+      console.error("[KYC Admin] List billing accounts error:", error);
+      res.status(500).json({ message: "Failed to list billing accounts" });
+    }
+  });
+
+  app.get("/api/admin/kyc/invoices", isAuthenticated, requireAdmin, async (_req: any, res: Response) => {
+    try {
+      const invoices = await db.select({
+        id: kycInvoices.id,
+        billingAccountId: kycInvoices.billingAccountId,
+        invoiceNumber: kycInvoices.invoiceNumber,
+        periodStart: kycInvoices.periodStart,
+        periodEnd: kycInvoices.periodEnd,
+        lineItems: kycInvoices.lineItems,
+        subtotal: kycInvoices.subtotal,
+        total: kycInvoices.total,
+        currency: kycInvoices.currency,
+        status: kycInvoices.status,
+        dueDate: kycInvoices.dueDate,
+        paidAt: kycInvoices.paidAt,
+        paystackReference: kycInvoices.paystackReference,
+        sentAt: kycInvoices.sentAt,
+        createdAt: kycInvoices.createdAt,
+        orgName: kycOrganisations.name,
+      })
+        .from(kycInvoices)
+        .leftJoin(kycBillingAccounts, eq(kycInvoices.billingAccountId, kycBillingAccounts.id))
+        .leftJoin(kycOrganisations, eq(kycBillingAccounts.organisationId, kycOrganisations.id))
+        .orderBy(desc(kycInvoices.createdAt));
+
+      res.json(invoices);
+    } catch (error: any) {
+      console.error("[KYC Admin] List invoices error:", error);
+      res.status(500).json({ message: "Failed to list invoices" });
+    }
+  });
+
+  app.patch("/api/admin/kyc/invoices/:invoiceId/mark-paid", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    try {
+      const invoiceId = parseInt(req.params.invoiceId);
+      const schema = z.object({
+        paystackReference: z.string().optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const invoice = await billingService.markInvoicePaid(invoiceId, data.paystackReference);
+      res.json(invoice);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC Admin] Mark invoice paid error:", error);
+      res.status(400).json({ message: error.message || "Failed to mark invoice as paid" });
     }
   });
 

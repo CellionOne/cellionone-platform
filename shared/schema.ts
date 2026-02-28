@@ -1217,6 +1217,180 @@ export const kycSupplierPeople = pgTable("kyc_supplier_people", {
 export const insertKycSupplierPersonSchema = createInsertSchema(kycSupplierPeople).omit({ id: true, createdAt: true });
 export type KycSupplierPerson = typeof kycSupplierPeople.$inferSelect;
 
+// ============== KYC API KEYS ==============
+export const kycApiKeys = pgTable("kyc_api_keys", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull(),
+  keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
+  keyHash: varchar("key_hash", { length: 128 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  permissions: text("permissions").array().default([]).notNull(),
+  rateLimitPerMinute: integer("rate_limit_per_minute").default(60).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_ak_org").on(table.organisationId),
+  index("idx_kyc_ak_hash").on(table.keyHash),
+]);
+
+export const insertKycApiKeySchema = createInsertSchema(kycApiKeys).omit({ id: true, createdAt: true });
+export type KycApiKey = typeof kycApiKeys.$inferSelect;
+export type InsertKycApiKey = z.infer<typeof insertKycApiKeySchema>;
+
+// ============== KYC API USAGE LOGS ==============
+export const kycApiUsageLogs = pgTable("kyc_api_usage_logs", {
+  id: serial("id").primaryKey(),
+  apiKeyId: integer("api_key_id").notNull(),
+  endpoint: varchar("endpoint", { length: 500 }).notNull(),
+  method: varchar("method", { length: 10 }).notNull(),
+  statusCode: integer("status_code").notNull(),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  requestId: varchar("request_id", { length: 64 }).notNull(),
+  responseTimeMs: integer("response_time_ms"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_aul_key").on(table.apiKeyId),
+  index("idx_kyc_aul_created").on(table.createdAt),
+]);
+
+export const insertKycApiUsageLogSchema = createInsertSchema(kycApiUsageLogs).omit({ id: true, createdAt: true });
+export type KycApiUsageLog = typeof kycApiUsageLogs.$inferSelect;
+
+// ============== KYC WEBHOOK CONFIGS ==============
+export const kycWebhookConfigs = pgTable("kyc_webhook_configs", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull(),
+  url: varchar("url", { length: 1000 }).notNull(),
+  secret: varchar("secret", { length: 128 }).notNull(),
+  events: text("events").array().default([]).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_wc_org").on(table.organisationId),
+]);
+
+export const insertKycWebhookConfigSchema = createInsertSchema(kycWebhookConfigs).omit({ id: true, createdAt: true });
+export type KycWebhookConfig = typeof kycWebhookConfigs.$inferSelect;
+export type InsertKycWebhookConfig = z.infer<typeof insertKycWebhookConfigSchema>;
+
+// ============== KYC WEBHOOK DELIVERY LOGS ==============
+export const kycWebhookDeliveryLogs = pgTable("kyc_webhook_delivery_logs", {
+  id: serial("id").primaryKey(),
+  webhookConfigId: integer("webhook_config_id").notNull(),
+  event: varchar("event", { length: 100 }).notNull(),
+  verificationRequestId: integer("verification_request_id"),
+  payload: jsonb("payload").notNull(),
+  responseStatus: integer("response_status"),
+  responseBody: text("response_body"),
+  attempts: integer("attempts").default(0).notNull(),
+  nextRetryAt: timestamp("next_retry_at"),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_wdl_config").on(table.webhookConfigId),
+  index("idx_kyc_wdl_event").on(table.event),
+]);
+
+export const insertKycWebhookDeliveryLogSchema = createInsertSchema(kycWebhookDeliveryLogs).omit({ id: true, createdAt: true });
+export type KycWebhookDeliveryLog = typeof kycWebhookDeliveryLogs.$inferSelect;
+
+// ============== KYC BILLING ACCOUNTS ==============
+export const kycBillingAccounts = pgTable("kyc_billing_accounts", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().unique(),
+  billingMode: varchar("billing_mode", { length: 20 }).default("prepaid").notNull(),
+  creditBalance: integer("credit_balance").default(0).notNull(),
+  invoiceEmail: varchar("invoice_email", { length: 255 }),
+  invoiceCompanyName: varchar("invoice_company_name", { length: 255 }),
+  invoiceAddress: text("invoice_address"),
+  paymentTermsDays: integer("payment_terms_days").default(30),
+  creditLimit: integer("credit_limit").default(0),
+  isActive: boolean("is_active").default(true).notNull(),
+  approvedAt: timestamp("approved_at"),
+  approvedBy: varchar("approved_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_ba_org").on(table.organisationId),
+]);
+
+export const insertKycBillingAccountSchema = createInsertSchema(kycBillingAccounts).omit({ id: true, createdAt: true, updatedAt: true });
+export type KycBillingAccount = typeof kycBillingAccounts.$inferSelect;
+export type InsertKycBillingAccount = z.infer<typeof insertKycBillingAccountSchema>;
+
+// ============== KYC BILLING REQUESTS (Contact Us for invoiced billing) ==============
+export const kycBillingRequests = pgTable("kyc_billing_requests", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull(),
+  requestedBy: varchar("requested_by").notNull(),
+  companyName: varchar("company_name", { length: 255 }).notNull(),
+  companyEmail: varchar("company_email", { length: 255 }).notNull(),
+  estimatedMonthlyVolume: varchar("estimated_monthly_volume", { length: 100 }),
+  message: text("message"),
+  status: varchar("status", { length: 20 }).default("pending").notNull(),
+  adminNotes: text("admin_notes"),
+  reviewedBy: varchar("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_br_org").on(table.organisationId),
+  index("idx_kyc_br_status").on(table.status),
+]);
+
+export const insertKycBillingRequestSchema = createInsertSchema(kycBillingRequests).omit({ id: true, createdAt: true });
+export type KycBillingRequest = typeof kycBillingRequests.$inferSelect;
+export type InsertKycBillingRequest = z.infer<typeof insertKycBillingRequestSchema>;
+
+// ============== KYC CREDIT TRANSACTIONS ==============
+export const kycCreditTransactions = pgTable("kyc_credit_transactions", {
+  id: serial("id").primaryKey(),
+  billingAccountId: integer("billing_account_id").notNull(),
+  type: varchar("type", { length: 20 }).notNull(),
+  verificationType: varchar("verification_type", { length: 20 }),
+  amount: integer("amount").notNull(),
+  balance: integer("balance").notNull(),
+  description: varchar("description", { length: 500 }).notNull(),
+  verificationRequestId: integer("verification_request_id"),
+  paystackReference: varchar("paystack_reference", { length: 128 }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_ct_ba").on(table.billingAccountId),
+  index("idx_kyc_ct_type").on(table.type),
+  index("idx_kyc_ct_created").on(table.createdAt),
+]);
+
+export const insertKycCreditTransactionSchema = createInsertSchema(kycCreditTransactions).omit({ id: true, createdAt: true });
+export type KycCreditTransaction = typeof kycCreditTransactions.$inferSelect;
+export type InsertKycCreditTransaction = z.infer<typeof insertKycCreditTransactionSchema>;
+
+// ============== KYC INVOICES ==============
+export const kycInvoices = pgTable("kyc_invoices", {
+  id: serial("id").primaryKey(),
+  billingAccountId: integer("billing_account_id").notNull(),
+  invoiceNumber: varchar("invoice_number", { length: 50 }).notNull().unique(),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  lineItems: jsonb("line_items").default([]).notNull(),
+  subtotal: integer("subtotal").default(0).notNull(),
+  total: integer("total").default(0).notNull(),
+  currency: varchar("currency", { length: 10 }).default("NGN").notNull(),
+  status: varchar("status", { length: 20 }).default("draft").notNull(),
+  dueDate: timestamp("due_date"),
+  paidAt: timestamp("paid_at"),
+  paystackReference: varchar("paystack_reference", { length: 128 }),
+  sentAt: timestamp("sent_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_inv_ba").on(table.billingAccountId),
+  index("idx_kyc_inv_status").on(table.status),
+]);
+
+export const insertKycInvoiceSchema = createInsertSchema(kycInvoices).omit({ id: true, createdAt: true });
+export type KycInvoice = typeof kycInvoices.$inferSelect;
+export type InsertKycInvoice = z.infer<typeof insertKycInvoiceSchema>;
+
 // ============== SETTINGS SCHEMAS ==============
 export const updateProfileSchema = z.object({
   firstName: z.string().min(1, "First name is required").max(100),

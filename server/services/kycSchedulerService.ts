@@ -5,8 +5,11 @@ import {
   kycSubmittedDocuments,
   kycOrganisations,
   kycOrgMembers,
+  kycBillingAccounts,
 } from "@shared/schema";
 import { getResendClient } from "./emailService";
+import * as webhookService from "./kycWebhookService";
+import * as billingService from "./kycBillingService";
 
 async function sendKycEmail(to: string, subject: string, html: string) {
   try {
@@ -75,6 +78,13 @@ export async function runKycExpiryCheck() {
         .set({ riskScore: "red", updatedAt: new Date() })
         .where(eq(kycVerificationRequests.id, row.request.id));
       statusesUpdated++;
+
+      webhookService.deliverWebhook(row.request.orgId, "document.expired", {
+        requestId: row.request.id,
+        subjectName: row.request.subjectName,
+        documentName: row.doc.fileName,
+        expiryDate: expiryDate.toISOString(),
+      }).catch(err => console.error("[KYCScheduler] Webhook delivery error:", err));
     } else {
       alert.expiringSoon.push(`${label} — ${daysLeft} days remaining`);
 
@@ -83,6 +93,16 @@ export async function runKycExpiryCheck() {
           .set({ riskScore: "amber", updatedAt: new Date() })
           .where(eq(kycVerificationRequests.id, row.request.id));
         statusesUpdated++;
+      }
+
+      if (daysLeft <= 30) {
+        webhookService.deliverWebhook(row.request.orgId, "document.expiring", {
+          requestId: row.request.id,
+          subjectName: row.request.subjectName,
+          documentName: row.doc.fileName,
+          expiryDate: expiryDate.toISOString(),
+          daysRemaining: daysLeft,
+        }).catch(err => console.error("[KYCScheduler] Webhook delivery error:", err));
       }
     }
   }
@@ -123,4 +143,35 @@ export async function runKycExpiryCheck() {
   }
 
   console.log(`[KYCScheduler] Updated ${statusesUpdated} statuses, sent ${alertsSent} alerts`);
+
+  try {
+    await webhookService.retryFailedWebhooks();
+  } catch (err) {
+    console.error("[KYCScheduler] Webhook retry error:", err);
+  }
+
+  const today = new Date();
+  if (today.getDate() === 1) {
+    try {
+      const invoicedAccounts = await db.select().from(kycBillingAccounts)
+        .where(and(
+          eq(kycBillingAccounts.billingMode, "invoiced"),
+          eq(kycBillingAccounts.isActive, true)
+        ));
+
+      const periodEnd = new Date(today.getFullYear(), today.getMonth(), 1);
+      const periodStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+
+      for (const account of invoicedAccounts) {
+        try {
+          await billingService.generateInvoice(account.organisationId, periodStart, periodEnd);
+          console.log(`[KYCScheduler] Generated invoice for org ${account.organisationId}`);
+        } catch (err) {
+          console.error(`[KYCScheduler] Invoice generation error for org ${account.organisationId}:`, err);
+        }
+      }
+    } catch (err) {
+      console.error("[KYCScheduler] Monthly invoice generation error:", err);
+    }
+  }
 }

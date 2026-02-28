@@ -15,6 +15,7 @@ import {
 } from "@shared/schema";
 import * as kycApiKeyService from "../services/kycApiKeyService";
 import * as billingService from "../services/kycBillingService";
+import * as webhookService from "../services/kycWebhookService";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { ObjectStorageService } from "../replit_integrations/object_storage";
 import { getResendClient } from "../services/emailService";
@@ -824,6 +825,19 @@ export function registerKycServiceRoutes(app: Express) {
           ${data.reviewNotes ? `<p><strong>Reviewer notes:</strong> ${data.reviewNotes}</p>` : ""}
         </div>`
       );
+
+      webhookService.deliverWebhook(orgId,
+        newStatus === "verified" ? "verification.completed" : "verification.failed",
+        {
+          requestId: reqId,
+          type: request.type,
+          status: newStatus,
+          riskScore,
+          subjectName: request.subjectName,
+          subjectEmail: request.subjectEmail,
+          reviewedAt: new Date().toISOString(),
+        }
+      ).catch(err => console.error("[KYC Webhook] Delivery error:", err));
 
       res.json(updated);
     } catch (error: any) {

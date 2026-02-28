@@ -302,6 +302,9 @@ export default function WhyCellionOne() {
               <Button size="lg" variant="outline" asChild data-testid="button-cta-home">
                 <a href="/">Back to Home</a>
               </Button>
+              <Button size="lg" variant="outline" asChild data-testid="button-cta-api-docs">
+                <a href="/api-docs">API Documentation</a>
+              </Button>
             </div>
           </div>
         </section>

@@ -56,6 +56,20 @@ Key architectural decisions and features include:
   - My Verifications page: `client/src/pages/kyc-service/my-verifications.tsx` at `/kyc/my-verifications` (all roles)
   - Org invite acceptance: `client/src/pages/kyc-service/org-invite-accept.tsx` at `/kyc/org-invite/:token`
   - Frontend pages: `client/src/pages/kyc-service/` (orgs, org-dashboard, verification-detail, org-settings, verify-request, employee-portal, supplier-portal, terms, my-verifications, org-invite-accept)
+- **KYC Verification API (Public):** Programmatic REST API for external applications to submit verification requests.
+  - API key management: `co_live_` prefix + 32-char hex, SHA-256 hashed storage, configurable permissions and rate limits
+  - Dual billing: prepaid credits (min 10 purchase, ₦10,000/individual, ₦100,000/supplier via Paystack) and admin-approved invoiced billing with credit limits
+  - Webhook delivery: HMAC-SHA256 signed callbacks (`X-Cellion-Signature`), 3 retries with exponential backoff, test events
+  - Public endpoints: `POST /api/v1/kyc/verify/individual`, `POST /api/v1/kyc/verify/supplier`, `GET /api/v1/kyc/requests`, `GET /api/v1/kyc/templates`
+  - Template-based or ad-hoc verification modes
+  - Org settings tabs: API Keys, Webhooks, Billing (in `client/src/pages/kyc-service/org-settings.tsx`)
+  - Admin billing controls: approve/reject invoiced billing requests, credit adjustments, invoice management (in `client/src/pages/admin/kyc-overview.tsx`)
+  - API documentation page: `client/src/pages/api-docs.tsx` at `/api-docs`
+  - Services: `server/services/kycApiKeyService.ts`, `server/services/kycBillingService.ts`, `server/services/kycWebhookService.ts`
+  - Middleware: `server/middleware/apiKeyAuth.ts`
+  - Routes: `server/routes/kycApiRoutes.ts`
+  - Tables: `kyc_api_keys`, `kyc_api_usage_logs`, `kyc_webhook_configs`, `kyc_webhook_delivery_logs`, `kyc_billing_accounts`, `kyc_billing_requests`, `kyc_credit_transactions`, `kyc_invoices`
+  - Paystack webhook: credit purchases handled via `kyc_credit_` reference prefix
 - **Notification Centre:** Bell icon with unread count in dashboard header, notification popover with mark-as-read, full notifications page at `/notifications`. API: `GET /api/notifications`, `PATCH /api/notifications/:id/read`, `POST /api/notifications/mark-all-read`.
 - **Founder Dashboard KYC Context:** Shows KYC org count, pending reviews, and completed verifications when user has KYC activity.
 - **Digital Signature Pad:** Personal profile page offers both draw-on-screen (via `react-signature-canvas`) and upload-scan options for signature specimens. Consent notice explains signature usage and authorisation requirements. Stored securely in Object Storage.

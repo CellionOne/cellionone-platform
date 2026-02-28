@@ -419,6 +419,7 @@ export default function LandingPage() {
             
             <div className="hidden md:flex items-center gap-8">
               <a href="/why-cellion-one" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-why">Why Cellion One</a>
+              <a href="/api-docs" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-api-docs">API Docs</a>
               <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Features</a>
               <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Pricing</a>
               <a href="#for-organisations" className="text-sm text-muted-foreground hover:text-foreground transition-colors">For Organisations</a>
@@ -875,6 +876,9 @@ export default function LandingPage() {
               <div className="flex flex-wrap items-center gap-6">
                 <a href="/why-cellion-one" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-why">
                   Why Cellion One
+                </a>
+                <a href="/api-docs" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-api-docs">
+                  API Docs
                 </a>
                 <a href="/apply-lawyer" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-apply-lawyer">
                   Join as Lawyer

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,15 +18,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { 
-  Building2, 
-  Shield, 
-  FileCheck, 
-  Users, 
-  Clock, 
+import {
+  Building2,
+  Shield,
+  Users,
   CheckCircle2,
   ArrowRight,
   Sparkles,
@@ -36,67 +42,26 @@ import {
   CalendarCheck,
   BadgeCheck,
   Landmark,
-  FileSignature,
-  BriefcaseBusiness,
   UserCheck,
   Building,
   ShieldCheck,
   Send,
   Loader2,
-  Mail
+  Mail,
+  Menu,
+  ChevronDown,
+  ChevronRight,
+  LayoutDashboard,
+  Code2,
+  Globe,
+  Webhook,
+  CreditCard,
+  FileCode2,
+  Bell,
+  Award,
+  X,
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
-
-const heroSlides = [
-  {
-    headline: "Register Your Nigerian Company",
-    accent: "With Confidence",
-    subtitle: "Complete your company incorporation in Nigeria with a seamless digital experience. Verified lawyers handle your CAC filings while you focus on building your business.",
-    primaryCta: { text: "Start Incorporation", href: "/register" },
-    secondaryCta: { text: "View Pricing", href: "#pricing" },
-    cardTitle: "Your Company Dashboard",
-    cardSubtitle: "Track all your applications",
-    cardIcon: Building2,
-    cardItems: [
-      { name: "TechStart Ventures Ltd", status: "Completed", color: "green" },
-      { name: "GreenFood Nigeria Ltd", status: "Under Review", color: "blue" },
-      { name: "FastLogix Enterprises", status: "Draft", color: "yellow" },
-    ],
-    cardAction: "View All Applications",
-  },
-  {
-    headline: "Verify Your Employees",
-    accent: "With Certainty",
-    subtitle: "Run compliant identity verification on employees and team members. AI-powered document checks, BVN/NIN validation, and audit-ready certificates.",
-    primaryCta: { text: "Start Verifying", href: "/register" },
-    secondaryCta: { text: "Learn More", href: "#for-organisations" },
-    cardTitle: "Verification Dashboard",
-    cardSubtitle: "Track employee verifications",
-    cardIcon: UserCheck,
-    cardItems: [
-      { name: "Adebayo Ogunlesi", status: "Verified", color: "green" },
-      { name: "Chidinma Eze", status: "In Progress", color: "blue" },
-      { name: "Femi Adeyemi", status: "Pending", color: "yellow" },
-    ],
-    cardAction: "View All Verifications",
-  },
-  {
-    headline: "Onboard Suppliers",
-    accent: "With Compliance",
-    subtitle: "Comprehensive corporate due diligence for suppliers and vendors. Verify directors, check documents, and generate compliance reports automatically.",
-    primaryCta: { text: "Verify Suppliers", href: "/register" },
-    secondaryCta: { text: "Learn More", href: "#for-organisations" },
-    cardTitle: "Supplier Verification",
-    cardSubtitle: "Corporate due diligence tracker",
-    cardIcon: ShieldCheck,
-    cardItems: [
-      { name: "Dangote Supplies Ltd", status: "Verified", color: "green" },
-      { name: "Zenith Logistics Co", status: "Under Review", color: "blue" },
-      { name: "Kobo Tech Solutions", status: "Pending", color: "yellow" },
-    ],
-    cardAction: "View All Suppliers",
-  },
-];
 
 const statusColors: Record<string, string> = {
   green: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
@@ -104,37 +69,11 @@ const statusColors: Record<string, string> = {
   yellow: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
 };
 
-const features = [
-  {
-    icon: FileCheck,
-    title: "Single Digital Intake",
-    description: "Complete your entire company registration through one seamless digital form. No paperwork, no hassle."
-  },
-  {
-    icon: Shield,
-    title: "Identity Verification",
-    description: "Verify your identity once and reuse it across all your business registrations. Secure and compliant."
-  },
-  {
-    icon: Users,
-    title: "Expert Legal Support",
-    description: "Work with verified Nigerian lawyers who handle your CAC filings and ensure everything is done right."
-  },
-  {
-    icon: Clock,
-    title: "Real-Time Tracking",
-    description: "Track your application status from submission to completion. Stay informed every step of the way."
-  },
-  {
-    icon: Building2,
-    title: "Digital Vault",
-    description: "Access all your company documents in one secure place. Certificates, receipts, and filings always available."
-  },
-  {
-    icon: CheckCircle2,
-    title: "Stamped Originals Delivery",
-    description: "Receive your physical stamped originals delivered directly to your doorstep via tracked courier."
-  }
+const trustStats = [
+  { value: "500+", label: "Companies Incorporated" },
+  { value: "10,000+", label: "Verifications Completed" },
+  { value: "50+", label: "Organisations Onboard" },
+  { value: "99.9%", label: "Uptime" },
 ];
 
 const services = [
@@ -211,10 +150,6 @@ const pricingTiers = [
 
 const faqItems = [
   {
-    question: "What is Cellion One?",
-    answer: "Cellion One is Nigeria's premier legal tech platform that simplifies company incorporation, identity verification, and regulatory compliance. We connect you with verified lawyers who handle all filings with the Corporate Affairs Commission (CAC) and other regulatory bodies, while you track progress through our digital dashboard."
-  },
-  {
     question: "How long does company incorporation take?",
     answer: "Typical company incorporation takes 7–14 business days from the point of submitting a complete application with all required documents. Timelines may vary depending on CAC processing times, name availability checks, and the completeness of your application. We keep you updated at every stage."
   },
@@ -239,24 +174,181 @@ const faqItems = [
     answer: "After registration, you receive your Certificate of Incorporation, CAC status report, and other statutory documents in your digital vault. We also deliver physical stamped originals to your doorstep via tracked courier. You can then proceed with add-on services like TIN registration, SCUML certification, and opening a corporate bank account."
   },
   {
-    question: "Can I verify employees and suppliers separately?",
-    answer: "Yes. Our KYC verification service supports both individual (employee) and corporate (supplier) verification as separate workflows. You can run employee identity checks and supplier due diligence independently, each with their own dashboards, audit trails, and compliance certificates."
-  },
-  {
-    question: "How do I track my application status?",
-    answer: "Once you submit an application, you can track its status in real time from your dashboard. You'll see each stage of the process — from document review to CAC submission to final approval — along with any clarification requests from your assigned lawyer. You also receive email notifications at key milestones."
-  },
-  {
     question: "What payment methods do you accept?",
     answer: "We accept payments via Paystack, which supports Nigerian bank cards (Visa, Mastercard, Verve), bank transfers, and USSD. All payments are processed securely, and you receive a digital receipt for every transaction, accessible from your dashboard at any time."
   }
 ];
 
-const comingSoon = [
-  { icon: Landmark, title: "Bank Account Opening", description: "Open corporate bank accounts seamlessly after incorporation" },
-  { icon: FileSignature, title: "Annual Returns Filing", description: "Automated CAC annual returns preparation and filing" },
-  { icon: BriefcaseBusiness, title: "Company Secretary Services", description: "Ongoing statutory compliance and company secretarial support" }
+const productsDropdown = [
+  { icon: Building2, label: "Company Incorporation", description: "Register your Nigerian company with CAC", href: "#pricing" },
+  { icon: ShieldCheck, label: "KYC Verification", description: "Verify employees and suppliers", href: "#for-organisations" },
+  { icon: Code2, label: "API Integration", description: "Programmatic verification via REST API", href: "/api-docs" },
 ];
+
+const resourcesDropdown = [
+  { icon: Sparkles, label: "Why Cellion One", description: "Our mission and differentiators", href: "/why-cellion-one" },
+  { icon: Users, label: "How It Works", description: "Simple 4-step process", href: "#how-it-works" },
+  { icon: Shield, label: "FAQ", description: "Common questions answered", href: "#faq" },
+  { icon: Award, label: "Join as Lawyer", description: "Partner with us as a legal professional", href: "/apply-lawyer" },
+];
+
+function NavDropdown({ label, items, testId }: { label: string; items: typeof productsDropdown; testId: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors py-2"
+        data-testid={testId}
+        onClick={() => setOpen(!open)}
+      >
+        {label}
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 pt-2 z-50" data-testid={`${testId}-menu`}>
+          <div className="w-72 rounded-xl border bg-popover p-2 shadow-lg animate-in fade-in-0 zoom-in-95 duration-150">
+            {items.map((item) => (
+              <a
+                key={item.label}
+                href={item.href}
+                className="flex items-start gap-3 rounded-lg p-3 hover:bg-muted transition-colors"
+                data-testid={`link-dropdown-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                onClick={() => setOpen(false)}
+              >
+                <div className="h-9 w-9 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <item.icon className="h-4 w-4 text-primary" />
+                </div>
+                <div>
+                  <div className="text-sm font-medium">{item.label}</div>
+                  <div className="text-xs text-muted-foreground">{item.description}</div>
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MobileNav() {
+  const [productsOpen, setProductsOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  return (
+    <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+      <SheetTrigger asChild>
+        <Button variant="ghost" size="icon" className="md:hidden" data-testid="button-mobile-menu">
+          <Menu className="h-5 w-5" />
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="right" className="w-80 p-0">
+        <SheetHeader className="px-6 py-4 border-b">
+          <div className="flex items-center justify-between">
+            <SheetTitle>
+              <CelionLogo />
+            </SheetTitle>
+            <SheetClose asChild>
+              <Button variant="ghost" size="icon" data-testid="button-mobile-close">
+                <X className="h-5 w-5" />
+              </Button>
+            </SheetClose>
+          </div>
+        </SheetHeader>
+        <nav className="flex flex-col px-4 py-4 gap-1" data-testid="mobile-nav">
+          <div>
+            <button
+              className="flex items-center justify-between w-full px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-muted transition-colors"
+              onClick={() => setProductsOpen(!productsOpen)}
+              data-testid="button-mobile-products"
+            >
+              Products
+              <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${productsOpen ? "rotate-90" : ""}`} />
+            </button>
+            {productsOpen && (
+              <div className="ml-3 mt-1 space-y-1">
+                {productsDropdown.map((item) => (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    className="flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted transition-colors"
+                    data-testid={`link-mobile-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    onClick={() => setSheetOpen(false)}
+                  >
+                    <item.icon className="h-4 w-4 text-primary" />
+                    {item.label}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <a
+            href="#pricing"
+            className="px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-muted transition-colors"
+            data-testid="link-mobile-pricing"
+            onClick={() => setSheetOpen(false)}
+          >
+            Pricing
+          </a>
+
+          <div>
+            <button
+              className="flex items-center justify-between w-full px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-muted transition-colors"
+              onClick={() => setResourcesOpen(!resourcesOpen)}
+              data-testid="button-mobile-resources"
+            >
+              Resources
+              <ChevronRight className={`h-4 w-4 transition-transform duration-200 ${resourcesOpen ? "rotate-90" : ""}`} />
+            </button>
+            {resourcesOpen && (
+              <div className="ml-3 mt-1 space-y-1">
+                {resourcesDropdown.map((item) => (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    className="flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted transition-colors"
+                    data-testid={`link-mobile-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    onClick={() => setSheetOpen(false)}
+                  >
+                    <item.icon className="h-4 w-4 text-primary" />
+                    {item.label}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <a
+            href="#contact"
+            className="px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-muted transition-colors"
+            data-testid="link-mobile-contact"
+            onClick={() => setSheetOpen(false)}
+          >
+            Contact
+          </a>
+
+          <div className="border-t my-3" />
+
+          <div className="flex flex-col gap-2 px-3">
+            <Button variant="ghost" asChild className="justify-start" data-testid="link-mobile-login">
+              <a href="/login" onClick={() => setSheetOpen(false)}>Sign In</a>
+            </Button>
+            <Button asChild data-testid="link-mobile-get-started">
+              <a href="/register" onClick={() => setSheetOpen(false)}>Get Started</a>
+            </Button>
+          </div>
+        </nav>
+      </SheetContent>
+    </Sheet>
+  );
+}
 
 function ContactSection() {
   const { toast } = useToast();
@@ -388,55 +480,29 @@ function ContactSection() {
 }
 
 export default function LandingPage() {
-  const [activeSlide, setActiveSlide] = useState(0);
-  const [isAnimating, setIsAnimating] = useState(false);
-
-  const goToSlide = useCallback((index: number) => {
-    if (index === activeSlide || isAnimating) return;
-    setIsAnimating(true);
-    setTimeout(() => {
-      setActiveSlide(index);
-      setTimeout(() => setIsAnimating(false), 50);
-    }, 300);
-  }, [activeSlide, isAnimating]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      goToSlide((activeSlide + 1) % heroSlides.length);
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [activeSlide, goToSlide]);
-
-  const slide = heroSlides[activeSlide];
-  const SlideIcon = slide.cardIcon;
-
   return (
     <div className="min-h-screen bg-background">
       <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-background/80 border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16 gap-4">
             <CelionLogo />
-            
+
             <div className="hidden md:flex items-center gap-8">
-              <a href="/why-cellion-one" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-why">Why Cellion One</a>
-              <a href="/api-docs" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-api-docs">API Docs</a>
-              <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Features</a>
-              <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Pricing</a>
-              <a href="#for-organisations" className="text-sm text-muted-foreground hover:text-foreground transition-colors">For Organisations</a>
-              <a href="#services" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Services</a>
-              <a href="#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
-              <a href="#contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Contact</a>
-              <a href="#faq" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-faq">FAQ</a>
+              <NavDropdown label="Products" items={productsDropdown} testId="nav-products" />
+              <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-pricing">Pricing</a>
+              <NavDropdown label="Resources" items={resourcesDropdown} testId="nav-resources" />
+              <a href="#contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-contact">Contact</a>
             </div>
-            
+
             <div className="flex items-center gap-2">
               <ThemeToggle />
-              <Button variant="ghost" asChild data-testid="link-login">
+              <Button variant="ghost" asChild className="hidden sm:inline-flex" data-testid="link-login">
                 <a href="/login">Sign In</a>
               </Button>
-              <Button asChild data-testid="link-get-started">
+              <Button asChild className="hidden sm:inline-flex" data-testid="link-get-started">
                 <a href="/register">Get Started</a>
               </Button>
+              <MobileNav />
             </div>
           </div>
         </div>
@@ -448,65 +514,42 @@ export default function LandingPage() {
             <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
             <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
           </div>
-          
+
           <div className="max-w-7xl mx-auto">
             <div className="grid lg:grid-cols-2 gap-12 items-center">
               <div className="space-y-8">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium">
-                  <Sparkles className="h-4 w-4" />
-                  Nigeria's Premier Legal Tech Platform
-                </div>
-                
-                <div className="min-h-[180px] sm:min-h-[160px]" data-testid="hero-text-container">
-                  <div
-                    key={activeSlide}
-                    className="space-y-4 transition-all duration-500 ease-out"
-                    style={{
-                      opacity: isAnimating ? 0 : 1,
-                      transform: isAnimating ? "translateY(16px)" : "translateY(0)",
-                    }}
-                  >
-                    <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight" data-testid="hero-headline">
-                      {slide.headline}{" "}
-                      <span className="text-primary">{slide.accent}</span>
-                    </h1>
-                  </div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium" data-testid="badge-africa">
+                  <Globe className="h-4 w-4" />
+                  Starting in Nigeria. Building for Africa.
                 </div>
 
-                <div className="min-h-[72px]">
-                  <p
-                    key={`sub-${activeSlide}`}
-                    className="text-lg text-muted-foreground max-w-xl transition-all duration-500 ease-out"
-                    style={{
-                      opacity: isAnimating ? 0 : 1,
-                      transform: isAnimating ? "translateY(12px)" : "translateY(0)",
-                    }}
-                    data-testid="hero-subtitle"
-                  >
-                    {slide.subtitle}
-                  </p>
+                <div data-testid="hero-text-container">
+                  <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight" data-testid="hero-headline">
+                    The Compliance Infrastructure{" "}
+                    <span className="text-primary">for African Business</span>
+                  </h1>
                 </div>
-                
-                <div
-                  key={`cta-${activeSlide}`}
-                  className="flex flex-col sm:flex-row gap-4 transition-all duration-500 ease-out"
-                  style={{
-                    opacity: isAnimating ? 0 : 1,
-                    transform: isAnimating ? "translateY(8px)" : "translateY(0)",
-                  }}
-                >
+
+                <p className="text-lg text-muted-foreground max-w-xl" data-testid="hero-subtitle">
+                  Incorporate companies, verify identities, and manage compliance — all through one platform. Use our dashboard or integrate via API.
+                </p>
+
+                <div className="flex flex-col sm:flex-row gap-4">
                   <Button size="lg" asChild className="gap-2" data-testid="button-hero-primary">
-                    <a href={slide.primaryCta.href}>
-                      {slide.primaryCta.text}
+                    <a href="/register">
+                      Get Started
                       <ArrowRight className="h-4 w-4" />
                     </a>
                   </Button>
                   <Button size="lg" variant="outline" asChild data-testid="button-hero-secondary">
-                    <a href={slide.secondaryCta.href}>{slide.secondaryCta.text}</a>
+                    <a href="/api-docs" className="gap-2">
+                      <Code2 className="h-4 w-4" />
+                      View API Docs
+                    </a>
                   </Button>
                 </div>
-                
-                <div className="flex items-center gap-6 pt-4">
+
+                <div className="flex items-center gap-6 pt-4 flex-wrap">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
                     <span className="text-sm text-muted-foreground">Free consultation</span>
@@ -520,56 +563,39 @@ export default function LandingPage() {
                     <span className="text-sm text-muted-foreground">Expert support</span>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2 pt-2" data-testid="hero-slide-dots">
-                  {heroSlides.map((_, i) => (
-                    <button
-                      key={i}
-                      onClick={() => goToSlide(i)}
-                      className={`h-2 rounded-full transition-all duration-300 ${
-                        i === activeSlide 
-                          ? "w-8 bg-primary" 
-                          : "w-2 bg-muted-foreground/30 hover:bg-muted-foreground/50"
-                      }`}
-                      aria-label={`Go to slide ${i + 1}`}
-                      data-testid={`button-slide-${i}`}
-                    />
-                  ))}
-                </div>
               </div>
-              
+
               <div className="relative hidden lg:block">
                 <div
-                  key={`card-${activeSlide}`}
-                  className="relative z-10 rounded-2xl bg-card border shadow-2xl p-8 transition-all duration-500 ease-out"
-                  style={{
-                    opacity: isAnimating ? 0 : 1,
-                    transform: isAnimating ? "translateY(16px)" : "translateY(0)",
-                  }}
+                  className="relative z-10 rounded-2xl bg-card border shadow-2xl p-8"
                   data-testid="hero-preview-card"
                 >
                   <div className="space-y-6">
                     <div className="flex items-center gap-4">
                       <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                        <SlideIcon className="h-6 w-6 text-primary" />
+                        <ShieldCheck className="h-6 w-6 text-primary" />
                       </div>
                       <div>
-                        <h3 className="font-semibold">{slide.cardTitle}</h3>
-                        <p className="text-sm text-muted-foreground">{slide.cardSubtitle}</p>
+                        <h3 className="font-semibold">Verification Dashboard</h3>
+                        <p className="text-sm text-muted-foreground">Track all verifications</p>
                       </div>
                     </div>
-                    
+
                     <div className="space-y-3">
-                      {slide.cardItems.map((item, idx) => (
+                      {[
+                        { name: "Adebayo Ogunlesi", status: "Verified", color: "green" },
+                        { name: "Chidinma Eze", status: "In Progress", color: "blue" },
+                        { name: "Femi Adeyemi", status: "Pending", color: "yellow" },
+                      ].map((item, idx) => (
                         <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
                           <span className="text-sm">{item.name}</span>
                           <span className={`text-xs px-2 py-1 rounded-full ${statusColors[item.color]}`}>{item.status}</span>
                         </div>
                       ))}
                     </div>
-                    
+
                     <Button className="w-full" variant="secondary">
-                      {slide.cardAction}
+                      View All Verifications
                     </Button>
                   </div>
                 </div>
@@ -579,58 +605,13 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="features" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
+        <section className="border-t border-b bg-muted/20 py-10 px-4 sm:px-6 lg:px-8" data-testid="trust-bar">
           <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl sm:text-4xl font-bold mb-4">Everything You Need to Incorporate</h2>
-              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                From document collection to stamped originals delivery, we handle every step of your company registration.
-              </p>
-            </div>
-            
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {features.map((feature, index) => (
-                <Card key={index} className="hover-elevate group">
-                  <CardContent className="p-6">
-                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                      <feature.icon className="h-6 w-6 text-primary" />
-                    </div>
-                    <h3 className="font-semibold text-lg mb-2">{feature.title}</h3>
-                    <p className="text-muted-foreground">{feature.description}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section id="how-it-works" className="py-20 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl sm:text-4xl font-bold mb-4">How It Works</h2>
-              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                Get your company registered in four simple steps
-              </p>
-            </div>
-            
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8">
-              {[
-                { step: "1", title: "Create Account", desc: "Sign up and verify your identity once" },
-                { step: "2", title: "Fill Application", desc: "Complete the digital intake form" },
-                { step: "3", title: "Pay & Submit", desc: "Make payment and submit for processing" },
-                { step: "4", title: "Receive Documents", desc: "Get your stamped originals delivered" }
-              ].map((item, index) => (
-                <div key={index} className="relative">
-                  <div className="flex flex-col items-center text-center">
-                    <div className="h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold mb-4">
-                      {item.step}
-                    </div>
-                    <h3 className="font-semibold text-lg mb-2">{item.title}</h3>
-                    <p className="text-muted-foreground">{item.desc}</p>
-                  </div>
-                  {index < 3 && (
-                    <div className="hidden lg:block absolute top-7 left-[60%] w-[80%] border-t-2 border-dashed border-muted" />
-                  )}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+              {trustStats.map((stat, idx) => (
+                <div key={idx} className="text-center" data-testid={`trust-stat-${idx}`}>
+                  <div className="text-2xl sm:text-3xl font-bold text-primary">{stat.value}</div>
+                  <div className="text-sm text-muted-foreground mt-1">{stat.label}</div>
                 </div>
               ))}
             </div>
@@ -713,10 +694,116 @@ export default function LandingPage() {
                 </CardContent>
               </Card>
             </div>
+
+            <div className="mt-16" data-testid="integration-paths">
+              <div className="text-center mb-10">
+                <h3 className="text-2xl font-bold mb-3">Choose How You Integrate</h3>
+                <p className="text-muted-foreground max-w-xl mx-auto">
+                  Whether you prefer a visual dashboard or programmatic access, we've got you covered.
+                </p>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-6 max-w-4xl mx-auto">
+                <Card className="hover-elevate group relative overflow-hidden" data-testid="card-path-dashboard">
+                  <CardContent className="p-6 flex flex-col h-full">
+                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+                      <LayoutDashboard className="h-6 w-6 text-primary" />
+                    </div>
+                    <h4 className="font-semibold text-lg mb-2">Web Dashboard</h4>
+                    <p className="text-muted-foreground text-sm mb-5">
+                      Manage verifications, invite team members, review results, and download audit certificates through our intuitive interface.
+                    </p>
+                    <ul className="space-y-2.5 mb-6 flex-1">
+                      {[
+                        { icon: Users, text: "Team collaboration" },
+                        { icon: Shield, text: "Document management" },
+                        { icon: Bell, text: "Real-time notifications" },
+                        { icon: Award, text: "Audit certificates" },
+                      ].map((feat, i) => (
+                        <li key={i} className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                          <feat.icon className="h-4 w-4 text-primary flex-shrink-0" />
+                          {feat.text}
+                        </li>
+                      ))}
+                    </ul>
+                    <Button asChild className="w-full gap-2" data-testid="button-path-dashboard">
+                      <a href="/register">
+                        Get Started
+                        <ArrowRight className="h-4 w-4" />
+                      </a>
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                <Card className="hover-elevate group relative overflow-hidden" data-testid="card-path-api">
+                  <CardContent className="p-6 flex flex-col h-full">
+                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+                      <Code2 className="h-6 w-6 text-primary" />
+                    </div>
+                    <h4 className="font-semibold text-lg mb-2">API Integration</h4>
+                    <p className="text-muted-foreground text-sm mb-5">
+                      Submit verification requests programmatically, receive webhook callbacks, and automate your compliance workflow.
+                    </p>
+                    <ul className="space-y-2.5 mb-6 flex-1">
+                      {[
+                        { icon: Globe, text: "REST API endpoints" },
+                        { icon: Webhook, text: "Webhook callbacks" },
+                        { icon: CreditCard, text: "Pre-paid or invoiced billing" },
+                        { icon: FileCode2, text: "cURL, Node.js & Python examples" },
+                      ].map((feat, i) => (
+                        <li key={i} className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                          <feat.icon className="h-4 w-4 text-primary flex-shrink-0" />
+                          {feat.text}
+                        </li>
+                      ))}
+                    </ul>
+                    <Button variant="outline" asChild className="w-full gap-2" data-testid="button-path-api">
+                      <a href="/api-docs">
+                        View API Docs
+                        <ArrowRight className="h-4 w-4" />
+                      </a>
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8">
+        <section id="how-it-works" className="py-20 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center mb-16">
+              <h2 className="text-3xl sm:text-4xl font-bold mb-4">How It Works</h2>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                Get your company registered in four simple steps
+              </p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8">
+              {[
+                { step: "1", title: "Create Account", desc: "Sign up and verify your identity once" },
+                { step: "2", title: "Fill Application", desc: "Complete the digital intake form" },
+                { step: "3", title: "Pay & Submit", desc: "Make payment and submit for processing" },
+                { step: "4", title: "Receive Documents", desc: "Get your stamped originals delivered" }
+              ].map((item, index) => (
+                <div key={index} className="relative">
+                  <div className="flex flex-col items-center text-center">
+                    <div className="h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold mb-4">
+                      {item.step}
+                    </div>
+                    <h3 className="font-semibold text-lg mb-2">{item.title}</h3>
+                    <p className="text-muted-foreground">{item.desc}</p>
+                  </div>
+                  {index < 3 && (
+                    <div className="hidden lg:block absolute top-7 left-[60%] w-[80%] border-t-2 border-dashed border-muted" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
           <div className="max-w-7xl mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-3xl sm:text-4xl font-bold mb-4">Company Incorporation Pricing</h2>
@@ -724,7 +811,7 @@ export default function LandingPage() {
                 Transparent, all-inclusive pricing for your Nigerian company registration. Choose the share capital tier that fits your business.
               </p>
             </div>
-            
+
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
               {pricingTiers.map((tier, index) => (
                 <Card key={index} className={`relative overflow-hidden ${tier.popular ? "border-primary shadow-lg" : ""}`} data-testid={`card-pricing-${index}`}>
@@ -750,7 +837,7 @@ export default function LandingPage() {
                 </Card>
               ))}
             </div>
-            
+
             <p className="text-center text-sm text-muted-foreground mt-8">
               All prices are in Nigerian Naira (NGN). A one-time identity verification fee of ₦10,000 per person applies to cover BVN/NIN validation, document verification, biometric checks, and AML screening.
             </p>
@@ -772,7 +859,7 @@ export default function LandingPage() {
                 Beyond incorporation — everything you need to set up and run your business in Nigeria.
               </p>
             </div>
-            
+
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {services.map((service, index) => (
                 <Card key={index} className="hover-elevate group" data-testid={`card-service-${index}`}>
@@ -792,39 +879,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="coming-soon" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl sm:text-4xl font-bold mb-4">Coming Soon</h2>
-              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                More features on the way to help you run your business smoothly
-              </p>
-            </div>
-            
-            <div className="grid sm:grid-cols-1 md:grid-cols-3 gap-6">
-              {comingSoon.map((item, index) => (
-                <Card key={index} className="relative overflow-hidden" data-testid={`card-coming-soon-${index}`}>
-                  <div className="absolute top-2 right-2">
-                    <span className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary font-medium">
-                      Coming Soon
-                    </span>
-                  </div>
-                  <CardContent className="p-6 pt-10 flex items-start gap-4">
-                    <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
-                      <item.icon className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-lg mb-1">{item.title}</h3>
-                      <p className="text-muted-foreground text-sm">{item.description}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section id="faq" className="py-20 px-4 sm:px-6 lg:px-8">
+        <section id="faq" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
           <div className="max-w-3xl mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-3xl sm:text-4xl font-bold mb-4">Frequently Asked Questions</h2>
@@ -858,43 +913,61 @@ export default function LandingPage() {
             <p className="text-lg text-muted-foreground mb-8 max-w-2xl mx-auto">
               Whether you need to incorporate a company or verify your employees and suppliers, Cellion One makes compliance simple and reliable.
             </p>
-            <Button size="lg" asChild className="gap-2" data-testid="button-cta-start">
-              <a href="/register">
-                Get Started Today
-                <ArrowRight className="h-4 w-4" />
-              </a>
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <Button size="lg" asChild className="gap-2" data-testid="button-cta-start">
+                <a href="/register">
+                  Get Started Today
+                  <ArrowRight className="h-4 w-4" />
+                </a>
+              </Button>
+              <Button size="lg" variant="outline" asChild className="gap-2" data-testid="button-cta-api">
+                <a href="/api-docs">
+                  <Code2 className="h-4 w-4" />
+                  Explore the API
+                </a>
+              </Button>
+            </div>
           </div>
         </section>
       </main>
 
       <footer className="border-t py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col gap-8">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              <CelionLogo textClassName="font-bold" />
-              <div className="flex flex-wrap items-center gap-6">
-                <a href="/why-cellion-one" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-why">
-                  Why Cellion One
-                </a>
-                <a href="/api-docs" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-api-docs">
-                  API Docs
-                </a>
-                <a href="/apply-lawyer" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-apply-lawyer">
-                  Join as Lawyer
-                </a>
-                <a href="/terms" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-terms">
-                  Terms & Conditions
-                </a>
-                <a href="/privacy" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-privacy">
-                  Privacy Policy
-                </a>
-                <a href="#contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-contact">
-                  Contact
-                </a>
+          <div className="flex flex-col gap-10">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div>
+                <CelionLogo textClassName="font-bold text-xl" />
+                <p className="text-sm text-muted-foreground mt-2">Starting in Nigeria. Building for Africa.</p>
               </div>
             </div>
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4 pt-4 border-t">
+
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
+              <div>
+                <h4 className="text-sm font-semibold mb-4 uppercase tracking-wider text-muted-foreground" data-testid="footer-heading-products">Products</h4>
+                <ul className="space-y-3">
+                  <li><a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-incorporation">Company Incorporation</a></li>
+                  <li><a href="#for-organisations" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-kyc">KYC Verification</a></li>
+                  <li><a href="/api-docs" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-api-docs">API Documentation</a></li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold mb-4 uppercase tracking-wider text-muted-foreground" data-testid="footer-heading-company">Company</h4>
+                <ul className="space-y-3">
+                  <li><a href="/why-cellion-one" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-why">Why Cellion One</a></li>
+                  <li><a href="/apply-lawyer" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-apply-lawyer">Join as Lawyer</a></li>
+                  <li><a href="#contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-contact">Contact</a></li>
+                </ul>
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold mb-4 uppercase tracking-wider text-muted-foreground" data-testid="footer-heading-legal">Legal</h4>
+                <ul className="space-y-3">
+                  <li><a href="/terms" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-terms">Terms & Conditions</a></li>
+                  <li><a href="/privacy" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-privacy">Privacy Policy</a></li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4 pt-6 border-t">
               <p className="text-sm text-muted-foreground">
                 &copy; {new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.
               </p>

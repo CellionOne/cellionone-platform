@@ -20,6 +20,7 @@ import { isAuthenticated } from "../replit_integrations/auth";
 import { ObjectStorageService } from "../replit_integrations/object_storage";
 import { getResendClient } from "../services/emailService";
 import { getPaystackPrice } from "../config/priceBook";
+import { upsertVerifiedEntity } from "../services/verifiedEntityService";
 
 const TERMS_VERSION = "1.0";
 const objectStorageService = new ObjectStorageService();
@@ -838,6 +839,15 @@ export function registerKycServiceRoutes(app: Express) {
           reviewedAt: new Date().toISOString(),
         }
       ).catch(err => console.error("[KYC Webhook] Delivery error:", err));
+
+      if (newStatus === "verified") {
+        upsertVerifiedEntity({
+          request: updated,
+          orgId,
+          riskScore,
+          amlScreeningStatus: null,
+        }).catch(err => console.error("[VerifiedEntity] Upsert error:", err));
+      }
 
       res.json(updated);
     } catch (error: any) {

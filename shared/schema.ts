@@ -1391,6 +1391,39 @@ export const insertKycInvoiceSchema = createInsertSchema(kycInvoices).omit({ id:
 export type KycInvoice = typeof kycInvoices.$inferSelect;
 export type InsertKycInvoice = z.infer<typeof insertKycInvoiceSchema>;
 
+// ============== VERIFIED ENTITIES REGISTRY ==============
+export const verifiedEntities = pgTable("verified_entities", {
+  id: serial("id").primaryKey(),
+  entityType: varchar("entity_type", { length: 20 }).notNull(),
+  fullName: varchar("full_name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull(),
+  bvnHash: varchar("bvn_hash", { length: 128 }),
+  ninHash: varchar("nin_hash", { length: 128 }),
+  rcNumber: varchar("rc_number", { length: 50 }),
+  tinNumber: varchar("tin_number", { length: 50 }),
+  country: varchar("country", { length: 10 }).default("NG").notNull(),
+  verificationCount: integer("verification_count").default(1).notNull(),
+  lastVerifiedAt: timestamp("last_verified_at").notNull(),
+  lastVerifiedByOrgId: integer("last_verified_by_org_id"),
+  lastVerificationRequestId: integer("last_verification_request_id"),
+  riskScore: varchar("risk_score", { length: 10 }),
+  amlScreeningStatus: varchar("aml_screening_status", { length: 20 }),
+  firstVerifiedAt: timestamp("first_verified_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_ve_bvn_hash").on(table.bvnHash),
+  index("idx_ve_nin_hash").on(table.ninHash),
+  index("idx_ve_rc_number").on(table.rcNumber),
+  index("idx_ve_email").on(table.email),
+  index("idx_ve_entity_type").on(table.entityType),
+  index("idx_ve_country").on(table.country),
+]);
+
+export const insertVerifiedEntitySchema = createInsertSchema(verifiedEntities).omit({ id: true, createdAt: true, updatedAt: true });
+export type VerifiedEntity = typeof verifiedEntities.$inferSelect;
+export type InsertVerifiedEntity = z.infer<typeof insertVerifiedEntitySchema>;
+
 // ============== SETTINGS SCHEMAS ==============
 export const updateProfileSchema = z.object({
   firstName: z.string().min(1, "First name is required").max(100),

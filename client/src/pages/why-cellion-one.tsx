@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { CelionLogo } from "@/components/celion-logo";
+import { PublicNav } from "@/components/public-nav";
+import { PublicFooter } from "@/components/public-footer";
 import {
   ArrowRight,
   CheckCircle2,
@@ -111,24 +111,7 @@ const beyondIncorporation = [
 export default function WhyCellionOne() {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <nav className="fixed top-0 w-full bg-background/80 backdrop-blur-md border-b z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16 gap-4 flex-wrap">
-            <a href="/" data-testid="link-home-logo">
-              <CelionLogo textClassName="font-bold" />
-            </a>
-            <div className="flex items-center gap-2">
-              <ThemeToggle />
-              <Button variant="ghost" asChild data-testid="link-login">
-                <a href="/login">Sign In</a>
-              </Button>
-              <Button asChild data-testid="link-get-started">
-                <a href="/register">Get Started</a>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <PublicNav />
 
       <main>
         <section className="pt-32 pb-16 px-4 sm:px-6 lg:px-8">
@@ -310,37 +293,7 @@ export default function WhyCellionOne() {
         </section>
       </main>
 
-      <footer className="border-t py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col gap-8">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              <CelionLogo textClassName="font-bold" />
-              <div className="flex flex-wrap items-center gap-6">
-                <a href="/apply-lawyer" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-apply-lawyer">
-                  Join as Lawyer
-                </a>
-                <a href="/terms" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-terms">
-                  Terms & Conditions
-                </a>
-                <a href="/privacy" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-privacy">
-                  Privacy Policy
-                </a>
-                <a href="#" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-back-to-top">
-                  Back to Top
-                </a>
-              </div>
-            </div>
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4 pt-4 border-t">
-              <p className="text-sm text-muted-foreground">
-                &copy; {new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                UK Partner: Disslio Limited
-              </p>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <PublicFooter />
     </div>
   );
 }

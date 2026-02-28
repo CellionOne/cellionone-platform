@@ -10,9 +10,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { PublicNav } from "@/components/public-nav";
+import { PublicFooter } from "@/components/public-footer";
 import { Loader2, CheckCircle, Scale, ArrowLeft } from "lucide-react";
-import { CelionLogo } from "@/components/celion-logo";
 import { useState } from "react";
 
 const lawyerApplicationSchema = z.object({
@@ -78,16 +78,7 @@ export default function ApplyLawyerPage() {
   if (applicationSubmitted) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
-        <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-background/80 border-b">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16 gap-4">
-              <Link href="/">
-              <CelionLogo />
-              </Link>
-              <ThemeToggle />
-            </div>
-          </div>
-        </nav>
+        <PublicNav />
 
         <div className="flex-1 flex items-center justify-center px-4 pt-20 pb-8">
           <Card className="w-full max-w-md text-center">
@@ -114,22 +105,15 @@ export default function ApplyLawyerPage() {
             </CardContent>
           </Card>
         </div>
+
+        <PublicFooter />
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-background/80 border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16 gap-4">
-            <Link href="/">
-              <CelionLogo />
-            </Link>
-            <ThemeToggle />
-          </div>
-        </div>
-      </nav>
+      <PublicNav />
 
       <div className="flex-1 px-4 pt-20 pb-8">
         <div className="max-w-2xl mx-auto">
@@ -342,6 +326,8 @@ export default function ApplyLawyerPage() {
           </Card>
         </div>
       </div>
+
+      <PublicFooter />
     </div>
   );
 }

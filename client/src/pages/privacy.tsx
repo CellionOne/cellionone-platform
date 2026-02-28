@@ -1,31 +1,13 @@
-import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { ArrowLeft } from "lucide-react";
-import { CelionLogo } from "@/components/celion-logo";
-import { Link } from "wouter";
+import { PublicNav } from "@/components/public-nav";
+import { PublicFooter } from "@/components/public-footer";
 
 export default function PrivacyPage() {
   return (
     <div className="min-h-screen bg-background">
-      <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-md bg-background/80 border-b">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16 gap-4">
-            <Link href="/">
-              <CelionLogo />
-            </Link>
-            <ThemeToggle />
-          </div>
-        </div>
-      </nav>
+      <PublicNav />
 
       <main className="pt-24 pb-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto">
-          <Link href="/">
-            <a className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8">
-              <ArrowLeft className="h-4 w-4" />
-              Back to Home
-            </a>
-          </Link>
 
           <h1 className="text-3xl sm:text-4xl font-bold mb-8">Privacy Policy</h1>
           
@@ -231,6 +213,8 @@ export default function PrivacyPage() {
           </div>
         </div>
       </main>
+
+      <PublicFooter />
     </div>
   );
 }

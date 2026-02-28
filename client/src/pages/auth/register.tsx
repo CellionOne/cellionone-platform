@@ -184,7 +184,7 @@ export default function RegisterPage() {
                   <strong>{formatRole(inviteInfo.role)}</strong>
                 </>
               ) : (
-                "Start your company incorporation journey"
+                "Create your account to get started"
               )}
             </CardDescription>
           </CardHeader>

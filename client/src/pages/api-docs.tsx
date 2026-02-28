@@ -1,23 +1,30 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { PublicNav } from "@/components/public-nav";
+import { PublicFooter } from "@/components/public-footer";
 import {
-  ArrowLeft,
   Key,
   Shield,
   CreditCard,
   Webhook,
   Code2,
   AlertTriangle,
-  BookOpen,
   Copy,
   Check,
   ChevronDown,
   ChevronRight,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Mail,
+  FileCheck,
+  AlertCircle,
+  Timer,
 } from "lucide-react";
 
 function CodeBlock({ code, language = "bash" }: { code: string; language?: string }) {
@@ -100,31 +107,153 @@ function EndpointSection({
   );
 }
 
+const sidebarSections = [
+  { id: "getting-started", label: "Getting Started" },
+  { id: "authentication", label: "Authentication" },
+  { id: "billing", label: "Billing" },
+  {
+    id: "endpoints",
+    label: "Endpoints",
+    children: [
+      { id: "endpoints-verification", label: "Verification" },
+      { id: "endpoints-status", label: "Status & Results" },
+      { id: "endpoints-templates", label: "Templates" },
+    ],
+  },
+  { id: "status-lifecycle", label: "Status Lifecycle" },
+  { id: "webhooks", label: "Webhooks" },
+  { id: "errors", label: "Error Codes" },
+  { id: "examples", label: "Code Examples" },
+];
+
+function DocsSidebar({ activeSection }: { activeSection: string }) {
+  return (
+    <nav className="hidden lg:block" data-testid="docs-sidebar">
+      <div className="sticky top-20 max-h-[calc(100vh-5rem)] overflow-y-auto pr-4">
+        <h3 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">On this page</h3>
+        <ul className="space-y-1">
+          {sidebarSections.map((section) => (
+            <li key={section.id}>
+              <a
+                href={`#${section.id}`}
+                className={`block px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  activeSection === section.id
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+                data-testid={`sidebar-link-${section.id}`}
+              >
+                {section.label}
+              </a>
+              {section.children && (
+                <ul className="ml-4 mt-1 space-y-1">
+                  {section.children.map((child) => (
+                    <li key={child.id}>
+                      <a
+                        href={`#${child.id}`}
+                        className={`block px-3 py-1 text-xs rounded-md transition-colors ${
+                          activeSection === child.id
+                            ? "text-primary font-medium"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                        data-testid={`sidebar-link-${child.id}`}
+                      >
+                        {child.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </nav>
+  );
+}
+
+function ParamTable({ params, title }: { params: { field: string; type: string; required: string; description: string }[]; title: string }) {
+  return (
+    <div className="space-y-2">
+      <h4 className="text-sm font-semibold">{title}</h4>
+      <div className="rounded-md border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="text-left p-2 font-medium">Field</th>
+              <th className="text-left p-2 font-medium">Type</th>
+              <th className="text-left p-2 font-medium">Required</th>
+              <th className="text-left p-2 font-medium">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {params.map((p, i) => (
+              <tr key={i} className="border-t">
+                <td className="p-2 font-mono text-xs">{p.field}</td>
+                <td className="p-2 text-xs">{p.type}</td>
+                <td className="p-2">
+                  {p.required === "Yes" ? (
+                    <Badge variant="default" className="text-[10px] px-1.5 py-0">Required</Badge>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">{p.required}</span>
+                  )}
+                </td>
+                <td className="p-2 text-muted-foreground text-xs">{p.description}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function ApiDocsPage() {
+  const [activeSection, setActiveSection] = useState("getting-started");
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  useEffect(() => {
+    const allIds = sidebarSections.flatMap((s) =>
+      s.children ? [s.id, ...s.children.map((c) => c.id)] : [s.id]
+    );
+
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting);
+        if (visible.length > 0) {
+          const sorted = visible.sort((a, b) => {
+            const ai = allIds.indexOf(a.target.id);
+            const bi = allIds.indexOf(b.target.id);
+            return ai - bi;
+          });
+          setActiveSection(sorted[0].target.id);
+        }
+      },
+      { rootMargin: "-80px 0px -60% 0px", threshold: 0.1 }
+    );
+
+    allIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) observerRef.current?.observe(el);
+    });
+
+    return () => observerRef.current?.disconnect();
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
-        <div className="container mx-auto px-4 flex items-center justify-between h-16">
-          <div className="flex items-center gap-4">
-            <Link href="/">
-              <Button variant="ghost" size="sm" data-testid="link-back-home">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Home
-              </Button>
-            </Link>
-            <Separator orientation="vertical" className="h-6" />
-            <div className="flex items-center gap-2">
-              <BookOpen className="h-5 w-5 text-primary" />
-              <h1 className="text-lg font-semibold">API Documentation</h1>
-            </div>
-          </div>
-          <Badge variant="secondary" className="border-0">v1.0</Badge>
-        </div>
-      </header>
+      <PublicNav />
 
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="space-y-8">
-          <section className="space-y-4">
+      <div className="container mx-auto px-4 pt-24 pb-8 lg:grid lg:grid-cols-[220px_1fr] lg:gap-8">
+        <DocsSidebar activeSection={activeSection} />
+
+        <div className="space-y-8 min-w-0">
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl font-bold" data-testid="heading-api-docs">API Documentation</h1>
+            <Badge variant="secondary" className="border-0">v1.0</Badge>
+          </div>
+
+          <section id="getting-started" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold" data-testid="heading-getting-started">Getting Started</h2>
             <p className="text-muted-foreground leading-relaxed">
               The Cellion One KYC Verification API lets you submit identity and corporate verification requests
@@ -159,7 +288,7 @@ export default function ApiDocsPage() {
 
           <Separator />
 
-          <section className="space-y-4">
+          <section id="authentication" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-authentication">
               <Key className="h-5 w-5" />
               Authentication
@@ -206,7 +335,7 @@ export default function ApiDocsPage() {
 
           <Separator />
 
-          <section className="space-y-4">
+          <section id="billing" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-billing">
               <CreditCard className="h-5 w-5" />
               Billing
@@ -285,7 +414,7 @@ export default function ApiDocsPage() {
 
           <Separator />
 
-          <section className="space-y-4">
+          <section id="endpoints" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-endpoints">
               <Code2 className="h-5 w-5" />
               Endpoints
@@ -298,7 +427,7 @@ export default function ApiDocsPage() {
                 <TabsTrigger value="templates" data-testid="tab-templates-endpoints">Templates</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="verification" className="space-y-4 mt-4">
+              <TabsContent value="verification" className="space-y-4 mt-4" id="endpoints-verification">
                 <EndpointSection
                   method="POST"
                   path="/api/v1/kyc/verify/individual"
@@ -306,12 +435,27 @@ export default function ApiDocsPage() {
                 >
                   <p className="text-sm text-muted-foreground">
                     Submit a request to verify an individual's identity. Supports two modes:
+                    template-based (pass a <code className="bg-muted px-1 rounded">templateId</code>) or ad-hoc (specify <code className="bg-muted px-1 rounded">checks</code> and <code className="bg-muted px-1 rounded">requiredDocuments</code> directly).
+                  </p>
+                  <ParamTable
+                    title="Request Body"
+                    params={[
+                      { field: "templateId", type: "integer", required: "No*", description: "Template ID for template-based verification mode" },
+                      { field: "subject.name", type: "string", required: "Yes", description: "Full legal name of the individual" },
+                      { field: "subject.email", type: "string", required: "Yes", description: "Email address (verification invite is sent here)" },
+                      { field: "subject.bvn", type: "string", required: "No", description: "Bank Verification Number (11 digits)" },
+                      { field: "subject.nin", type: "string", required: "No", description: "National Identity Number (11 digits)" },
+                      { field: "checks", type: "string[]", required: "No*", description: 'Ad-hoc checks: "bvn", "nin", "aml", "biometric"' },
+                      { field: "requiredDocuments", type: "string[]", required: "No*", description: 'Ad-hoc document types: "government_id", "proof_of_address", etc.' },
+                      { field: "callbackUrl", type: "string", required: "No", description: "Per-request webhook URL (overrides org default)" },
+                      { field: "metadata", type: "object", required: "No", description: "Custom key-value pairs returned in webhooks" },
+                    ]}
+                  />
+                  <p className="text-xs text-muted-foreground italic">
+                    * Either <code className="bg-muted px-1 rounded">templateId</code> or <code className="bg-muted px-1 rounded">checks</code>/<code className="bg-muted px-1 rounded">requiredDocuments</code> must be provided.
                   </p>
                   <div className="space-y-2">
-                    <h4 className="text-sm font-semibold">Template-based mode</h4>
-                    <p className="text-xs text-muted-foreground">
-                      Pass a <code className="bg-muted px-1 rounded">templateId</code> and the template defines required checks and documents.
-                    </p>
+                    <h4 className="text-sm font-semibold">Example: Template-based</h4>
                     <CodeBlock
                       language="json"
                       code={`{
@@ -323,17 +467,12 @@ export default function ApiDocsPage() {
     "nin": "12345678901"
   },
   "callbackUrl": "https://yourapp.com/kyc/callback",
-  "metadata": {
-    "employeeId": "EMP-001"
-  }
+  "metadata": { "employeeId": "EMP-001" }
 }`}
                     />
                   </div>
                   <div className="space-y-2">
-                    <h4 className="text-sm font-semibold">Ad-hoc mode</h4>
-                    <p className="text-xs text-muted-foreground">
-                      Specify checks and documents directly without a template.
-                    </p>
+                    <h4 className="text-sm font-semibold">Example: Ad-hoc</h4>
                     <CodeBlock
                       language="json"
                       code={`{
@@ -348,20 +487,17 @@ export default function ApiDocsPage() {
 }`}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-semibold">Response</h4>
-                    <CodeBlock
-                      language="json"
-                      code={`{
-  "requestId": 142,
-  "status": "pending_invite",
-  "type": "individual",
-  "inviteToken": "abc123...",
-  "expiresAt": "2026-04-01T00:00:00.000Z",
-  "message": "Verification request created. Subject will receive an email invite."
-}`}
-                    />
-                  </div>
+                  <ParamTable
+                    title="Response"
+                    params={[
+                      { field: "requestId", type: "integer", required: "-", description: "Unique verification request ID" },
+                      { field: "status", type: "string", required: "-", description: 'Initial status: "pending_invite"' },
+                      { field: "type", type: "string", required: "-", description: '"individual"' },
+                      { field: "inviteToken", type: "string", required: "-", description: "Token included in the subject's email invite" },
+                      { field: "expiresAt", type: "ISO 8601", required: "-", description: "Invite expiration date" },
+                      { field: "message", type: "string", required: "-", description: "Confirmation message" },
+                    ]}
+                  />
                 </EndpointSection>
 
                 <EndpointSection
@@ -370,11 +506,35 @@ export default function ApiDocsPage() {
                   description="Submit supplier/corporate verification"
                 >
                   <p className="text-sm text-muted-foreground">
-                    Submit a corporate due diligence request. Include company details and optionally director information.
+                    Submit a corporate due diligence request. Include company details and optionally director information
+                    for individual verification of each director.
                   </p>
-                  <CodeBlock
-                    language="json"
-                    code={`{
+                  <ParamTable
+                    title="Request Body"
+                    params={[
+                      { field: "templateId", type: "integer", required: "No*", description: "Template ID for template-based verification" },
+                      { field: "subject.name", type: "string", required: "Yes", description: "Company or entity name" },
+                      { field: "subject.email", type: "string", required: "Yes", description: "Primary contact email" },
+                      { field: "company.companyName", type: "string", required: "Yes", description: "Registered company name" },
+                      { field: "company.rcNumber", type: "string", required: "No", description: "CAC Registration number (RC-XXXXXX)" },
+                      { field: "company.tinNumber", type: "string", required: "No", description: "Tax Identification Number" },
+                      { field: "company.contactPersonName", type: "string", required: "No", description: "Contact person full name" },
+                      { field: "company.contactPersonEmail", type: "string", required: "No", description: "Contact person email" },
+                      { field: "company.contactPersonPhone", type: "string", required: "No", description: "Contact person phone" },
+                      { field: "directors[]", type: "array", required: "No", description: "List of directors to verify individually" },
+                      { field: "directors[].fullName", type: "string", required: "Yes", description: "Director full name" },
+                      { field: "directors[].email", type: "string", required: "Yes", description: "Director email (invite sent here)" },
+                      { field: "directors[].role", type: "string", required: "No", description: 'Role title (e.g. "Director", "CEO")' },
+                      { field: "directors[].requiresVerification", type: "boolean", required: "No", description: "Whether to create individual verification (default: true)" },
+                      { field: "callbackUrl", type: "string", required: "No", description: "Per-request webhook URL" },
+                      { field: "metadata", type: "object", required: "No", description: "Custom key-value pairs" },
+                    ]}
+                  />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Example</h4>
+                    <CodeBlock
+                      language="json"
+                      code={`{
   "templateId": 8,
   "subject": {
     "name": "TechCorp Nigeria Ltd",
@@ -398,11 +558,12 @@ export default function ApiDocsPage() {
   ],
   "callbackUrl": "https://yourapp.com/kyc/supplier-callback"
 }`}
-                  />
+                    />
+                  </div>
                 </EndpointSection>
               </TabsContent>
 
-              <TabsContent value="status" className="space-y-4 mt-4">
+              <TabsContent value="status" className="space-y-4 mt-4" id="endpoints-status">
                 <EndpointSection
                   method="GET"
                   path="/api/v1/kyc/requests/:requestId"
@@ -411,9 +572,25 @@ export default function ApiDocsPage() {
                   <p className="text-sm text-muted-foreground">
                     Retrieve the current status and results of a verification request.
                   </p>
-                  <CodeBlock
-                    language="json"
-                    code={`{
+                  <ParamTable
+                    title="Response Fields"
+                    params={[
+                      { field: "id", type: "integer", required: "-", description: "Verification request ID" },
+                      { field: "type", type: "string", required: "-", description: '"individual" or "supplier"' },
+                      { field: "status", type: "string", required: "-", description: "Current status (see Status Lifecycle below)" },
+                      { field: "riskScore", type: "string", required: "-", description: '"green", "amber", or "red" (see Risk Scores below)' },
+                      { field: "subjectName", type: "string", required: "-", description: "Name of the person/company being verified" },
+                      { field: "subjectEmail", type: "string", required: "-", description: "Email of the subject" },
+                      { field: "reviewedAt", type: "ISO 8601", required: "-", description: "When the review was completed (null if pending)" },
+                      { field: "documents", type: "array", required: "-", description: "Submitted documents with status and expiry" },
+                      { field: "createdAt", type: "ISO 8601", required: "-", description: "When the request was created" },
+                    ]}
+                  />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Example Response</h4>
+                    <CodeBlock
+                      language="json"
+                      code={`{
   "id": 142,
   "type": "individual",
   "status": "verified",
@@ -431,7 +608,8 @@ export default function ApiDocsPage() {
   ],
   "createdAt": "2026-03-01T09:00:00.000Z"
 }`}
-                  />
+                    />
+                  </div>
                 </EndpointSection>
 
                 <EndpointSection
@@ -487,7 +665,7 @@ export default function ApiDocsPage() {
                 </EndpointSection>
               </TabsContent>
 
-              <TabsContent value="templates" className="space-y-4 mt-4">
+              <TabsContent value="templates" className="space-y-4 mt-4" id="endpoints-templates">
                 <EndpointSection
                   method="GET"
                   path="/api/v1/kyc/templates"
@@ -497,9 +675,22 @@ export default function ApiDocsPage() {
                     Get all verification templates configured for your organisation.
                     Templates define which checks and documents are required.
                   </p>
-                  <CodeBlock
-                    language="json"
-                    code={`[
+                  <ParamTable
+                    title="Response Fields (array)"
+                    params={[
+                      { field: "id", type: "integer", required: "-", description: "Template ID (use in verify requests)" },
+                      { field: "name", type: "string", required: "-", description: 'Template name (e.g. "Standard Employee")' },
+                      { field: "type", type: "string", required: "-", description: '"individual" or "supplier"' },
+                      { field: "description", type: "string", required: "-", description: "Human-readable template description" },
+                      { field: "requireDirectorVerification", type: "boolean", required: "-", description: "Whether supplier directors require individual verification" },
+                      { field: "documentRequirementIds", type: "integer[]", required: "-", description: "IDs of required document types" },
+                    ]}
+                  />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Example Response</h4>
+                    <CodeBlock
+                      language="json"
+                      code={`[
   {
     "id": 5,
     "name": "Standard Employee",
@@ -517,7 +708,8 @@ export default function ApiDocsPage() {
     "documentRequirementIds": [2, 4, 5, 6]
   }
 ]`}
-                  />
+                    />
+                  </div>
                 </EndpointSection>
 
                 <EndpointSection
@@ -528,9 +720,21 @@ export default function ApiDocsPage() {
                   <p className="text-sm text-muted-foreground">
                     Get the list of documents required by a specific verification template.
                   </p>
-                  <CodeBlock
-                    language="json"
-                    code={`[
+                  <ParamTable
+                    title="Response Fields (array)"
+                    params={[
+                      { field: "id", type: "integer", required: "-", description: "Document requirement ID" },
+                      { field: "documentName", type: "string", required: "-", description: 'Display name (e.g. "Government-issued ID")' },
+                      { field: "documentCategory", type: "string", required: "-", description: '"identity", "address", "financial", "corporate", "other"' },
+                      { field: "isMandatory", type: "boolean", required: "-", description: "Whether the document is required or optional" },
+                      { field: "hasExpiry", type: "boolean", required: "-", description: "Whether the document has an expiration date" },
+                    ]}
+                  />
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold">Example Response</h4>
+                    <CodeBlock
+                      language="json"
+                      code={`[
   {
     "id": 1,
     "documentName": "Government-issued ID",
@@ -546,7 +750,8 @@ export default function ApiDocsPage() {
     "hasExpiry": false
   }
 ]`}
-                  />
+                    />
+                  </div>
                 </EndpointSection>
               </TabsContent>
             </Tabs>
@@ -554,7 +759,92 @@ export default function ApiDocsPage() {
 
           <Separator />
 
-          <section className="space-y-4">
+          <section id="status-lifecycle" className="space-y-4 scroll-mt-24">
+            <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-status-lifecycle">
+              <Clock className="h-5 w-5" />
+              Verification Status Lifecycle
+            </h2>
+            <p className="text-muted-foreground leading-relaxed">
+              Every verification request progresses through a series of statuses. Understanding this flow
+              helps you build correct integrations and handle webhook events appropriately.
+            </p>
+
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex flex-col gap-0">
+                  {[
+                    { status: "pending_invite", icon: Mail, color: "text-blue-500", bg: "bg-blue-100 dark:bg-blue-900/30", label: "Pending Invite", description: "Request created. Subject receives an email invite to begin verification." },
+                    { status: "pending_submission", icon: FileCheck, color: "text-yellow-500", bg: "bg-yellow-100 dark:bg-yellow-900/30", label: "Pending Submission", description: "Subject accepted the invite and is completing their profile and uploading documents." },
+                    { status: "under_review", icon: Clock, color: "text-orange-500", bg: "bg-orange-100 dark:bg-orange-900/30", label: "Under Review", description: "All documents submitted. Awaiting review by an organisation reviewer." },
+                    { status: "verified", icon: CheckCircle2, color: "text-green-500", bg: "bg-green-100 dark:bg-green-900/30", label: "Verified", description: "Approved by reviewer. Triggers verification.completed webhook." },
+                    { status: "rejected", icon: XCircle, color: "text-red-500", bg: "bg-red-100 dark:bg-red-900/30", label: "Rejected", description: "Rejected by reviewer with reason. Triggers verification.failed webhook." },
+                    { status: "expired", icon: Timer, color: "text-gray-500", bg: "bg-gray-100 dark:bg-gray-900/30", label: "Expired", description: "Invite expired before the subject completed verification. No credit is refunded." },
+                  ].map((step, i, arr) => (
+                    <div key={step.status} className="flex items-start gap-4" data-testid={`status-step-${step.status}`}>
+                      <div className="flex flex-col items-center">
+                        <div className={`h-10 w-10 rounded-full ${step.bg} flex items-center justify-center flex-shrink-0`}>
+                          <step.icon className={`h-5 w-5 ${step.color}`} />
+                        </div>
+                        {i < arr.length - 1 && (
+                          <div className="w-px h-8 bg-border" />
+                        )}
+                      </div>
+                      <div className="pt-1.5 pb-4">
+                        <div className="flex items-center gap-2">
+                          <code className="text-sm font-mono font-medium">{step.status}</code>
+                          <span className="text-sm text-muted-foreground">— {step.label}</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">{step.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Risk Scores</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Completed verifications receive a risk score based on document completeness and validity:
+                </p>
+                <div className="rounded-md border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-2 font-medium">Score</th>
+                        <th className="text-left p-2 font-medium">Level</th>
+                        <th className="text-left p-2 font-medium">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-t">
+                        <td className="p-2"><Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0">green</Badge></td>
+                        <td className="p-2 font-medium">Low Risk</td>
+                        <td className="p-2 text-muted-foreground">All required documents present and valid. No AML flags.</td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="p-2"><Badge className="bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 border-0">amber</Badge></td>
+                        <td className="p-2 font-medium">Moderate Risk</td>
+                        <td className="p-2 text-muted-foreground">Some optional documents missing or documents expiring within 30 days.</td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="p-2"><Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0">red</Badge></td>
+                        <td className="p-2 font-medium">High Risk</td>
+                        <td className="p-2 text-muted-foreground">Critical mandatory documents missing, expired, or AML screening flagged.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          <Separator />
+
+          <section id="webhooks" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-webhooks">
               <Webhook className="h-5 w-5" />
               Webhooks
@@ -671,7 +961,7 @@ app.post('/kyc/callback', (req, res) => {
 
           <Separator />
 
-          <section className="space-y-4">
+          <section id="errors" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-errors">
               <AlertTriangle className="h-5 w-5" />
               Error Codes
@@ -700,7 +990,7 @@ app.post('/kyc/callback', (req, res) => {
 
           <Separator />
 
-          <section className="space-y-4">
+          <section id="examples" className="space-y-4 scroll-mt-24">
             <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-examples">
               <Code2 className="h-5 w-5" />
               Code Examples
@@ -861,6 +1151,37 @@ def verify_signature(body: bytes, signature: str, secret: str) -> bool:
           <Separator />
 
           <section className="space-y-4 pb-12">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Card>
+                <CardContent className="pt-6 space-y-2">
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4" />
+                    Testing
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    You can send test webhook events from the <strong>Webhooks</strong> tab in your organisation settings
+                    to verify your integration handles payloads correctly. Note that the platform does not currently
+                    offer a sandbox or test mode — all verification requests consume real credits.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="pt-6 space-y-2">
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <Shield className="h-4 w-4" />
+                    API Versioning
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    The API is currently at <strong>v1</strong>. The version is included in the URL prefix
+                    (<code className="bg-muted px-1 rounded">/api/v1/kyc</code>). Breaking changes will be
+                    introduced under a new version prefix (e.g. <code className="bg-muted px-1 rounded">/api/v2/kyc</code>).
+                    Existing versions will continue to be supported with advance notice.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
             <Card>
               <CardContent className="pt-6">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -874,7 +1195,7 @@ def verify_signature(body: bytes, signature: str, secret: str) -> bool:
                       for API support and integration guidance.
                     </p>
                   </div>
-                  <Link href="/login">
+                  <Link href="/register">
                     <Button data-testid="button-get-started">Get Started</Button>
                   </Link>
                 </div>
@@ -883,6 +1204,8 @@ def verify_signature(body: bytes, signature: str, secret: str) -> bool:
           </section>
         </div>
       </div>
+
+      <PublicFooter />
     </div>
   );
 }

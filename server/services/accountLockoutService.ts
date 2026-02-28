@@ -1,40 +1,7 @@
-/**
- * Account Lockout Service
- * 
- * Protects against brute force attacks by locking accounts after
- * multiple failed login attempts.
- * 
- * Configuration:
- * - 5 failed attempts = 15 minute lockout
- * - Successful login resets the counter
- * - Lockout info stored in memory (use Redis in production)
- */
-
-interface LockoutInfo {
-  failedAttempts: number;
-  lockoutUntil: Date | null;
-  lastAttempt: Date;
-}
-
-// In-memory storage (use Redis or database in production for persistence across restarts)
-const lockoutStore = new Map<string, LockoutInfo>();
+import { storage } from "../storage";
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MINUTES = 15;
-const CLEANUP_INTERVAL_MINUTES = 60;
-
-// Clean up old entries periodically
-setInterval(() => {
-  const now = new Date();
-  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-  
-  Array.from(lockoutStore.entries()).forEach(([key, info]) => {
-    // Remove entries that haven't been accessed in an hour and aren't locked
-    if (info.lastAttempt < oneHourAgo && (!info.lockoutUntil || info.lockoutUntil < now)) {
-      lockoutStore.delete(key);
-    }
-  });
-}, CLEANUP_INTERVAL_MINUTES * 60 * 1000);
 
 export interface LockoutStatus {
   isLocked: boolean;
@@ -43,10 +10,10 @@ export interface LockoutStatus {
   lockoutMinutesRemaining: number | null;
 }
 
-export function checkAccountLockout(identifier: string): LockoutStatus {
-  const info = lockoutStore.get(identifier);
-  
-  if (!info) {
+export async function checkAccountLockout(identifier: string): Promise<LockoutStatus> {
+  const attempt = await storage.getLoginAttempt(identifier);
+
+  if (!attempt) {
     return {
       isLocked: false,
       remainingAttempts: MAX_FAILED_ATTEMPTS,
@@ -54,113 +21,121 @@ export function checkAccountLockout(identifier: string): LockoutStatus {
       lockoutMinutesRemaining: null,
     };
   }
-  
+
   const now = new Date();
-  
-  // Check if lockout has expired
-  if (info.lockoutUntil && info.lockoutUntil > now) {
-    const minutesRemaining = Math.ceil((info.lockoutUntil.getTime() - now.getTime()) / (60 * 1000));
+
+  if (attempt.lockoutUntil && attempt.lockoutUntil > now) {
+    const minutesRemaining = Math.ceil((attempt.lockoutUntil.getTime() - now.getTime()) / (60 * 1000));
     return {
       isLocked: true,
       remainingAttempts: 0,
-      lockoutUntil: info.lockoutUntil,
+      lockoutUntil: attempt.lockoutUntil,
       lockoutMinutesRemaining: minutesRemaining,
     };
   }
-  
-  // Lockout expired - reset if necessary
-  if (info.lockoutUntil && info.lockoutUntil <= now) {
-    info.failedAttempts = 0;
-    info.lockoutUntil = null;
-  }
-  
-  return {
-    isLocked: false,
-    remainingAttempts: Math.max(0, MAX_FAILED_ATTEMPTS - info.failedAttempts),
-    lockoutUntil: null,
-    lockoutMinutesRemaining: null,
-  };
-}
 
-export function recordFailedAttempt(identifier: string): LockoutStatus {
-  const now = new Date();
-  let info = lockoutStore.get(identifier);
-  
-  if (!info) {
-    info = {
+  if (attempt.lockoutUntil && attempt.lockoutUntil <= now) {
+    await storage.upsertLoginAttempt(identifier, {
       failedAttempts: 0,
       lockoutUntil: null,
       lastAttempt: now,
-    };
-    lockoutStore.set(identifier, info);
-  }
-  
-  // If currently locked, just return the status
-  if (info.lockoutUntil && info.lockoutUntil > now) {
-    const minutesRemaining = Math.ceil((info.lockoutUntil.getTime() - now.getTime()) / (60 * 1000));
+    });
     return {
-      isLocked: true,
-      remainingAttempts: 0,
-      lockoutUntil: info.lockoutUntil,
-      lockoutMinutesRemaining: minutesRemaining,
+      isLocked: false,
+      remainingAttempts: MAX_FAILED_ATTEMPTS,
+      lockoutUntil: null,
+      lockoutMinutesRemaining: null,
     };
   }
-  
-  // Reset if previous lockout expired
-  if (info.lockoutUntil && info.lockoutUntil <= now) {
-    info.failedAttempts = 0;
-    info.lockoutUntil = null;
-  }
-  
-  // Record the failed attempt
-  info.failedAttempts++;
-  info.lastAttempt = now;
-  
-  // Check if we should lock the account
-  if (info.failedAttempts >= MAX_FAILED_ATTEMPTS) {
-    info.lockoutUntil = new Date(now.getTime() + LOCKOUT_DURATION_MINUTES * 60 * 1000);
-    console.log(`[Security] Account locked: ${identifier} until ${info.lockoutUntil.toISOString()}`);
-    
-    return {
-      isLocked: true,
-      remainingAttempts: 0,
-      lockoutUntil: info.lockoutUntil,
-      lockoutMinutesRemaining: LOCKOUT_DURATION_MINUTES,
-    };
-  }
-  
+
   return {
     isLocked: false,
-    remainingAttempts: MAX_FAILED_ATTEMPTS - info.failedAttempts,
+    remainingAttempts: Math.max(0, MAX_FAILED_ATTEMPTS - attempt.failedAttempts),
     lockoutUntil: null,
     lockoutMinutesRemaining: null,
   };
 }
 
-export function recordSuccessfulLogin(identifier: string): void {
-  // Clear all failed attempts on successful login
-  lockoutStore.delete(identifier);
+export async function recordFailedAttempt(identifier: string): Promise<LockoutStatus> {
+  const now = new Date();
+  const attempt = await storage.getLoginAttempt(identifier);
+
+  let currentFailed = 0;
+
+  if (attempt) {
+    if (attempt.lockoutUntil && attempt.lockoutUntil > now) {
+      const minutesRemaining = Math.ceil((attempt.lockoutUntil.getTime() - now.getTime()) / (60 * 1000));
+      return {
+        isLocked: true,
+        remainingAttempts: 0,
+        lockoutUntil: attempt.lockoutUntil,
+        lockoutMinutesRemaining: minutesRemaining,
+      };
+    }
+
+    if (attempt.lockoutUntil && attempt.lockoutUntil <= now) {
+      currentFailed = 0;
+    } else {
+      currentFailed = attempt.failedAttempts;
+    }
+  }
+
+  currentFailed++;
+
+  let lockoutUntil: Date | null = null;
+  if (currentFailed >= MAX_FAILED_ATTEMPTS) {
+    lockoutUntil = new Date(now.getTime() + LOCKOUT_DURATION_MINUTES * 60 * 1000);
+    console.log(`[Security] Account locked: ${identifier} until ${lockoutUntil.toISOString()}`);
+
+    try {
+      await storage.createSecurityEvent({
+        eventType: "account_locked",
+        severity: "medium",
+        ipAddress: null,
+        details: { identifier, lockoutUntil: lockoutUntil.toISOString(), failedAttempts: currentFailed },
+      });
+    } catch (e) {
+      console.error("[Security] Failed to log account_locked event:", e);
+    }
+  }
+
+  await storage.upsertLoginAttempt(identifier, {
+    failedAttempts: currentFailed,
+    lockoutUntil,
+    lastAttempt: now,
+  });
+
+  if (lockoutUntil) {
+    return {
+      isLocked: true,
+      remainingAttempts: 0,
+      lockoutUntil,
+      lockoutMinutesRemaining: LOCKOUT_DURATION_MINUTES,
+    };
+  }
+
+  return {
+    isLocked: false,
+    remainingAttempts: MAX_FAILED_ATTEMPTS - currentFailed,
+    lockoutUntil: null,
+    lockoutMinutesRemaining: null,
+  };
+}
+
+export async function recordSuccessfulLogin(identifier: string): Promise<void> {
+  await storage.deleteLoginAttempt(identifier);
   console.log(`[Security] Login successful, lockout cleared for: ${identifier}`);
 }
 
-export function clearLockout(identifier: string): void {
-  lockoutStore.delete(identifier);
+export async function clearLockout(identifier: string): Promise<void> {
+  await storage.deleteLoginAttempt(identifier);
   console.log(`[Security] Manual lockout clear for: ${identifier}`);
 }
 
-// Admin function to get current lockout stats
-export function getLockoutStats(): { totalLocked: number; totalTracked: number } {
-  const now = new Date();
-  let totalLocked = 0;
-  
-  Array.from(lockoutStore.values()).forEach((info) => {
-    if (info.lockoutUntil && info.lockoutUntil > now) {
-      totalLocked++;
-    }
-  });
-  
+export async function getLockoutStats(): Promise<{ totalLocked: number; totalTracked: number }> {
+  const locked = await storage.getLockedAccounts();
   return {
-    totalLocked,
-    totalTracked: lockoutStore.size,
+    totalLocked: locked.length,
+    totalTracked: locked.length,
   };
 }

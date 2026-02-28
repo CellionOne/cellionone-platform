@@ -1424,6 +1424,53 @@ export const insertVerifiedEntitySchema = createInsertSchema(verifiedEntities).o
 export type VerifiedEntity = typeof verifiedEntities.$inferSelect;
 export type InsertVerifiedEntity = z.infer<typeof insertVerifiedEntitySchema>;
 
+// ============== SECURITY: LOGIN ATTEMPTS (persistent account lockout) ==============
+export const loginAttempts = pgTable("login_attempts", {
+  id: serial("id").primaryKey(),
+  identifier: varchar("identifier", { length: 255 }).notNull(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  lockoutUntil: timestamp("lockout_until"),
+  lastAttempt: timestamp("last_attempt").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("idx_login_attempts_identifier").on(table.identifier),
+]);
+
+export type LoginAttempt = typeof loginAttempts.$inferSelect;
+
+// ============== SECURITY: SECURITY EVENTS ==============
+export const securityEvents = pgTable("security_events", {
+  id: serial("id").primaryKey(),
+  eventType: varchar("event_type", { length: 100 }).notNull(),
+  severity: varchar("severity", { length: 20 }).notNull(),
+  ipAddress: varchar("ip_address", { length: 100 }),
+  userId: varchar("user_id"),
+  details: jsonb("details"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("idx_security_events_type").on(table.eventType),
+  index("idx_security_events_severity").on(table.severity),
+  index("idx_security_events_created").on(table.createdAt),
+]);
+
+export type SecurityEvent = typeof securityEvents.$inferSelect;
+export type InsertSecurityEvent = typeof securityEvents.$inferInsert;
+
+// ============== SECURITY: USER LOGIN HISTORY ==============
+export const userLoginHistory = pgTable("user_login_history", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull(),
+  ipAddress: varchar("ip_address", { length: 100 }),
+  userAgent: text("user_agent"),
+  loginAt: timestamp("login_at").notNull().defaultNow(),
+  isNewIp: boolean("is_new_ip").notNull().default(false),
+}, (table) => [
+  index("idx_login_history_user").on(table.userId),
+  index("idx_login_history_ip").on(table.ipAddress),
+]);
+
+export type UserLoginHistoryEntry = typeof userLoginHistory.$inferSelect;
+
 // ============== SETTINGS SCHEMAS ==============
 export const updateProfileSchema = z.object({
   firstName: z.string().min(1, "First name is required").max(100),

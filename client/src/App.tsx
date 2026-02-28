@@ -44,6 +44,7 @@ import AdminOrders from "@/pages/admin/orders";
 import AdminKycOverview from "@/pages/admin/kyc-overview";
 import AdminProposals from "@/pages/admin/proposals";
 import AdminRegisteredOffices from "@/pages/admin/registered-offices";
+import AdminSecurity from "@/pages/admin/security";
 import PlatformOverview from "@/pages/platform-overview";
 import WhyCellionOne from "@/pages/why-cellion-one";
 import ApiDocsPage from "@/pages/api-docs";
@@ -284,6 +285,9 @@ function Router() {
       </Route>
       <Route path="/admin/registered-offices">
         <ProtectedRoute component={AdminRegisteredOffices} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/security">
+        <ProtectedRoute component={AdminSecurity} roles={["admin"]} />
       </Route>
       
       <Route path="/building-manager/dashboard">

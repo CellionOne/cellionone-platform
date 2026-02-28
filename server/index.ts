@@ -207,6 +207,15 @@ app.use((req, res, next) => {
       
       // Run KYC document expiry check daily
       runKycExpiryCheck().catch(console.error);
+
+      // Clean up expired login attempts every hour
+      setInterval(() => {
+        import("./storage").then(({ storage }) => {
+          storage.cleanupExpiredLoginAttempts().catch((e: any) => {
+            console.error("[Security] Failed to cleanup login attempts:", e);
+          });
+        });
+      }, 60 * 60 * 1000);
     },
   );
 })();

@@ -225,9 +225,40 @@ export async function registerRoutes(
   console.log("Auth routes initialised – custom role-aware endpoint active");
   
   // Session timeout middleware (after auth initialization)
-  const { sessionTimeout, validateFileUploadMiddleware } = await import("./middleware/security");
+  const { sessionTimeout, validateFileUploadMiddleware, csrfProtection, generateCsrfToken } = await import("./middleware/security");
   app.use(sessionTimeout);
   console.log("[Security] Session timeout middleware enabled (30 min idle, 8 hour absolute)");
+  
+  // CSRF token endpoint (must be before CSRF protection middleware)
+  app.get("/api/csrf-token", (req: any, res) => {
+    const token = generateCsrfToken(req);
+    res.json({ csrfToken: token });
+  });
+
+  // CSP violation report endpoint
+  app.post("/api/csp-report", async (req: any, res) => {
+    try {
+      const report = req.body?.["csp-report"] || req.body;
+      await storage.createSecurityEvent({
+        eventType: "csp_violation",
+        severity: "low",
+        ipAddress: req.ip || null,
+        details: {
+          documentUri: report?.["document-uri"],
+          violatedDirective: report?.["violated-directive"],
+          blockedUri: report?.["blocked-uri"],
+          originalPolicy: report?.["original-policy"],
+        },
+      });
+    } catch (e) {
+      // Silently handle — don't block on logging failures
+    }
+    res.status(204).send();
+  });
+
+  // CSRF protection middleware (after session/auth, before routes)
+  app.use(csrfProtection);
+  console.log("[Security] CSRF protection middleware enabled");
   
   // Setup object storage routes with file validation
   app.use("/api/uploads/request-url", validateFileUploadMiddleware);
@@ -423,6 +454,77 @@ export async function registerRoutes(
     }
   });
 
+  // ============== ADMIN SECURITY DASHBOARD ==============
+  app.get("/api/admin/security-summary", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const summary = await storage.getSecuritySummary();
+      res.json(summary);
+    } catch (error: any) {
+      console.error("Error fetching security summary:", error);
+      res.status(500).json({ message: "Failed to fetch security summary" });
+    }
+  });
+
+  app.get("/api/admin/security-events", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { eventType, severity, limit, offset } = req.query;
+      const events = await storage.getSecurityEvents({
+        eventType: eventType as string,
+        severity: severity as string,
+        limit: limit ? parseInt(limit as string, 10) : 50,
+        offset: offset ? parseInt(offset as string, 10) : 0,
+      });
+      res.json(events);
+    } catch (error: any) {
+      console.error("Error fetching security events:", error);
+      res.status(500).json({ message: "Failed to fetch security events" });
+    }
+  });
+
+  app.get("/api/admin/locked-accounts", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const locked = await storage.getLockedAccounts();
+      res.json(locked);
+    } catch (error: any) {
+      console.error("Error fetching locked accounts:", error);
+      res.status(500).json({ message: "Failed to fetch locked accounts" });
+    }
+  });
+
+  app.post("/api/admin/unlock-account", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { identifier } = req.body;
+      if (!identifier) return res.status(400).json({ message: "Identifier is required" });
+
+      const { clearLockout } = await import("./services/accountLockoutService");
+      await clearLockout(identifier);
+
+      await storage.createAuditLog({
+        actorUserId: req.user?.claims?.sub,
+        action: "admin_unlock_account",
+        entityType: "security",
+        details: { identifier, unlockedBy: req.user?.claims?.email },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Account unlocked successfully" });
+    } catch (error: any) {
+      console.error("Error unlocking account:", error);
+      res.status(500).json({ message: "Failed to unlock account" });
+    }
+  });
+
+  app.get("/api/admin/recent-new-ip-logins", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const days = req.query.days ? parseInt(req.query.days as string, 10) : 7;
+      const logins = await storage.getRecentNewIpLogins(days);
+      res.json(logins);
+    } catch (error: any) {
+      console.error("Error fetching new IP logins:", error);
+      res.status(500).json({ message: "Failed to fetch login anomalies" });
+    }
+  });
+
   // Debug endpoint to test email sending (temporary)
   app.get("/api/test-email", async (req, res) => {
     try {
@@ -497,7 +599,7 @@ export async function registerRoutes(
       const lockoutIdentifier = email || req.ip;
       
       // Check if account is locked
-      const lockoutStatus = checkAccountLockout(lockoutIdentifier);
+      const lockoutStatus = await checkAccountLockout(lockoutIdentifier);
       if (lockoutStatus.isLocked) {
         await storage.createAuditLog({
           action: "login_blocked_lockout",
@@ -521,7 +623,7 @@ export async function registerRoutes(
       
       if (!result.success) {
         // Record failed attempt
-        const updatedLockout = recordFailedAttempt(lockoutIdentifier);
+        const updatedLockout = await recordFailedAttempt(lockoutIdentifier);
         
         await storage.createAuditLog({
           action: "login_failed",
@@ -533,6 +635,32 @@ export async function registerRoutes(
           },
           ipAddress: req.ip,
         });
+
+        // Log failed login as security event for IP-based tracking
+        try {
+          await storage.createSecurityEvent({
+            eventType: "failed_login",
+            severity: "low",
+            ipAddress: req.ip || null,
+            details: { email, reason: result.message },
+          });
+
+          // Check for IP-based brute force (>20 failed logins from same IP in 15 min)
+          if (req.ip) {
+            const ipFailCount = await storage.getFailedLoginCountByIp(req.ip, 15);
+            if (ipFailCount >= 20) {
+              await storage.createSecurityEvent({
+                eventType: "failed_login_spike",
+                severity: "critical",
+                ipAddress: req.ip,
+                details: { failedCount: ipFailCount, windowMinutes: 15, email },
+              });
+              console.warn(`[Security] CRITICAL: IP ${req.ip} has ${ipFailCount} failed logins in 15 minutes`);
+            }
+          }
+        } catch (e) {
+          console.error("[Security] Failed to log security event:", e);
+        }
         
         const status = result.requiresVerification ? 403 : 401;
         const response: any = { 
@@ -554,7 +682,7 @@ export async function registerRoutes(
       }
       
       // Record successful login (clears lockout)
-      recordSuccessfulLogin(lockoutIdentifier);
+      await recordSuccessfulLogin(lockoutIdentifier);
       
       const user = result.user;
 
@@ -599,6 +727,64 @@ export async function registerRoutes(
           details: { email: user.email, method: "email_password" },
           ipAddress: req.ip,
         });
+
+        // Track login history and detect new IPs
+        (async () => {
+          try {
+            const loginIp = req.ip || "unknown";
+            const userAgent = req.get("user-agent") || null;
+            const isNewIp = loginIp !== "unknown" ? await storage.isNewIpForUser(user.id, loginIp) : false;
+
+            await storage.recordLoginHistory({
+              userId: user.id,
+              ipAddress: loginIp,
+              userAgent,
+              isNewIp,
+            });
+
+            if (isNewIp) {
+              await storage.createSecurityEvent({
+                eventType: "login_new_location",
+                severity: "medium",
+                ipAddress: loginIp,
+                userId: user.id,
+                details: { email: user.email, userAgent },
+              });
+
+              // Send email notification about new IP login
+              try {
+                const emailSvc = await import("./services/emailService");
+                const { client: resendClient, fromEmail } = await emailSvc.getResendClient();
+                const loginTime = new Date().toLocaleString("en-NG", { timeZone: "Africa/Lagos" });
+                await resendClient.emails.send({
+                  from: fromEmail,
+                  to: user.email,
+                  subject: "New login to your Cellion One account",
+                  html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                      <h2 style="color: #0d9668;">New Login Detected</h2>
+                      <p>We detected a login to your account from a new location:</p>
+                      <table style="border-collapse: collapse; margin: 16px 0;">
+                        <tr><td style="padding: 8px 16px; font-weight: bold;">IP Address:</td><td style="padding: 8px 16px;">${loginIp}</td></tr>
+                        <tr><td style="padding: 8px 16px; font-weight: bold;">Time:</td><td style="padding: 8px 16px;">${loginTime} (WAT)</td></tr>
+                        <tr><td style="padding: 8px 16px; font-weight: bold;">Device:</td><td style="padding: 8px 16px;">${userAgent || "Unknown"}</td></tr>
+                      </table>
+                      <p>If this was you, no action is needed.</p>
+                      <p style="color: #dc2626;"><strong>If this wasn't you</strong>, please change your password immediately and enable two-factor authentication in your account settings.</p>
+                      <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+                      <p style="color: #6b7280; font-size: 12px;">This is an automated security notification from Cellion One.</p>
+                    </div>
+                  `,
+                });
+                console.log(`[Security] New IP login notification sent to ${user.email}`);
+              } catch (emailErr) {
+                console.warn("[Security] Failed to send new IP login email:", emailErr);
+              }
+            }
+          } catch (historyErr) {
+            console.error("[Security] Failed to record login history:", historyErr);
+          }
+        })();
         
         res.json({ message: result.message, user });
       });

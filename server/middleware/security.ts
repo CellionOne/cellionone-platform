@@ -9,6 +9,7 @@
 
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import crypto from "crypto";
 import { type Express, type Request, type Response, type NextFunction } from "express";
 
 // Rate limiter for general API endpoints
@@ -53,31 +54,30 @@ export const uploadLimiter = rateLimit({
 });
 
 export function setupSecurityMiddleware(app: Express): void {
-  // Helmet security headers
-  // NOTE: 'unsafe-inline' and 'unsafe-eval' are required for:
-  // - Vite HMR in development mode
-  // - Paystack popup integration
-  // PRODUCTION TODO: Consider using nonces/hashes for scripts when deploying
+  const isProduction = process.env.NODE_ENV === "production";
+
+  const cspDirectives: Record<string, string[]> = {
+    defaultSrc: ["'self'"],
+    scriptSrc: isProduction
+      ? ["'self'", "'unsafe-inline'", "https://js.paystack.co"]
+      : ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://js.paystack.co"],
+    styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+    fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+    imgSrc: ["'self'", "data:", "blob:", "https:", "*.replit.dev"],
+    connectSrc: isProduction
+      ? ["'self'", "https://api.paystack.co"]
+      : ["'self'", "https://api.paystack.co", "wss:", "ws:"],
+    frameSrc: ["'self'"],
+    objectSrc: ["'none'"],
+    mediaSrc: ["'self'"],
+    workerSrc: ["'self'", "blob:"],
+    reportUri: ["/api/csp-report"],
+  };
+
   app.use(
     helmet({
       contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://js.paystack.co"],
-          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-          fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
-          imgSrc: ["'self'", "data:", "blob:", "https:", "*.replit.dev"],
-          connectSrc: [
-            "'self'",
-            "https://api.paystack.co",
-            "wss:",
-            "ws:",
-          ],
-          frameSrc: ["'self'"],
-          objectSrc: ["'none'"],
-          mediaSrc: ["'self'"],
-          workerSrc: ["'self'", "blob:"],
-        },
+        directives: cspDirectives,
       },
       crossOriginEmbedderPolicy: false, // Needed for Paystack iframes
       crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
@@ -170,28 +170,62 @@ export function getCorsOptions() {
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-CSRF-Token", "X-API-Key"],
     exposedHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
     maxAge: 86400, // 24 hours
   };
 }
 
-// Security logging middleware
+// Security logging middleware — blocks and logs suspicious requests
 export function securityLogger(req: Request, res: Response, next: NextFunction): void {
-  // Log suspicious requests
   const suspiciousPatterns = [
-    /\.\.\//, // Path traversal
-    /<script/i, // XSS attempts
-    /union\s+select/i, // SQL injection
-    /\$\{.*\}/, // Template injection
-    /eval\s*\(/i, // Code injection
+    { pattern: /\.\.\//, name: "path_traversal" },
+    { pattern: /\.\.%2[fF]/, name: "path_traversal_encoded" },
+    { pattern: /%2[eE]%2[eE]%2[fF]/, name: "path_traversal_double_encoded" },
+    { pattern: /<script/i, name: "xss_attempt" },
+    { pattern: /%3[cC]script/i, name: "xss_attempt_encoded" },
+    { pattern: /union\s+select/i, name: "sql_injection" },
+    { pattern: /\$\{.*\}/, name: "template_injection" },
+    { pattern: /eval\s*\(/i, name: "code_injection" },
+    { pattern: /;.*cat\s|;.*ls\s|;.*rm\s|;.*wget\s/i, name: "command_injection" },
   ];
 
   const fullUrl = req.originalUrl;
-  const isSuspicious = suspiciousPatterns.some((pattern) => pattern.test(fullUrl));
+  let decodedUrl = fullUrl;
+  try { decodedUrl = decodeURIComponent(fullUrl); } catch (e) { /* malformed URI */ }
+  let bodyStr = "";
+  if (typeof req.body === "string") {
+    bodyStr = req.body;
+  } else if (req.body && typeof req.body === "object") {
+    try { bodyStr = JSON.stringify(req.body); } catch (e) { /* ignore */ }
+  }
+  const checkTarget = fullUrl + " " + decodedUrl + " " + bodyStr;
+  const matched = suspiciousPatterns.find((p) => p.pattern.test(checkTarget));
 
-  if (isSuspicious) {
-    console.warn(`[Security] Suspicious request detected: ${req.method} ${fullUrl} from ${req.ip}`);
+  if (matched) {
+    console.warn(`[Security] BLOCKED suspicious request (${matched.name}): ${req.method} ${fullUrl} from ${req.ip}`);
+
+    (async () => {
+      try {
+        const { storage } = await import("../storage");
+        await storage.createSecurityEvent({
+          eventType: "suspicious_request",
+          severity: "high",
+          ipAddress: req.ip || null,
+          details: {
+            method: req.method,
+            url: fullUrl,
+            pattern: matched.name,
+            userAgent: req.get("user-agent"),
+          },
+        });
+      } catch (e) {
+        console.error("[Security] Failed to log security event:", e);
+      }
+    })();
+
+    res.status(403).json({ error: "Forbidden" });
+    return;
   }
 
   next();
@@ -266,6 +300,53 @@ export function sessionTimeout(req: Request, res: Response, next: NextFunction):
   session.lastActivity = now;
   
   next();
+}
+
+// CSRF Token Protection
+export function csrfProtection(req: Request, res: Response, next: NextFunction): void {
+  const safeMethods = ["GET", "HEAD", "OPTIONS"];
+  if (safeMethods.includes(req.method)) {
+    return next();
+  }
+
+  const exemptPaths = [
+    "/api/webhooks/",
+    "/api/v1/",
+    "/api/csp-report",
+    "/api/csrf-token",
+  ];
+  if (exemptPaths.some((path) => req.path.startsWith(path))) {
+    return next();
+  }
+
+  if (!req.path.startsWith("/api/")) {
+    return next();
+  }
+
+  const session = (req as any).session;
+  if (!session) {
+    return next();
+  }
+
+  const tokenFromHeader = req.headers["x-csrf-token"] as string | undefined;
+  const sessionToken = session.csrfToken as string | undefined;
+
+  if (!sessionToken || !tokenFromHeader || tokenFromHeader !== sessionToken) {
+    console.warn(`[Security] CSRF token mismatch: ${req.method} ${req.path} from ${req.ip}`);
+    res.status(403).json({ error: "Invalid or missing CSRF token" });
+    return;
+  }
+
+  next();
+}
+
+export function generateCsrfToken(req: Request): string {
+  const token = crypto.randomBytes(32).toString("hex");
+  const session = (req as any).session;
+  if (session) {
+    session.csrfToken = token;
+  }
+  return token;
 }
 
 // File upload validation configuration

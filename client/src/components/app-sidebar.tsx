@@ -39,6 +39,7 @@ import {
   ShoppingCart,
   Share2,
   ShieldCheck,
+  ShieldAlert,
   ClipboardCheck,
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
@@ -105,6 +106,7 @@ const adminItems: NavItem[] = [
   { title: "Registered Offices", url: "/admin/registered-offices", icon: Building2 },
   { title: "KYC Oversight", url: "/admin/kyc", icon: ShieldCheck },
   { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
+  { title: "Security", url: "/admin/security", icon: ShieldAlert },
   { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },
   { title: "Settings", url: "/settings", icon: Settings },
 ];

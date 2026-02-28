@@ -34,6 +34,9 @@ import {
   notificationPreferences, type NotificationPreference,
   companyPeople, type CompanyPerson, type InsertCompanyPerson,
   sensitiveDataAccessLogs,
+  loginAttempts, type LoginAttempt,
+  securityEvents, type SecurityEvent, type InsertSecurityEvent,
+  userLoginHistory, type UserLoginHistoryEntry,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -235,6 +238,26 @@ export interface IStorage {
     twoFactorBackupCodes: string;
     lastTwoFactorAt: Date;
   }>): Promise<User>;
+
+  // Login Attempts (persistent account lockout)
+  getLoginAttempt(identifier: string): Promise<LoginAttempt | undefined>;
+  upsertLoginAttempt(identifier: string, data: { failedAttempts: number; lockoutUntil: Date | null; lastAttempt: Date }): Promise<LoginAttempt>;
+  deleteLoginAttempt(identifier: string): Promise<void>;
+  getLockedAccounts(): Promise<LoginAttempt[]>;
+  cleanupExpiredLoginAttempts(): Promise<void>;
+
+  // Security Events
+  createSecurityEvent(data: InsertSecurityEvent): Promise<SecurityEvent>;
+  getSecurityEvents(filters?: { eventType?: string; severity?: string; limit?: number; offset?: number }): Promise<SecurityEvent[]>;
+  getSecurityEventCount(filters?: { eventType?: string; severity?: string; since?: Date }): Promise<number>;
+  getSecuritySummary(): Promise<{ total24h: number; critical24h: number; lockedAccounts: number; uniqueFailedIps24h: number }>;
+
+  // User Login History
+  recordLoginHistory(data: { userId: string; ipAddress: string | null; userAgent: string | null; isNewIp: boolean }): Promise<UserLoginHistoryEntry>;
+  getLoginHistoryByUser(userId: string, limit?: number): Promise<UserLoginHistoryEntry[]>;
+  isNewIpForUser(userId: string, ipAddress: string): Promise<boolean>;
+  getRecentNewIpLogins(days?: number): Promise<UserLoginHistoryEntry[]>;
+  getFailedLoginCountByIp(ipAddress: string, windowMinutes?: number): Promise<number>;
 
   // Service Addresses
   getServiceAddresses(): Promise<ServiceAddress[]>;
@@ -1117,6 +1140,152 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, userId))
       .returning();
     return updated;
+  }
+
+  // Login Attempts (persistent account lockout)
+  async getLoginAttempt(identifier: string): Promise<LoginAttempt | undefined> {
+    const [attempt] = await db.select().from(loginAttempts).where(eq(loginAttempts.identifier, identifier));
+    return attempt;
+  }
+
+  async upsertLoginAttempt(identifier: string, data: { failedAttempts: number; lockoutUntil: Date | null; lastAttempt: Date }): Promise<LoginAttempt> {
+    const existing = await this.getLoginAttempt(identifier);
+    if (existing) {
+      const [updated] = await db.update(loginAttempts)
+        .set({ failedAttempts: data.failedAttempts, lockoutUntil: data.lockoutUntil, lastAttempt: data.lastAttempt })
+        .where(eq(loginAttempts.identifier, identifier))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(loginAttempts)
+      .values({ identifier, failedAttempts: data.failedAttempts, lockoutUntil: data.lockoutUntil, lastAttempt: data.lastAttempt })
+      .returning();
+    return created;
+  }
+
+  async deleteLoginAttempt(identifier: string): Promise<void> {
+    await db.delete(loginAttempts).where(eq(loginAttempts.identifier, identifier));
+  }
+
+  async getLockedAccounts(): Promise<LoginAttempt[]> {
+    const now = new Date();
+    return db.select().from(loginAttempts)
+      .where(sql`${loginAttempts.lockoutUntil} > ${now}`);
+  }
+
+  async cleanupExpiredLoginAttempts(): Promise<void> {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    await db.delete(loginAttempts)
+      .where(and(
+        sql`${loginAttempts.lastAttempt} < ${oneHourAgo}`,
+        or(
+          sql`${loginAttempts.lockoutUntil} IS NULL`,
+          sql`${loginAttempts.lockoutUntil} < NOW()`
+        )
+      ));
+  }
+
+  // Security Events
+  async createSecurityEvent(data: InsertSecurityEvent): Promise<SecurityEvent> {
+    const [event] = await db.insert(securityEvents).values(data).returning();
+    return event;
+  }
+
+  async getSecurityEvents(filters?: { eventType?: string; severity?: string; limit?: number; offset?: number }): Promise<SecurityEvent[]> {
+    const conditions = [];
+    if (filters?.eventType) conditions.push(eq(securityEvents.eventType, filters.eventType));
+    if (filters?.severity) conditions.push(eq(securityEvents.severity, filters.severity));
+
+    const query = db.select().from(securityEvents)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(securityEvents.createdAt))
+      .limit(filters?.limit ?? 100)
+      .offset(filters?.offset ?? 0);
+
+    return query;
+  }
+
+  async getSecurityEventCount(filters?: { eventType?: string; severity?: string; since?: Date }): Promise<number> {
+    const conditions = [];
+    if (filters?.eventType) conditions.push(eq(securityEvents.eventType, filters.eventType));
+    if (filters?.severity) conditions.push(eq(securityEvents.severity, filters.severity));
+    if (filters?.since) conditions.push(sql`${securityEvents.createdAt} >= ${filters.since}`);
+
+    const [result] = await db.select({ count: count() }).from(securityEvents)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+    return result?.count ?? 0;
+  }
+
+  async getSecuritySummary(): Promise<{ total24h: number; critical24h: number; lockedAccounts: number; uniqueFailedIps24h: number }> {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const [totalResult] = await db.select({ count: count() }).from(securityEvents)
+      .where(sql`${securityEvents.createdAt} >= ${twentyFourHoursAgo}`);
+
+    const [criticalResult] = await db.select({ count: count() }).from(securityEvents)
+      .where(and(
+        sql`${securityEvents.createdAt} >= ${twentyFourHoursAgo}`,
+        eq(securityEvents.severity, "critical")
+      ));
+
+    const lockedAccounts = await this.getLockedAccounts();
+
+    const failedIps = await db.selectDistinct({ ip: securityEvents.ipAddress }).from(securityEvents)
+      .where(and(
+        sql`${securityEvents.createdAt} >= ${twentyFourHoursAgo}`,
+        or(eq(securityEvents.eventType, "failed_login_spike"), eq(securityEvents.eventType, "account_locked"))
+      ));
+
+    return {
+      total24h: totalResult?.count ?? 0,
+      critical24h: criticalResult?.count ?? 0,
+      lockedAccounts: lockedAccounts.length,
+      uniqueFailedIps24h: failedIps.length,
+    };
+  }
+
+  // User Login History
+  async recordLoginHistory(data: { userId: string; ipAddress: string | null; userAgent: string | null; isNewIp: boolean }): Promise<UserLoginHistoryEntry> {
+    const [entry] = await db.insert(userLoginHistory).values(data).returning();
+    return entry;
+  }
+
+  async getLoginHistoryByUser(userId: string, limit: number = 50): Promise<UserLoginHistoryEntry[]> {
+    return db.select().from(userLoginHistory)
+      .where(eq(userLoginHistory.userId, userId))
+      .orderBy(desc(userLoginHistory.loginAt))
+      .limit(limit);
+  }
+
+  async isNewIpForUser(userId: string, ipAddress: string): Promise<boolean> {
+    const [existing] = await db.select().from(userLoginHistory)
+      .where(and(
+        eq(userLoginHistory.userId, userId),
+        eq(userLoginHistory.ipAddress, ipAddress)
+      ))
+      .limit(1);
+    return !existing;
+  }
+
+  async getRecentNewIpLogins(days: number = 7): Promise<UserLoginHistoryEntry[]> {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    return db.select().from(userLoginHistory)
+      .where(and(
+        eq(userLoginHistory.isNewIp, true),
+        sql`${userLoginHistory.loginAt} >= ${since}`
+      ))
+      .orderBy(desc(userLoginHistory.loginAt));
+  }
+
+  async getFailedLoginCountByIp(ipAddress: string, windowMinutes: number = 15): Promise<number> {
+    const since = new Date(Date.now() - windowMinutes * 60 * 1000);
+    const [result] = await db.select({ count: count() }).from(securityEvents)
+      .where(and(
+        eq(securityEvents.eventType, "failed_login"),
+        eq(securityEvents.ipAddress, ipAddress),
+        sql`${securityEvents.createdAt} >= ${since}`
+      ));
+    return result?.count ?? 0;
   }
 }
 

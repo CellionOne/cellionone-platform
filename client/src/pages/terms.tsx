@@ -1,7 +1,14 @@
 import { PublicNav } from "@/components/public-nav";
 import { PublicFooter } from "@/components/public-footer";
+import { usePageMeta } from "@/hooks/use-page-meta";
 
 export default function TermsPage() {
+  usePageMeta({
+    title: "Terms & Conditions \u2014 Cellion One",
+    description: "Read the terms and conditions for using Cellion One, Nigeria's company incorporation and KYC verification platform.",
+    canonicalPath: "/terms",
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <PublicNav />

@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PublicNav } from "@/components/public-nav";
 import { PublicFooter } from "@/components/public-footer";
+import { usePageMeta } from "@/hooks/use-page-meta";
 import {
   ArrowRight,
   CheckCircle2,
@@ -109,6 +110,12 @@ const beyondIncorporation = [
 ];
 
 export default function WhyCellionOne() {
+  usePageMeta({
+    title: "Why Cellion One \u2014 Simplify Company Registration in Nigeria",
+    description: "Discover why businesses choose Cellion One for company incorporation and KYC verification in Nigeria. Compare DIY registration vs our managed service.",
+    canonicalPath: "/why-cellion-one",
+  });
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <PublicNav />

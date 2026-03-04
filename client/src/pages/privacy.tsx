@@ -1,7 +1,14 @@
 import { PublicNav } from "@/components/public-nav";
 import { PublicFooter } from "@/components/public-footer";
+import { usePageMeta } from "@/hooks/use-page-meta";
 
 export default function PrivacyPage() {
+  usePageMeta({
+    title: "Privacy Policy \u2014 Cellion One",
+    description: "Learn how Cellion One collects, uses, and protects your personal data. Our privacy policy covers data handling for company incorporation and KYC services.",
+    canonicalPath: "/privacy",
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <PublicNav />

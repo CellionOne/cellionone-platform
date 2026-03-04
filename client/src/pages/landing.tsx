@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import { PublicNav } from "@/components/public-nav";
 import { PublicFooter } from "@/components/public-footer";
+import { usePageMeta } from "@/hooks/use-page-meta";
 
 const statusColors: Record<string, string> = {
   green: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
@@ -297,6 +298,123 @@ function ContactSection() {
 }
 
 export default function LandingPage() {
+  usePageMeta({
+    title: "Cellion One \u2014 Company Incorporation & KYC Verification in Nigeria",
+    description: "The compliance infrastructure for African business. Incorporate companies, verify identities, and manage compliance via dashboard or API. Trusted by 500+ companies in Nigeria.",
+    canonicalPath: "/",
+  });
+
+  useEffect(() => {
+    const organizationSchema = {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      name: "Cellion One",
+      legalName: "Cellion Platforms Nigeria Limited",
+      url: "https://cellionone.com",
+      logo: "https://cellionone.com/icon-512.svg",
+      description: "The compliance infrastructure for African business. Incorporate companies, verify identities, and manage compliance — all through one platform.",
+      contactPoint: {
+        "@type": "ContactPoint",
+        email: "hello@cellionone.com",
+        contactType: "customer support",
+      },
+      address: {
+        "@type": "PostalAddress",
+        addressCountry: "NG",
+        addressLocality: "Lagos",
+        addressRegion: "Lagos",
+      },
+    };
+
+    const webSiteSchema = {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "Cellion One",
+      url: "https://cellionone.com",
+    };
+
+    const faqPageSchema = {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: faqItems.map((item) => ({
+        "@type": "Question",
+        name: item.question,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: item.answer,
+        },
+      })),
+    };
+
+    const serviceSchemas = [
+      {
+        "@context": "https://schema.org",
+        "@type": "Service",
+        serviceType: "Company Incorporation",
+        provider: { "@type": "Organization", name: "Cellion One" },
+        description: "Register your Nigerian limited liability company with the CAC. Licensed lawyers handle filings, follow-ups, and deliver stamped originals.",
+        areaServed: { "@type": "Country", name: "Nigeria" },
+        offers: {
+          "@type": "AggregateOffer",
+          priceCurrency: "NGN",
+          lowPrice: "100000",
+          highPrice: "3000000",
+        },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Service",
+        serviceType: "KYC Employee Verification",
+        provider: { "@type": "Organization", name: "Cellion One" },
+        description: "Individual identity verification including BVN/NIN validation, document checks, biometrics, and AML screening.",
+        areaServed: { "@type": "Country", name: "Nigeria" },
+        offers: {
+          "@type": "Offer",
+          priceCurrency: "NGN",
+          price: "10000",
+        },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Service",
+        serviceType: "KYC Supplier Verification",
+        provider: { "@type": "Organization", name: "Cellion One" },
+        description: "Comprehensive corporate due diligence for vendors and suppliers including company registration, directors, financials, and compliance status verification.",
+        areaServed: { "@type": "Country", name: "Nigeria" },
+        offers: {
+          "@type": "Offer",
+          priceCurrency: "NGN",
+          price: "100000",
+        },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Service",
+        serviceType: "KYC API Integration",
+        provider: { "@type": "Organization", name: "Cellion One" },
+        description: "Submit verification requests programmatically via REST API, receive webhook callbacks, and automate compliance workflows.",
+        areaServed: { "@type": "Country", name: "Nigeria" },
+      },
+    ];
+
+    const schemas = [organizationSchema, webSiteSchema, faqPageSchema, ...serviceSchemas];
+    const scriptElements: HTMLScriptElement[] = [];
+
+    schemas.forEach((schema) => {
+      const script = document.createElement("script");
+      script.type = "application/ld+json";
+      script.textContent = JSON.stringify(schema);
+      document.head.appendChild(script);
+      scriptElements.push(script);
+    });
+
+    return () => {
+      scriptElements.forEach((script) => {
+        document.head.removeChild(script);
+      });
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
       <PublicNav />

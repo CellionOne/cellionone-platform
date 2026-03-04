@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+
+Disallow: /admin/
+Disallow: /founder/
+Disallow: /lawyer/
+Disallow: /building-manager/
+Disallow: /kyc/
+Disallow: /settings/
+Disallow: /profile/
+Disallow: /api/
+
+Sitemap: https://cellionone.com/sitemap.xml

@@ -41,6 +41,13 @@ Key architectural decisions and features include:
 - **Verified Entities Registry:** Cross-platform catalogue of all verified individuals and companies, auto-populated upon KYC approval.
 - **Admin Proposals Page:** Admin-only page for viewing partnership proposals as formatted HTML for browser-native printing/saving.
 - **Certificate HTML Fallback:** Verification certificates support `?format=html` query parameter for browser-rendered viewing when PDF generation fails.
+- **SEO & Structured Data:**
+  - Open Graph and Twitter Card meta tags in `index.html` for social sharing previews.
+  - Schema.org JSON-LD structured data on landing page: Organization, WebSite, FAQPage, and Service schemas.
+  - `robots.txt` blocking private routes (`/admin/`, `/founder/`, `/lawyer/`, `/kyc/`, `/settings/`, `/profile/`, `/api/`).
+  - `sitemap.xml` listing all 8 public pages with priority/changefreq.
+  - `usePageMeta` hook (`client/src/hooks/use-page-meta.ts`) for per-page title, meta description, OG tags, Twitter tags, and canonical URL updates. Applied to: landing, why-cellion-one, api-docs, terms, privacy, apply-lawyer, login, register.
+  - Canonical domain: `https://cellionone.com`.
 
 ## External Dependencies
 - **PostgreSQL:** Primary database, hosted via Neon.

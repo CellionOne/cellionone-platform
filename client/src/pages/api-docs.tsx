@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { PublicNav } from "@/components/public-nav";
 import { PublicFooter } from "@/components/public-footer";
+import { usePageMeta } from "@/hooks/use-page-meta";
 import {
   Key,
   Shield,
@@ -209,6 +210,12 @@ function ParamTable({ params, title }: { params: { field: string; type: string; 
 }
 
 export default function ApiDocsPage() {
+  usePageMeta({
+    title: "API Documentation \u2014 Cellion One KYC & Verification API",
+    description: "Integrate KYC verification into your application with the Cellion One REST API. Documentation for identity verification, corporate due diligence, and compliance endpoints.",
+    canonicalPath: "/api-docs",
+  });
+
   const [activeSection, setActiveSection] = useState("getting-started");
   const observerRef = useRef<IntersectionObserver | null>(null);
 

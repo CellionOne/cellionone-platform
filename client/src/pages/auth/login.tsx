@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Loader2, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
+import { usePageMeta } from "@/hooks/use-page-meta";
 import {
   InputOTP,
   InputOTPGroup,
@@ -27,6 +28,12 @@ const loginSchema = z.object({
 type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
+  usePageMeta({
+    title: "Sign In \u2014 Cellion One",
+    description: "Sign in to your Cellion One account to manage company incorporation, KYC verification, and compliance services.",
+    canonicalPath: "/login",
+  });
+
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const { toast } = useToast();

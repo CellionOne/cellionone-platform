@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Loader2, CheckCircle, Eye, EyeOff, Users, UserPlus } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
+import { usePageMeta } from "@/hooks/use-page-meta";
 import { useState, useEffect } from "react";
 
 const registerSchema = z.object({
@@ -42,6 +43,12 @@ function formatRole(role: string): string {
 }
 
 export default function RegisterPage() {
+  usePageMeta({
+    title: "Create Account \u2014 Cellion One",
+    description: "Create your Cellion One account to start incorporating companies, verifying identities, and managing compliance in Nigeria.",
+    canonicalPath: "/register",
+  });
+
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const { toast } = useToast();

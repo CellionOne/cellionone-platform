@@ -12,6 +12,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDes
 import { useToast } from "@/hooks/use-toast";
 import { PublicNav } from "@/components/public-nav";
 import { PublicFooter } from "@/components/public-footer";
+import { usePageMeta } from "@/hooks/use-page-meta";
 import { Loader2, CheckCircle, Scale, ArrowLeft } from "lucide-react";
 import { useState } from "react";
 
@@ -31,6 +32,12 @@ const lawyerApplicationSchema = z.object({
 type LawyerApplicationForm = z.infer<typeof lawyerApplicationSchema>;
 
 export default function ApplyLawyerPage() {
+  usePageMeta({
+    title: "Join as a Lawyer \u2014 Cellion One Legal Network",
+    description: "Apply to join Cellion One's network of licensed lawyers handling company incorporation in Nigeria. Earn per-engagement fees with automated payments.",
+    canonicalPath: "/apply-lawyer",
+  });
+
   const { toast } = useToast();
   const [applicationSubmitted, setApplicationSubmitted] = useState(false);
 

@@ -15,6 +15,7 @@ import { mailroomService } from "./services/mailroomService";
 import * as verificationService from "./services/verificationService";
 import { registerKycServiceRoutes } from "./routes/kycServiceRoutes";
 import { registerKycApiRoutes } from "./routes/kycApiRoutes";
+import { registerProcurementRoutes } from "./routes/procurementRoutes";
 
 // Validation schemas
 const createApplicationSchema = insertCompanyApplicationSchema.pick({
@@ -7568,6 +7569,9 @@ For questions, contact: service@cellionone.com
 
   // ============== KYC PUBLIC API ROUTES (v1) ==============
   registerKycApiRoutes(app);
+
+  // ============== PROCUREMENT ROUTES ==============
+  registerProcurementRoutes(app);
 
   return httpServer;
 }

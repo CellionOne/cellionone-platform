@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, and, desc, sql, count, inArray, or } from "drizzle-orm";
+import { eq, and, desc, sql, count, inArray, or, ilike, gte, lte } from "drizzle-orm";
 import {
   users, type User,
   founderProfiles, type FounderProfile, type InsertFounderProfile,
@@ -37,6 +37,18 @@ import {
   loginAttempts, type LoginAttempt,
   securityEvents, type SecurityEvent, type InsertSecurityEvent,
   userLoginHistory, type UserLoginHistoryEntry,
+  rfqCategories, type RfqCategory, type InsertRfqCategory,
+  rfqs, type Rfq, type InsertRfq,
+  rfqInvitations, type RfqInvitation, type InsertRfqInvitation,
+  rfqItems, type RfqItem, type InsertRfqItem,
+  bids, type Bid, type InsertBid,
+  bidItems, type BidItem, type InsertBidItem,
+  bidTemplates, type BidTemplate, type InsertBidTemplate,
+  contracts, type Contract, type InsertContract,
+  contractMilestones, type ContractMilestone, type InsertContractMilestone,
+  escrowTransactions, type EscrowTransaction, type InsertEscrowTransaction,
+  procurementInvoices, type ProcurementInvoice, type InsertProcurementInvoice,
+  procurementInvoiceItems, type ProcurementInvoiceItem, type InsertProcurementInvoiceItem,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -278,6 +290,82 @@ export interface IStorage {
   // Mail Items
   getMailItemsBySubscription(subscriptionId: number): Promise<MailItem[]>;
   getAllMailItems(): Promise<MailItem[]>;
+
+  // RFQ Categories
+  getCategories(): Promise<RfqCategory[]>;
+  getCategoryBySlug(slug: string): Promise<RfqCategory | undefined>;
+  createCategory(data: InsertRfqCategory): Promise<RfqCategory>;
+
+  // RFQs
+  createRfq(data: InsertRfq): Promise<Rfq>;
+  getRfqById(id: number): Promise<Rfq | undefined>;
+  getRfqsByBuyerOrg(buyerOrgId: number): Promise<Rfq[]>;
+  getOpenRfqs(filters?: { categoryId?: number; search?: string; budgetMin?: number; budgetMax?: number }): Promise<Rfq[]>;
+  updateRfqStatus(id: number, status: string): Promise<Rfq | undefined>;
+  updateRfq(id: number, data: Partial<InsertRfq>): Promise<Rfq | undefined>;
+  getRfqsForSupplier(supplierOrgId: number): Promise<Rfq[]>;
+
+  // RFQ Invitations
+  createInvitation(data: InsertRfqInvitation): Promise<RfqInvitation>;
+  getInvitationsByRfq(rfqId: number): Promise<RfqInvitation[]>;
+  getInvitationsForOrg(supplierOrgId: number): Promise<RfqInvitation[]>;
+
+  // RFQ Items
+  createRfqItem(data: InsertRfqItem): Promise<RfqItem>;
+  getRfqItems(rfqId: number): Promise<RfqItem[]>;
+  updateRfqItem(id: number, data: Partial<InsertRfqItem>): Promise<RfqItem | undefined>;
+  deleteRfqItem(id: number): Promise<void>;
+
+  // Bids
+  createBid(data: InsertBid): Promise<Bid>;
+  getBidById(id: number): Promise<Bid | undefined>;
+  getBidsByRfq(rfqId: number): Promise<Bid[]>;
+  getBidsBySupplierOrg(supplierOrgId: number): Promise<Bid[]>;
+  updateBid(id: number, data: Partial<InsertBid>): Promise<Bid | undefined>;
+  updateBidStatus(id: number, status: string): Promise<Bid | undefined>;
+
+  // Bid Items
+  createBidItem(data: InsertBidItem): Promise<BidItem>;
+  getBidItems(bidId: number): Promise<BidItem[]>;
+
+  // Bid Templates
+  createBidTemplate(data: InsertBidTemplate): Promise<BidTemplate>;
+  getBidTemplatesByOrg(orgId: number): Promise<BidTemplate[]>;
+  getBidTemplateById(id: number): Promise<BidTemplate | undefined>;
+  updateBidTemplate(id: number, data: Partial<InsertBidTemplate>): Promise<BidTemplate | undefined>;
+  deleteBidTemplate(id: number): Promise<void>;
+
+  // Contracts
+  createContract(data: InsertContract): Promise<Contract>;
+  getContractById(id: number): Promise<Contract | undefined>;
+  getContractsByBuyerOrg(buyerOrgId: number): Promise<Contract[]>;
+  getContractsBySupplierOrg(supplierOrgId: number): Promise<Contract[]>;
+  updateContractStatus(id: number, status: string): Promise<Contract | undefined>;
+  generateContractNumber(): Promise<string>;
+
+  // Contract Milestones
+  createMilestone(data: InsertContractMilestone): Promise<ContractMilestone>;
+  getMilestonesByContract(contractId: number): Promise<ContractMilestone[]>;
+  updateMilestoneStatus(id: number, status: string, evidence?: any): Promise<ContractMilestone | undefined>;
+
+  // Escrow Transactions
+  createEscrowTransaction(data: InsertEscrowTransaction): Promise<EscrowTransaction>;
+  getEscrowByContract(contractId: number): Promise<EscrowTransaction[]>;
+  updateEscrowStatus(id: number, status: string): Promise<EscrowTransaction | undefined>;
+
+  // Procurement Invoices
+  createProcurementInvoice(data: InsertProcurementInvoice): Promise<ProcurementInvoice>;
+  getProcurementInvoiceById(id: number): Promise<ProcurementInvoice | undefined>;
+  getProcurementInvoicesByContract(contractId: number): Promise<ProcurementInvoice[]>;
+  getProcurementInvoicesBySupplierOrg(supplierOrgId: number): Promise<ProcurementInvoice[]>;
+  getProcurementInvoicesByBuyerOrg(buyerOrgId: number): Promise<ProcurementInvoice[]>;
+  updateProcurementInvoice(id: number, data: Partial<InsertProcurementInvoice>): Promise<ProcurementInvoice | undefined>;
+  updateProcurementInvoiceStatus(id: number, status: string): Promise<ProcurementInvoice | undefined>;
+  generateInvoiceNumber(): Promise<string>;
+
+  // Procurement Invoice Items
+  createProcurementInvoiceItem(data: InsertProcurementInvoiceItem): Promise<ProcurementInvoiceItem>;
+  getProcurementInvoiceItems(invoiceId: number): Promise<ProcurementInvoiceItem[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1286,6 +1374,354 @@ export class DatabaseStorage implements IStorage {
         sql`${securityEvents.createdAt} >= ${since}`
       ));
     return result?.count ?? 0;
+  }
+
+  // RFQ Categories
+  async getCategories(): Promise<RfqCategory[]> {
+    return db.select().from(rfqCategories).orderBy(rfqCategories.name);
+  }
+
+  async getCategoryBySlug(slug: string): Promise<RfqCategory | undefined> {
+    const [category] = await db.select().from(rfqCategories).where(eq(rfqCategories.slug, slug));
+    return category;
+  }
+
+  async createCategory(data: InsertRfqCategory): Promise<RfqCategory> {
+    const [category] = await db.insert(rfqCategories).values(data).returning();
+    return category;
+  }
+
+  // RFQs
+  async createRfq(data: InsertRfq): Promise<Rfq> {
+    const [rfq] = await db.insert(rfqs).values(data).returning();
+    return rfq;
+  }
+
+  async getRfqById(id: number): Promise<Rfq | undefined> {
+    const [rfq] = await db.select().from(rfqs).where(eq(rfqs.id, id));
+    return rfq;
+  }
+
+  async getRfqsByBuyerOrg(buyerOrgId: number): Promise<Rfq[]> {
+    return db.select().from(rfqs)
+      .where(eq(rfqs.buyerOrgId, buyerOrgId))
+      .orderBy(desc(rfqs.createdAt));
+  }
+
+  async getOpenRfqs(filters?: { categoryId?: number; search?: string; budgetMin?: number; budgetMax?: number }): Promise<Rfq[]> {
+    const conditions: any[] = [eq(rfqs.status, "open")];
+    if (filters?.categoryId) conditions.push(eq(rfqs.categoryId, filters.categoryId));
+    if (filters?.search) conditions.push(or(ilike(rfqs.title, `%${filters.search}%`), ilike(rfqs.description, `%${filters.search}%`)));
+    if (filters?.budgetMin) conditions.push(gte(rfqs.budgetMax, filters.budgetMin));
+    if (filters?.budgetMax) conditions.push(lte(rfqs.budgetMin, filters.budgetMax));
+
+    return db.select().from(rfqs)
+      .where(and(...conditions))
+      .orderBy(desc(rfqs.createdAt));
+  }
+
+  async updateRfqStatus(id: number, status: string): Promise<Rfq | undefined> {
+    const [rfq] = await db.update(rfqs)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(rfqs.id, id))
+      .returning();
+    return rfq;
+  }
+
+  async updateRfq(id: number, data: Partial<InsertRfq>): Promise<Rfq | undefined> {
+    const [rfq] = await db.update(rfqs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(rfqs.id, id))
+      .returning();
+    return rfq;
+  }
+
+  async getRfqsForSupplier(supplierOrgId: number): Promise<Rfq[]> {
+    const invitedRfqIds = await db.select({ rfqId: rfqInvitations.rfqId })
+      .from(rfqInvitations)
+      .where(eq(rfqInvitations.supplierOrgId, supplierOrgId));
+
+    const invitedIds = invitedRfqIds.map(r => r.rfqId);
+
+    if (invitedIds.length > 0) {
+      return db.select().from(rfqs)
+        .where(or(
+          eq(rfqs.status, "open"),
+          inArray(rfqs.id, invitedIds)
+        ))
+        .orderBy(desc(rfqs.createdAt));
+    }
+
+    return db.select().from(rfqs)
+      .where(eq(rfqs.status, "open"))
+      .orderBy(desc(rfqs.createdAt));
+  }
+
+  // RFQ Invitations
+  async createInvitation(data: InsertRfqInvitation): Promise<RfqInvitation> {
+    const [invitation] = await db.insert(rfqInvitations).values(data).returning();
+    return invitation;
+  }
+
+  async getInvitationsByRfq(rfqId: number): Promise<RfqInvitation[]> {
+    return db.select().from(rfqInvitations).where(eq(rfqInvitations.rfqId, rfqId));
+  }
+
+  async getInvitationsForOrg(supplierOrgId: number): Promise<RfqInvitation[]> {
+    return db.select().from(rfqInvitations).where(eq(rfqInvitations.supplierOrgId, supplierOrgId));
+  }
+
+  // RFQ Items
+  async createRfqItem(data: InsertRfqItem): Promise<RfqItem> {
+    const [item] = await db.insert(rfqItems).values(data).returning();
+    return item;
+  }
+
+  async getRfqItems(rfqId: number): Promise<RfqItem[]> {
+    return db.select().from(rfqItems).where(eq(rfqItems.rfqId, rfqId));
+  }
+
+  async updateRfqItem(id: number, data: Partial<InsertRfqItem>): Promise<RfqItem | undefined> {
+    const [item] = await db.update(rfqItems)
+      .set(data)
+      .where(eq(rfqItems.id, id))
+      .returning();
+    return item;
+  }
+
+  async deleteRfqItem(id: number): Promise<void> {
+    await db.delete(rfqItems).where(eq(rfqItems.id, id));
+  }
+
+  // Bids
+  async createBid(data: InsertBid): Promise<Bid> {
+    const [bid] = await db.insert(bids).values(data).returning();
+    return bid;
+  }
+
+  async getBidById(id: number): Promise<Bid | undefined> {
+    const [bid] = await db.select().from(bids).where(eq(bids.id, id));
+    return bid;
+  }
+
+  async getBidsByRfq(rfqId: number): Promise<Bid[]> {
+    return db.select().from(bids)
+      .where(eq(bids.rfqId, rfqId))
+      .orderBy(desc(bids.createdAt));
+  }
+
+  async getBidsBySupplierOrg(supplierOrgId: number): Promise<Bid[]> {
+    return db.select().from(bids)
+      .where(eq(bids.supplierOrgId, supplierOrgId))
+      .orderBy(desc(bids.createdAt));
+  }
+
+  async updateBid(id: number, data: Partial<InsertBid>): Promise<Bid | undefined> {
+    const [bid] = await db.update(bids)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(bids.id, id))
+      .returning();
+    return bid;
+  }
+
+  async updateBidStatus(id: number, status: string): Promise<Bid | undefined> {
+    const [bid] = await db.update(bids)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(bids.id, id))
+      .returning();
+    return bid;
+  }
+
+  // Bid Items
+  async createBidItem(data: InsertBidItem): Promise<BidItem> {
+    const [item] = await db.insert(bidItems).values(data).returning();
+    return item;
+  }
+
+  async getBidItems(bidId: number): Promise<BidItem[]> {
+    return db.select().from(bidItems).where(eq(bidItems.bidId, bidId));
+  }
+
+  // Bid Templates
+  async createBidTemplate(data: InsertBidTemplate): Promise<BidTemplate> {
+    const [template] = await db.insert(bidTemplates).values(data).returning();
+    return template;
+  }
+
+  async getBidTemplatesByOrg(orgId: number): Promise<BidTemplate[]> {
+    return db.select().from(bidTemplates)
+      .where(eq(bidTemplates.orgId, orgId))
+      .orderBy(desc(bidTemplates.createdAt));
+  }
+
+  async getBidTemplateById(id: number): Promise<BidTemplate | undefined> {
+    const [template] = await db.select().from(bidTemplates).where(eq(bidTemplates.id, id));
+    return template;
+  }
+
+  async updateBidTemplate(id: number, data: Partial<InsertBidTemplate>): Promise<BidTemplate | undefined> {
+    const [template] = await db.update(bidTemplates)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(bidTemplates.id, id))
+      .returning();
+    return template;
+  }
+
+  async deleteBidTemplate(id: number): Promise<void> {
+    await db.delete(bidTemplates).where(eq(bidTemplates.id, id));
+  }
+
+  // Contracts
+  async createContract(data: InsertContract): Promise<Contract> {
+    const [contract] = await db.insert(contracts).values(data).returning();
+    return contract;
+  }
+
+  async getContractById(id: number): Promise<Contract | undefined> {
+    const [contract] = await db.select().from(contracts).where(eq(contracts.id, id));
+    return contract;
+  }
+
+  async getContractsByBuyerOrg(buyerOrgId: number): Promise<Contract[]> {
+    return db.select().from(contracts)
+      .where(eq(contracts.buyerOrgId, buyerOrgId))
+      .orderBy(desc(contracts.createdAt));
+  }
+
+  async getContractsBySupplierOrg(supplierOrgId: number): Promise<Contract[]> {
+    return db.select().from(contracts)
+      .where(eq(contracts.supplierOrgId, supplierOrgId))
+      .orderBy(desc(contracts.createdAt));
+  }
+
+  async updateContractStatus(id: number, status: string): Promise<Contract | undefined> {
+    const updateData: any = { status, updatedAt: new Date() };
+    if (status === "completed") updateData.completedAt = new Date();
+    const [contract] = await db.update(contracts)
+      .set(updateData)
+      .where(eq(contracts.id, id))
+      .returning();
+    return contract;
+  }
+
+  async generateContractNumber(): Promise<string> {
+    const year = new Date().getFullYear();
+    const [result] = await db.select({ count: count() }).from(contracts);
+    const num = (result?.count ?? 0) + 1;
+    return `CO-${year}-${String(num).padStart(5, "0")}`;
+  }
+
+  // Contract Milestones
+  async createMilestone(data: InsertContractMilestone): Promise<ContractMilestone> {
+    const [milestone] = await db.insert(contractMilestones).values(data).returning();
+    return milestone;
+  }
+
+  async getMilestonesByContract(contractId: number): Promise<ContractMilestone[]> {
+    return db.select().from(contractMilestones)
+      .where(eq(contractMilestones.contractId, contractId))
+      .orderBy(contractMilestones.sortOrder);
+  }
+
+  async updateMilestoneStatus(id: number, status: string, evidence?: any): Promise<ContractMilestone | undefined> {
+    const updateData: any = { status };
+    if (evidence) updateData.evidence = evidence;
+    if (status === "approved") updateData.completedAt = new Date();
+    const [milestone] = await db.update(contractMilestones)
+      .set(updateData)
+      .where(eq(contractMilestones.id, id))
+      .returning();
+    return milestone;
+  }
+
+  // Escrow Transactions
+  async createEscrowTransaction(data: InsertEscrowTransaction): Promise<EscrowTransaction> {
+    const [escrow] = await db.insert(escrowTransactions).values(data).returning();
+    return escrow;
+  }
+
+  async getEscrowByContract(contractId: number): Promise<EscrowTransaction[]> {
+    return db.select().from(escrowTransactions)
+      .where(eq(escrowTransactions.contractId, contractId))
+      .orderBy(desc(escrowTransactions.createdAt));
+  }
+
+  async updateEscrowStatus(id: number, status: string): Promise<EscrowTransaction | undefined> {
+    const updateData: any = { status, updatedAt: new Date() };
+    if (status === "funded") updateData.fundedAt = new Date();
+    if (status === "released") updateData.releasedAt = new Date();
+    const [escrow] = await db.update(escrowTransactions)
+      .set(updateData)
+      .where(eq(escrowTransactions.id, id))
+      .returning();
+    return escrow;
+  }
+
+  // Procurement Invoices
+  async createProcurementInvoice(data: InsertProcurementInvoice): Promise<ProcurementInvoice> {
+    const [invoice] = await db.insert(procurementInvoices).values(data).returning();
+    return invoice;
+  }
+
+  async getProcurementInvoiceById(id: number): Promise<ProcurementInvoice | undefined> {
+    const [invoice] = await db.select().from(procurementInvoices).where(eq(procurementInvoices.id, id));
+    return invoice;
+  }
+
+  async getProcurementInvoicesByContract(contractId: number): Promise<ProcurementInvoice[]> {
+    return db.select().from(procurementInvoices)
+      .where(eq(procurementInvoices.contractId, contractId))
+      .orderBy(desc(procurementInvoices.createdAt));
+  }
+
+  async getProcurementInvoicesBySupplierOrg(supplierOrgId: number): Promise<ProcurementInvoice[]> {
+    return db.select().from(procurementInvoices)
+      .where(eq(procurementInvoices.supplierOrgId, supplierOrgId))
+      .orderBy(desc(procurementInvoices.createdAt));
+  }
+
+  async getProcurementInvoicesByBuyerOrg(buyerOrgId: number): Promise<ProcurementInvoice[]> {
+    return db.select().from(procurementInvoices)
+      .where(eq(procurementInvoices.buyerOrgId, buyerOrgId))
+      .orderBy(desc(procurementInvoices.createdAt));
+  }
+
+  async updateProcurementInvoice(id: number, data: Partial<InsertProcurementInvoice>): Promise<ProcurementInvoice | undefined> {
+    const [invoice] = await db.update(procurementInvoices)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(procurementInvoices.id, id))
+      .returning();
+    return invoice;
+  }
+
+  async updateProcurementInvoiceStatus(id: number, status: string): Promise<ProcurementInvoice | undefined> {
+    const updateData: any = { status, updatedAt: new Date() };
+    if (status === "sent") updateData.sentAt = new Date();
+    if (status === "viewed") updateData.viewedAt = new Date();
+    if (status === "paid") updateData.paidAt = new Date();
+    const [invoice] = await db.update(procurementInvoices)
+      .set(updateData)
+      .where(eq(procurementInvoices.id, id))
+      .returning();
+    return invoice;
+  }
+
+  async generateInvoiceNumber(): Promise<string> {
+    const year = new Date().getFullYear();
+    const [result] = await db.select({ count: count() }).from(procurementInvoices);
+    const num = (result?.count ?? 0) + 1;
+    return `INV-${year}-${String(num).padStart(5, "0")}`;
+  }
+
+  // Procurement Invoice Items
+  async createProcurementInvoiceItem(data: InsertProcurementInvoiceItem): Promise<ProcurementInvoiceItem> {
+    const [item] = await db.insert(procurementInvoiceItems).values(data).returning();
+    return item;
+  }
+
+  async getProcurementInvoiceItems(invoiceId: number): Promise<ProcurementInvoiceItem[]> {
+    return db.select().from(procurementInvoiceItems)
+      .where(eq(procurementInvoiceItems.invoiceId, invoiceId));
   }
 }
 

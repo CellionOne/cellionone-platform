@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
-import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements } from "@shared/schema";
+import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories } from "@shared/schema";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
@@ -29,6 +29,7 @@ export async function seedDatabase() {
       { key: "enable_paystack_split_settlement", isEnabled: true, description: "Enable Paystack split settlement to lawyer subaccount" },
       { key: "enable_verification_payment_required", isEnabled: false, description: "Require payment for identity verification (beta: false)" },
       { key: "enable_incorporation_payment_required", isEnabled: false, description: "Require payment for incorporation (beta: false)" },
+      { key: "enable_escrow_payments", isEnabled: false, description: "Enable escrow payment system for procurement contracts (requires banking partner)" },
     ];
     
     // Always insert any missing feature flags
@@ -219,6 +220,34 @@ export async function seedDatabase() {
       await db.insert(kycDocumentRequirements).values(doc).onConflictDoNothing();
     }
     console.log("Synced KYC standard document requirements");
+
+    const procurementCategories = [
+      { name: "IT & Technology", slug: "it-technology", description: "Software, hardware, cloud services, and IT consulting", parentId: null },
+      { name: "Software Development", slug: "software-development", description: "Custom software, web, and mobile app development", parentId: null },
+      { name: "Hardware Supply", slug: "hardware-supply", description: "Computers, servers, networking equipment", parentId: null },
+      { name: "IT Consulting", slug: "it-consulting", description: "Technology advisory and implementation services", parentId: null },
+      { name: "Cloud Services", slug: "cloud-services", description: "Cloud hosting, SaaS, and infrastructure services", parentId: null },
+      { name: "Professional Services", slug: "professional-services", description: "Legal, accounting, consulting, and training services", parentId: null },
+      { name: "Legal Services", slug: "legal-services", description: "Legal advisory, compliance, and regulatory services", parentId: null },
+      { name: "Accounting & Audit", slug: "accounting-audit", description: "Bookkeeping, auditing, and financial reporting", parentId: null },
+      { name: "Management Consulting", slug: "management-consulting", description: "Strategy, operations, and management advisory", parentId: null },
+      { name: "Training & Development", slug: "training-development", description: "Corporate training, workshops, and capacity building", parentId: null },
+      { name: "Office Supplies & Equipment", slug: "office-supplies", description: "Stationery, furniture, and office equipment", parentId: null },
+      { name: "Construction & Facilities", slug: "construction-facilities", description: "Building, renovation, and facility management", parentId: null },
+      { name: "Logistics & Transportation", slug: "logistics-transportation", description: "Freight, courier, warehousing, and fleet services", parentId: null },
+      { name: "Marketing & Communications", slug: "marketing-communications", description: "Advertising, PR, branding, and digital marketing", parentId: null },
+      { name: "Manufacturing & Industrial", slug: "manufacturing-industrial", description: "Raw materials, fabrication, and industrial supplies", parentId: null },
+      { name: "Financial Services", slug: "financial-services", description: "Banking, insurance, and investment services", parentId: null },
+      { name: "Healthcare & Pharmaceuticals", slug: "healthcare-pharma", description: "Medical supplies, pharmaceuticals, and health services", parentId: null },
+      { name: "Energy & Utilities", slug: "energy-utilities", description: "Power generation, oil & gas, and utility services", parentId: null },
+      { name: "Security Services", slug: "security-services", description: "Physical security, cybersecurity, and risk management", parentId: null },
+      { name: "Food & Catering", slug: "food-catering", description: "Catering, food supply, and hospitality services", parentId: null },
+    ];
+
+    for (const cat of procurementCategories) {
+      await db.insert(rfqCategories).values(cat).onConflictDoNothing();
+    }
+    console.log("Synced procurement categories");
 
     console.log("Database seeding complete");
   } catch (error) {

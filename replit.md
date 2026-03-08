@@ -39,6 +39,7 @@ Key architectural decisions and features include:
 - **Shared Public Navigation & Footer:** Reusable components for marketing and public pages, including navigation, product/resource dropdowns, pricing, contact links, and theme toggling.
 - **Landing Page:** World-class single-statement hero, trust bar, 7-section layout, and two-path KYC integration journey (Web Dashboard vs API).
 - **Verified Entities Registry:** Cross-platform catalogue of all verified individuals and companies, auto-populated upon KYC approval.
+- **Verified Procurement Marketplace:** Full RFQ/Bid/Contract/Invoice system for verified organisations. Features include: RFQ creation (draft/publish workflow, open/invited visibility, line items, categories), bid submission with templates, contract award with milestone tracking, professional invoice generation with manual tax entry, and escrow infrastructure (gated behind `enable_escrow_payments` feature flag until banking partner secured). All amounts stored in kobo. Contract numbers: CO-YYYY-XXXXX, Invoice numbers: INV-YYYY-XXXXX. Routes in `server/routes/procurementRoutes.ts`, pages in `client/src/pages/procurement/`. 20 seeded categories covering Nigerian business sectors.
 - **Admin Proposals Page:** Admin-only page for viewing partnership proposals as formatted HTML for browser-native printing/saving.
 - **Certificate HTML Fallback:** Verification certificates support `?format=html` query parameter for browser-rendered viewing when PDF generation fails.
 - **SEO & Structured Data:**

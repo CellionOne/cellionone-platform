@@ -1471,6 +1471,250 @@ export const userLoginHistory = pgTable("user_login_history", {
 
 export type UserLoginHistoryEntry = typeof userLoginHistory.$inferSelect;
 
+// ============== PROCUREMENT SYSTEM ==============
+
+export const rfqCategories = pgTable("rfq_categories", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull().unique(),
+  description: text("description"),
+  parentId: integer("parent_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertRfqCategorySchema = createInsertSchema(rfqCategories).omit({ id: true, createdAt: true });
+export type RfqCategory = typeof rfqCategories.$inferSelect;
+export type InsertRfqCategory = z.infer<typeof insertRfqCategorySchema>;
+
+export const rfqs = pgTable("rfqs", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 500 }).notNull(),
+  description: text("description").notNull(),
+  buyerOrgId: integer("buyer_org_id").notNull(),
+  createdByUserId: varchar("created_by_user_id").notNull(),
+  categoryId: integer("category_id"),
+  currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
+  budgetMin: integer("budget_min"),
+  budgetMax: integer("budget_max"),
+  deadline: timestamp("deadline").notNull(),
+  deliveryDeadline: timestamp("delivery_deadline"),
+  visibility: varchar("visibility", { length: 20 }).notNull().default("open"),
+  status: varchar("status", { length: 20 }).notNull().default("draft"),
+  requirements: text("requirements"),
+  qualifications: text("qualifications"),
+  attachments: jsonb("attachments"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_rfqs_buyer_org").on(table.buyerOrgId),
+  index("idx_rfqs_status").on(table.status),
+  index("idx_rfqs_category").on(table.categoryId),
+]);
+
+export const insertRfqSchema = createInsertSchema(rfqs).omit({ id: true, createdAt: true, updatedAt: true });
+export type Rfq = typeof rfqs.$inferSelect;
+export type InsertRfq = z.infer<typeof insertRfqSchema>;
+
+export const rfqInvitations = pgTable("rfq_invitations", {
+  id: serial("id").primaryKey(),
+  rfqId: integer("rfq_id").notNull(),
+  supplierOrgId: integer("supplier_org_id").notNull(),
+  invitedAt: timestamp("invited_at").defaultNow(),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+});
+
+export const insertRfqInvitationSchema = createInsertSchema(rfqInvitations).omit({ id: true, invitedAt: true });
+export type RfqInvitation = typeof rfqInvitations.$inferSelect;
+export type InsertRfqInvitation = z.infer<typeof insertRfqInvitationSchema>;
+
+export const rfqItems = pgTable("rfq_items", {
+  id: serial("id").primaryKey(),
+  rfqId: integer("rfq_id").notNull(),
+  description: varchar("description", { length: 500 }).notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  unit: varchar("unit", { length: 50 }).notNull().default("units"),
+  specifications: text("specifications"),
+});
+
+export const insertRfqItemSchema = createInsertSchema(rfqItems).omit({ id: true });
+export type RfqItem = typeof rfqItems.$inferSelect;
+export type InsertRfqItem = z.infer<typeof insertRfqItemSchema>;
+
+export const bidTemplates = pgTable("bid_templates", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  categoryId: integer("category_id"),
+  coverLetterTemplate: text("cover_letter_template"),
+  termsTemplate: text("terms_template"),
+  defaultItems: jsonb("default_items"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertBidTemplateSchema = createInsertSchema(bidTemplates).omit({ id: true, createdAt: true, updatedAt: true });
+export type BidTemplate = typeof bidTemplates.$inferSelect;
+export type InsertBidTemplate = z.infer<typeof insertBidTemplateSchema>;
+
+export const bids = pgTable("bids", {
+  id: serial("id").primaryKey(),
+  rfqId: integer("rfq_id").notNull(),
+  supplierOrgId: integer("supplier_org_id").notNull(),
+  submittedByUserId: varchar("submitted_by_user_id").notNull(),
+  totalAmount: integer("total_amount").notNull().default(0),
+  currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
+  deliveryTimeline: varchar("delivery_timeline", { length: 255 }),
+  validUntil: timestamp("valid_until"),
+  coverLetter: text("cover_letter"),
+  terms: text("terms"),
+  attachments: jsonb("attachments"),
+  status: varchar("status", { length: 20 }).notNull().default("draft"),
+  templateId: integer("template_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_bids_rfq").on(table.rfqId),
+  index("idx_bids_supplier_org").on(table.supplierOrgId),
+  index("idx_bids_status").on(table.status),
+]);
+
+export const insertBidSchema = createInsertSchema(bids).omit({ id: true, createdAt: true, updatedAt: true });
+export type Bid = typeof bids.$inferSelect;
+export type InsertBid = z.infer<typeof insertBidSchema>;
+
+export const bidItems = pgTable("bid_items", {
+  id: serial("id").primaryKey(),
+  bidId: integer("bid_id").notNull(),
+  rfqItemId: integer("rfq_item_id").notNull(),
+  unitPrice: integer("unit_price").notNull().default(0),
+  quantity: integer("quantity").notNull().default(1),
+  subtotal: integer("subtotal").notNull().default(0),
+  notes: text("notes"),
+});
+
+export const insertBidItemSchema = createInsertSchema(bidItems).omit({ id: true });
+export type BidItem = typeof bidItems.$inferSelect;
+export type InsertBidItem = z.infer<typeof insertBidItemSchema>;
+
+export const contracts = pgTable("contracts", {
+  id: serial("id").primaryKey(),
+  rfqId: integer("rfq_id").notNull(),
+  bidId: integer("bid_id").notNull(),
+  buyerOrgId: integer("buyer_org_id").notNull(),
+  supplierOrgId: integer("supplier_org_id").notNull(),
+  contractNumber: varchar("contract_number", { length: 50 }).notNull().unique(),
+  totalAmount: integer("total_amount").notNull(),
+  currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
+  status: varchar("status", { length: 20 }).notNull().default("awarded"),
+  terms: text("terms"),
+  startDate: timestamp("start_date"),
+  endDate: timestamp("end_date"),
+  awardedByUserId: varchar("awarded_by_user_id").notNull(),
+  awardedAt: timestamp("awarded_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  attachments: jsonb("attachments"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_contracts_buyer_org").on(table.buyerOrgId),
+  index("idx_contracts_supplier_org").on(table.supplierOrgId),
+  index("idx_contracts_status").on(table.status),
+]);
+
+export const insertContractSchema = createInsertSchema(contracts).omit({ id: true, createdAt: true, updatedAt: true });
+export type Contract = typeof contracts.$inferSelect;
+export type InsertContract = z.infer<typeof insertContractSchema>;
+
+export const contractMilestones = pgTable("contract_milestones", {
+  id: serial("id").primaryKey(),
+  contractId: integer("contract_id").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  amount: integer("amount").notNull().default(0),
+  dueDate: timestamp("due_date"),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  evidence: jsonb("evidence"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_milestones_contract").on(table.contractId),
+]);
+
+export const insertContractMilestoneSchema = createInsertSchema(contractMilestones).omit({ id: true, createdAt: true });
+export type ContractMilestone = typeof contractMilestones.$inferSelect;
+export type InsertContractMilestone = z.infer<typeof insertContractMilestoneSchema>;
+
+export const escrowTransactions = pgTable("escrow_transactions", {
+  id: serial("id").primaryKey(),
+  contractId: integer("contract_id").notNull(),
+  milestoneId: integer("milestone_id"),
+  amount: integer("amount").notNull(),
+  currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  buyerOrgId: integer("buyer_org_id").notNull(),
+  supplierOrgId: integer("supplier_org_id").notNull(),
+  fundedAt: timestamp("funded_at"),
+  releasedAt: timestamp("released_at"),
+  paymentReference: varchar("payment_reference", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_escrow_contract").on(table.contractId),
+]);
+
+export const insertEscrowTransactionSchema = createInsertSchema(escrowTransactions).omit({ id: true, createdAt: true, updatedAt: true });
+export type EscrowTransaction = typeof escrowTransactions.$inferSelect;
+export type InsertEscrowTransaction = z.infer<typeof insertEscrowTransactionSchema>;
+
+export const procurementInvoices = pgTable("procurement_invoices", {
+  id: serial("id").primaryKey(),
+  invoiceNumber: varchar("invoice_number", { length: 50 }).notNull().unique(),
+  contractId: integer("contract_id").notNull(),
+  milestoneId: integer("milestone_id"),
+  supplierOrgId: integer("supplier_org_id").notNull(),
+  buyerOrgId: integer("buyer_org_id").notNull(),
+  issuedByUserId: varchar("issued_by_user_id").notNull(),
+  subtotal: integer("subtotal").notNull().default(0),
+  taxAmount: integer("tax_amount").notNull().default(0),
+  totalAmount: integer("total_amount").notNull().default(0),
+  currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
+  status: varchar("status", { length: 20 }).notNull().default("draft"),
+  paymentTerms: varchar("payment_terms", { length: 100 }),
+  bankDetails: text("bank_details"),
+  notes: text("notes"),
+  taxLabel: varchar("tax_label", { length: 50 }).notNull().default("VAT"),
+  dueDate: timestamp("due_date"),
+  sentAt: timestamp("sent_at"),
+  viewedAt: timestamp("viewed_at"),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_proc_invoices_contract").on(table.contractId),
+  index("idx_proc_invoices_supplier").on(table.supplierOrgId),
+  index("idx_proc_invoices_buyer").on(table.buyerOrgId),
+  index("idx_proc_invoices_status").on(table.status),
+]);
+
+export const insertProcurementInvoiceSchema = createInsertSchema(procurementInvoices).omit({ id: true, createdAt: true, updatedAt: true });
+export type ProcurementInvoice = typeof procurementInvoices.$inferSelect;
+export type InsertProcurementInvoice = z.infer<typeof insertProcurementInvoiceSchema>;
+
+export const procurementInvoiceItems = pgTable("procurement_invoice_items", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id").notNull(),
+  description: varchar("description", { length: 500 }).notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  unitPrice: integer("unit_price").notNull().default(0),
+  subtotal: integer("subtotal").notNull().default(0),
+  unit: varchar("unit", { length: 50 }),
+});
+
+export const insertProcurementInvoiceItemSchema = createInsertSchema(procurementInvoiceItems).omit({ id: true });
+export type ProcurementInvoiceItem = typeof procurementInvoiceItems.$inferSelect;
+export type InsertProcurementInvoiceItem = z.infer<typeof insertProcurementInvoiceItemSchema>;
+
 // ============== SETTINGS SCHEMAS ==============
 export const updateProfileSchema = z.object({
   firstName: z.string().min(1, "First name is required").max(100),

@@ -76,6 +76,18 @@ import KycEmployeePortalPage from "@/pages/kyc-service/employee-portal";
 import KycSupplierPortalPage from "@/pages/kyc-service/supplier-portal";
 import KycOrgInviteAcceptPage from "@/pages/kyc-service/org-invite-accept";
 import KycMyVerifications from "@/pages/kyc-service/my-verifications";
+import ProcurementMarketplace from "@/pages/procurement/marketplace";
+import ProcurementCreateRfq from "@/pages/procurement/create-rfq";
+import ProcurementRfqDetail from "@/pages/procurement/rfq-detail";
+import ProcurementMyRfqs from "@/pages/procurement/my-rfqs";
+import ProcurementSubmitBid from "@/pages/procurement/submit-bid";
+import ProcurementMyBids from "@/pages/procurement/my-bids";
+import ProcurementBidTemplates from "@/pages/procurement/bid-templates";
+import ProcurementMyContracts from "@/pages/procurement/my-contracts";
+import ProcurementContractDetail from "@/pages/procurement/contract-detail";
+import ProcurementMyInvoices from "@/pages/procurement/my-invoices";
+import ProcurementCreateInvoice from "@/pages/procurement/create-invoice";
+import ProcurementInvoiceDetail from "@/pages/procurement/invoice-detail";
 import BuildingManagerDashboard from "@/pages/building-manager/dashboard";
 import BuildingManagerUtilityBill from "@/pages/building-manager/utility-bill";
 import BuildingManagerSubscribers from "@/pages/building-manager/subscribers";
@@ -348,6 +360,43 @@ function Router() {
       <Route path="/kyc/verify/:token" component={KycVerifyRequestPage} />
       <Route path="/kyc/:slug/employees" component={KycEmployeePortalPage} />
       <Route path="/kyc/:slug/suppliers" component={KycSupplierPortalPage} />
+
+      <Route path="/procurement/marketplace">
+        <ProtectedRoute component={ProcurementMarketplace} />
+      </Route>
+      <Route path="/procurement/rfqs/new">
+        <ProtectedRoute component={ProcurementCreateRfq} />
+      </Route>
+      <Route path="/procurement/rfqs/:id">
+        <ProtectedRoute component={ProcurementRfqDetail} />
+      </Route>
+      <Route path="/procurement/my-rfqs">
+        <ProtectedRoute component={ProcurementMyRfqs} />
+      </Route>
+      <Route path="/procurement/rfqs/:rfqId/bid">
+        <ProtectedRoute component={ProcurementSubmitBid} />
+      </Route>
+      <Route path="/procurement/my-bids">
+        <ProtectedRoute component={ProcurementMyBids} />
+      </Route>
+      <Route path="/procurement/bid-templates">
+        <ProtectedRoute component={ProcurementBidTemplates} />
+      </Route>
+      <Route path="/procurement/contracts">
+        <ProtectedRoute component={ProcurementMyContracts} />
+      </Route>
+      <Route path="/procurement/contracts/:id">
+        <ProtectedRoute component={ProcurementContractDetail} />
+      </Route>
+      <Route path="/procurement/invoices">
+        <ProtectedRoute component={ProcurementMyInvoices} />
+      </Route>
+      <Route path="/procurement/contracts/:contractId/invoice/new">
+        <ProtectedRoute component={ProcurementCreateInvoice} />
+      </Route>
+      <Route path="/procurement/invoices/:id">
+        <ProtectedRoute component={ProcurementInvoiceDetail} />
+      </Route>
       
       <Route path="/payment/checkout">
         <ProtectedRoute component={PaymentCheckoutPage} />

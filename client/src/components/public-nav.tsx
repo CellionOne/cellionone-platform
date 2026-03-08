@@ -20,19 +20,23 @@ import {
   ChevronDown,
   ChevronRight,
   Award,
+  Handshake,
+  MapPin,
   X,
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
 
 const productsDropdown = [
-  { icon: Building2, label: "Company Incorporation", description: "Register your Nigerian company with CAC", href: "/#pricing" },
-  { icon: ShieldCheck, label: "KYC Verification", description: "Verify employees and suppliers", href: "/#for-organisations" },
+  { icon: Building2, label: "Company Incorporation", description: "Register your Nigerian company with CAC", href: "/#solutions" },
+  { icon: ShieldCheck, label: "KYC Verification", description: "Verify employees and suppliers", href: "/#solutions" },
+  { icon: Handshake, label: "Verified Procurement", description: "RFQ marketplace for verified organisations", href: "/procurement/marketplace" },
+  { icon: MapPin, label: "Virtual Office", description: "Premium registered address in Lagos", href: "/#solutions" },
   { icon: Code2, label: "API Integration", description: "Programmatic verification via REST API", href: "/api-docs" },
 ];
 
 const resourcesDropdown = [
   { icon: Sparkles, label: "Why Cellion One", description: "Our mission and differentiators", href: "/why-cellion-one" },
-  { icon: Users, label: "How It Works", description: "Simple 4-step process", href: "/#how-it-works" },
+  { icon: Users, label: "How It Works", description: "Simple 3-step process", href: "/#how-it-works" },
   { icon: Shield, label: "FAQ", description: "Common questions answered", href: "/#faq" },
   { icon: Award, label: "Join as Lawyer", description: "Partner with us as a legal professional", href: "/apply-lawyer" },
 ];
@@ -135,12 +139,12 @@ function MobileNav() {
           </div>
 
           <a
-            href="/#pricing"
+            href="/#solutions"
             className="px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-muted transition-colors"
             data-testid="link-mobile-pricing"
             onClick={() => setSheetOpen(false)}
           >
-            Pricing
+            Solutions
           </a>
 
           <div>
@@ -171,7 +175,7 @@ function MobileNav() {
           </div>
 
           <a
-            href="/#contact"
+            href="mailto:hello@cellionone.com"
             className="px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-muted transition-colors"
             data-testid="link-mobile-contact"
             onClick={() => setSheetOpen(false)}
@@ -206,9 +210,9 @@ export function PublicNav() {
 
           <div className="hidden md:flex items-center gap-8">
             <NavDropdown label="Products" items={productsDropdown} testId="nav-products" />
-            <a href="/#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-pricing">Pricing</a>
+            <a href="/#solutions" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-pricing">Solutions</a>
             <NavDropdown label="Resources" items={resourcesDropdown} testId="nav-resources" />
-            <a href="/#contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-contact">Contact</a>
+            <a href="mailto:hello@cellionone.com" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-contact">Contact</a>
           </div>
 
           <div className="flex items-center gap-2">

@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Accordion,
   AccordionContent,
@@ -22,40 +21,20 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Building2,
-  Shield,
-  Users,
-  CheckCircle2,
+  ShieldCheck,
   ArrowRight,
-  Receipt,
-  Stamp,
   MapPin,
   CalendarCheck,
-  BadgeCheck,
-  Landmark,
-  UserCheck,
-  Building,
-  ShieldCheck,
+  Handshake,
   Send,
   Loader2,
   Mail,
-  LayoutDashboard,
   Code2,
   Globe,
-  Webhook,
-  CreditCard,
-  FileCode2,
-  Bell,
-  Award,
 } from "lucide-react";
 import { PublicNav } from "@/components/public-nav";
 import { PublicFooter } from "@/components/public-footer";
 import { usePageMeta } from "@/hooks/use-page-meta";
-
-const statusColors: Record<string, string> = {
-  green: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-  blue: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  yellow: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-};
 
 const trustStats = [
   { value: "500+", label: "Companies Incorporated" },
@@ -64,76 +43,43 @@ const trustStats = [
   { value: "99.9%", label: "Uptime" },
 ];
 
-const services = [
+const solutionPaths = [
   {
-    icon: Receipt,
-    title: "TIN Registration",
-    description: "Get your Tax Identification Number from the Federal Inland Revenue Service (FIRS).",
-    price: "₦20,000"
+    icon: Building2,
+    title: "Start a Company",
+    description: "Register your Nigerian LLC. Licensed lawyers handle all CAC filings and deliver stamped originals.",
+    price: "From ₦100,000",
+    cta: "Start Incorporation",
+    href: "/register",
   },
   {
-    icon: BadgeCheck,
-    title: "SCUML Certificate",
-    description: "Obtain your SCUML certificate from the EFCC for designated non-financial businesses.",
-    price: "₦150,000"
+    icon: ShieldCheck,
+    title: "Verify People & Companies",
+    description: "KYC for employees and suppliers — BVN/NIN, biometrics, document checks, and AML screening.",
+    cta: "Start Verifying",
+    href: "/register",
   },
   {
-    icon: Stamp,
-    title: "Trademark Registration",
-    description: "Protect your brand with official trademark registration handled in two stages.",
-    price: "₦250,000"
+    icon: Handshake,
+    title: "Procure with Trust",
+    description: "RFQ marketplace, bid management, contracts, and invoicing — exclusively for verified organisations.",
+    cta: "Explore Marketplace",
+    href: "/procurement/marketplace",
   },
   {
     icon: MapPin,
-    title: "Registered Office Address",
-    description: "Premium business address in Ikoyi, Lagos with mail handling and forwarding.",
-    price: "Available"
+    title: "Get a Virtual Office",
+    description: "Premium registered address in Lagos with mail handling, forwarding, and proof-of-address for your company.",
+    cta: "View Plans",
+    href: "/register",
   },
   {
     icon: CalendarCheck,
-    title: "Compliance Calendar",
-    description: "Automated compliance deadlines tracking with email reminders so you never miss a filing.",
-    price: "Included"
+    title: "Stay Compliant",
+    description: "Automated compliance calendar, TIN registration, SCUML certification, and AI legal assistant.",
+    cta: "Learn More",
+    href: "/register",
   },
-  {
-    icon: Landmark,
-    title: "NGO Registration",
-    description: "Register your Incorporated Trustees (NGO/Foundation) with the Corporate Affairs Commission.",
-    price: "₦250,000"
-  }
-];
-
-const pricingTiers = [
-  {
-    name: "Starter",
-    sharecap: "₦1M Share Capital",
-    price: "₦100,000",
-    popular: false,
-  },
-  {
-    name: "Growth",
-    sharecap: "₦5M Share Capital",
-    price: "₦150,000",
-    popular: true,
-  },
-  {
-    name: "Professional",
-    sharecap: "₦10M Share Capital",
-    price: "₦350,000",
-    popular: false,
-  },
-  {
-    name: "Enterprise",
-    sharecap: "₦20M Share Capital",
-    price: "₦550,000",
-    popular: false,
-  },
-  {
-    name: "Foreign Participation",
-    sharecap: "₦100M Share Capital (per CAMA)",
-    price: "₦3,000,000",
-    popular: false,
-  }
 ];
 
 const faqItems = [
@@ -150,25 +96,18 @@ const faqItems = [
     answer: "Our KYC service lets organisations verify the identity of employees, suppliers, and other stakeholders. You create an organisation on the platform, invite team members, and submit verification requests. Each request goes through BVN/NIN validation, document checks, biometric verification, and AML screening, with results delivered as audit-ready certificates."
   },
   {
-    question: "How much does it cost?",
-    answer: "Company incorporation starts from ₦100,000 for a Starter package (up to ₦1M share capital). Employee verification is ₦10,000 per person, and supplier verification is ₦100,000 per company. Additional services like TIN registration, SCUML certification, and trademark registration are priced separately. All pricing is transparent with no hidden fees."
-  },
-  {
     question: "Is my personal data secure?",
     answer: "Absolutely. We use industry-standard encryption for all data at rest and in transit. Your documents are stored in a secure digital vault with strict access controls. Personal information is only shared with assigned lawyers handling your approved applications, and you can update or delete your data at any time."
   },
-  {
-    question: "What happens after my company is registered?",
-    answer: "After registration, you receive your Certificate of Incorporation, CAC status report, and other statutory documents in your digital vault. We also deliver physical stamped originals to your doorstep via tracked courier. You can then proceed with add-on services like TIN registration, SCUML certification, and opening a corporate bank account."
-  },
-  {
-    question: "What payment methods do you accept?",
-    answer: "We accept payments via Paystack, which supports Nigerian bank cards (Visa, Mastercard, Verve), bank transfers, and USSD. All payments are processed securely, and you receive a digital receipt for every transaction, accessible from your dashboard at any time."
-  }
 ];
 
+const steps = [
+  { step: "1", title: "Create & Verify", desc: "Create your account and verify your identity in minutes" },
+  { step: "2", title: "Choose Your Service", desc: "Incorporation, KYC, procurement, or virtual office" },
+  { step: "3", title: "We Handle the Rest", desc: "Track everything from your dashboard while we deliver" },
+];
 
-function ContactSection() {
+export function ContactSection() {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [contactName, setContactName] = useState("");
@@ -299,7 +238,7 @@ function ContactSection() {
 
 export default function LandingPage() {
   usePageMeta({
-    title: "Cellion One \u2014 Company Incorporation & KYC Verification in Nigeria",
+    title: "Cellion One — Company Incorporation & KYC Verification in Nigeria",
     description: "The compliance infrastructure for African business. Incorporate companies, verify identities, and manage compliance via dashboard or API. Trusted by 500+ companies in Nigeria.",
     canonicalPath: "/",
   });
@@ -420,104 +359,98 @@ export default function LandingPage() {
       <PublicNav />
 
       <main>
-        <section className="relative pt-32 pb-20 px-4 sm:px-6 lg:px-8">
+        <section className="relative pt-36 pb-24 px-4 sm:px-6 lg:px-8">
           <div className="absolute inset-0 -z-10 overflow-hidden">
-            <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
-            <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
+            <div className="absolute top-1/3 left-1/3 w-[500px] h-[500px] bg-primary/8 rounded-full blur-[120px]" />
+            <div className="absolute bottom-1/3 right-1/4 w-[400px] h-[400px] bg-primary/5 rounded-full blur-[100px]" />
           </div>
 
-          <div className="max-w-7xl mx-auto">
-            <div className="grid lg:grid-cols-2 gap-12 items-center">
-              <div className="space-y-8">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium" data-testid="badge-africa">
-                  <Globe className="h-4 w-4" />
-                  Starting in Nigeria. Building for Africa.
-                </div>
+          <div className="max-w-3xl mx-auto text-center">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium mb-8" data-testid="badge-africa">
+              <Globe className="h-4 w-4" />
+              Starting in Nigeria. Building for Africa.
+            </div>
 
-                <div data-testid="hero-text-container">
-                  <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight" data-testid="hero-headline">
-                    The Compliance Infrastructure{" "}
-                    <span className="text-primary">for African Business</span>
-                  </h1>
-                </div>
+            <div data-testid="hero-text-container">
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight tracking-tight" data-testid="hero-headline">
+                The Compliance Infrastructure{" "}
+                <span className="text-primary">for African Business</span>
+              </h1>
+            </div>
 
-                <p className="text-lg text-muted-foreground max-w-xl" data-testid="hero-subtitle">
-                  Incorporate companies, verify identities, and manage compliance — all through one platform. Use our dashboard or integrate via API.
-                </p>
+            <p className="text-lg sm:text-xl text-muted-foreground mt-6 max-w-2xl mx-auto leading-relaxed" data-testid="hero-subtitle">
+              Incorporate companies, verify identities, procure with trust, and stay compliant — all through one platform.
+            </p>
 
-                <div className="flex flex-col sm:flex-row gap-4">
-                  <Button size="lg" asChild className="gap-2" data-testid="button-hero-primary">
-                    <a href="/register">
-                      Get Started
-                      <ArrowRight className="h-4 w-4" />
-                    </a>
-                  </Button>
-                  <Button size="lg" variant="outline" asChild data-testid="button-hero-secondary">
-                    <a href="/api-docs" className="gap-2">
-                      <Code2 className="h-4 w-4" />
-                      View API Docs
-                    </a>
-                  </Button>
-                </div>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center mt-10">
+              <Button size="lg" asChild className="gap-2 text-base px-8 h-12" data-testid="button-hero-primary">
+                <a href="/register">
+                  Get Started
+                  <ArrowRight className="h-4 w-4" />
+                </a>
+              </Button>
+              <Button size="lg" variant="ghost" asChild className="gap-2 text-base text-muted-foreground hover:text-foreground" data-testid="button-hero-secondary">
+                <a href="/api-docs">
+                  <Code2 className="h-4 w-4" />
+                  View API Docs
+                </a>
+              </Button>
+            </div>
 
-                <div className="flex items-center gap-6 pt-4 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span className="text-sm text-muted-foreground">Free consultation</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span className="text-sm text-muted-foreground">Transparent pricing</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span className="text-sm text-muted-foreground">Expert support</span>
-                  </div>
-                </div>
-              </div>
+            <p className="text-sm text-muted-foreground mt-8" data-testid="text-trust-line">
+              Trusted by 500+ companies across Nigeria
+            </p>
+          </div>
+        </section>
 
-              <div className="relative hidden lg:block">
-                <div
-                  className="relative z-10 rounded-2xl bg-card border shadow-2xl p-8"
-                  data-testid="hero-preview-card"
+        <section id="solutions" className="py-24 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-5xl mx-auto">
+            <div className="text-center mb-16">
+              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight" data-testid="text-solutions-heading">
+                What are you looking to do?
+              </h2>
+              <p className="text-muted-foreground mt-4 text-lg max-w-xl mx-auto">
+                Choose the service that fits your needs. We'll guide you from there.
+              </p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {solutionPaths.map((path, index) => (
+                <Card
+                  key={index}
+                  className={`group relative border border-border/60 bg-card/50 hover:border-primary/30 hover:shadow-lg transition-all duration-300 ${
+                    index >= 3 ? "sm:col-span-1 lg:col-span-1" : ""
+                  }`}
+                  data-testid={`card-solution-${index}`}
                 >
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                        <ShieldCheck className="h-6 w-6 text-primary" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold">Verification Dashboard</h3>
-                        <p className="text-sm text-muted-foreground">Track all verifications</p>
-                      </div>
+                  <CardContent className="p-8 flex flex-col h-full">
+                    <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center mb-5 group-hover:bg-primary/15 transition-colors">
+                      <path.icon className="h-6 w-6 text-primary" />
                     </div>
-
-                    <div className="space-y-3">
-                      {[
-                        { name: "Adebayo Ogunlesi", status: "Verified", color: "green" },
-                        { name: "Chidinma Eze", status: "In Progress", color: "blue" },
-                        { name: "Femi Adeyemi", status: "Pending", color: "yellow" },
-                      ].map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                          <span className="text-sm">{item.name}</span>
-                          <span className={`text-xs px-2 py-1 rounded-full ${statusColors[item.color]}`}>{item.status}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <Button className="w-full" variant="secondary">
-                      View All Verifications
-                    </Button>
-                  </div>
-                </div>
-                <div className="absolute -bottom-4 -right-4 -z-0 w-full h-full rounded-2xl bg-primary/20 blur-xl" />
-              </div>
+                    <h3 className="font-semibold text-lg mb-2">{path.title}</h3>
+                    <p className="text-muted-foreground text-sm leading-relaxed flex-1">
+                      {path.description}
+                    </p>
+                    {"price" in path && path.price && (
+                      <p className="text-sm font-medium text-primary mt-3">{path.price}</p>
+                    )}
+                    <a
+                      href={path.href}
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-primary mt-4 group-hover:gap-2.5 transition-all"
+                      data-testid={`link-solution-${index}`}
+                    >
+                      {path.cta}
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </a>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           </div>
         </section>
 
-        <section className="border-t border-b bg-muted/20 py-10 px-4 sm:px-6 lg:px-8" data-testid="trust-bar">
-          <div className="max-w-7xl mx-auto">
+        <section className="border-t border-b border-border/40 py-12 px-4 sm:px-6 lg:px-8" data-testid="trust-bar">
+          <div className="max-w-4xl mx-auto">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
               {trustStats.map((stat, idx) => (
                 <div key={idx} className="text-center" data-testid={`trust-stat-${idx}`}>
@@ -529,184 +462,25 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="for-organisations" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
-          <div className="max-w-7xl mx-auto">
+        <section id="how-it-works" className="py-24 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-4xl mx-auto">
             <div className="text-center mb-16">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium mb-4">
-                <ShieldCheck className="h-4 w-4" />
-                For Organisations
-              </div>
-              <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-                Build Trust Through Verified Compliance
-              </h2>
-              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                Whether you're starting a company, verifying your workforce, or screening suppliers, Cellion One gives you the tools to stay compliant and credible.
+              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">How It Works</h2>
+              <p className="text-muted-foreground mt-4 text-lg">
+                Three simple steps to get started
               </p>
             </div>
 
-            <div className="grid sm:grid-cols-1 lg:grid-cols-3 gap-6">
-              <Card className="hover-elevate group" data-testid="card-offering-incorporate">
-                <CardContent className="p-6 flex flex-col h-full">
-                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                    <Building2 className="h-6 w-6 text-primary" />
+            <div className="grid md:grid-cols-3 gap-12 md:gap-8">
+              {steps.map((item, index) => (
+                <div key={index} className="relative text-center">
+                  <div className="h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold mx-auto mb-5">
+                    {item.step}
                   </div>
-                  <h3 className="font-semibold text-lg mb-2">Incorporate a Company</h3>
-                  <p className="text-muted-foreground text-sm mb-4 flex-1">
-                    Register your Nigerian limited liability company with the CAC. Our licensed lawyers handle filings, follow-ups, and deliver your stamped originals.
-                  </p>
-                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <span className="text-sm font-semibold text-primary">From ₦100,000</span>
-                    <Button size="sm" asChild data-testid="button-offering-incorporate">
-                      <a href="/register" className="gap-1.5">
-                        Get Started <ArrowRight className="h-3.5 w-3.5" />
-                      </a>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="hover-elevate group" data-testid="card-offering-employees">
-                <CardContent className="p-6 flex flex-col h-full">
-                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                    <UserCheck className="h-6 w-6 text-primary" />
-                  </div>
-                  <h3 className="font-semibold text-lg mb-2">Verify Employees</h3>
-                  <p className="text-muted-foreground text-sm mb-4 flex-1">
-                    Run individual identity verification on employees and team members. Includes BVN/NIN validation, document checks, biometrics, and AML screening.
-                  </p>
-                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <span className="text-sm font-semibold text-primary">₦10,000 / person</span>
-                    <Button size="sm" asChild data-testid="button-offering-employees">
-                      <a href="/register" className="gap-1.5">
-                        Get Started <ArrowRight className="h-3.5 w-3.5" />
-                      </a>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="hover-elevate group" data-testid="card-offering-suppliers">
-                <CardContent className="p-6 flex flex-col h-full">
-                  <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                    <Building className="h-6 w-6 text-primary" />
-                  </div>
-                  <h3 className="font-semibold text-lg mb-2">Verify Suppliers</h3>
-                  <p className="text-muted-foreground text-sm mb-4 flex-1">
-                    Comprehensive corporate due diligence for your vendors and suppliers. Verify company registration, directors, financials, and compliance status.
-                  </p>
-                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <span className="text-sm font-semibold text-primary">₦100,000 / company</span>
-                    <Button size="sm" asChild data-testid="button-offering-suppliers">
-                      <a href="/register" className="gap-1.5">
-                        Get Started <ArrowRight className="h-3.5 w-3.5" />
-                      </a>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <div className="mt-16" data-testid="integration-paths">
-              <div className="text-center mb-10">
-                <h3 className="text-2xl font-bold mb-3">Choose How You Integrate</h3>
-                <p className="text-muted-foreground max-w-xl mx-auto">
-                  Whether you prefer a visual dashboard or programmatic access, we've got you covered.
-                </p>
-              </div>
-
-              <div className="grid sm:grid-cols-2 gap-6 max-w-4xl mx-auto">
-                <Card className="hover-elevate group relative overflow-hidden" data-testid="card-path-dashboard">
-                  <CardContent className="p-6 flex flex-col h-full">
-                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                      <LayoutDashboard className="h-6 w-6 text-primary" />
-                    </div>
-                    <h4 className="font-semibold text-lg mb-2">Web Dashboard</h4>
-                    <p className="text-muted-foreground text-sm mb-5">
-                      Manage verifications, invite team members, review results, and download audit certificates through our intuitive interface.
-                    </p>
-                    <ul className="space-y-2.5 mb-6 flex-1">
-                      {[
-                        { icon: Users, text: "Team collaboration" },
-                        { icon: Shield, text: "Document management" },
-                        { icon: Bell, text: "Real-time notifications" },
-                        { icon: Award, text: "Audit certificates" },
-                      ].map((feat, i) => (
-                        <li key={i} className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                          <feat.icon className="h-4 w-4 text-primary flex-shrink-0" />
-                          {feat.text}
-                        </li>
-                      ))}
-                    </ul>
-                    <Button asChild className="w-full gap-2" data-testid="button-path-dashboard">
-                      <a href="/register">
-                        Get Started
-                        <ArrowRight className="h-4 w-4" />
-                      </a>
-                    </Button>
-                  </CardContent>
-                </Card>
-
-                <Card className="hover-elevate group relative overflow-hidden" data-testid="card-path-api">
-                  <CardContent className="p-6 flex flex-col h-full">
-                    <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                      <Code2 className="h-6 w-6 text-primary" />
-                    </div>
-                    <h4 className="font-semibold text-lg mb-2">API Integration</h4>
-                    <p className="text-muted-foreground text-sm mb-5">
-                      Submit verification requests programmatically, receive webhook callbacks, and automate your compliance workflow.
-                    </p>
-                    <ul className="space-y-2.5 mb-6 flex-1">
-                      {[
-                        { icon: Globe, text: "REST API endpoints" },
-                        { icon: Webhook, text: "Webhook callbacks" },
-                        { icon: CreditCard, text: "Pre-paid or invoiced billing" },
-                        { icon: FileCode2, text: "cURL, Node.js & Python examples" },
-                      ].map((feat, i) => (
-                        <li key={i} className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                          <feat.icon className="h-4 w-4 text-primary flex-shrink-0" />
-                          {feat.text}
-                        </li>
-                      ))}
-                    </ul>
-                    <Button variant="outline" asChild className="w-full gap-2" data-testid="button-path-api">
-                      <a href="/api-docs">
-                        View API Docs
-                        <ArrowRight className="h-4 w-4" />
-                      </a>
-                    </Button>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="how-it-works" className="py-20 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl sm:text-4xl font-bold mb-4">How It Works</h2>
-              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                Get your company registered in four simple steps
-              </p>
-            </div>
-
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8">
-              {[
-                { step: "1", title: "Create Account", desc: "Sign up and verify your identity once" },
-                { step: "2", title: "Fill Application", desc: "Complete the digital intake form" },
-                { step: "3", title: "Pay & Submit", desc: "Make payment and submit for processing" },
-                { step: "4", title: "Receive Documents", desc: "Get your stamped originals delivered" }
-              ].map((item, index) => (
-                <div key={index} className="relative">
-                  <div className="flex flex-col items-center text-center">
-                    <div className="h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold mb-4">
-                      {item.step}
-                    </div>
-                    <h3 className="font-semibold text-lg mb-2">{item.title}</h3>
-                    <p className="text-muted-foreground">{item.desc}</p>
-                  </div>
-                  {index < 3 && (
-                    <div className="hidden lg:block absolute top-7 left-[60%] w-[80%] border-t-2 border-dashed border-muted" />
+                  <h3 className="font-semibold text-lg mb-2">{item.title}</h3>
+                  <p className="text-muted-foreground text-sm leading-relaxed">{item.desc}</p>
+                  {index < 2 && (
+                    <div className="hidden md:block absolute top-7 left-[60%] w-[80%] border-t-2 border-dashed border-border" />
                   )}
                 </div>
               ))}
@@ -714,88 +488,12 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="pricing" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
-          <div className="max-w-7xl mx-auto">
+        <section id="faq" className="py-24 px-4 sm:px-6 lg:px-8 bg-muted/20">
+          <div className="max-w-2xl mx-auto">
             <div className="text-center mb-16">
-              <h2 className="text-3xl sm:text-4xl font-bold mb-4">Company Incorporation Pricing</h2>
-              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                Transparent, all-inclusive pricing for your Nigerian company registration. Choose the share capital tier that fits your business.
-              </p>
-            </div>
-
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
-              {pricingTiers.map((tier, index) => (
-                <Card key={index} className={`relative overflow-hidden ${tier.popular ? "border-primary shadow-lg" : ""}`} data-testid={`card-pricing-${index}`}>
-                  {tier.popular && (
-                    <div className="bg-primary text-primary-foreground text-center text-xs font-medium py-1">
-                      Most Popular
-                    </div>
-                  )}
-                  <CardContent className="p-6 flex flex-col items-center text-center">
-                    <h3 className="font-semibold text-lg mb-1">{tier.name}</h3>
-                    <p className="text-xs text-muted-foreground mb-4">{tier.sharecap}</p>
-                    <p className="text-2xl font-bold text-primary mb-4">{tier.price}</p>
-                    <ul className="text-xs text-muted-foreground space-y-2 mb-6">
-                      <li className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-primary flex-shrink-0" /> CAC Filing & Registration</li>
-                      <li className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-primary flex-shrink-0" /> Expert Lawyer Assigned</li>
-                      <li className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-primary flex-shrink-0" /> Stamped Originals Delivered</li>
-                      <li className="flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-primary flex-shrink-0" /> Digital Document Vault</li>
-                    </ul>
-                    <Button size="sm" asChild className="w-full" variant={tier.popular ? "default" : "outline"} data-testid={`button-pricing-${index}`}>
-                      <a href="/register">Get Started</a>
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            <p className="text-center text-sm text-muted-foreground mt-8">
-              All prices are in Nigerian Naira (NGN). A one-time identity verification fee of ₦10,000 per person applies to cover BVN/NIN validation, document verification, biometric checks, and AML screening.
-            </p>
-
-            <div className="max-w-3xl mx-auto mt-10 p-6 rounded-xl border border-border bg-card/50" data-testid="card-managed-service-note">
-              <h3 className="text-sm font-semibold mb-2">Why use a managed service?</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                While the Corporate Affairs Commission (CAC) and other Nigerian agencies have digitised parts of their processes, company registration in Nigeria still requires in-person follow-ups, portal submissions/physical document submissions, and coordination with regulatory offices. Many registrations — including SCUML, TIN, and trademark filings — can technically be done by registering online or visiting the relevant offices yourself, but they often involve multiple trips, long wait times, and bureaucratic delays. What you're paying for is a managed service: our network of licensed lawyers handles all filings, follow-ups, and correspondence on your behalf so you don't have to.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section id="services" className="py-20 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl sm:text-4xl font-bold mb-4">Products & Services</h2>
-              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                Beyond incorporation — everything you need to set up and run your business in Nigeria.
-              </p>
-            </div>
-
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {services.map((service, index) => (
-                <Card key={index} className="hover-elevate group" data-testid={`card-service-${index}`}>
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                        <service.icon className="h-6 w-6 text-primary" />
-                      </div>
-                      <Badge variant="secondary" className="text-xs">{service.price}</Badge>
-                    </div>
-                    <h3 className="font-semibold text-lg mb-2">{service.title}</h3>
-                    <p className="text-muted-foreground text-sm">{service.description}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section id="faq" className="py-20 px-4 sm:px-6 lg:px-8 bg-muted/30">
-          <div className="max-w-3xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl sm:text-4xl font-bold mb-4">Frequently Asked Questions</h2>
-              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                Find answers to common questions about our services
+              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">Frequently Asked Questions</h2>
+              <p className="text-muted-foreground mt-4 text-lg">
+                Quick answers to common questions
               </p>
             </div>
 
@@ -806,7 +504,7 @@ export default function LandingPage() {
                     {item.question}
                   </AccordionTrigger>
                   <AccordionContent data-testid={`faq-content-${index}`}>
-                    <p className="text-muted-foreground">{item.answer}</p>
+                    <p className="text-muted-foreground leading-relaxed">{item.answer}</p>
                   </AccordionContent>
                 </AccordionItem>
               ))}
@@ -814,30 +512,26 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <ContactSection />
-
-        <section className="py-20 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-4xl mx-auto text-center">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-              Ready to Get Started?
+        <section className="py-24 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-2xl mx-auto text-center">
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Ready to get started?
             </h2>
-            <p className="text-lg text-muted-foreground mb-8 max-w-2xl mx-auto">
-              Whether you need to incorporate a company or verify your employees and suppliers, Cellion One makes compliance simple and reliable.
+            <p className="text-lg text-muted-foreground mb-8">
+              Join hundreds of companies building with confidence on Cellion One.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button size="lg" asChild className="gap-2" data-testid="button-cta-start">
-                <a href="/register">
-                  Get Started Today
-                  <ArrowRight className="h-4 w-4" />
-                </a>
-              </Button>
-              <Button size="lg" variant="outline" asChild className="gap-2" data-testid="button-cta-api">
-                <a href="/api-docs">
-                  <Code2 className="h-4 w-4" />
-                  Explore the API
-                </a>
-              </Button>
-            </div>
+            <Button size="lg" asChild className="gap-2 text-base px-8 h-12" data-testid="button-cta-start">
+              <a href="/register">
+                Get Started Today
+                <ArrowRight className="h-4 w-4" />
+              </a>
+            </Button>
+            <p className="text-sm text-muted-foreground mt-6">
+              Have questions?{" "}
+              <a href="mailto:hello@cellionone.com" className="text-primary hover:underline" data-testid="link-contact-email">
+                hello@cellionone.com
+              </a>
+            </p>
           </div>
         </section>
       </main>

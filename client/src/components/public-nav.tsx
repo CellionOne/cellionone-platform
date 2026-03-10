@@ -39,6 +39,7 @@ const resourcesDropdown = [
   { icon: Users, label: "How It Works", description: "Simple 3-step process", href: "/#how-it-works" },
   { icon: Shield, label: "FAQ", description: "Common questions answered", href: "/#faq" },
   { icon: Award, label: "Join as Lawyer", description: "Partner with us as a legal professional", href: "/apply-lawyer" },
+  { icon: Handshake, label: "Partner With Us", description: "Verification and banking partnerships", href: "/partner-with-us" },
 ];
 
 function NavDropdown({ label, items, testId }: { label: string; items: typeof productsDropdown; testId: string }) {

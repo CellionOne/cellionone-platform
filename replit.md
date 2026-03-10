@@ -37,17 +37,18 @@ Key architectural decisions and features include:
 - **Notification Centre:** In-app notification system with a bell icon, popover, and a full notifications page.
 - **Digital Signature Pad:** Personal profile page offers draw-on-screen and upload options for signature specimens, stored securely.
 - **Shared Public Navigation & Footer:** Reusable components for marketing and public pages, including navigation, product/resource dropdowns, pricing, contact links, and theme toggling.
-- **Landing Page:** Clean, spacious, user-guided design with 6 sections: hero, "What are you looking to do?" solution paths (5 cards: Incorporate, Verify, Procure, Virtual Office, Comply), trust bar, 3-step How It Works, FAQ (4 items), and final CTA. ContactSection component preserved but not rendered on landing.
+- **Landing Page:** Clean, spacious, founder-focused design with 6 sections: hero ("The Smarter Way to Start and Run a Compliant Business in Nigeria"), "What does your business need?" solution paths (6 cards: Incorporate, Registered Office, SCUML, Trademark, Identity Verification, Supplier Verification), trust bar, 3-step How It Works, FAQ (4 items), and final CTA. ContactSection component preserved but not rendered on landing.
 - **Verified Entities Registry:** Cross-platform catalogue of all verified individuals and companies, auto-populated upon KYC approval.
 - **Verified Procurement Marketplace:** Full RFQ/Bid/Contract/Invoice system for verified organisations. Features include: RFQ creation (draft/publish workflow, open/invited visibility, line items, categories), bid submission with templates, contract award with milestone tracking, professional invoice generation with manual tax entry, and escrow infrastructure (gated behind `enable_escrow_payments` feature flag until banking partner secured). All amounts stored in kobo. Contract numbers: CO-YYYY-XXXXX, Invoice numbers: INV-YYYY-XXXXX. Routes in `server/routes/procurementRoutes.ts`, pages in `client/src/pages/procurement/`. 20 seeded categories covering Nigerian business sectors.
-- **Admin Proposals Page:** Admin-only page for viewing partnership proposals as formatted HTML for browser-native printing/saving.
+- **Admin Proposals Page:** Admin-only page for viewing partnership proposals as formatted HTML for browser-native printing/saving. Includes Bank Partnership and Verification Partner proposals.
+- **Partner With Us Page:** Public page at `/partner-with-us` showcasing two partnership tracks (Verification Partner for corporates/fintechs, Banking Partner for banks) with enquiry form posting to `/api/contact`.
 - **Certificate HTML Fallback:** Verification certificates support `?format=html` query parameter for browser-rendered viewing when PDF generation fails.
 - **SEO & Structured Data:**
   - Open Graph and Twitter Card meta tags in `index.html` for social sharing previews.
   - Schema.org JSON-LD structured data on landing page: Organization, WebSite, FAQPage, and Service schemas.
   - `robots.txt` blocking private routes (`/admin/`, `/founder/`, `/lawyer/`, `/kyc/`, `/settings/`, `/profile/`, `/api/`).
-  - `sitemap.xml` listing all 8 public pages with priority/changefreq.
-  - `usePageMeta` hook (`client/src/hooks/use-page-meta.ts`) for per-page title, meta description, OG tags, Twitter tags, and canonical URL updates. Applied to: landing, why-cellion-one, api-docs, terms, privacy, apply-lawyer, login, register.
+  - `sitemap.xml` listing all 9 public pages with priority/changefreq.
+  - `usePageMeta` hook (`client/src/hooks/use-page-meta.ts`) for per-page title, meta description, OG tags, Twitter tags, and canonical URL updates. Applied to: landing, why-cellion-one, api-docs, terms, privacy, apply-lawyer, partner-with-us, login, register.
   - Canonical domain: `https://cellionone.com`.
 
 ## External Dependencies

@@ -30,6 +30,7 @@ export function PublicFooter() {
               <ul className="space-y-3">
                 <li><a href="/why-cellion-one" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-why">Why Cellion One</a></li>
                 <li><a href="/apply-lawyer" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-apply-lawyer">Join as Lawyer</a></li>
+                <li><a href="/partner-with-us" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-partner">Partner With Us</a></li>
                 <li><a href="mailto:hello@cellionone.com" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-footer-contact">Contact</a></li>
               </ul>
             </div>

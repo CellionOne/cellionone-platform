@@ -272,7 +272,7 @@ export async function registerRoutes(
   const contactSchema = z.object({
     name: z.string().min(1, "Name is required").max(200),
     email: z.string().email("Valid email is required"),
-    subject: z.enum(["General Inquiry", "Incorporation Help", "KYC/Verification", "Technical Support", "Other"]),
+    subject: z.enum(["General Inquiry", "Incorporation Help", "KYC/Verification", "Technical Support", "Partnership Enquiry", "Other"]),
     message: z.string().min(10, "Message must be at least 10 characters").max(5000),
   });
 
@@ -432,6 +432,38 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error generating proposal HTML:", error);
       res.status(500).json({ message: "Failed to generate proposal HTML", error: error.message });
+    }
+  });
+
+  app.get("/api/admin/proposals/verification-partner/html", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateVerificationPartnerProposalHTML } = await import("./templates/verification-partner-proposal");
+      const html = generateVerificationPartnerProposalHTML();
+      res.setHeader("Content-Type", "text/html");
+      res.send(html);
+    } catch (error: any) {
+      console.error("Error generating verification partner proposal HTML:", error);
+      res.status(500).json({ message: "Failed to generate proposal HTML", error: error.message });
+    }
+  });
+
+  app.get("/api/admin/proposals/verification-partner", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateVerificationPartnerProposalHTML } = await import("./templates/verification-partner-proposal");
+      const { generatePdf } = await import("./services/pdfService");
+      const html = generateVerificationPartnerProposalHTML();
+      const pdfBuffer = await generatePdf(html, {
+        format: 'A4',
+        margin: { top: '40px', right: '50px', bottom: '40px', left: '50px' },
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="Cellion_One_Verification_Partner_Proposal.pdf"');
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error("Error generating verification partner proposal PDF:", error);
+      const htmlUrl = "/api/admin/proposals/verification-partner/html";
+      res.status(500).json({ message: "Failed to generate PDF. You can view the proposal as HTML instead.", htmlUrl });
     }
   });
 

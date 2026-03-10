@@ -24,8 +24,9 @@ import {
   ShieldCheck,
   ArrowRight,
   MapPin,
-  CalendarCheck,
-  Handshake,
+  BadgeCheck,
+  Stamp,
+  Building,
   Send,
   Loader2,
   Mail,
@@ -46,38 +47,49 @@ const trustStats = [
 const solutionPaths = [
   {
     icon: Building2,
-    title: "Start a Company",
-    description: "Register your Nigerian LLC. Licensed lawyers handle all CAC filings and deliver stamped originals.",
+    title: "Incorporate Your Company",
+    description: "Register your LLC or NGO with the CAC. Licensed lawyers handle all filings and deliver stamped originals.",
     price: "From ₦100,000",
     cta: "Start Incorporation",
     href: "/register",
   },
   {
-    icon: ShieldCheck,
-    title: "Verify People & Companies",
-    description: "KYC for employees and suppliers — BVN/NIN, biometrics, document checks, and AML screening.",
-    cta: "Start Verifying",
-    href: "/register",
-  },
-  {
-    icon: Handshake,
-    title: "Procure with Trust",
-    description: "RFQ marketplace, bid management, contracts, and invoicing — exclusively for verified organisations.",
-    cta: "Explore Marketplace",
-    href: "/procurement/marketplace",
-  },
-  {
     icon: MapPin,
-    title: "Get a Virtual Office",
-    description: "Premium registered address in Lagos with mail handling, forwarding, and proof-of-address for your company.",
+    title: "Registered Office Address",
+    description: "Business address subscription in Lagos with mail handling, forwarding, and proof-of-address for CAC and FIRS filings.",
     cta: "View Plans",
     href: "/register",
   },
   {
-    icon: CalendarCheck,
-    title: "Stay Compliant",
-    description: "Automated compliance calendar, TIN registration, SCUML certification, and AI legal assistant.",
-    cta: "Learn More",
+    icon: BadgeCheck,
+    title: "SCUML Certification",
+    description: "Get your SCUML certificate from the EFCC — required for designated non-financial businesses and institutions.",
+    price: "₦150,000",
+    cta: "Get Certified",
+    href: "/register",
+  },
+  {
+    icon: Stamp,
+    title: "Trademark Registration",
+    description: "Protect your brand with official trademark registration at the Trademarks Registry, handled in two stages.",
+    price: "₦250,000",
+    cta: "Register Trademark",
+    href: "/register",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Identity Verification",
+    description: "Verify employees, directors, and stakeholders — BVN/NIN validation, biometrics, document checks, and AML screening.",
+    price: "₦10,000/person",
+    cta: "Start Verifying",
+    href: "/register",
+  },
+  {
+    icon: Building,
+    title: "Supplier Verification",
+    description: "Comprehensive corporate due diligence for your vendors and suppliers. Verify registration, directors, financials, and compliance status.",
+    price: "₦100,000/company",
+    cta: "Verify Suppliers",
     href: "/register",
   },
 ];
@@ -103,7 +115,7 @@ const faqItems = [
 
 const steps = [
   { step: "1", title: "Create & Verify", desc: "Create your account and verify your identity in minutes" },
-  { step: "2", title: "Choose Your Service", desc: "Incorporation, KYC, procurement, or virtual office" },
+  { step: "2", title: "Tell Us What You Need", desc: "Tell us what you need — incorporation, verification, registered office, or compliance" },
   { step: "3", title: "We Handle the Rest", desc: "Track everything from your dashboard while we deliver" },
 ];
 
@@ -199,6 +211,7 @@ export function ContactSection() {
                       <SelectItem value="General Inquiry">General Inquiry</SelectItem>
                       <SelectItem value="Incorporation Help">Incorporation Help</SelectItem>
                       <SelectItem value="KYC/Verification">KYC/Verification</SelectItem>
+                      <SelectItem value="Partnership Enquiry">Partnership Enquiry</SelectItem>
                       <SelectItem value="Technical Support">Technical Support</SelectItem>
                       <SelectItem value="Other">Other</SelectItem>
                     </SelectContent>
@@ -238,8 +251,8 @@ export function ContactSection() {
 
 export default function LandingPage() {
   usePageMeta({
-    title: "Cellion One — Company Incorporation & KYC Verification in Nigeria",
-    description: "The compliance infrastructure for African business. Incorporate companies, verify identities, and manage compliance via dashboard or API. Trusted by 500+ companies in Nigeria.",
+    title: "Cellion One — Register and Run a Compliant Business in Nigeria",
+    description: "The smarter way to start and run a compliant business in Nigeria. From company registration to identity verification — we handle the regulatory complexity so you can focus on building your business.",
     canonicalPath: "/",
   });
 
@@ -251,7 +264,7 @@ export default function LandingPage() {
       legalName: "Cellion Platforms Nigeria Limited",
       url: "https://cellionone.com",
       logo: "https://cellionone.com/icon-512.svg",
-      description: "The compliance infrastructure for African business. Incorporate companies, verify identities, and manage compliance — all through one platform.",
+      description: "The smarter way to start and run a compliant business in Nigeria. From company registration to identity verification, SCUML certification, and trademark registration — all through one platform.",
       contactPoint: {
         "@type": "ContactPoint",
         email: "hello@cellionone.com",
@@ -373,13 +386,13 @@ export default function LandingPage() {
 
             <div data-testid="hero-text-container">
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight tracking-tight" data-testid="hero-headline">
-                The Compliance Infrastructure{" "}
-                <span className="text-primary">for African Business</span>
+                The Smarter Way to Start and Run a{" "}
+                <span className="text-primary">Compliant Business in Nigeria</span>
               </h1>
             </div>
 
             <p className="text-lg sm:text-xl text-muted-foreground mt-6 max-w-2xl mx-auto leading-relaxed" data-testid="hero-subtitle">
-              Incorporate companies, verify identities, procure with trust, and stay compliant — all through one platform.
+              From company registration to identity verification — we handle the regulatory complexity so you can focus on building your business.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center mt-10">
@@ -407,7 +420,7 @@ export default function LandingPage() {
           <div className="max-w-5xl mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-3xl sm:text-4xl font-bold tracking-tight" data-testid="text-solutions-heading">
-                What are you looking to do?
+                What does your business need?
               </h2>
               <p className="text-muted-foreground mt-4 text-lg max-w-xl mx-auto">
                 Choose the service that fits your needs. We'll guide you from there.
@@ -418,9 +431,7 @@ export default function LandingPage() {
               {solutionPaths.map((path, index) => (
                 <Card
                   key={index}
-                  className={`group relative border border-border/60 bg-card/50 hover:border-primary/30 hover:shadow-lg transition-all duration-300 ${
-                    index >= 3 ? "sm:col-span-1 lg:col-span-1" : ""
-                  }`}
+                  className="group relative border border-border/60 bg-card/50 hover:border-primary/30 hover:shadow-lg transition-all duration-300"
                   data-testid={`card-solution-${index}`}
                 >
                   <CardContent className="p-8 flex flex-col h-full">
@@ -515,10 +526,10 @@ export default function LandingPage() {
         <section className="py-24 px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl mx-auto text-center">
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
-              Ready to get started?
+              Start building your verified business today
             </h2>
             <p className="text-lg text-muted-foreground mb-8">
-              Join hundreds of companies building with confidence on Cellion One.
+              Join hundreds of founders who trust Cellion One to handle the regulatory complexity.
             </p>
             <Button size="lg" asChild className="gap-2 text-base px-8 h-12" data-testid="button-cta-start">
               <a href="/register">

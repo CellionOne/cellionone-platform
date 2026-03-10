@@ -51,6 +51,7 @@ import ApiDocsPage from "@/pages/api-docs";
 import ApplyLawyerPage from "@/pages/apply-lawyer";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
+import PartnerWithUsPage from "@/pages/partner-with-us";
 import LoginPage from "@/pages/auth/login";
 import RegisterPage from "@/pages/auth/register";
 import ForgotPasswordPage from "@/pages/auth/forgot-password";
@@ -332,6 +333,7 @@ function Router() {
       <Route path="/api-docs" component={ApiDocsPage} />
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
+      <Route path="/partner-with-us" component={PartnerWithUsPage} />
       
       <Route path="/login" component={LoginPage} />
       <Route path="/register" component={RegisterPage} />

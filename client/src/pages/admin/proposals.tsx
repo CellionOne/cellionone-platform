@@ -3,7 +3,7 @@ import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/loading-spinner";
-import { FileText, Printer, ArrowLeft, Building2 } from "lucide-react";
+import { FileText, Printer, ArrowLeft, Building2, ShieldCheck } from "lucide-react";
 
 interface Proposal {
   id: string;
@@ -20,6 +20,13 @@ const proposals: Proposal[] = [
     description: "A comprehensive partnership proposal for banking institutions, outlining Celion's services and collaboration opportunities.",
     icon: Building2,
     htmlEndpoint: "/api/admin/proposals/bank-partnership/html",
+  },
+  {
+    id: "verification-partner",
+    title: "Verification Partner Proposal",
+    description: "A proposal for organisations seeking identity and corporate verification services — HR firms, fintechs, insurance companies, and procurement teams.",
+    icon: ShieldCheck,
+    htmlEndpoint: "/api/admin/proposals/verification-partner/html",
   },
 ];
 

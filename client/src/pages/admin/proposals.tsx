@@ -3,7 +3,7 @@ import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/loading-spinner";
-import { FileText, Printer, ArrowLeft, Building2, ShieldCheck } from "lucide-react";
+import { FileText, Printer, ArrowLeft, Building2, ShieldCheck, Truck } from "lucide-react";
 
 interface Proposal {
   id: string;
@@ -17,7 +17,7 @@ const proposals: Proposal[] = [
   {
     id: "bank-partnership",
     title: "Bank Partnership Proposal",
-    description: "A comprehensive partnership proposal for banking institutions, outlining Celion's services and collaboration opportunities.",
+    description: "A comprehensive partnership proposal for banking institutions, outlining Cellion's services and collaboration opportunities.",
     icon: Building2,
     htmlEndpoint: "/api/admin/proposals/bank-partnership/html",
   },
@@ -27,6 +27,13 @@ const proposals: Proposal[] = [
     description: "A proposal for organisations seeking identity and corporate verification services — HR firms, fintechs, insurance companies, and procurement teams.",
     icon: ShieldCheck,
     htmlEndpoint: "/api/admin/proposals/verification-partner/html",
+  },
+  {
+    id: "supplier-verification",
+    title: "Supplier Verification Proposal",
+    description: "A proposal for organisations that need to vet their vendors and supply chain before onboarding — covering CAC checks, director identity, AML screening, compliance status, and the Verified Procurement Marketplace.",
+    icon: Truck,
+    htmlEndpoint: "/api/admin/proposals/supplier-verification/html",
   },
 ];
 

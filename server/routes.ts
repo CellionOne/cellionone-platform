@@ -467,6 +467,37 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/proposals/supplier-verification/html", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateSupplierVerificationProposalHTML } = await import("./templates/supplier-verification-proposal");
+      const html = generateSupplierVerificationProposalHTML();
+      res.setHeader("Content-Type", "text/html");
+      res.send(html);
+    } catch (error: any) {
+      console.error("Error generating supplier verification proposal HTML:", error);
+      res.status(500).json({ message: "Failed to generate proposal HTML", error: error.message });
+    }
+  });
+
+  app.get("/api/admin/proposals/supplier-verification", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateSupplierVerificationProposalHTML } = await import("./templates/supplier-verification-proposal");
+      const { generatePdf } = await import("./services/pdfService");
+      const html = generateSupplierVerificationProposalHTML();
+      const pdfBuffer = await generatePdf(html, {
+        format: 'A4',
+        margin: { top: '40px', right: '50px', bottom: '40px', left: '50px' },
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="Cellion_One_Supplier_Verification_Proposal.pdf"');
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error("Error generating supplier verification proposal PDF:", error);
+      const htmlUrl = "/api/admin/proposals/supplier-verification/html";
+      res.status(500).json({ message: "Failed to generate PDF. You can view the proposal as HTML instead.", htmlUrl });
+    }
+  });
+
   app.get("/api/admin/proposals/bank-partnership", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const { generateBankPartnershipProposalHTML } = await import("./templates/bank-partnership-proposal");

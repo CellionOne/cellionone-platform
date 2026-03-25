@@ -2596,8 +2596,12 @@ export function registerKycServiceRoutes(app: Express) {
       const effectiveDocumentPath = documentObjectPath || prefillData?.idDocumentUrl || null;
 
       // Validate only steps that are required and not covered by prefill
-      if (identityRequired && !firstName && !lastName && !prefillData?.firstName) {
-        return res.status(422).json({ message: "First name and last name are required to complete verification." });
+      if (identityRequired) {
+        const hasFirstName = !!(firstName || prefillData?.firstName);
+        const hasLastName = !!(lastName || prefillData?.lastName);
+        if (!hasFirstName || !hasLastName) {
+          return res.status(422).json({ message: "First name and last name are required to complete verification." });
+        }
       }
       if (documentRequired && !effectiveDocumentPath) {
         return res.status(422).json({ message: "A government-issued ID document is required to complete verification." });

@@ -2449,6 +2449,14 @@ export function registerKycServiceRoutes(app: Express) {
       const now = new Date();
       if (session.expiresAt && session.expiresAt < now && session.status === "pending") {
         await db.update(kycSessions).set({ status: "expired", updatedAt: new Date() }).where(eq(kycSessions.id, session.id));
+        webhookService.deliverWebhook(session.orgId, "session.expired", {
+          sessionId: session.id,
+          sessionToken: session.sessionToken,
+          subjectEmail: session.subjectEmail,
+          subjectName: session.subjectName,
+          metadata: session.metadata,
+          expiredAt: new Date().toISOString(),
+        }).catch((err: any) => console.error("[KYC Session] Failed to deliver session.expired webhook:", err));
         return res.status(410).json({ message: "Session expired", status: "expired" });
       }
       if (session.status === "expired") return res.status(410).json({ message: "Session expired", status: "expired" });

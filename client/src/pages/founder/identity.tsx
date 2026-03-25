@@ -1,5 +1,6 @@
 import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useState, useRef } from "react";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,8 +19,13 @@ import {
   Link2,
   AlertTriangle,
   CalendarClock,
+  Upload,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { LiveCaptureWidget } from "@/components/live-capture-widget";
 
 interface VerificationInfo {
   founderVerified: boolean;
@@ -43,10 +49,49 @@ function formatRole(role: string): string {
 
 export default function IdentityVerificationPage() {
   const { user } = useAuth();
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selfieDone, setSelfieDone] = useState(false);
+  const [selfieError, setSelfieError] = useState("");
 
   const { data: verificationInfo, isLoading } = useQuery<VerificationInfo>({
     queryKey: ["/api/checkout/verification-info"],
   });
+
+  const selfieMutation = useMutation({
+    mutationFn: (selfieBase64: string) =>
+      apiRequest("POST", "/api/verification/smile-id/submit-selfie", { selfieBase64 }),
+    onSuccess: () => {
+      setSelfieDone(true);
+      setSelfieError("");
+      queryClient.invalidateQueries({ queryKey: ["/api/checkout/verification-info"] });
+      toast({ title: "Selfie submitted", description: "Your biometric selfie has been submitted for processing." });
+    },
+    onError: (err: any) => {
+      setSelfieError(err?.message ?? "Selfie submission failed. Please try again.");
+      toast({ title: "Submission failed", description: err?.message ?? "Please try again.", variant: "destructive" });
+    },
+  });
+
+  function handleCapture(base64DataUrl: string) {
+    setSelfieError("");
+    selfieMutation.mutate(base64DataUrl);
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setSelfieError("Please upload an image file.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result as string;
+      if (result) handleCapture(result);
+    };
+    reader.readAsDataURL(file);
+  }
 
   const founderVerified = verificationInfo?.founderVerified ?? false;
   const people = verificationInfo?.people ?? [];
@@ -79,7 +124,7 @@ export default function IdentityVerificationPage() {
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Verification Expired</AlertTitle>
             <AlertDescription>
-              Your identity verification expired on {formatExpiryDate(founderExpiresAt)}. You must re-verify to continue placing orders. Please go to your profile to complete a new biometric check.
+              Your identity verification expired on {formatExpiryDate(founderExpiresAt)}. You must re-verify to continue placing orders. Use the biometric selfie step below to submit a new verification.
             </AlertDescription>
           </Alert>
         )}
@@ -166,17 +211,23 @@ export default function IdentityVerificationPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
-                  <Camera className="h-5 w-5 text-primary" />
+                  {selfieDone ? (
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                  ) : (
+                    <Camera className="h-5 w-5 text-primary" />
+                  )}
                 </div>
                 <div>
                   <CardTitle className="text-base">Step 3 of 4: Biometric Selfie</CardTitle>
                   <CardDescription>
-                    After paying, go to your profile to complete your biometric check
+                    {selfieDone
+                      ? "Selfie submitted — processing in progress"
+                      : "Take a live selfie to confirm your identity"}
                   </CardDescription>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
               <div className="space-y-2 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
                   <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center text-xs font-bold shrink-0">1</div>
@@ -187,24 +238,70 @@ export default function IdentityVerificationPage() {
                   <span className="line-through opacity-60">Government ID authenticity</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center text-xs font-bold shrink-0 text-primary-foreground">3</div>
-                  <span className="font-medium text-foreground">Biometric selfie with liveness detection</span>
+                  <div className={`h-5 w-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${selfieDone ? "bg-green-500 text-white" : "bg-primary text-primary-foreground"}`}>
+                    {selfieDone ? "✓" : "3"}
+                  </div>
+                  <span className={`font-medium ${selfieDone ? "text-green-700 dark:text-green-400 line-through opacity-70" : "text-foreground"}`}>
+                    Biometric selfie with liveness detection
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center text-xs font-bold shrink-0">4</div>
                   <span>AML and sanctions screening</span>
                 </div>
               </div>
-              <Link href="/profile">
-                <Button variant="outline" className="w-full" data-testid="button-go-to-profile-biometric">
-                  <Camera className="h-4 w-4 mr-2" />
-                  Complete Biometric on Profile Page
-                  <ArrowRight className="h-4 w-4 ml-auto" />
-                </Button>
-              </Link>
-              <p className="text-xs text-muted-foreground">
-                The biometric selfie step is available under "Biometric Verification" on your personal profile page.
-              </p>
+
+              {selfieDone ? (
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800" data-testid="alert-selfie-done">
+                  <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-green-700 dark:text-green-400">Selfie received</p>
+                    <p className="text-xs text-green-600 dark:text-green-500">Your verification result will be updated shortly.</p>
+                  </div>
+                </div>
+              ) : selfieMutation.isPending ? (
+                <div className="flex items-center justify-center gap-3 p-6" data-testid="selfie-submitting">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span className="text-sm text-muted-foreground">Submitting selfie…</span>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <LiveCaptureWidget onCapture={handleCapture} data-testid="widget-live-capture" />
+
+                  {selfieError && (
+                    <p className="text-xs text-red-600 dark:text-red-400 text-center" data-testid="text-selfie-error">{selfieError}</p>
+                  )}
+
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center"><Separator /></div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-primary/5 px-2 text-muted-foreground">or</span>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    className="w-full text-sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    data-testid="button-upload-selfie"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload a photo instead
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="user"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                    data-testid="input-selfie-upload"
+                  />
+                  <p className="text-xs text-muted-foreground text-center">
+                    Use the upload option if your camera is unavailable
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

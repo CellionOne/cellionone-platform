@@ -39,6 +39,12 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  Settings2,
+  Camera,
+  ScanFace,
+  Zap,
+  CheckCircle2,
+  Timer,
 } from "lucide-react";
 import type {
   KycOrganisation, KycOrgMember, KycDocumentRequirement, KycVerificationTemplate,
@@ -81,6 +87,7 @@ export default function OrgSettingsPage() {
   const [orgEmployeePortal, setOrgEmployeePortal] = useState(true);
   const [orgSupplierPortal, setOrgSupplierPortal] = useState(true);
   const [orgInitialized, setOrgInitialized] = useState(false);
+  const [integrationProfileMode, setIntegrationProfileMode] = useState<"full_hosted" | "prefill_selfie" | "selfie_only" | null>(null);
 
   const { data: org, isLoading } = useQuery<OrgDetail>({
     queryKey: ["/api/kyc-service/organisations", orgId],
@@ -93,6 +100,9 @@ export default function OrgSettingsPage() {
     setOrgAddress(org.address || "");
     setOrgEmployeePortal(org.employeePortalEnabled ?? true);
     setOrgSupplierPortal(org.supplierPortalEnabled ?? true);
+    if (org.integrationProfile?.mode) {
+      setIntegrationProfileMode(org.integrationProfile.mode);
+    }
     setOrgInitialized(true);
   }
 
@@ -293,6 +303,7 @@ export default function OrgSettingsPage() {
             <TabsTrigger value="team" data-testid="tab-team">Team</TabsTrigger>
             <TabsTrigger value="requirements" data-testid="tab-requirements">Documents</TabsTrigger>
             <TabsTrigger value="templates" data-testid="tab-templates">Templates</TabsTrigger>
+            <TabsTrigger value="integration" data-testid="tab-integration">Integration</TabsTrigger>
             <TabsTrigger value="api-keys" data-testid="tab-api-keys">API Keys</TabsTrigger>
             <TabsTrigger value="webhooks" data-testid="tab-webhooks">Webhooks</TabsTrigger>
             <TabsTrigger value="billing" data-testid="tab-billing">Billing</TabsTrigger>
@@ -565,6 +576,15 @@ export default function OrgSettingsPage() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="integration" className="space-y-4 mt-4">
+            <IntegrationProfileTab
+              orgId={orgId!}
+              currentMode={integrationProfileMode}
+              onModeChange={setIntegrationProfileMode}
+              updateMutation={updateOrgMutation}
+            />
           </TabsContent>
 
           <ApiKeysTab orgId={orgId!} />
@@ -1680,5 +1700,166 @@ function BillingTab({ orgId }: { orgId: string }) {
         </DialogContent>
       </Dialog>
     </TabsContent>
+  );
+}
+
+function IntegrationProfileTab({
+  orgId,
+  currentMode,
+  onModeChange,
+  updateMutation,
+}: {
+  orgId: string;
+  currentMode: "full_hosted" | "prefill_selfie" | "selfie_only" | null;
+  onModeChange: (mode: "full_hosted" | "prefill_selfie" | "selfie_only") => void;
+  updateMutation: any;
+}) {
+  const { toast } = useToast();
+  const [selectedMode, setSelectedMode] = useState<"full_hosted" | "prefill_selfie" | "selfie_only" | null>(currentMode);
+
+  const profiles: {
+    mode: "full_hosted" | "prefill_selfie" | "selfie_only";
+    label: string;
+    description: string;
+    steps: string[];
+    timing: string;
+    icon: any;
+    timingColor: string;
+  }[] = [
+    {
+      mode: "full_hosted",
+      label: "Full Hosted",
+      description: "Your customer provides everything: name, date of birth, ID document photo, and a liveness selfie. Best for onboarding flows where you have no prior data.",
+      steps: ["Identity details", "ID document upload", "Liveness selfie"],
+      timing: "~2–5 minutes",
+      timingColor: "text-amber-600 dark:text-amber-400",
+      icon: Layers,
+    },
+    {
+      mode: "prefill_selfie",
+      label: "Prefill + Selfie",
+      description: "Your system prefills the subject's name and date of birth. The subject only needs to upload their ID document and take a liveness selfie.",
+      steps: ["ID document upload", "Liveness selfie"],
+      timing: "~1–2 minutes",
+      timingColor: "text-blue-600 dark:text-blue-400",
+      icon: ScanFace,
+    },
+    {
+      mode: "selfie_only",
+      label: "Selfie Only",
+      description: "Your system has all the subject's document data. The subject only takes a liveness selfie for biometric matching. Fastest experience.",
+      steps: ["Liveness selfie only"],
+      timing: "~30 seconds",
+      timingColor: "text-green-600 dark:text-green-400",
+      icon: Camera,
+    },
+  ];
+
+  function handleSave() {
+    if (!selectedMode) return;
+    updateMutation.mutate(
+      {
+        integrationProfile: {
+          mode: selectedMode,
+          configuredAt: new Date().toISOString(),
+        },
+      },
+      {
+        onSuccess: () => {
+          onModeChange(selectedMode);
+          toast({ title: "Integration profile saved", description: "Your hosted session wizard will now adapt to this profile." });
+        },
+        onError: (error: Error) => {
+          toast({ title: "Save failed", description: error.message, variant: "destructive" });
+        },
+      }
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Settings2 className="h-4 w-4" />
+            Integration Profile
+          </CardTitle>
+          <CardDescription>
+            Choose how much data your system provides when creating a hosted verification session.
+            This controls which steps the subject sees in the verification wizard.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {currentMode && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+              <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+              <p className="text-sm text-primary font-medium">
+                Current profile: <span className="capitalize">{profiles.find(p => p.mode === currentMode)?.label ?? currentMode.replace(/_/g, " ")}</span>
+              </p>
+            </div>
+          )}
+
+          <div className="grid gap-3">
+            {profiles.map((profile) => {
+              const Icon = profile.icon;
+              const isSelected = selectedMode === profile.mode;
+              return (
+                <div
+                  key={profile.mode}
+                  onClick={() => setSelectedMode(profile.mode)}
+                  className={`cursor-pointer rounded-lg border p-4 transition-all ${isSelected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/40"}`}
+                  data-testid={`card-profile-${profile.mode}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2 rounded-md shrink-0 ${isSelected ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-sm">{profile.label}</p>
+                        {isSelected && (
+                          <Badge variant="default" className="text-xs" data-testid={`badge-profile-selected-${profile.mode}`}>Selected</Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{profile.description}</p>
+                      <div className="flex items-center gap-4 mt-2 flex-wrap">
+                        <div className="flex items-center gap-1">
+                          <Timer className={`h-3 w-3 ${profile.timingColor}`} />
+                          <span className={`text-xs font-medium ${profile.timingColor}`}>{profile.timing}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {profile.steps.map((step) => (
+                            <span key={step} className="text-xs bg-muted px-2 py-0.5 rounded-full">{step}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="pt-2 border-t">
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 mb-4">
+              <Zap className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground">How it works with the API</p>
+                <p>When you create a session via the API, you can pass a <code className="bg-muted px-1 py-0.5 rounded text-xs">prefill</code> object and this profile determines which wizard steps the subject sees. You can also override <code className="bg-muted px-1 py-0.5 rounded text-xs">requiredSteps</code> on a per-session basis.</p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                onClick={handleSave}
+                disabled={!selectedMode || selectedMode === currentMode || updateMutation.isPending}
+                data-testid="button-save-integration-profile"
+              >
+                {updateMutation.isPending ? "Saving..." : "Save Profile"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

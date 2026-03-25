@@ -191,7 +191,7 @@ function TermsStep({ token, orgName, onAccepted }: { token: string; orgName: str
 
         <p>By accepting these terms, you consent to:</p>
         <ul className="list-disc pl-5 space-y-1">
-          <li>The collection and processing of your personal data, including biometric data (selfie, liveness check) by Smile ID</li>
+          <li>The collection and processing of your personal data, including biometric data (selfie, liveness check) by Cellion's identity verification system</li>
           <li>AI-powered extraction of data from documents you upload</li>
           <li>Sharing of your verified data with <strong>{orgName}</strong> (the Requesting Organisation)</li>
           <li>Data retention for 7 years for regulatory compliance</li>

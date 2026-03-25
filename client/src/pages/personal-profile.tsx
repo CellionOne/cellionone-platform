@@ -886,7 +886,7 @@ function BiometricSection() {
         )}
 
         <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg text-sm text-blue-800 dark:text-blue-300">
-          Your selfie is used only for identity verification via Smile ID and is not stored on our servers after the check is complete.
+          Your selfie is used only for identity verification via Cellion's verification engine and is not stored on our servers after the check is complete.
         </div>
       </CardContent>
     </Card>

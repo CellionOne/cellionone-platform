@@ -22,6 +22,15 @@ type SessionData = {
   subjectName: string;
   expiresAt: string;
   metadata: Record<string, any> | null;
+  prefillData: {
+    firstName?: string;
+    lastName?: string;
+    dateOfBirth?: string;
+    idNumber?: string;
+    documentType?: string;
+    idDocumentUrl?: string;
+  } | null;
+  requiredSteps: string[] | null;
   organisation: { name: string; logoPath: string | null } | null;
   returnUrl?: string;
 };
@@ -32,20 +41,26 @@ type IdentityData = {
   dateOfBirth: string;
 };
 
-const STEPS = [
+const ALL_STEPS = [
   { id: "consent", label: "Consent", icon: Shield },
   { id: "identity", label: "Identity", icon: User },
   { id: "documents", label: "Documents", icon: FileText },
   { id: "selfie", label: "Selfie", icon: Camera },
 ];
 
-function StepIndicator({ currentStep }: { currentStep: number }) {
+function getActiveSteps(requiredSteps: string[] | null) {
+  if (!requiredSteps) return ALL_STEPS;
+  return ALL_STEPS.filter(s => s.id === "consent" || requiredSteps.includes(s.id));
+}
+
+function StepIndicator({ currentStepId, activeSteps }: { currentStepId: string; activeSteps: typeof ALL_STEPS }) {
+  const currentIdx = activeSteps.findIndex(s => s.id === currentStepId);
   return (
     <div className="flex items-center justify-center gap-0 mb-8">
-      {STEPS.map((step, idx) => {
+      {activeSteps.map((step, idx) => {
         const Icon = step.icon;
-        const done = idx < currentStep;
-        const active = idx === currentStep;
+        const done = idx < currentIdx;
+        const active = idx === currentIdx;
         return (
           <div key={step.id} className="flex items-center">
             <div className="flex flex-col items-center gap-1">
@@ -62,7 +77,7 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
                 active ? "text-primary" : done ? "text-primary/70" : "text-muted-foreground"
               )}>{step.label}</span>
             </div>
-            {idx < STEPS.length - 1 && (
+            {idx < activeSteps.length - 1 && (
               <div className={cn(
                 "h-0.5 w-8 sm:w-12 mx-1 transition-all",
                 done ? "bg-primary" : "bg-muted"
@@ -75,12 +90,44 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
   );
 }
 
-function ConsentStep({ session, onAccept, isPending }: {
+function PrefillConfirmationCard({ data, label }: { data: Record<string, string | undefined>; label: string }) {
+  return (
+    <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1.5">
+      <div className="flex items-center gap-1.5 text-xs text-primary font-medium">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        {label} pre-filled by the requesting organisation
+      </div>
+      <div className="space-y-1">
+        {Object.entries(data).filter(([, v]) => !!v).map(([key, value]) => (
+          <div key={key} className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground capitalize">{key.replace(/([A-Z])/g, " $1").trim()}</span>
+            <span className="font-medium text-foreground">{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConsentStep({ session, requiredSteps, onAccept, isPending }: {
   session: SessionData;
+  requiredSteps: string[] | null;
   onAccept: () => void;
   isPending: boolean;
 }) {
   const [agreed, setAgreed] = useState(false);
+
+  const allCollect = [
+    { id: "identity", icon: User, text: "Your personal details (name, date of birth)" },
+    { id: "documents", icon: FileText, text: "Government-issued ID document" },
+    { id: "selfie", icon: Camera, text: "A liveness selfie for biometric matching" },
+  ];
+  const collectItems = requiredSteps
+    ? allCollect.filter(c => requiredSteps.includes(c.id))
+    : allCollect;
+
+  const hasPrefillIdentity = !!(session.prefillData?.firstName && session.prefillData?.lastName && session.prefillData?.dateOfBirth);
+  const hasPrefillDocument = !!(session.prefillData?.idNumber || session.prefillData?.documentType);
 
   return (
     <div className="space-y-6" data-testid="step-consent">
@@ -115,15 +162,35 @@ function ConsentStep({ session, onAccept, isPending }: {
         </CardContent>
       </Card>
 
+      {(hasPrefillIdentity || hasPrefillDocument) && (
+        <div className="space-y-2">
+          {hasPrefillIdentity && (
+            <PrefillConfirmationCard
+              label="Identity details"
+              data={{
+                "First name": session.prefillData!.firstName,
+                "Last name": session.prefillData!.lastName,
+                "Date of birth": session.prefillData!.dateOfBirth,
+              }}
+            />
+          )}
+          {hasPrefillDocument && (
+            <PrefillConfirmationCard
+              label="Document info"
+              data={{
+                "Document type": session.prefillData!.documentType,
+                "ID number": session.prefillData!.idNumber,
+              }}
+            />
+          )}
+        </div>
+      )}
+
       <Card>
         <CardContent className="pt-4 space-y-3">
-          <p className="text-sm font-semibold">What we'll collect</p>
+          <p className="text-sm font-semibold">{collectItems.length < 3 ? "What you'll need to complete" : "What we'll collect"}</p>
           <ul className="space-y-2">
-            {[
-              { icon: User, text: "Your personal details (name, date of birth)" },
-              { icon: FileText, text: "Government-issued ID document" },
-              { icon: Camera, text: "A liveness selfie for biometric matching" },
-            ].map(({ icon: Icon, text }) => (
+            {collectItems.map(({ icon: Icon, text }) => (
               <li key={text} className="flex items-start gap-2 text-sm text-muted-foreground">
                 <Icon className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
                 {text}
@@ -520,6 +587,8 @@ function DoneState({ returnUrl, requestId, sessionId }: {
   );
 }
 
+const STEP_ID_MAP: Record<number, string> = { 0: "consent", 1: "identity", 2: "documents", 3: "selfie", 4: "submit" };
+
 export default function KycSessionPage() {
   const { token } = useParams<{ token: string }>();
   const [stepIdx, setStepIdx] = useState(0);
@@ -543,6 +612,37 @@ export default function KycSessionPage() {
     enabled: !!token,
     retry: false,
   });
+
+  // Pre-populate identity data from prefillData when session loads
+  useEffect(() => {
+    if (session?.prefillData && !identityData) {
+      const { firstName, lastName, dateOfBirth } = session.prefillData;
+      if (firstName && lastName && dateOfBirth) {
+        setIdentityData({ firstName, lastName, dateOfBirth });
+      }
+    }
+  }, [session]);
+
+  const activeSteps = session ? getActiveSteps(session.requiredSteps) : ALL_STEPS;
+  const requiredSteps = session?.requiredSteps;
+
+  function getNextStepAfterConsent(): number {
+    if (!requiredSteps || requiredSteps.includes("identity")) return 1;
+    if (requiredSteps.includes("documents")) return 2;
+    if (requiredSteps.includes("selfie")) return 3;
+    return 4;
+  }
+
+  function getNextStepAfterIdentity(): number {
+    if (!requiredSteps || requiredSteps.includes("documents")) return 2;
+    if (requiredSteps.includes("selfie")) return 3;
+    return 4;
+  }
+
+  function getNextStepAfterDocuments(): number {
+    if (!requiredSteps || requiredSteps.includes("selfie")) return 3;
+    return 4;
+  }
 
   function handleMutationError(err: any) {
     const msg = err?.message || "";
@@ -577,18 +677,18 @@ export default function KycSessionPage() {
 
   function handleConsentAccept() {
     startMutation.mutate(undefined, {
-      onSuccess: () => setStepIdx(1),
+      onSuccess: () => setStepIdx(getNextStepAfterConsent()),
     });
   }
 
   function handleIdentityNext(data: IdentityData) {
     setIdentityData(data);
-    setStepIdx(2);
+    setStepIdx(getNextStepAfterIdentity());
   }
 
   function handleDocumentsNext(result: DocumentUploadResult) {
     setDocumentUpload(result);
-    setStepIdx(3);
+    setStepIdx(getNextStepAfterDocuments());
   }
 
   function handleSelfieCapture(base64: string) {
@@ -675,13 +775,14 @@ export default function KycSessionPage() {
               </div>
             )}
 
-            <StepIndicator currentStep={stepIdx} />
+            <StepIndicator currentStepId={STEP_ID_MAP[stepIdx] ?? "consent"} activeSteps={activeSteps} />
 
             <Card>
               <CardContent className="pt-6 pb-6">
                 {stepIdx === 0 && (
                   <ConsentStep
                     session={session}
+                    requiredSteps={session.requiredSteps}
                     onAccept={handleConsentAccept}
                     isPending={startMutation.isPending}
                   />

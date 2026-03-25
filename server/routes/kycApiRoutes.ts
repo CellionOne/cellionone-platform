@@ -569,6 +569,15 @@ export function registerKycApiRoutes(app: Express) {
     try {
       const orgId = req.apiKeyContext!.orgId;
 
+      const prefillSchema = z.object({
+        firstName: z.string().max(100).optional(),
+        lastName: z.string().max(100).optional(),
+        dateOfBirth: z.string().optional(),
+        idNumber: z.string().max(50).optional(),
+        documentType: z.enum(["national_id", "passport", "drivers_license"]).optional(),
+        idDocumentUrl: z.string().url().optional(),
+      }).optional();
+
       const schema = z.object({
         type: z.enum(["individual"]).default("individual"),
         subjectEmail: z.string().email(),
@@ -576,11 +585,30 @@ export function registerKycApiRoutes(app: Express) {
         returnUrl: z.string().url().optional(),
         expiresInHours: z.number().min(1).max(168).default(48),
         metadata: z.record(z.unknown()).optional(),
+        prefill: prefillSchema,
+        requiredSteps: z.array(z.enum(["identity", "documents", "selfie"])).optional(),
       });
       const data = schema.parse(req.body);
 
       const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
       if (!org) return res.status(404).json({ error: "Organisation not found" });
+
+      // Derive requiredSteps from org integrationProfile if not explicitly provided
+      let resolvedSteps: string[] | null = data.requiredSteps || null;
+      if (!resolvedSteps && org.integrationProfile) {
+        const mode = org.integrationProfile.mode;
+        if (mode === "selfie_only") {
+          resolvedSteps = ["selfie"];
+        } else if (mode === "prefill_selfie") {
+          resolvedSteps = ["documents", "selfie"];
+        } else {
+          resolvedSteps = ["identity", "documents", "selfie"];
+        }
+      }
+
+      // Determine result timing: instant if only identity (BVN/NIN), webhook if biometric check
+      const hasSelfie = !resolvedSteps || resolvedSteps.includes("selfie");
+      const resultTiming = hasSelfie ? "webhook" : "instant";
 
       const sessionToken = crypto.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + data.expiresInHours * 60 * 60 * 1000);
@@ -594,6 +622,8 @@ export function registerKycApiRoutes(app: Express) {
         returnUrl: data.returnUrl || null,
         status: "pending",
         metadata: data.metadata || null,
+        prefillData: data.prefill || null,
+        requiredSteps: resolvedSteps,
         expiresAt,
       }).returning();
 
@@ -611,6 +641,7 @@ export function registerKycApiRoutes(app: Express) {
         subjectEmail: session.subjectEmail,
         subjectName: session.subjectName,
         expiresAt: session.expiresAt,
+        resultTiming,
       });
 
       res.status(201).json({
@@ -623,6 +654,8 @@ export function registerKycApiRoutes(app: Express) {
         subjectName: session.subjectName,
         expiresAt: session.expiresAt,
         createdAt: session.createdAt,
+        resultTiming,
+        requiredSteps: resolvedSteps,
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {

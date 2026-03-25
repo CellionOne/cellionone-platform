@@ -321,7 +321,7 @@ export default function IdentityVerificationPage() {
             <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-border">
               <p className="text-sm font-medium mb-2">Why do we charge for verification?</p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Your {formatNgn(1000000)} verification fee covers a comprehensive 4-step identity check powered by Smile ID, a trusted third-party provider. This includes: (1) BVN/NIN validation against national databases, (2) government-issued ID document authenticity verification, (3) biometric selfie with liveness detection to confirm you are who you claim to be, and (4) AML and sanctions screening. These checks are required to comply with Nigerian regulatory standards and to give banks, the CAC, and other third parties full confidence in your identity.
+                Your {formatNgn(1000000)} verification fee covers a comprehensive 4-step identity check powered by Cellion's verification engine. This includes: (1) BVN/NIN validation against national databases, (2) government-issued ID document authenticity verification, (3) biometric selfie with liveness detection to confirm you are who you claim to be, and (4) AML and sanctions screening. These checks are required to comply with Nigerian regulatory standards and to give banks, the CAC, and other third parties full confidence in your identity.
               </p>
             </div>
           </CardContent>

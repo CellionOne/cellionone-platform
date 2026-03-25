@@ -71,7 +71,7 @@ interface AccessLog {
 
 const scopeLabels: Record<keyof DataScope, { label: string; icon: any; description: string }> = {
   personal: { label: "Personal Info", icon: User, description: "Name, email, phone, address, nationality" },
-  verification: { label: "Verification Results", icon: Shield, description: "Smile ID checks, BVN/NIN status, liveness score" },
+  verification: { label: "Verification Results", icon: Shield, description: "Identity verification status, BVN/NIN status, liveness score" },
   company: { label: "Company Details", icon: Building2, description: "Company name, RC number, directors, shareholders" },
   documents: { label: "Documents", icon: FolderOpen, description: "Passport photo, signature, ID document" },
   proofOfAddress: { label: "Proof of Address", icon: MapPin, description: "Virtual office utility bill" },

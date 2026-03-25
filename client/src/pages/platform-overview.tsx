@@ -130,7 +130,7 @@ export default function PlatformOverview() {
         <div className="feature-grid">
           <div className="feature-card">
             <h4>4-Step Identity Verification</h4>
-            <p>Comprehensive verification via Smile ID: BVN/NIN validation, government ID document check, biometric selfie matching, and AML/sanctions screening.</p>
+            <p>Comprehensive 4-step verification: BVN/NIN validation, government ID document check, biometric selfie matching, and AML/sanctions screening via Cellion's verification engine.</p>
           </div>
           <div className="feature-card">
             <h4>Director & Shareholder Management</h4>
@@ -261,7 +261,7 @@ export default function PlatformOverview() {
         <h3>External Integrations</h3>
         <ul>
           <li><strong>Paystack</strong> — Payment processing with split payments and webhook handling</li>
-          <li><strong>Smile ID</strong> — Identity verification (BVN/NIN, biometric, AML screening)</li>
+          <li><strong>Identity Verification Engine</strong> — BVN/NIN validation, biometric selfie matching, AML screening</li>
           <li><strong>OpenAI GPT-4o</strong> — AI legal assistant and document extraction</li>
           <li><strong>Resend</strong> — Transactional email delivery</li>
           <li><strong>Africa's Talking</strong> — SMS OTP for two-factor authentication</li>

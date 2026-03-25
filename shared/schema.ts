@@ -1091,6 +1091,11 @@ export const kycOrganisations = pgTable("kyc_organisations", {
   termsVersion: varchar("terms_version", { length: 20 }),
   termsAcceptedByUserId: varchar("terms_accepted_by_user_id"),
   termsAcceptedIp: varchar("terms_accepted_ip", { length: 45 }),
+  integrationProfile: jsonb("integration_profile").$type<{
+    mode: "full_hosted" | "prefill_selfie" | "selfie_only";
+    configuredAt?: string;
+    description?: string;
+  }>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -1797,6 +1802,15 @@ export const kycSessions = pgTable("kyc_sessions", {
   status: varchar("status", { length: 20 }).default("pending").notNull(), // pending, in_progress, completed, expired
   verificationRequestId: integer("verification_request_id"),
   metadata: jsonb("metadata"),
+  prefillData: jsonb("prefill_data").$type<{
+    firstName?: string;
+    lastName?: string;
+    dateOfBirth?: string;
+    idNumber?: string;
+    documentType?: string;
+    idDocumentUrl?: string;
+  }>(),
+  requiredSteps: text("required_steps").array(),
   expiresAt: timestamp("expires_at").notNull(),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),

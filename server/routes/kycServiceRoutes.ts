@@ -216,6 +216,12 @@ export function registerKycServiceRoutes(app: Express) {
   app.patch("/api/kyc-service/organisations/:id", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
     try {
       const orgId = parseInt(req.params.id);
+      const integrationProfileSchema = z.object({
+        mode: z.enum(["full_hosted", "prefill_selfie", "selfie_only"]),
+        configuredAt: z.string().optional(),
+        description: z.string().optional(),
+      }).optional();
+
       const schema = z.object({
         name: z.string().min(2).max(255).optional(),
         contactEmail: z.string().email().optional(),
@@ -225,6 +231,7 @@ export function registerKycServiceRoutes(app: Express) {
         settings: z.record(z.unknown()).optional(),
         employeePortalEnabled: z.boolean().optional(),
         supplierPortalEnabled: z.boolean().optional(),
+        integrationProfile: integrationProfileSchema,
       });
 
       const data = schema.parse(req.body);
@@ -2486,6 +2493,8 @@ export function registerKycServiceRoutes(app: Express) {
         subjectName: session.subjectName,
         expiresAt: session.expiresAt,
         metadata: session.metadata,
+        prefillData: session.prefillData || null,
+        requiredSteps: session.requiredSteps || null,
         organisation: org || null,
       });
     } catch (error: any) {

@@ -62,13 +62,13 @@ export default function KycTermsPage() {
               </section>
 
               <section className="space-y-4">
-                <h3 className="text-xl font-semibold">1.2 Third-Party Identity Verification (Smile ID)</h3>
+                <h3 className="text-xl font-semibold">1.2 Third-Party Identity Verification Provider</h3>
                 <p>
                   Identity verification services, including BVN validation, NIN validation, document verification, biometric
                   selfie matching, liveness detection, and Anti-Money Laundering (AML) screening, are performed by
-                  <strong> Smile ID</strong>, a licensed third-party identity verification provider. Cellion One integrates with
-                  Smile ID to facilitate these checks but does not independently perform identity verification. The accuracy and
-                  completeness of identity verification results are subject to Smile ID&apos;s systems, data sources, and processes.
+                  a <strong>licensed third-party identity verification provider</strong> engaged by Cellion One. Cellion One integrates with
+                  this licensed provider to facilitate these checks but does not independently perform identity verification. The accuracy and
+                  completeness of identity verification results are subject to the provider&apos;s systems, data sources, and processes.
                 </p>
               </section>
 
@@ -151,7 +151,7 @@ export default function KycTermsPage() {
                 <p>To the maximum extent permitted by law:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li>Cellion One&apos;s total liability under or in connection with the KYC Service shall not exceed the total fees paid by the organisation in the twelve (12) months preceding the claim</li>
-                  <li>Cellion One shall not be liable for errors, omissions, or inaccuracies in verification results provided by Smile ID</li>
+                  <li>Cellion One shall not be liable for errors, omissions, or inaccuracies in verification results provided by the licensed verification provider</li>
                   <li>Cellion One shall not be liable for inaccuracies in data extracted using AI technology</li>
                   <li>Cellion One shall not be liable for any decisions made by the organisation based on verification results, including but not limited to hiring, contracting, or procurement decisions</li>
                   <li>Cellion One shall not be liable for indirect, incidental, special, consequential, or punitive damages, including loss of profits, revenue, or business opportunities</li>
@@ -209,7 +209,7 @@ export default function KycTermsPage() {
 
               <section className="space-y-4">
                 <h3 className="text-xl font-semibold">2.2 What Checks Are Performed</h3>
-                <p>Depending on the type of verification requested, the following checks may be performed via <strong>Smile ID</strong>, a licensed third-party identity verification provider:</p>
+                <p>Depending on the type of verification requested, the following checks may be performed via our licensed third-party identity verification provider:</p>
                 <ul className="list-disc pl-6 space-y-2">
                   <li><strong>BVN Validation:</strong> Verification of your Bank Verification Number against the national BVN database</li>
                   <li><strong>NIN Validation:</strong> Verification of your National Identification Number against the NIMC database</li>
@@ -247,7 +247,7 @@ export default function KycTermsPage() {
                   <li>Liveness detection data to confirm you are a live person</li>
                 </ul>
                 <p>
-                  This biometric data is processed by Smile ID in accordance with their privacy policy and applicable data
+                  This biometric data is processed by our licensed verification provider in accordance with applicable data
                   protection laws. Biometric data is used solely for the purpose of identity verification and is not used for
                   any other purpose.
                 </p>
@@ -269,7 +269,7 @@ export default function KycTermsPage() {
                 <p>
                   The <strong>Requesting Organisation</strong> is the Data Controller — they determine why and how your personal
                   data is processed. <strong>Cellion One</strong> acts as the Data Processor, processing your data on behalf of and
-                  under the instructions of the Requesting Organisation. Smile ID acts as a sub-processor for identity
+                  under the instructions of the Requesting Organisation. Our licensed verification provider acts as a sub-processor for identity
                   verification services.
                 </p>
               </section>

@@ -594,7 +594,7 @@ export default function CheckoutPage() {
                       </div>
                       <div className="text-xs text-muted-foreground pl-6 space-y-1">
                         <p>
-                          {formatNgn(verifyProduct.priceNgn)} per person — covers BVN/NIN validation, document verification, biometric selfie matching, and AML screening via Smile ID.
+                          {formatNgn(verifyProduct.priceNgn)} per person — covers BVN/NIN validation, document verification, biometric selfie matching, and AML screening via Cellion's verification engine.
                         </p>
                         {verificationInfo && (
                           <div className="space-y-0.5">

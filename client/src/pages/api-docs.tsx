@@ -779,7 +779,7 @@ export default function ApiDocsPage() {
               completes all steps in a mobile-friendly wizard. Requires the <code className="bg-muted px-1 rounded">verify:individual</code> permission.
             </p>
 
-            <EndpointSection method="POST" path="/api/v1/kyc/sessions" badge="Hosted Sessions" description="Create a new hosted verification session and receive a shareable session link.">
+            <EndpointSection method="POST" path="/api/v1/kyc/sessions" badge="Hosted Sessions" description="Create a new hosted verification session and receive a shareable session link. The wizard shown to the subject adapts based on your organisation's Integration Profile and any prefill data you supply.">
               <div className="space-y-4">
                 <div>
                   <p className="text-sm font-medium mb-2">Request body</p>
@@ -787,7 +787,15 @@ export default function ApiDocsPage() {
   "subjectName": "Ngozi Adeyemi",
   "subjectEmail": "ngozi@example.com",
   "returnUrl": "https://yourapp.com/kyc-done",
-  "expiresInHours": 48
+  "expiresInHours": 48,
+  "prefill": {
+    "firstName": "Ngozi",
+    "lastName": "Adeyemi",
+    "dateOfBirth": "1990-05-14",
+    "documentType": "national_id",
+    "idNumber": "11234567890"
+  },
+  "requiredSteps": ["documents", "selfie"]
 }`} />
                   <table className="w-full text-sm mt-3 border rounded-md overflow-hidden">
                     <thead className="bg-muted/50">
@@ -825,18 +833,67 @@ export default function ApiDocsPage() {
                         <td className="p-2 text-muted-foreground">No</td>
                         <td className="p-2 text-muted-foreground">Link expiry in hours (default: 48, max: 168). When expired, a <code className="bg-muted px-1 rounded text-xs">session.expired</code> webhook is fired.</td>
                       </tr>
+                      <tr className="border-t">
+                        <td className="p-2 font-mono text-xs">prefill</td>
+                        <td className="p-2 text-muted-foreground">object</td>
+                        <td className="p-2 text-muted-foreground">No</td>
+                        <td className="p-2 text-muted-foreground">
+                          Data your system already holds. Prefilled fields are shown as read-only confirmations in the wizard and are not re-entered by the subject.
+                          Accepted keys: <code className="bg-muted px-1 rounded text-xs">firstName</code>, <code className="bg-muted px-1 rounded text-xs">lastName</code>, <code className="bg-muted px-1 rounded text-xs">dateOfBirth</code> (YYYY-MM-DD), <code className="bg-muted px-1 rounded text-xs">documentType</code>, <code className="bg-muted px-1 rounded text-xs">idNumber</code>.
+                        </td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="p-2 font-mono text-xs">requiredSteps</td>
+                        <td className="p-2 text-muted-foreground">string[]</td>
+                        <td className="p-2 text-muted-foreground">No</td>
+                        <td className="p-2 text-muted-foreground">
+                          Override the steps shown to the subject for this session only. Accepted values: <code className="bg-muted px-1 rounded text-xs">"identity"</code>, <code className="bg-muted px-1 rounded text-xs">"documents"</code>, <code className="bg-muted px-1 rounded text-xs">"selfie"</code>. If omitted, steps are derived from your organisation's Integration Profile.
+                        </td>
+                      </tr>
                     </tbody>
                   </table>
                 </div>
+
+                <div className="rounded-lg bg-muted/40 border p-3 text-xs text-muted-foreground space-y-1">
+                  <p className="font-medium text-foreground text-sm">Integration Profiles</p>
+                  <p>Configure a default step set for all sessions in your organisation's Settings → Integration tab. Three profiles are available:</p>
+                  <ul className="list-disc list-inside space-y-0.5 mt-1">
+                    <li><strong>Full Hosted</strong> — subject completes identity details, document upload, and selfie (~2–5 min)</li>
+                    <li><strong>Prefill + Selfie</strong> — you supply name/DOB, subject uploads document and takes selfie (~1–2 min)</li>
+                    <li><strong>Selfie Only</strong> — you supply all document data, subject takes a selfie only (~30 sec)</li>
+                  </ul>
+                  <p className="mt-1">Per-session <code className="bg-muted px-1 rounded">requiredSteps</code> always overrides the profile.</p>
+                </div>
+
                 <div>
                   <p className="text-sm font-medium mb-2">Response <span className="text-muted-foreground font-normal">201 Created</span></p>
                   <CodeBlock language="json" code={`{
   "sessionId": 42,
   "sessionToken": "tok_a1b2c3d4e5f6...",
-  "sessionUrl": "https://cellionone.com/verify/tok_a1b2c3d4e5f6...",
+  "sessionUrl": "https://cellionone.com/kyc/session/tok_a1b2c3d4e5f6...",
   "expiresAt": "2026-03-28T10:00:00.000Z",
-  "status": "pending"
+  "status": "pending",
+  "resultTiming": "webhook",
+  "requiredSteps": ["documents", "selfie"]
 }`} />
+                  <table className="w-full text-sm mt-3 border rounded-md overflow-hidden">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-2 font-medium">Field</th>
+                        <th className="text-left p-2 font-medium">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-t">
+                        <td className="p-2 font-mono text-xs">resultTiming</td>
+                        <td className="p-2 text-muted-foreground"><code className="bg-muted px-1 rounded text-xs">"instant"</code> if only identity data is collected; <code className="bg-muted px-1 rounded text-xs">"webhook"</code> when a selfie or document is involved (biometric processing takes a few seconds).</td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="p-2 font-mono text-xs">requiredSteps</td>
+                        <td className="p-2 text-muted-foreground">The resolved step list for this session (after applying the integration profile and any per-session override).</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </EndpointSection>

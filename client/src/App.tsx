@@ -78,6 +78,7 @@ import KycEmployeePortalPage from "@/pages/kyc-service/employee-portal";
 import KycSupplierPortalPage from "@/pages/kyc-service/supplier-portal";
 import KycOrgInviteAcceptPage from "@/pages/kyc-service/org-invite-accept";
 import KycMyVerifications from "@/pages/kyc-service/my-verifications";
+import KycSessionPage from "@/pages/kyc-service/kyc-session";
 import ProcurementMarketplace from "@/pages/procurement/marketplace";
 import ProcurementCreateRfq from "@/pages/procurement/create-rfq";
 import ProcurementRfqDetail from "@/pages/procurement/rfq-detail";
@@ -364,6 +365,7 @@ function Router() {
       </Route>
       <Route path="/kyc/org-invite/:token" component={KycOrgInviteAcceptPage} />
       <Route path="/kyc/verify/:token" component={KycVerifyRequestPage} />
+      <Route path="/kyc/session/:token" component={KycSessionPage} />
       <Route path="/kyc/:slug/employees" component={KycEmployeePortalPage} />
       <Route path="/kyc/:slug/suppliers" component={KycSupplierPortalPage} />
 

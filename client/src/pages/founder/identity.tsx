@@ -14,6 +14,8 @@ import {
   Users,
   Clock,
   XCircle,
+  Camera,
+  Link2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -23,6 +25,7 @@ interface VerificationInfo {
   unverifiedCount: number;
   verificationFeePerPerson: number;
   totalVerificationFee: number;
+  hasPaidVerification?: boolean;
 }
 
 function formatNgn(kobo: number): string {
@@ -123,6 +126,54 @@ export default function IdentityVerificationPage() {
             </Card>
           </>
         ) : null}
+
+        {!founderVerified && !isLoading && (
+          <Card className="border-primary/20 bg-primary/5" data-testid="card-biometric-step">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
+                  <Camera className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Step 3 of 4: Biometric Selfie</CardTitle>
+                  <CardDescription>
+                    After paying, go to your profile to complete your biometric check
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center text-xs font-bold shrink-0">1</div>
+                  <span className="line-through opacity-60">BVN/NIN validation</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center text-xs font-bold shrink-0">2</div>
+                  <span className="line-through opacity-60">Government ID authenticity</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center text-xs font-bold shrink-0 text-primary-foreground">3</div>
+                  <span className="font-medium text-foreground">Biometric selfie with liveness detection</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center text-xs font-bold shrink-0">4</div>
+                  <span>AML and sanctions screening</span>
+                </div>
+              </div>
+              <Link href="/profile">
+                <Button variant="outline" className="w-full" data-testid="button-go-to-profile-biometric">
+                  <Camera className="h-4 w-4 mr-2" />
+                  Complete Biometric on Profile Page
+                  <ArrowRight className="h-4 w-4 ml-auto" />
+                </Button>
+              </Link>
+              <p className="text-xs text-muted-foreground">
+                The biometric selfie step is available under "Biometric Verification" on your personal profile page.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         <Card data-testid="card-verification-status">
           <CardHeader>

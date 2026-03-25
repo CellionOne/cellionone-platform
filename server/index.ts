@@ -5,7 +5,7 @@ import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { startSubscriptionScheduler } from "./services/subscriptionScheduler";
 import { runComplianceDeadlineCheck } from "./services/complianceScheduler";
-import { runKycExpiryCheck } from "./services/kycSchedulerService";
+import { runKycExpiryCheck, runSanctionsMonitoring } from "./services/kycSchedulerService";
 import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUploadMiddleware } from "./middleware/security";
 
 process.on('uncaughtException', (err) => {
@@ -207,6 +207,13 @@ app.use((req, res, next) => {
       
       // Run KYC document expiry check daily
       runKycExpiryCheck().catch(console.error);
+
+      // Run sanctions monitoring weekly (gated by feature flag)
+      const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+      setInterval(() => {
+        runSanctionsMonitoring().catch(console.error);
+      }, SEVEN_DAYS_MS);
+      runSanctionsMonitoring().catch(console.error);
 
       // Clean up expired login attempts every hour
       setInterval(() => {

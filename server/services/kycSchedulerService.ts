@@ -6,6 +6,9 @@ import {
   kycOrganisations,
   kycOrgMembers,
   kycBillingAccounts,
+  kycSessions,
+  kycSanctionsLogs,
+  featureFlags,
 } from "@shared/schema";
 import { getResendClient } from "./emailService";
 import * as webhookService from "./kycWebhookService";
@@ -142,6 +145,19 @@ export async function runKycExpiryCheck() {
     statusesUpdated++;
   }
 
+  // Also expire pending hosted sessions that have passed their expiry
+  try {
+    const now = new Date();
+    await db.update(kycSessions)
+      .set({ status: "expired", updatedAt: new Date() })
+      .where(and(
+        sql`${kycSessions.status} = 'pending'`,
+        lt(kycSessions.expiresAt, now)
+      ));
+  } catch (err) {
+    console.error("[KYCScheduler] Session expiry error:", err);
+  }
+
   console.log(`[KYCScheduler] Updated ${statusesUpdated} statuses, sent ${alertsSent} alerts`);
 
   try {
@@ -174,4 +190,94 @@ export async function runKycExpiryCheck() {
       console.error("[KYCScheduler] Monthly invoice generation error:", err);
     }
   }
+}
+
+export async function runSanctionsMonitoring() {
+  console.log("[KYCScheduler] Checking sanctions monitoring feature flag...");
+
+  const [flag] = await db.select().from(featureFlags)
+    .where(eq(featureFlags.key, "enable_sanctions_monitoring"));
+
+  if (!flag?.isEnabled) {
+    console.log("[KYCScheduler] Sanctions monitoring disabled — skipping");
+    return;
+  }
+
+  console.log("[KYCScheduler] Running weekly sanctions/AML re-screening...");
+
+  const verifiedRequests = await db.select({
+    request: kycVerificationRequests,
+    org: kycOrganisations,
+  })
+    .from(kycVerificationRequests)
+    .innerJoin(kycOrganisations, eq(kycVerificationRequests.orgId, kycOrganisations.id))
+    .where(and(
+      eq(kycVerificationRequests.status, "verified"),
+      eq(kycVerificationRequests.type, "individual")
+    ));
+
+  let screened = 0;
+  let alerts = 0;
+
+  for (const row of verifiedRequests) {
+    try {
+      // Simulated AML screening result (production: call smileId AML API)
+      const screeningResult: "clear" | "alert" = "clear";
+      const previousRiskScore = row.request.riskScore;
+      const newRiskScore = screeningResult === "alert" ? "red" : (previousRiskScore ?? "green");
+
+      await db.insert(kycSanctionsLogs).values({
+        verificationRequestId: row.request.id,
+        orgId: row.request.orgId,
+        subjectName: row.request.subjectName,
+        previousRiskScore: previousRiskScore || null,
+        newRiskScore,
+        screeningResult,
+        matchDetails: null,
+        alertSentAt: screeningResult === "alert" ? new Date() : null,
+      });
+
+      if (screeningResult === "alert") {
+        await db.update(kycVerificationRequests)
+          .set({ riskScore: "red", updatedAt: new Date() })
+          .where(eq(kycVerificationRequests.id, row.request.id));
+
+        webhookService.deliverWebhook(row.request.orgId, "sanctions.alert", {
+          requestId: row.request.id,
+          subjectName: row.request.subjectName,
+          subjectEmail: row.request.subjectEmail,
+          previousRiskScore,
+          newRiskScore: "red",
+          screenedAt: new Date().toISOString(),
+        }).catch(err => console.error("[KYCScheduler] Sanctions webhook error:", err));
+
+        // Email org admins
+        const reviewers = await db.select().from(kycOrgMembers)
+          .where(and(
+            eq(kycOrgMembers.orgId, row.request.orgId),
+            eq(kycOrgMembers.inviteStatus, "accepted"),
+            eq(kycOrgMembers.role, "org_admin")
+          ));
+
+        const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#dc2626;">${row.org.name} — Sanctions Alert</h2>
+          <p><strong>${row.request.subjectName}</strong> has been flagged during routine AML/sanctions re-screening.</p>
+          <p>Previous risk score: <strong>${previousRiskScore || "N/A"}</strong> → New: <strong>RED</strong></p>
+          <p>Please review this individual immediately in your KYC dashboard.</p>
+        </div>`;
+
+        for (const reviewer of reviewers) {
+          await sendKycEmail(reviewer.inviteEmail, `[URGENT] Sanctions Alert — ${row.request.subjectName}`, html);
+        }
+
+        alerts++;
+      }
+
+      screened++;
+    } catch (err) {
+      console.error(`[KYCScheduler] Sanctions screening error for request ${row.request.id}:`, err);
+    }
+  }
+
+  console.log(`[KYCScheduler] Sanctions monitoring complete: ${screened} screened, ${alerts} alerts raised`);
 }

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
   Loader2, ShoppingCart, CheckCircle2, Clock, XCircle, ChevronDown, ChevronUp,
-  FileText,
+  FileText, UserCheck, FileClock, FileCheck2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -81,6 +81,12 @@ function getSrStatusBadge(status: string) {
       return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" /> Assigned</Badge>;
     case "cancelled":
       return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" /> Cancelled</Badge>;
+    case "awaiting_director_verification":
+      return <Badge variant="secondary" className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0"><FileClock className="h-3 w-3 mr-1" /> Awaiting Director</Badge>;
+    case "ready_for_filing":
+      return <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0"><FileCheck2 className="h-3 w-3 mr-1" /> Ready to File</Badge>;
+    case "filed":
+      return <Badge variant="secondary" className="bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 border-0"><FileText className="h-3 w-3 mr-1" /> Filed</Badge>;
     case "queued":
     default:
       return <Badge variant="outline"><Clock className="h-3 w-3 mr-1" /> Queued</Badge>;
@@ -92,6 +98,7 @@ function getServiceLabel(serviceType: string): string {
     SCUML: "SCUML Registration",
     TM: "Trademark Registration",
     TIN: "TIN Registration",
+    ADD_DIR: "Add Director (CAC Filing)",
   };
   return labels[serviceType] || serviceType;
 }
@@ -131,6 +138,20 @@ export default function AdminOrdersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/service-requests"] });
       toast({ title: "Lawyer assigned", description: "Service request has been assigned." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const markDirectorVerifiedMutation = useMutation({
+    mutationFn: async (srId: number) => {
+      const res = await apiRequest("POST", `/api/admin/service-requests/${srId}/director-verified`, {});
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/service-requests"] });
+      toast({ title: "Director marked as verified", description: "Service request has been moved to ready for filing." });
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -288,6 +309,23 @@ export default function AdminOrdersPage() {
                                   onAssign={(lawyerId) => assignLawyerMutation.mutate({ srId: sr.id, lawyerId })}
                                   isPending={assignLawyerMutation.isPending}
                                 />
+                              )}
+                              {sr.serviceType === "ADD_DIR" && sr.status === "awaiting_director_verification" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => markDirectorVerifiedMutation.mutate(sr.id)}
+                                  disabled={markDirectorVerifiedMutation.isPending}
+                                  className="text-xs mt-1"
+                                  data-testid={`button-mark-director-verified-${sr.id}`}
+                                >
+                                  {markDirectorVerifiedMutation.isPending ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <UserCheck className="h-3 w-3 mr-1" />
+                                  )}
+                                  Mark Director Verified
+                                </Button>
                               )}
                             </div>
                           ))}

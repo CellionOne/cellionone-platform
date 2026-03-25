@@ -7,6 +7,7 @@ import {
   kycOrganisations, kycVerificationTemplates,
   kycDocumentRequirements, kycVerificationRequests,
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
+  kycSessions,
   type KycVerificationRequest, type KycSupplierProfile, type KycSupplierPerson,
   type KycDocumentRequirement, type KycSubmittedDocument,
 } from "@shared/schema";
@@ -558,6 +559,93 @@ export function registerKycApiRoutes(app: Express) {
     } catch (error: any) {
       console.error("[KYC API] Get document requirements error:", error);
       res.status(500).json({ error: "Failed to get document requirements" });
+    }
+  });
+
+  // ============== HOSTED SESSIONS ==============
+
+  // POST /api/v1/kyc/sessions — create a hosted verification session
+  app.post("/api/v1/kyc/sessions", authenticateApiKey("verify:individual"), async (req: ApiKeyRequest, res: Response) => {
+    try {
+      const orgId = req.apiKeyContext!.orgId;
+
+      const schema = z.object({
+        type: z.enum(["individual"]).default("individual"),
+        subjectEmail: z.string().email(),
+        subjectName: z.string().min(1).max(255),
+        returnUrl: z.string().url().optional(),
+        expiresInHours: z.number().min(1).max(72).default(24),
+        metadata: z.record(z.unknown()).optional(),
+      });
+      const data = schema.parse(req.body);
+
+      const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
+      if (!org) return res.status(404).json({ error: "Organisation not found" });
+
+      const sessionToken = crypto.randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + data.expiresInHours * 60 * 60 * 1000);
+
+      const [session] = await db.insert(kycSessions).values({
+        orgId,
+        sessionToken,
+        type: data.type,
+        subjectEmail: data.subjectEmail,
+        subjectName: data.subjectName,
+        returnUrl: data.returnUrl || null,
+        status: "pending",
+        metadata: data.metadata || null,
+        expiresAt,
+      }).returning();
+
+      const baseUrl = process.env.NODE_ENV === "production"
+        ? "https://cellionone.com"
+        : `http://localhost:${process.env.PORT || 5000}`;
+
+      const sessionUrl = `${baseUrl}/kyc/session/${sessionToken}`;
+
+      await webhookService.deliverWebhook(orgId, "session.created", {
+        sessionId: session.id,
+        sessionToken,
+        sessionUrl,
+        type: session.type,
+        subjectEmail: session.subjectEmail,
+        subjectName: session.subjectName,
+        expiresAt: session.expiresAt,
+      });
+
+      res.status(201).json({
+        sessionId: session.id,
+        sessionToken,
+        sessionUrl,
+        type: session.type,
+        status: session.status,
+        subjectEmail: session.subjectEmail,
+        subjectName: session.subjectName,
+        expiresAt: session.expiresAt,
+        createdAt: session.createdAt,
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("[KYC API] Create session error:", error);
+      res.status(500).json({ error: "Failed to create hosted session" });
+    }
+  });
+
+  // GET /api/v1/kyc/sessions — list sessions for the org
+  app.get("/api/v1/kyc/sessions", authenticateApiKey("verify:individual"), async (req: ApiKeyRequest, res: Response) => {
+    try {
+      const orgId = req.apiKeyContext!.orgId;
+      const sessions = await db.select().from(kycSessions)
+        .where(eq(kycSessions.orgId, orgId))
+        .orderBy(desc(kycSessions.createdAt))
+        .limit(50);
+
+      res.json({ sessions });
+    } catch (error: any) {
+      console.error("[KYC API] List sessions error:", error);
+      res.status(500).json({ error: "Failed to list sessions" });
     }
   });
 }

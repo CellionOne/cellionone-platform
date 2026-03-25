@@ -1783,3 +1783,51 @@ export const changePasswordSchema = z.object({
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+// ============== KYC HOSTED SESSIONS ==============
+export const kycSessions = pgTable("kyc_sessions", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull(),
+  sessionToken: varchar("session_token", { length: 128 }).notNull().unique(),
+  type: varchar("type", { length: 20 }).notNull(), // individual, supplier
+  subjectEmail: varchar("subject_email", { length: 255 }).notNull(),
+  subjectName: varchar("subject_name", { length: 255 }).notNull(),
+  returnUrl: varchar("return_url", { length: 1000 }),
+  status: varchar("status", { length: 20 }).default("pending").notNull(), // pending, in_progress, completed, expired
+  verificationRequestId: integer("verification_request_id"),
+  metadata: jsonb("metadata"),
+  expiresAt: timestamp("expires_at").notNull(),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_sess_org").on(table.orgId),
+  index("idx_kyc_sess_token").on(table.sessionToken),
+  index("idx_kyc_sess_status").on(table.status),
+]);
+
+export const insertKycSessionSchema = createInsertSchema(kycSessions).omit({ id: true, createdAt: true, updatedAt: true });
+export type KycSession = typeof kycSessions.$inferSelect;
+export type InsertKycSession = z.infer<typeof insertKycSessionSchema>;
+
+// ============== KYC SANCTIONS MONITORING ==============
+export const kycSanctionsLogs = pgTable("kyc_sanctions_logs", {
+  id: serial("id").primaryKey(),
+  verificationRequestId: integer("verification_request_id").notNull(),
+  orgId: integer("org_id").notNull(),
+  subjectName: varchar("subject_name", { length: 255 }).notNull(),
+  previousRiskScore: varchar("previous_risk_score", { length: 10 }),
+  newRiskScore: varchar("new_risk_score", { length: 10 }),
+  screeningResult: varchar("screening_result", { length: 30 }).notNull(), // clear, alert, error
+  matchDetails: jsonb("match_details"),
+  alertSentAt: timestamp("alert_sent_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_sl_vr").on(table.verificationRequestId),
+  index("idx_kyc_sl_org").on(table.orgId),
+  index("idx_kyc_sl_created").on(table.createdAt),
+]);
+
+export const insertKycSanctionsLogSchema = createInsertSchema(kycSanctionsLogs).omit({ id: true, createdAt: true });
+export type KycSanctionsLog = typeof kycSanctionsLogs.$inferSelect;
+export type InsertKycSanctionsLog = z.infer<typeof insertKycSanctionsLogSchema>;

@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
@@ -34,6 +35,8 @@ import {
   CheckCircle2,
   XCircle,
   ExternalLink,
+  Link2,
+  Shield,
 } from "lucide-react";
 import type { KycOrganisation, KycVerificationRequest, KycVerificationTemplate } from "@shared/schema";
 
@@ -110,6 +113,21 @@ export default function OrgDashboard() {
 
   const { data: templates } = useQuery<KycVerificationTemplate[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "templates"],
+  });
+
+  const { data: sessionsData } = useQuery<{ sessions: any[] }>({
+    queryKey: ["/api/kyc-service/orgs", orgId, "sessions"],
+    queryFn: () => fetch(`/api/kyc-service/orgs/${orgId}/sessions`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const { data: expiryData } = useQuery<{ alerts: any[]; count: number }>({
+    queryKey: ["/api/kyc-service/orgs", orgId, "expiry-alerts"],
+    queryFn: () => fetch(`/api/kyc-service/orgs/${orgId}/expiry-alerts`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const { data: sanctionsData } = useQuery<{ logs: any[] }>({
+    queryKey: ["/api/kyc-service/orgs", orgId, "sanctions-logs"],
+    queryFn: () => fetch(`/api/kyc-service/orgs/${orgId}/sanctions-logs`, { credentials: "include" }).then(r => r.json()),
   });
 
   const createRequestMutation = useMutation({
@@ -545,142 +563,387 @@ export default function OrgDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-medium">Verification Requests</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-3">
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by name or email..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9"
-                  data-testid="input-search"
-                />
-              </div>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="w-[140px]" data-testid="select-filter-type">
-                  <SelectValue placeholder="Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="individual">Individual</SelectItem>
-                  <SelectItem value="supplier">Supplier</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[160px]" data-testid="select-filter-status">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="pending_invite">Pending Invite</SelectItem>
-                  <SelectItem value="pending_payment">Pending Payment</SelectItem>
-                  <SelectItem value="in_progress">In Progress</SelectItem>
-                  <SelectItem value="documents_submitted">Docs Submitted</SelectItem>
-                  <SelectItem value="under_review">Under Review</SelectItem>
-                  <SelectItem value="verified">Verified</SelectItem>
-                  <SelectItem value="rejected">Rejected</SelectItem>
-                  <SelectItem value="expired">Expired</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={riskFilter} onValueChange={setRiskFilter}>
-                <SelectTrigger className="w-[140px]" data-testid="select-filter-risk">
-                  <SelectValue placeholder="Risk" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Risk</SelectItem>
-                  <SelectItem value="green">Green</SelectItem>
-                  <SelectItem value="amber">Amber</SelectItem>
-                  <SelectItem value="red">Red</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        <Tabs defaultValue="requests" data-testid="dashboard-tabs">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="requests" data-testid="tab-requests">
+              Requests
+              {requests && requests.length > 0 && (
+                <Badge variant="secondary" className="ml-2 border-0 text-xs">{requests.length}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="sessions" data-testid="tab-sessions">
+              Sessions
+              {sessionsData?.sessions && sessionsData.sessions.length > 0 && (
+                <Badge variant="secondary" className="ml-2 border-0 text-xs">{sessionsData.sessions.length}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="monitoring" data-testid="tab-monitoring">
+              Monitoring
+              {expiryData && expiryData.count > 0 && (
+                <Badge variant="destructive" className="ml-2 border-0 text-xs">{expiryData.count}</Badge>
+              )}
+            </TabsTrigger>
+          </TabsList>
 
-            {requestsLoading ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map(i => (
-                  <Skeleton key={i} className="h-12 w-full" />
-                ))}
-              </div>
-            ) : filteredRequests.length === 0 ? (
-              <EmptyState
-                icon={ClipboardCheck}
-                title="No verification requests"
-                description={requests?.length ? "No requests match your filters." : "Create your first verification request to get started."}
-                action={
-                  !requests?.length ? (
-                    <Button onClick={() => setNewRequestOpen(true)} data-testid="button-empty-new-request">
-                      <Plus className="h-4 w-4 mr-2" />
-                      New Request
-                    </Button>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Subject</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Risk</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredRequests.map((req) => (
-                      <TableRow key={req.id} data-testid={`row-request-${req.id}`}>
-                        <TableCell>
-                          <Badge variant="secondary" className="border-0" data-testid={`badge-type-${req.id}`}>
-                            {req.type === "individual" ? "Individual" : "Supplier"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium text-sm" data-testid={`text-name-${req.id}`}>{req.subjectName}</p>
-                            <p className="text-xs text-muted-foreground">{req.subjectEmail}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className={`border-0 ${statusColors[req.status] || ""}`} data-testid={`badge-status-${req.id}`}>
-                            {statusLabels[req.status] || req.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {req.riskScore ? (
-                            <Badge variant="secondary" className={`border-0 ${riskColors[req.riskScore] || ""}`} data-testid={`badge-risk-${req.id}`}>
-                              {req.riskScore.charAt(0).toUpperCase() + req.riskScore.slice(1)}
-                            </Badge>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-muted-foreground">
-                            {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : "-"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" asChild data-testid={`button-view-${req.id}`}>
-                            <Link href={`/kyc/org/${orgId}/requests/${req.id}`}>
-                              <Eye className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        </TableCell>
-                      </TableRow>
+          <TabsContent value="requests" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base font-medium">Verification Requests</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-3">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by name or email..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9"
+                      data-testid="input-search"
+                    />
+                  </div>
+                  <Select value={typeFilter} onValueChange={setTypeFilter}>
+                    <SelectTrigger className="w-[140px]" data-testid="select-filter-type">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Types</SelectItem>
+                      <SelectItem value="individual">Individual</SelectItem>
+                      <SelectItem value="supplier">Supplier</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-[160px]" data-testid="select-filter-status">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="pending_invite">Pending Invite</SelectItem>
+                      <SelectItem value="pending_payment">Pending Payment</SelectItem>
+                      <SelectItem value="in_progress">In Progress</SelectItem>
+                      <SelectItem value="documents_submitted">Docs Submitted</SelectItem>
+                      <SelectItem value="under_review">Under Review</SelectItem>
+                      <SelectItem value="verified">Verified</SelectItem>
+                      <SelectItem value="rejected">Rejected</SelectItem>
+                      <SelectItem value="expired">Expired</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={riskFilter} onValueChange={setRiskFilter}>
+                    <SelectTrigger className="w-[140px]" data-testid="select-filter-risk">
+                      <SelectValue placeholder="Risk" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Risk</SelectItem>
+                      <SelectItem value="green">Green</SelectItem>
+                      <SelectItem value="amber">Amber</SelectItem>
+                      <SelectItem value="red">Red</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {requestsLoading ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map(i => (
+                      <Skeleton key={i} className="h-12 w-full" />
                     ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  </div>
+                ) : filteredRequests.length === 0 ? (
+                  <EmptyState
+                    icon={ClipboardCheck}
+                    title="No verification requests"
+                    description={requests?.length ? "No requests match your filters." : "Create your first verification request to get started."}
+                    action={
+                      !requests?.length ? (
+                        <Button onClick={() => setNewRequestOpen(true)} data-testid="button-empty-new-request">
+                          <Plus className="h-4 w-4 mr-2" />
+                          New Request
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Subject</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Risk</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredRequests.map((req) => (
+                          <TableRow key={req.id} data-testid={`row-request-${req.id}`}>
+                            <TableCell>
+                              <Badge variant="secondary" className="border-0" data-testid={`badge-type-${req.id}`}>
+                                {req.type === "individual" ? "Individual" : "Supplier"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium text-sm" data-testid={`text-name-${req.id}`}>{req.subjectName}</p>
+                                <p className="text-xs text-muted-foreground">{req.subjectEmail}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary" className={`border-0 ${statusColors[req.status] || ""}`} data-testid={`badge-status-${req.id}`}>
+                                {statusLabels[req.status] || req.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {req.riskScore ? (
+                                <Badge variant="secondary" className={`border-0 ${riskColors[req.riskScore] || ""}`} data-testid={`badge-risk-${req.id}`}>
+                                  {req.riskScore.charAt(0).toUpperCase() + req.riskScore.slice(1)}
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-sm text-muted-foreground">
+                                {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : "-"}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="icon" asChild data-testid={`button-view-${req.id}`}>
+                                <Link href={`/kyc/org/${orgId}/requests/${req.id}`}>
+                                  <Eye className="h-4 w-4" />
+                                </Link>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="sessions" className="mt-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base font-medium flex items-center gap-2">
+                    <Link2 className="h-4 w-4" />
+                    Hosted Verification Sessions
+                  </CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!sessionsData ? (
+                  <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
+                ) : sessionsData.sessions.length === 0 ? (
+                  <EmptyState
+                    icon={Link2}
+                    title="No sessions yet"
+                    description="Hosted sessions are created via the API. Each session generates a unique verification link for a subject."
+                  />
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Subject</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Expires</TableHead>
+                          <TableHead>Created</TableHead>
+                          <TableHead className="text-right">Link</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sessionsData.sessions.map((session: any) => {
+                          const statusColor: Record<string, string> = {
+                            pending: "bg-muted text-muted-foreground",
+                            in_progress: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+                            completed: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                            expired: "bg-muted text-muted-foreground",
+                          };
+                          return (
+                            <TableRow key={session.id} data-testid={`row-session-${session.id}`}>
+                              <TableCell>
+                                <div>
+                                  <p className="font-medium text-sm">{session.subjectName}</p>
+                                  <p className="text-xs text-muted-foreground">{session.subjectEmail}</p>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="secondary" className={`border-0 capitalize ${statusColor[session.status] || ""}`} data-testid={`badge-session-status-${session.id}`}>
+                                  {session.status.replace("_", " ")}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(session.expiresAt).toLocaleDateString()}
+                                </span>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(session.createdAt).toLocaleDateString()}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {session.status === "pending" || session.status === "in_progress" ? (
+                                  <Button variant="ghost" size="icon" onClick={() => {
+                                    navigator.clipboard.writeText(`${window.location.origin}/kyc/session/${session.sessionToken}`);
+                                    toast({ title: "Link copied", description: "Session link copied to clipboard." });
+                                  }} data-testid={`button-copy-session-${session.id}`}>
+                                    <Copy className="h-4 w-4" />
+                                  </Button>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground px-2">—</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="monitoring" className="mt-4 space-y-4">
+            <Card data-testid="card-doc-expiry-alerts">
+              <CardHeader>
+                <CardTitle className="text-base font-medium flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  Document Expiry Alerts
+                  {expiryData && expiryData.count > 0 && (
+                    <Badge variant="destructive" className="ml-1 border-0">{expiryData.count}</Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {!expiryData ? (
+                  <div className="space-y-2">{[1,2].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
+                ) : expiryData.alerts.length === 0 ? (
+                  <div className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
+                    <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
+                    All verified documents are valid — no expiry alerts.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {expiryData.alerts.map((alert: any) => (
+                      <div
+                        key={alert.docId}
+                        className={`flex items-center justify-between gap-4 p-3 rounded-lg border ${
+                          alert.isExpired
+                            ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20"
+                            : alert.isUrgent
+                            ? "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20"
+                            : "border-yellow-100 bg-yellow-50/50 dark:border-yellow-900/50 dark:bg-yellow-950/10"
+                        }`}
+                        data-testid={`alert-doc-expiry-${alert.docId}`}
+                      >
+                        <div className="flex items-start gap-3 min-w-0">
+                          {alert.isExpired ? (
+                            <XCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                          ) : (
+                            <AlertTriangle className={`h-4 w-4 mt-0.5 shrink-0 ${alert.isUrgent ? "text-amber-500" : "text-yellow-500"}`} />
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{alert.subjectName}</p>
+                            <p className="text-xs text-muted-foreground truncate">{alert.docFileName}</p>
+                            <p className={`text-xs font-medium mt-0.5 ${alert.isExpired ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>
+                              {alert.isExpired
+                                ? `Expired ${Math.abs(alert.daysLeft)} day${Math.abs(alert.daysLeft) !== 1 ? "s" : ""} ago`
+                                : `Expires in ${alert.daysLeft} day${alert.daysLeft !== 1 ? "s" : ""}`}
+                            </p>
+                          </div>
+                        </div>
+                        <Button variant="outline" size="sm" asChild className="shrink-0">
+                          <Link href={`/kyc/org/${orgId}/requests/${alert.requestId}`}>
+                            <Eye className="h-3.5 w-3.5 mr-1.5" />
+                            View
+                          </Link>
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card data-testid="card-sanctions-monitoring">
+              <CardHeader>
+                <CardTitle className="text-base font-medium flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-primary" />
+                  Sanctions & AML Monitoring
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {!sanctionsData ? (
+                  <div className="space-y-2">{[1,2].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
+                ) : sanctionsData.logs.length === 0 ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3 py-2 text-sm text-muted-foreground">
+                      <Shield className="h-5 w-5 text-muted-foreground/50 shrink-0" />
+                      No screening runs recorded yet. Automated weekly screening is managed by Cellion One.
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/40 border border-muted text-xs text-muted-foreground">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      Sanctions monitoring runs weekly when enabled by Cellion One admin. Contact <a href="mailto:service@cellionone.com" className="underline hover:text-foreground">service@cellionone.com</a> to activate.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Subject</TableHead>
+                          <TableHead>Result</TableHead>
+                          <TableHead>Risk Change</TableHead>
+                          <TableHead>Screened At</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sanctionsData.logs.map((log: any) => (
+                          <TableRow key={log.id} data-testid={`row-sanctions-${log.id}`}>
+                            <TableCell>
+                              <p className="text-sm font-medium">{log.subjectName}</p>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="secondary"
+                                className={`border-0 ${log.screeningResult === "alert" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"}`}
+                                data-testid={`badge-sanctions-result-${log.id}`}
+                              >
+                                {log.screeningResult === "alert" ? "⚠ Alert" : "✓ Clear"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <span className={`capitalize ${log.previousRiskScore === "red" ? "text-red-500" : log.previousRiskScore === "amber" ? "text-amber-500" : "text-green-500"}`}>
+                                  {log.previousRiskScore || "—"}
+                                </span>
+                                <span>→</span>
+                                <span className={`capitalize ${log.newRiskScore === "red" ? "text-red-500" : log.newRiskScore === "amber" ? "text-amber-500" : "text-green-500"}`}>
+                                  {log.newRiskScore || "—"}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(log.createdAt).toLocaleDateString()}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     </DashboardLayout>
   );

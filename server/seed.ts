@@ -30,6 +30,8 @@ export async function seedDatabase() {
       { key: "enable_verification_payment_required", isEnabled: false, description: "Require payment for identity verification (beta: false)" },
       { key: "enable_incorporation_payment_required", isEnabled: false, description: "Require payment for incorporation (beta: false)" },
       { key: "enable_escrow_payments", isEnabled: false, description: "Enable escrow payment system for procurement contracts (requires banking partner)" },
+      { key: "enable_sanctions_monitoring", isEnabled: false, description: "Enable weekly automated sanctions/AML re-screening for all verified individuals (off by default pending cost review)" },
+      { key: "enable_kyc_hosted_sessions", isEnabled: true, description: "Enable hosted KYC session links (no-code verification URLs for API customers)" },
     ];
     
     // Always insert any missing feature flags

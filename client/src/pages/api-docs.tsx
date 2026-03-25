@@ -26,6 +26,7 @@ import {
   FileCheck,
   AlertCircle,
   Timer,
+  ExternalLink,
 } from "lucide-react";
 
 function CodeBlock({ code, language = "bash" }: { code: string; language?: string }) {
@@ -121,6 +122,7 @@ const sidebarSections = [
       { id: "endpoints-templates", label: "Templates" },
     ],
   },
+  { id: "hosted-sessions", label: "Hosted Sessions" },
   { id: "status-lifecycle", label: "Status Lifecycle" },
   { id: "webhooks", label: "Webhooks" },
   { id: "errors", label: "Error Codes" },
@@ -762,6 +764,144 @@ export default function ApiDocsPage() {
                 </EndpointSection>
               </TabsContent>
             </Tabs>
+          </section>
+
+          <Separator />
+
+          <section id="hosted-sessions" className="space-y-4 scroll-mt-24">
+            <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-hosted-sessions">
+              <ExternalLink className="h-5 w-5" />
+              Hosted Verification Sessions
+            </h2>
+            <p className="text-muted-foreground leading-relaxed">
+              Hosted sessions let you generate a unique, time-limited verification link for a subject
+              without them needing a Cellion One account. Share the link via email or SMS; the subject
+              completes all steps in a mobile-friendly wizard. Requires the <code className="bg-muted px-1 rounded">verify:individual</code> permission.
+            </p>
+
+            <EndpointSection method="POST" path="/api/v1/kyc/sessions" badge="Hosted Sessions" description="Create a new hosted verification session and receive a shareable session link.">
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium mb-2">Request body</p>
+                  <CodeBlock language="json" code={`{
+  "subjectName": "Ngozi Adeyemi",
+  "subjectEmail": "ngozi@example.com",
+  "redirectUrl": "https://yourapp.com/kyc-done",
+  "expiresInHours": 72
+}`} />
+                  <table className="w-full text-sm mt-3 border rounded-md overflow-hidden">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-2 font-medium">Field</th>
+                        <th className="text-left p-2 font-medium">Type</th>
+                        <th className="text-left p-2 font-medium">Required</th>
+                        <th className="text-left p-2 font-medium">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-t">
+                        <td className="p-2 font-mono text-xs">subjectName</td>
+                        <td className="p-2 text-muted-foreground">string</td>
+                        <td className="p-2 text-muted-foreground">Yes</td>
+                        <td className="p-2 text-muted-foreground">Full name of the subject</td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="p-2 font-mono text-xs">subjectEmail</td>
+                        <td className="p-2 text-muted-foreground">string</td>
+                        <td className="p-2 text-muted-foreground">Yes</td>
+                        <td className="p-2 text-muted-foreground">Email address for session notifications</td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="p-2 font-mono text-xs">redirectUrl</td>
+                        <td className="p-2 text-muted-foreground">string</td>
+                        <td className="p-2 text-muted-foreground">No</td>
+                        <td className="p-2 text-muted-foreground">URL to redirect to after session completes</td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="p-2 font-mono text-xs">expiresInHours</td>
+                        <td className="p-2 text-muted-foreground">number</td>
+                        <td className="p-2 text-muted-foreground">No</td>
+                        <td className="p-2 text-muted-foreground">Link expiry in hours (default: 72, max: 168)</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div>
+                  <p className="text-sm font-medium mb-2">Response <span className="text-muted-foreground font-normal">201 Created</span></p>
+                  <CodeBlock language="json" code={`{
+  "sessionId": 42,
+  "sessionToken": "tok_a1b2c3d4e5f6...",
+  "sessionUrl": "https://cellionone.com/kyc/session/tok_a1b2c3d4e5f6...",
+  "expiresAt": "2026-03-28T10:00:00.000Z",
+  "status": "pending"
+}`} />
+                </div>
+              </div>
+            </EndpointSection>
+
+            <EndpointSection method="GET" path="/api/v1/kyc/sessions" badge="Hosted Sessions" description="List all hosted sessions created by your organisation.">
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium mb-2">Response <span className="text-muted-foreground font-normal">200 OK</span></p>
+                  <CodeBlock language="json" code={`{
+  "sessions": [
+    {
+      "id": 42,
+      "subjectName": "Ngozi Adeyemi",
+      "subjectEmail": "ngozi@example.com",
+      "status": "completed",
+      "expiresAt": "2026-03-28T10:00:00.000Z",
+      "createdAt": "2026-03-25T10:00:00.000Z"
+    }
+  ]
+}`} />
+                </div>
+              </div>
+            </EndpointSection>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Session Status Lifecycle</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col gap-0">
+                  {[
+                    { status: "pending", color: "text-blue-500", bg: "bg-blue-100 dark:bg-blue-900/30", label: "Pending", description: "Session created. Link has been shared but the subject has not yet started." },
+                    { status: "in_progress", color: "text-orange-500", bg: "bg-orange-100 dark:bg-orange-900/30", label: "In Progress", description: "Subject has opened the session link and is actively completing verification steps." },
+                    { status: "completed", color: "text-green-500", bg: "bg-green-100 dark:bg-green-900/30", label: "Completed", description: "Subject completed all steps. A verification request is created automatically in your dashboard." },
+                    { status: "expired", color: "text-gray-500", bg: "bg-gray-100 dark:bg-gray-900/30", label: "Expired", description: "The link expired before the subject completed verification. Create a new session to retry." },
+                  ].map((step, i, arr) => (
+                    <div key={step.status} className="flex items-start gap-4" data-testid={`session-status-step-${step.status}`}>
+                      <div className="flex flex-col items-center">
+                        <div className={`h-10 w-10 rounded-full ${step.bg} flex items-center justify-center flex-shrink-0`}>
+                          <span className={`text-xs font-bold ${step.color}`}>{step.status === "completed" ? "✓" : step.status === "expired" ? "✕" : "●"}</span>
+                        </div>
+                        {i < arr.length - 1 && <div className="w-px h-8 bg-border" />}
+                      </div>
+                      <div className="pt-1.5 pb-4">
+                        <div className="flex items-center gap-2">
+                          <code className="text-sm font-mono font-medium">{step.status}</code>
+                          <span className="text-sm text-muted-foreground">— {step.label}</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">{step.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-muted">
+              <CardContent className="pt-6">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-amber-500 mt-0.5 shrink-0" />
+                  <div className="text-sm text-muted-foreground space-y-1">
+                    <p><strong className="text-foreground">Session links are single-use per subject.</strong> Once a session is <code className="bg-muted px-1 rounded">completed</code> or <code className="bg-muted px-1 rounded">expired</code>, the link no longer works. Create a new session to re-verify.</p>
+                    <p>Completed sessions automatically create a verification request in your dashboard, visible under the <strong className="text-foreground">Requests</strong> tab.</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </section>
 
           <Separator />

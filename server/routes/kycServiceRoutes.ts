@@ -8,6 +8,7 @@ import {
   kycDocumentRequirements, kycVerificationRequests,
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
   kycApiKeys, kycApiUsageLogs, kycBillingAccounts, kycBillingRequests, kycCreditTransactions, kycInvoices,
+  kycSessions, kycSanctionsLogs,
   userRoles,
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
   type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
@@ -2433,6 +2434,216 @@ export function registerKycServiceRoutes(app: Express) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
       console.error("[KYC Admin] Mark invoice paid error:", error);
       res.status(400).json({ message: error.message || "Failed to mark invoice as paid" });
+    }
+  });
+
+  // ============== HOSTED SESSION PUBLIC ROUTES ==============
+
+  // GET /api/kyc-service/sessions/:token — public, no auth, for the hosted session wizard
+  app.get("/api/kyc-service/sessions/:token", async (req: any, res: Response) => {
+    try {
+      const { token } = req.params;
+      const [session] = await db.select().from(kycSessions).where(eq(kycSessions.sessionToken, token));
+      if (!session) return res.status(404).json({ message: "Session not found" });
+
+      const now = new Date();
+      if (session.expiresAt && session.expiresAt < now && session.status === "pending") {
+        await db.update(kycSessions).set({ status: "expired", updatedAt: new Date() }).where(eq(kycSessions.id, session.id));
+        return res.status(410).json({ message: "Session expired", status: "expired" });
+      }
+      if (session.status === "expired") return res.status(410).json({ message: "Session expired", status: "expired" });
+      if (session.status === "completed") return res.json({ status: "completed", returnUrl: session.returnUrl });
+
+      const [org] = await db.select({ name: kycOrganisations.name, logoPath: kycOrganisations.logoPath })
+        .from(kycOrganisations).where(eq(kycOrganisations.id, session.orgId));
+
+      res.json({
+        sessionId: session.id,
+        status: session.status,
+        type: session.type,
+        subjectEmail: session.subjectEmail,
+        subjectName: session.subjectName,
+        expiresAt: session.expiresAt,
+        metadata: session.metadata,
+        organisation: org || null,
+      });
+    } catch (error: any) {
+      console.error("[KYC Session] Get session error:", error);
+      res.status(500).json({ message: "Failed to get session" });
+    }
+  });
+
+  // POST /api/kyc-service/sessions/:token/start — subject accepts consent
+  app.post("/api/kyc-service/sessions/:token/start", async (req: any, res: Response) => {
+    try {
+      const { token } = req.params;
+      const [session] = await db.select().from(kycSessions).where(eq(kycSessions.sessionToken, token));
+      if (!session) return res.status(404).json({ message: "Session not found" });
+      if (session.status === "expired" || session.status === "completed") {
+        return res.status(410).json({ message: `Session is ${session.status}` });
+      }
+      if (new Date() > session.expiresAt) {
+        await db.update(kycSessions).set({ status: "expired", updatedAt: new Date() }).where(eq(kycSessions.id, session.id));
+        return res.status(410).json({ message: "Session expired" });
+      }
+
+      await db.update(kycSessions)
+        .set({ status: "in_progress", updatedAt: new Date() })
+        .where(eq(kycSessions.id, session.id));
+
+      res.json({ status: "in_progress" });
+    } catch (error: any) {
+      console.error("[KYC Session] Start session error:", error);
+      res.status(500).json({ message: "Failed to start session" });
+    }
+  });
+
+  // POST /api/kyc-service/sessions/:token/complete — subject completes session
+  app.post("/api/kyc-service/sessions/:token/complete", async (req: any, res: Response) => {
+    try {
+      const { token } = req.params;
+      const [session] = await db.select().from(kycSessions).where(eq(kycSessions.sessionToken, token));
+      if (!session) return res.status(404).json({ message: "Session not found" });
+      if (session.status === "expired") return res.status(410).json({ message: "Session expired" });
+      if (session.status === "completed") return res.json({ status: "completed", returnUrl: session.returnUrl });
+      if (new Date() > session.expiresAt) {
+        await db.update(kycSessions).set({ status: "expired", updatedAt: new Date() }).where(eq(kycSessions.id, session.id));
+        return res.status(410).json({ message: "Session expired" });
+      }
+
+      // Create a verification request for this session
+      const inviteToken = generateToken();
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const [request] = await db.insert(kycVerificationRequests).values({
+        orgId: session.orgId,
+        type: session.type,
+        status: "in_progress",
+        subjectEmail: session.subjectEmail,
+        subjectName: session.subjectName,
+        paymentResponsibility: "organisation",
+        paymentStatus: "not_required",
+        inviteToken,
+        expiresAt,
+      }).returning();
+
+      await db.update(kycSessions).set({
+        status: "completed",
+        completedAt: new Date(),
+        verificationRequestId: request.id,
+        updatedAt: new Date(),
+      }).where(eq(kycSessions.id, session.id));
+
+      await webhookService.deliverWebhook(session.orgId, "session.completed", {
+        sessionId: session.id,
+        sessionToken: token,
+        verificationRequestId: request.id,
+        subjectEmail: session.subjectEmail,
+        subjectName: session.subjectName,
+        metadata: session.metadata,
+      });
+
+      res.json({ status: "completed", returnUrl: session.returnUrl, verificationRequestId: request.id });
+    } catch (error: any) {
+      console.error("[KYC Session] Complete session error:", error);
+      res.status(500).json({ message: "Failed to complete session" });
+    }
+  });
+
+  // ============== ORG SESSION MANAGEMENT (authenticated) ==============
+
+  // GET /api/kyc-service/orgs/:id/sessions
+  app.get("/api/kyc-service/orgs/:id/sessions", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const sessions = await db.select().from(kycSessions)
+        .where(eq(kycSessions.orgId, orgId))
+        .orderBy(desc(kycSessions.createdAt))
+        .limit(100);
+
+      // Mark expired sessions
+      const now = new Date();
+      for (const s of sessions) {
+        if (s.status === "pending" && s.expiresAt < now) {
+          await db.update(kycSessions).set({ status: "expired", updatedAt: new Date() }).where(eq(kycSessions.id, s.id));
+          s.status = "expired";
+        }
+      }
+
+      res.json({ sessions });
+    } catch (error: any) {
+      console.error("[KYC Sessions] List error:", error);
+      res.status(500).json({ message: "Failed to list sessions" });
+    }
+  });
+
+  // ============== ORG SANCTIONS MONITORING (authenticated) ==============
+
+  // GET /api/kyc-service/orgs/:id/sanctions-logs
+  app.get("/api/kyc-service/orgs/:id/sanctions-logs", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const logs = await db.select().from(kycSanctionsLogs)
+        .where(eq(kycSanctionsLogs.orgId, orgId))
+        .orderBy(desc(kycSanctionsLogs.createdAt))
+        .limit(100);
+
+      res.json({ logs });
+    } catch (error: any) {
+      console.error("[KYC Sanctions] List logs error:", error);
+      res.status(500).json({ message: "Failed to list sanctions logs" });
+    }
+  });
+
+  // GET /api/kyc-service/orgs/:id/expiry-alerts — upcoming document expiry for the org's verified individuals
+  app.get("/api/kyc-service/orgs/:id/expiry-alerts", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const now = new Date();
+      const thirtyDays = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      const expiringDocs = await db.select({
+        docId: kycSubmittedDocuments.id,
+        docFileName: kycSubmittedDocuments.fileName,
+        docExpiryDate: kycSubmittedDocuments.expiryDate,
+        docStatus: kycSubmittedDocuments.status,
+        requestId: kycVerificationRequests.id,
+        requestStatus: kycVerificationRequests.status,
+        subjectName: kycVerificationRequests.subjectName,
+        subjectEmail: kycVerificationRequests.subjectEmail,
+        riskScore: kycVerificationRequests.riskScore,
+      })
+        .from(kycSubmittedDocuments)
+        .innerJoin(kycVerificationRequests, eq(kycSubmittedDocuments.verificationRequestId, kycVerificationRequests.id))
+        .where(and(
+          eq(kycVerificationRequests.orgId, orgId),
+          sql`${kycSubmittedDocuments.expiryDate} IS NOT NULL`,
+          sql`${kycSubmittedDocuments.expiryDate} <= ${thirtyDays}`,
+          eq(kycSubmittedDocuments.status, "accepted"),
+        ))
+        .orderBy(kycSubmittedDocuments.expiryDate);
+
+      const result = expiringDocs.map(row => {
+        const expiry = new Date(row.docExpiryDate!);
+        const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+        return {
+          docId: row.docId,
+          docFileName: row.docFileName,
+          expiryDate: row.docExpiryDate,
+          daysLeft,
+          isExpired: expiry < now,
+          isUrgent: daysLeft <= 7 && daysLeft >= 0,
+          requestId: row.requestId,
+          requestStatus: row.requestStatus,
+          subjectName: row.subjectName,
+          subjectEmail: row.subjectEmail,
+          riskScore: row.riskScore,
+        };
+      });
+
+      res.json({ alerts: result, count: result.length });
+    } catch (error: any) {
+      console.error("[KYC Expiry] List alerts error:", error);
+      res.status(500).json({ message: "Failed to get expiry alerts" });
     }
   });
 

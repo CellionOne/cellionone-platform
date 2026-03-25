@@ -7,12 +7,59 @@ import {
 } from "@shared/schema";
 import crypto from "crypto";
 
-const INDIVIDUAL_CREDIT_PRICE_KOBO = 1000000;
-const SUPPLIER_CREDIT_PRICE_KOBO = 10000000;
+// ─── Pricing Tiers ────────────────────────────────────────────────────────────
+// identity_only = BVN/NIN lookup + AML only (no selfie/document)
+// individual    = full individual KYC (identity + document + biometric selfie + AML)
+// supplier      = corporate entity + key persons KYC
+
+export const PRICING_TIERS = [
+  {
+    id: "identity_only" as const,
+    label: "Identity Check",
+    description: "BVN/NIN lookup, AML & sanctions screening. Instant result.",
+    priceKobo: 500_000,        // ₦5,000
+    priceNaira: 5_000,
+    checks: ["BVN/NIN lookup", "AML & sanctions screening"],
+    timing: "Instant",
+    resultTiming: "instant" as const,
+    color: "text-violet-600 dark:text-violet-400",
+  },
+  {
+    id: "individual" as const,
+    label: "Full Individual KYC",
+    description: "Identity + government-issued ID + liveness selfie + AML. Result via webhook.",
+    priceKobo: 1_500_000,      // ₦15,000
+    priceNaira: 15_000,
+    checks: ["BVN/NIN lookup", "ID document verification", "Liveness selfie & biometric match", "AML & sanctions screening"],
+    timing: "~2–5 min (webhook)",
+    resultTiming: "webhook" as const,
+    color: "text-amber-600 dark:text-amber-400",
+  },
+  {
+    id: "supplier" as const,
+    label: "Supplier / Corporate KYC",
+    description: "Entity verification + key persons KYC + sanctions screening.",
+    priceKobo: 7_500_000,      // ₦75,000
+    priceNaira: 75_000,
+    checks: ["Corporate entity verification", "Director & shareholder KYC", "AML & sanctions screening"],
+    timing: "~1 business day",
+    resultTiming: "webhook" as const,
+    color: "text-blue-600 dark:text-blue-400",
+  },
+] as const;
+
+export type VerificationType = "identity_only" | "individual" | "supplier";
 
 function getCreditPriceKobo(verificationType: string): number {
-  return verificationType === "supplier" ? SUPPLIER_CREDIT_PRICE_KOBO : INDIVIDUAL_CREDIT_PRICE_KOBO;
+  const tier = PRICING_TIERS.find(t => t.id === verificationType);
+  return tier?.priceKobo ?? PRICING_TIERS[1].priceKobo;
 }
+
+export function getPricingTier(verificationType: string) {
+  return PRICING_TIERS.find(t => t.id === verificationType) ?? PRICING_TIERS[1];
+}
+
+// ─── Account Management ───────────────────────────────────────────────────────
 
 export async function createBillingAccount(orgId: number): Promise<KycBillingAccount> {
   const [existing] = await db.select().from(kycBillingAccounts)
@@ -51,6 +98,7 @@ export async function purchaseCredits(
 
   const unitPriceKobo = getCreditPriceKobo(verificationType);
   const totalAmountKobo = unitPriceKobo * quantity;
+  const tier = getPricingTier(verificationType);
 
   const reference = `kyc_credit_${orgId}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 
@@ -74,6 +122,7 @@ export async function purchaseCredits(
         quantity,
         verificationType,
         unitPriceKobo,
+        tierLabel: tier.label,
       },
     }),
   });
@@ -133,6 +182,7 @@ export async function deductCredit(
   }
 
   const newBalance = account.creditBalance - 1;
+  const tier = getPricingTier(verificationType);
 
   await db.update(kycBillingAccounts)
     .set({ creditBalance: newBalance, updatedAt: new Date() })
@@ -144,7 +194,7 @@ export async function deductCredit(
     verificationType,
     amount: -1,
     balance: newBalance,
-    description: `${verificationType === "supplier" ? "Supplier" : "Individual"} verification - Request #${requestId}`,
+    description: `${tier.label} verification — Request #${requestId} · ₦${tier.priceNaira.toLocaleString()}/credit`,
     verificationRequestId: requestId,
   }).returning();
 
@@ -180,223 +230,27 @@ export async function hasCredits(orgId: number, verificationType: string): Promi
   return false;
 }
 
-export async function refundCredit(
+// ─── Billing Requests & Invoices ──────────────────────────────────────────────
+
+export async function createBillingRequest(
   orgId: number,
-  requestId: number
-): Promise<KycCreditTransaction> {
-  const account = await getBillingAccount(orgId);
-  if (!account) throw new Error("No billing account found");
-
-  const newBalance = account.creditBalance + 1;
-
-  await db.update(kycBillingAccounts)
-    .set({ creditBalance: newBalance, updatedAt: new Date() })
-    .where(eq(kycBillingAccounts.id, account.id));
-
-  const [transaction] = await db.insert(kycCreditTransactions).values({
-    billingAccountId: account.id,
-    type: "refund",
-    amount: 1,
-    balance: newBalance,
-    description: `Refund for failed verification - Request #${requestId}`,
-    verificationRequestId: requestId,
-  }).returning();
-
-  return transaction;
-}
-
-export async function requestInvoicedBilling(
-  orgId: number,
-  userId: string,
-  companyName: string,
-  email: string,
-  volume: string,
-  message: string
+  requestData: Omit<typeof kycBillingRequests.$inferInsert, "id" | "createdAt" | "updatedAt">
 ): Promise<KycBillingRequest> {
-  const [existing] = await db.select().from(kycBillingRequests)
-    .where(and(
-      eq(kycBillingRequests.organisationId, orgId),
-      eq(kycBillingRequests.status, "pending")
-    ));
-
-  if (existing) {
-    throw new Error("A pending billing request already exists for this organisation");
-  }
-
-  const [request] = await db.insert(kycBillingRequests).values({
-    organisationId: orgId,
-    requestedBy: userId,
-    companyName,
-    companyEmail: email,
-    estimatedMonthlyVolume: volume,
-    message,
-    status: "pending",
-  }).returning();
-
+  const [request] = await db.insert(kycBillingRequests).values(requestData).returning();
   return request;
 }
 
-export async function approveInvoicedBilling(
-  requestId: number,
-  adminUserId: string,
-  creditLimit: number
-): Promise<KycBillingRequest> {
-  const [billingRequest] = await db.select().from(kycBillingRequests)
-    .where(eq(kycBillingRequests.id, requestId));
-
-  if (!billingRequest) throw new Error("Billing request not found");
-  if (billingRequest.status !== "pending") throw new Error("Request is not pending");
-
-  const [updated] = await db.update(kycBillingRequests)
-    .set({
-      status: "approved",
-      reviewedBy: adminUserId,
-      reviewedAt: new Date(),
-    })
-    .where(eq(kycBillingRequests.id, requestId))
-    .returning();
-
-  let account = await getBillingAccount(billingRequest.organisationId);
-  if (!account) {
-    account = await createBillingAccount(billingRequest.organisationId);
-  }
-
-  await db.update(kycBillingAccounts)
-    .set({
-      billingMode: "invoiced",
-      creditLimit,
-      invoiceEmail: billingRequest.companyEmail,
-      invoiceCompanyName: billingRequest.companyName,
-      isActive: true,
-      approvedAt: new Date(),
-      approvedBy: adminUserId,
-      updatedAt: new Date(),
-    })
-    .where(eq(kycBillingAccounts.id, account.id));
-
-  return updated;
-}
-
-export async function rejectInvoicedBilling(
-  requestId: number,
-  adminUserId: string,
-  notes: string
-): Promise<KycBillingRequest> {
-  const [billingRequest] = await db.select().from(kycBillingRequests)
-    .where(eq(kycBillingRequests.id, requestId));
-
-  if (!billingRequest) throw new Error("Billing request not found");
-  if (billingRequest.status !== "pending") throw new Error("Request is not pending");
-
-  const [updated] = await db.update(kycBillingRequests)
-    .set({
-      status: "rejected",
-      adminNotes: notes,
-      reviewedBy: adminUserId,
-      reviewedAt: new Date(),
-    })
-    .where(eq(kycBillingRequests.id, requestId))
-    .returning();
-
-  return updated;
-}
-
-export async function generateInvoice(
-  orgId: number,
-  periodStart: Date,
-  periodEnd: Date
-): Promise<KycInvoice> {
-  const account = await getBillingAccount(orgId);
-  if (!account) throw new Error("No billing account found");
-  if (account.billingMode !== "invoiced") throw new Error("Organisation is not on invoiced billing");
-
-  const transactions = await db.select().from(kycCreditTransactions)
-    .where(and(
-      eq(kycCreditTransactions.billingAccountId, account.id),
-      eq(kycCreditTransactions.type, "usage"),
-      gte(kycCreditTransactions.createdAt, periodStart),
-      lte(kycCreditTransactions.createdAt, periodEnd)
-    ));
-
-  const individualCount = transactions.filter(t => t.verificationType === "individual").length;
-  const supplierCount = transactions.filter(t => t.verificationType === "supplier").length;
-
-  const lineItems: { description: string; quantity: number; unitPrice: number; total: number }[] = [];
-
-  if (individualCount > 0) {
-    lineItems.push({
-      description: "Individual KYC Verification",
-      quantity: individualCount,
-      unitPrice: INDIVIDUAL_CREDIT_PRICE_KOBO,
-      total: individualCount * INDIVIDUAL_CREDIT_PRICE_KOBO,
-    });
-  }
-  if (supplierCount > 0) {
-    lineItems.push({
-      description: "Supplier/Corporate KYC Verification",
-      quantity: supplierCount,
-      unitPrice: SUPPLIER_CREDIT_PRICE_KOBO,
-      total: supplierCount * SUPPLIER_CREDIT_PRICE_KOBO,
-    });
-  }
-
-  const subtotal = lineItems.reduce((sum, item) => sum + item.total, 0);
-  const total = subtotal;
-
-  const year = periodEnd.getFullYear();
-  const [countResult] = await db.select({ cnt: count() })
-    .from(kycInvoices)
-    .where(sql`EXTRACT(YEAR FROM ${kycInvoices.createdAt}) = ${year}`);
-
-  const seq = (countResult?.cnt || 0) + 1;
-  const invoiceNumber = `INV-${year}-${String(seq).padStart(4, "0")}`;
-
-  const dueDate = new Date(periodEnd);
-  dueDate.setDate(dueDate.getDate() + (account.paymentTermsDays || 30));
-
-  const [invoice] = await db.insert(kycInvoices).values({
-    billingAccountId: account.id,
-    invoiceNumber,
-    periodStart,
-    periodEnd,
-    lineItems,
-    subtotal,
-    total,
-    currency: "NGN",
-    status: "draft",
-    dueDate,
-  }).returning();
-
-  return invoice;
-}
-
-export async function markInvoicePaid(
-  invoiceId: number,
-  paystackRef?: string
-): Promise<KycInvoice> {
-  const [updated] = await db.update(kycInvoices)
-    .set({
-      status: "paid",
-      paidAt: new Date(),
-      paystackReference: paystackRef || null,
-    })
-    .where(eq(kycInvoices.id, invoiceId))
-    .returning();
-
-  if (!updated) throw new Error("Invoice not found");
-  return updated;
-}
-
-export async function getInvoices(orgId: number): Promise<KycInvoice[]> {
+export async function getBillingRequests(orgId: number): Promise<KycBillingRequest[]> {
   const account = await getBillingAccount(orgId);
   if (!account) return [];
 
-  return db.select().from(kycInvoices)
-    .where(eq(kycInvoices.billingAccountId, account.id))
-    .orderBy(desc(kycInvoices.createdAt));
+  return db.select().from(kycBillingRequests)
+    .where(eq(kycBillingRequests.billingAccountId, account.id))
+    .orderBy(desc(kycBillingRequests.createdAt))
+    .limit(50);
 }
 
-export async function getTransactions(orgId: number, limit = 50): Promise<KycCreditTransaction[]> {
+export async function getTransactions(orgId: number, limit = 100): Promise<KycCreditTransaction[]> {
   const account = await getBillingAccount(orgId);
   if (!account) return [];
 
@@ -406,76 +260,45 @@ export async function getTransactions(orgId: number, limit = 50): Promise<KycCre
     .limit(limit);
 }
 
-export async function getPendingBillingRequests(): Promise<(KycBillingRequest & { orgName: string | null })[]> {
-  const requests = await db.select({
-    id: kycBillingRequests.id,
-    organisationId: kycBillingRequests.organisationId,
-    requestedBy: kycBillingRequests.requestedBy,
-    companyName: kycBillingRequests.companyName,
-    companyEmail: kycBillingRequests.companyEmail,
-    estimatedMonthlyVolume: kycBillingRequests.estimatedMonthlyVolume,
-    message: kycBillingRequests.message,
-    status: kycBillingRequests.status,
-    adminNotes: kycBillingRequests.adminNotes,
-    reviewedBy: kycBillingRequests.reviewedBy,
-    reviewedAt: kycBillingRequests.reviewedAt,
-    createdAt: kycBillingRequests.createdAt,
-    orgName: kycOrganisations.name,
-  })
-    .from(kycBillingRequests)
-    .leftJoin(kycOrganisations, eq(kycBillingRequests.organisationId, kycOrganisations.id))
-    .orderBy(desc(kycBillingRequests.createdAt));
-
-  return requests;
-}
-
-export async function adjustCredits(
-  orgId: number,
-  amount: number,
-  reason: string,
-  adminUserId: string
-): Promise<KycCreditTransaction> {
+export async function getInvoices(orgId: number): Promise<KycInvoice[]> {
   const account = await getBillingAccount(orgId);
-  if (!account) throw new Error("No billing account found");
+  if (!account) return [];
 
-  const newBalance = account.creditBalance + amount;
-
-  await db.update(kycBillingAccounts)
-    .set({ creditBalance: newBalance, updatedAt: new Date() })
-    .where(eq(kycBillingAccounts.id, account.id));
-
-  const [transaction] = await db.insert(kycCreditTransactions).values({
-    billingAccountId: account.id,
-    type: "adjustment",
-    amount,
-    balance: newBalance,
-    description: `Admin adjustment: ${reason} (by ${adminUserId})`,
-  }).returning();
-
-  return transaction;
+  return db.select().from(kycInvoices)
+    .where(eq(kycInvoices.billingAccountId, account.id))
+    .orderBy(desc(kycInvoices.createdAt))
+    .limit(50);
 }
 
-export async function getAllBillingAccounts(): Promise<(KycBillingAccount & { orgName: string | null })[]> {
-  const accounts = await db.select({
-    id: kycBillingAccounts.id,
-    organisationId: kycBillingAccounts.organisationId,
-    billingMode: kycBillingAccounts.billingMode,
-    creditBalance: kycBillingAccounts.creditBalance,
-    invoiceEmail: kycBillingAccounts.invoiceEmail,
-    invoiceCompanyName: kycBillingAccounts.invoiceCompanyName,
-    invoiceAddress: kycBillingAccounts.invoiceAddress,
-    paymentTermsDays: kycBillingAccounts.paymentTermsDays,
-    creditLimit: kycBillingAccounts.creditLimit,
-    isActive: kycBillingAccounts.isActive,
-    approvedAt: kycBillingAccounts.approvedAt,
-    approvedBy: kycBillingAccounts.approvedBy,
-    createdAt: kycBillingAccounts.createdAt,
-    updatedAt: kycBillingAccounts.updatedAt,
-    orgName: kycOrganisations.name,
-  })
-    .from(kycBillingAccounts)
-    .leftJoin(kycOrganisations, eq(kycBillingAccounts.organisationId, kycOrganisations.id))
-    .orderBy(desc(kycBillingAccounts.createdAt));
+export async function getBillingStats(orgId: number) {
+  const account = await getBillingAccount(orgId);
+  if (!account) return null;
 
-  return accounts;
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const [monthlyUsage] = await db.select({
+    used: sql<number>`COALESCE(SUM(ABS(${kycCreditTransactions.amount})), 0)`,
+  }).from(kycCreditTransactions)
+    .where(and(
+      eq(kycCreditTransactions.billingAccountId, account.id),
+      eq(kycCreditTransactions.type, "usage"),
+      gte(kycCreditTransactions.createdAt, startOfMonth)
+    ));
+
+  const [totalUsage] = await db.select({
+    used: sql<number>`COALESCE(SUM(ABS(${kycCreditTransactions.amount})), 0)`,
+  }).from(kycCreditTransactions)
+    .where(and(
+      eq(kycCreditTransactions.billingAccountId, account.id),
+      eq(kycCreditTransactions.type, "usage")
+    ));
+
+  return {
+    account,
+    creditBalance: account.creditBalance,
+    billingMode: account.billingMode,
+    monthlyCreditsUsed: monthlyUsage?.used || 0,
+    totalCreditsUsed: totalUsage?.used || 0,
+  };
 }

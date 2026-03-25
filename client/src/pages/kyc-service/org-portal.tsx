@@ -1775,50 +1775,102 @@ function ApiStatusPanel() {
 
 const BILLING_PAGE_SIZE = 20;
 
+// Mirrors server/services/kycBillingService.ts PRICING_TIERS — keep in sync
+const KYC_PRICING_TIERS = [
+  {
+    id: "identity_only" as const,
+    label: "Identity Check",
+    description: "AML & sanctions screening. Instant result.",
+    priceNaira: 5_000,
+    checks: ["AML & sanctions screening", "Name-based fraud screening"],
+    timing: "Instant",
+    color: "text-violet-600 dark:text-violet-400",
+    bgColor: "bg-violet-50 dark:bg-violet-950/30",
+    borderColor: "border-violet-200 dark:border-violet-800",
+  },
+  {
+    id: "individual" as const,
+    label: "Full Individual KYC",
+    description: "Government-issued ID + liveness selfie + AML. Result via webhook.",
+    priceNaira: 15_000,
+    checks: ["ID document verification", "Liveness selfie & biometric match", "AML & sanctions screening"],
+    timing: "~2–5 min",
+    color: "text-amber-600 dark:text-amber-400",
+    bgColor: "bg-amber-50 dark:bg-amber-950/30",
+    borderColor: "border-amber-200 dark:border-amber-800",
+  },
+  {
+    id: "supplier" as const,
+    label: "Supplier / Corporate KYC",
+    description: "Entity verification + key persons + AML.",
+    priceNaira: 75_000,
+    checks: ["Corporate entity verification", "Director & shareholder KYC", "AML & sanctions screening"],
+    timing: "~1 business day",
+    color: "text-blue-600 dark:text-blue-400",
+    bgColor: "bg-blue-50 dark:bg-blue-950/30",
+    borderColor: "border-blue-200 dark:border-blue-800",
+  },
+] as const;
+
+type KycVerificationType = "identity_only" | "individual" | "supplier";
+
+function formatNaira(amount: number): string {
+  return `₦${amount.toLocaleString("en-NG")}`;
+}
+
 function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean }) {
   const { toast } = useToast();
   const [topUpQty, setTopUpQty] = useState(50);
+  const [topUpType, setTopUpType] = useState<KycVerificationType>("individual");
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [billingPage, setBillingPage] = useState(0);
 
   const { data: billing, isLoading } = useQuery<any>({
     queryKey: ["/api/kyc-service/organisations", orgId, "billing"],
   });
-  const { data: transactions } = useQuery<any[]>({
-    queryKey: ["/api/kyc-service/organisations", orgId, "billing", "transactions"],
-    queryFn: () => fetch(`/api/kyc-service/organisations/${orgId}/billing/transactions?limit=100`, { credentials: "include" }).then(r => r.json()),
-  });
   const { data: requests } = useQuery<KycVerificationRequest[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
   });
 
   const usageRows = (() => {
-    const completed = (requests || []).filter(r => ["verified", "rejected"].includes(r.status));
-    const CREDIT_COST: Record<string, number> = { individual: 1, supplier: 2 };
+    const completed = (requests || []).filter(r => ["verified", "rejected", "in_review"].includes(r.status));
     return completed
       .slice()
       .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime())
-      .map(r => ({ ...r, creditCost: CREDIT_COST[r.type] ?? 1 }));
+      .map(r => {
+        // Try to get verificationType from notes JSON
+        let verificationType: string = r.type === "supplier" ? "supplier" : "individual";
+        try {
+          const notes = typeof r.notes === "string" ? JSON.parse(r.notes) : r.notes;
+          if (notes?.verificationType) verificationType = notes.verificationType;
+        } catch {}
+        const tier = KYC_PRICING_TIERS.find(t => t.id === verificationType);
+        return { ...r, verificationType, tierLabel: tier?.label ?? r.type, tierPrice: tier?.priceNaira ?? 15_000 };
+      });
   })();
 
   const totalBillingPages = Math.ceil(usageRows.length / BILLING_PAGE_SIZE);
   const pageUsageRows = usageRows.slice(billingPage * BILLING_PAGE_SIZE, (billingPage + 1) * BILLING_PAGE_SIZE);
 
   const usageByType = {
-    individual: usageRows.filter(r => r.type === "individual").length,
-    supplier: usageRows.filter(r => r.type === "supplier").length,
+    identity_only: usageRows.filter(r => r.verificationType === "identity_only").length,
+    individual: usageRows.filter(r => r.verificationType === "individual").length,
+    supplier: usageRows.filter(r => r.verificationType === "supplier").length,
     total: usageRows.length,
   };
 
+  const selectedTier = KYC_PRICING_TIERS.find(t => t.id === topUpType) ?? KYC_PRICING_TIERS[1];
+  const topUpTotalNaira = selectedTier.priceNaira * topUpQty;
+
   function exportUsageCsv() {
     if (!usageRows.length) return;
-    const rows = [["Subject Name", "Subject Email", "Type", "Result", "Credits Used", "Date Completed"]];
+    const rows = [["Subject Name", "Subject Email", "Verification Type", "Result", "Unit Price (₦)", "Date Completed"]];
     usageRows.forEach(r => rows.push([
-      r.subjectName, r.subjectEmail, r.type, r.status,
-      String(r.creditCost),
+      r.subjectName ?? "", r.subjectEmail ?? "", r.tierLabel, r.status,
+      String(r.tierPrice),
       r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "",
     ]));
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "kyc-usage-history.csv"; a.click();
@@ -1826,8 +1878,8 @@ function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean })
   }
 
   const purchaseMutation = useMutation({
-    mutationFn: async (qty: number) => {
-      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/billing/purchase-credits`, { quantity: qty });
+    mutationFn: async ({ qty, type }: { qty: number; type: string }) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/billing/purchase-credits`, { quantity: qty, verificationType: type });
       return res.json();
     },
     onSuccess: (data) => {
@@ -1846,6 +1898,7 @@ function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean })
         <p className="text-sm text-muted-foreground">Credit balance, usage history, and top-up</p>
       </div>
 
+      {/* Credit balance + billing mode */}
       <div className="grid gap-4 sm:grid-cols-2">
         <Card className="border-primary/30">
           <CardContent className="pt-6">
@@ -1869,26 +1922,61 @@ function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean })
 
         <Card>
           <CardContent className="pt-6 space-y-3">
-            <p className="text-sm font-medium">Billing Type</p>
+            <p className="text-sm font-medium">Billing Mode</p>
             {isLoading ? <Skeleton className="h-6 w-24" /> : (
               <Badge variant="secondary" className="border-0 capitalize" data-testid="badge-billing-type">
-                {billing?.billingMode?.replace("_", " ") || "Pay as you go"}
+                {billing?.billingMode?.replace("_", " ") || "Prepaid"}
               </Badge>
             )}
-            <p className="text-xs text-muted-foreground">Each verification consumes 1 credit. Credits are pre-purchased and deducted automatically.</p>
+            <p className="text-xs text-muted-foreground">
+              Credits are purchased in advance and deducted automatically when each verification completes.
+              Each verification uses exactly 1 credit at the rate for its type.
+            </p>
           </CardContent>
         </Card>
       </div>
 
+      {/* Pricing tiers reference card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">Verification Pricing</CardTitle>
+          <p className="text-xs text-muted-foreground">1 credit = 1 verification. Prices are per credit, billed in NGN.</p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {KYC_PRICING_TIERS.map((tier) => (
+              <div key={tier.id} className={cn("rounded-lg border p-4 space-y-2", tier.bgColor, tier.borderColor)}>
+                <div className="flex items-start justify-between gap-2">
+                  <p className={cn("text-sm font-semibold", tier.color)}>{tier.label}</p>
+                  <p className="text-xs font-bold text-foreground whitespace-nowrap">{formatNaira(tier.priceNaira)}</p>
+                </div>
+                <p className="text-xs text-muted-foreground">{tier.description}</p>
+                <ul className="space-y-1">
+                  {tier.checks.map(c => (
+                    <li key={c} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <CheckCircle2 className="h-3 w-3 text-primary shrink-0" />
+                      {c}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-muted-foreground pt-1">Result: {tier.timing}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Usage breakdown */}
       {usageByType.total > 0 && (
         <Card>
           <CardHeader><CardTitle className="text-sm font-medium">Usage Breakdown by Type</CardTitle></CardHeader>
           <CardContent>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-4">
               {[
-                { label: "Total Processed", value: usageByType.total, color: "text-foreground" },
-                { label: "Individual", value: usageByType.individual, color: "text-blue-600 dark:text-blue-400" },
-                { label: "Supplier", value: usageByType.supplier, color: "text-purple-600 dark:text-purple-400" },
+                { label: "Total", value: usageByType.total, color: "text-foreground" },
+                { label: "Identity Check", value: usageByType.identity_only, color: "text-violet-600 dark:text-violet-400" },
+                { label: "Individual KYC", value: usageByType.individual, color: "text-amber-600 dark:text-amber-400" },
+                { label: "Supplier KYC", value: usageByType.supplier, color: "text-blue-600 dark:text-blue-400" },
               ].map(({ label, value, color }) => (
                 <div key={label} className="rounded-lg bg-muted/40 p-3 border">
                   <p className="text-xs text-muted-foreground">{label}</p>
@@ -1901,12 +1989,15 @@ function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean })
         </Card>
       )}
 
+      {/* Usage history table */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-sm font-medium">Verification Usage History</CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">One row per completed verification (verified or rejected) · 1 credit per individual, 2 per supplier</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                One row per completed verification · 1 credit deducted per verification at the tier rate
+              </p>
             </div>
             <Button variant="outline" size="sm" onClick={exportUsageCsv} disabled={!usageRows.length} data-testid="button-export-usage">
               <Download className="h-3.5 w-3.5 mr-1.5" />
@@ -1926,21 +2017,21 @@ function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean })
                   <TableHeader>
                     <TableRow>
                       <TableHead>Subject</TableHead>
-                      <TableHead>Type</TableHead>
+                      <TableHead>Tier</TableHead>
                       <TableHead>Result</TableHead>
                       <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Credits</TableHead>
+                      <TableHead className="text-right">Unit Price</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {pageUsageRows.map((r) => (
                       <TableRow key={r.id} data-testid={`row-usage-${r.id}`}>
                         <TableCell>
-                          <p className="text-sm font-medium">{r.subjectName}</p>
-                          <p className="text-xs text-muted-foreground">{r.subjectEmail}</p>
+                          <p className="text-sm font-medium">{r.subjectName || "—"}</p>
+                          <p className="text-xs text-muted-foreground">{r.subjectEmail || "—"}</p>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="secondary" className="border-0 capitalize text-xs">{r.type}</Badge>
+                          <Badge variant="secondary" className="border-0 text-xs">{r.tierLabel}</Badge>
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary" className={cn("border-0 capitalize text-xs", RESULT_COLORS[r.status] || "")}>
@@ -1950,8 +2041,8 @@ function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean })
                         <TableCell className="text-xs text-muted-foreground">
                           {r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"}
                         </TableCell>
-                        <TableCell className="text-right font-medium text-sm">
-                          -{r.creditCost}
+                        <TableCell className="text-right text-sm font-medium text-muted-foreground">
+                          {formatNaira(r.tierPrice)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1974,30 +2065,74 @@ function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean })
         </CardContent>
       </Card>
 
+      {/* Top-up dialog */}
       <Dialog open={topUpOpen} onOpenChange={setTopUpOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Top Up Credits</DialogTitle>
-            <DialogDescription>Purchase verification credits. Each credit covers one complete verification.</DialogDescription>
+            <DialogDescription>Choose the verification type and quantity. Each credit covers one complete verification of that type.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Verification Type</Label>
+              <div className="grid gap-2">
+                {KYC_PRICING_TIERS.map((tier) => (
+                  <button
+                    key={tier.id}
+                    type="button"
+                    onClick={() => setTopUpType(tier.id)}
+                    data-testid={`button-tier-${tier.id}`}
+                    className={cn(
+                      "flex items-center justify-between rounded-lg border p-3 text-left transition-colors",
+                      topUpType === tier.id
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-muted-foreground/40"
+                    )}
+                  >
+                    <div>
+                      <p className="text-sm font-medium">{tier.label}</p>
+                      <p className="text-xs text-muted-foreground">{tier.description}</p>
+                    </div>
+                    <p className={cn("text-sm font-bold ml-3 whitespace-nowrap", tier.color)}>
+                      {formatNaira(tier.priceNaira)}<span className="font-normal text-muted-foreground">/credit</span>
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label>Number of Credits</Label>
               <Select value={String(topUpQty)} onValueChange={(v) => setTopUpQty(Number(v))}>
                 <SelectTrigger data-testid="select-topup-qty"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="10">10 credits</SelectItem>
-                  <SelectItem value="50">50 credits</SelectItem>
-                  <SelectItem value="100">100 credits</SelectItem>
-                  <SelectItem value="250">250 credits</SelectItem>
-                  <SelectItem value="500">500 credits</SelectItem>
+                  {[10, 50, 100, 250, 500].map(n => (
+                    <SelectItem key={n} value={String(n)}>{n} credits</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Cost preview */}
+            <div className="rounded-lg bg-muted/50 p-3 space-y-1 border">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Unit price</span>
+                <span>{formatNaira(selectedTier.priceNaira)} × {topUpQty} credits</span>
+              </div>
+              <div className="flex justify-between text-sm font-bold">
+                <span>Total</span>
+                <span className="text-primary">{formatNaira(topUpTotalNaira)}</span>
+              </div>
+              <p className="text-xs text-muted-foreground pt-1">Payment processed via Paystack. Credits are added immediately after confirmation.</p>
+            </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => purchaseMutation.mutate(topUpQty)} disabled={purchaseMutation.isPending} data-testid="button-confirm-topup">
-              {purchaseMutation.isPending ? "Processing..." : `Buy ${topUpQty} Credits`}
+            <Button
+              onClick={() => purchaseMutation.mutate({ qty: topUpQty, type: topUpType })}
+              disabled={purchaseMutation.isPending}
+              data-testid="button-confirm-topup"
+            >
+              {purchaseMutation.isPending ? "Processing..." : `Pay ${formatNaira(topUpTotalNaira)}`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2297,11 +2432,17 @@ function SettingsSection({ orgId, org, isAdmin }: { orgId: string; org: OrgWithS
     onError: (e: Error) => toast({ title: "Failed to delete template", description: e.message, variant: "destructive" }),
   });
 
-  const integrationProfiles: { mode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection"; label: string; description: string; steps: string[]; timing: string; resultTiming: "instant" | "webhook"; requiresBiometric: boolean; icon: (props: { className?: string }) => JSX.Element; timingColor: string; }[] = [
-    { mode: "full_hosted", label: "Full Hosted", description: "Customer provides identity details, ID document, and liveness selfie. Best for onboarding flows with no prior data.", steps: ["Identity details", "ID document upload", "Liveness selfie"], timing: "~2–5 min (webhook)", resultTiming: "webhook", requiresBiometric: true, timingColor: "text-amber-600 dark:text-amber-400", icon: Layers },
-    { mode: "prefill_selfie", label: "Prefill + Selfie", description: "Your system prefills name/DOB. The subject uploads their ID and takes a selfie.", steps: ["ID document upload", "Liveness selfie"], timing: "~1–2 min (webhook)", resultTiming: "webhook", requiresBiometric: true, timingColor: "text-blue-600 dark:text-blue-400", icon: ScanFace },
-    { mode: "selfie_only", label: "Selfie Only", description: "You have all document data. Subject takes a liveness selfie only for biometric matching.", steps: ["Liveness selfie only"], timing: "~30 sec (webhook)", resultTiming: "webhook", requiresBiometric: true, timingColor: "text-green-600 dark:text-green-400", icon: Camera },
-    { mode: "data_collection", label: "Data Collection", description: "Subjects provide identity details and upload an ID document. No selfie — instant API result.", steps: ["Identity details", "ID document upload"], timing: "Instant result", resultTiming: "instant", requiresBiometric: false, timingColor: "text-violet-600 dark:text-violet-400", icon: FileText },
+  const integrationProfiles: {
+    mode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection";
+    label: string; description: string; steps: string[]; timing: string;
+    resultTiming: "instant" | "webhook"; requiresBiometric: boolean;
+    icon: (props: { className?: string }) => JSX.Element; timingColor: string;
+    billingTier: "individual" | "identity_only"; billingLabel: string; billingPrice: number;
+  }[] = [
+    { mode: "full_hosted", label: "Full Hosted", description: "Customer provides identity details, ID document, and liveness selfie. Best for onboarding flows with no prior data.", steps: ["Identity details", "ID document upload", "Liveness selfie"], timing: "~2–5 min (webhook)", resultTiming: "webhook", requiresBiometric: true, timingColor: "text-amber-600 dark:text-amber-400", icon: Layers, billingTier: "individual", billingLabel: "Full Individual KYC", billingPrice: 15_000 },
+    { mode: "prefill_selfie", label: "Prefill + Selfie", description: "Your system prefills name/DOB. The subject uploads their ID and takes a selfie.", steps: ["ID document upload", "Liveness selfie"], timing: "~1–2 min (webhook)", resultTiming: "webhook", requiresBiometric: true, timingColor: "text-blue-600 dark:text-blue-400", icon: ScanFace, billingTier: "individual", billingLabel: "Full Individual KYC", billingPrice: 15_000 },
+    { mode: "selfie_only", label: "Selfie Only", description: "You have all document data. Subject takes a liveness selfie only for biometric matching.", steps: ["Liveness selfie only"], timing: "~30 sec (webhook)", resultTiming: "webhook", requiresBiometric: true, timingColor: "text-green-600 dark:text-green-400", icon: Camera, billingTier: "individual", billingLabel: "Full Individual KYC", billingPrice: 15_000 },
+    { mode: "data_collection", label: "Data Collection", description: "Subjects provide identity details and upload an ID document. No selfie — instant API result.", steps: ["Identity details", "ID document upload"], timing: "Instant result", resultTiming: "instant", requiresBiometric: false, timingColor: "text-violet-600 dark:text-violet-400", icon: FileText, billingTier: "identity_only", billingLabel: "Identity Check", billingPrice: 5_000 },
   ];
 
   function handleSaveIntegrationProfile() {
@@ -2574,6 +2715,9 @@ function SettingsSection({ orgId, org, isAdmin }: { orgId: string; org: OrgWithS
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium text-sm">{profile.label}</p>
                         {isSelected && <Badge variant="default" className="text-xs">Selected</Badge>}
+                        <Badge variant="outline" className="text-xs border-muted-foreground/30 text-muted-foreground font-normal">
+                          {profile.billingLabel} · ₦{profile.billingPrice.toLocaleString()}/credit
+                        </Badge>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">{profile.description}</p>
                       <div className="flex items-center gap-4 mt-2 flex-wrap">

@@ -17,6 +17,7 @@ import {
 import * as kycApiKeyService from "../services/kycApiKeyService";
 import * as billingService from "../services/kycBillingService";
 import * as webhookService from "../services/kycWebhookService";
+import * as smileIdService from "../services/smileIdService";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { ObjectStorageService } from "../replit_integrations/object_storage";
 import { getResendClient } from "../services/emailService";
@@ -2232,7 +2233,7 @@ export function registerKycServiceRoutes(app: Express) {
 
       const schema = z.object({
         quantity: z.number().int().min(10, "Minimum purchase is 10 credits"),
-        verificationType: z.enum(["individual", "supplier"]),
+        verificationType: z.enum(["identity_only", "individual", "supplier"]),
       });
       const data = schema.parse(req.body);
 
@@ -2622,11 +2623,30 @@ export function registerKycServiceRoutes(app: Express) {
         ? `${effectiveFirstName} ${effectiveLastName}`.trim()
         : session.subjectName;
 
+      // ── Determine billing tier based on what was collected ─────────────────
+      // supplier sessions → supplier tier regardless of steps
+      // sessions requiring a selfie → individual tier (full KYC)
+      // document/identity only (no selfie) → identity_only tier
+      const verificationType: billingService.VerificationType =
+        session.type === "supplier" ? "supplier" :
+        selfieRequired ? "individual" : "identity_only";
+
+      // ── Credit check — gate session before storing anything ────────────────
+      const creditOk = await billingService.hasCredits(session.orgId, verificationType);
+      if (!creditOk) {
+        console.warn(`[KYC Session] Org ${session.orgId} has insufficient credits for ${verificationType} verification`);
+        return res.status(402).json({
+          message: "Insufficient verification credits. Please top up your account to continue.",
+          code: "INSUFFICIENT_CREDITS",
+          verificationType,
+        });
+      }
+
       // Create a verification request for this session
       const inviteToken = generateToken();
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-      const notesData: Record<string, any> = { source: "hosted_session", sessionId: session.id };
+      const notesData: Record<string, any> = { source: "hosted_session", sessionId: session.id, verificationType };
       if (dateOfBirth || prefillData?.dateOfBirth) notesData.dateOfBirth = dateOfBirth || prefillData?.dateOfBirth;
       if (selfieBase64) notesData.selfieSubmitted = true;
       if (prefillData?.idDocumentUrl && !documentObjectPath) notesData.documentPrefilled = true;
@@ -2644,8 +2664,7 @@ export function registerKycServiceRoutes(app: Express) {
         notes: JSON.stringify(notesData),
       }).returning();
 
-      // Persist uploaded documents into kycSubmittedDocuments
-      // Look up standard individual requirements (prefer org-specific, fall back to global)
+      // ── Persist documents into kycSubmittedDocuments ──────────────────────
       const allReqs = await db.select().from(kycDocumentRequirements).where(
         and(
           eq(kycDocumentRequirements.type, "individual"),
@@ -2669,12 +2688,14 @@ export function registerKycServiceRoutes(app: Express) {
         });
       }
 
+      // Store selfie to object storage (non-blocking; we keep base64 for biometric check)
+      let storedSelfiePath: string | null = null;
       if (selfieBase64 && selfieReq) {
         try {
           const base64Data = selfieBase64.replace(/^data:image\/\w+;base64,/, "");
           const buffer = Buffer.from(base64Data, "base64");
           const selfieUploadURL = await objectStorageService.getObjectEntityUploadURL();
-          const selfieObjectPath = objectStorageService.normalizeObjectEntityPath(selfieUploadURL);
+          storedSelfiePath = objectStorageService.normalizeObjectEntityPath(selfieUploadURL);
           await fetch(selfieUploadURL, {
             method: "PUT",
             body: buffer,
@@ -2684,7 +2705,7 @@ export function registerKycServiceRoutes(app: Express) {
             verificationRequestId: request.id,
             requirementId: selfieReq.id,
             fileName: "selfie.jpg",
-            filePath: selfieObjectPath,
+            filePath: storedSelfiePath,
             mimeType: "image/jpeg",
             status: "uploaded",
             detectedDocumentType: "selfie",
@@ -2694,6 +2715,93 @@ export function registerKycServiceRoutes(app: Express) {
         }
       }
 
+      // ── Run Smile ID verification pipeline ────────────────────────────────
+      // These checks run in parallel where possible. Results determine final status.
+      const smileUserId = session.subjectEmail || `session_${session.id}`;
+      const smileJobId = `session_${session.id}_${Date.now()}`;
+
+      let biometricResult: smileIdService.BiometricResult | null = null;
+      let amlResult: smileIdService.AmlCheckResult | null = null;
+
+      const smileChecks: Promise<void>[] = [];
+
+      // Biometric selfie check — only when selfie was submitted and required
+      if (selfieRequired && selfieBase64) {
+        smileChecks.push(
+          smileIdService.submitBiometricSelfie(selfieBase64, smileUserId, smileJobId)
+            .then(r => { biometricResult = r; })
+            .catch(err => {
+              console.error("[KYC Session] Biometric check error:", err);
+              biometricResult = { success: false, resultCode: "ERROR", resultText: String(err?.message || err), error: String(err?.message || err) };
+            })
+        );
+      }
+
+      // AML/sanctions screening — always run when we have a full name
+      if (subjectName && subjectName.trim().split(" ").length >= 2) {
+        smileChecks.push(
+          smileIdService.performAmlCheck(subjectName, smileUserId)
+            .then(r => { amlResult = r; })
+            .catch(err => {
+              console.error("[KYC Session] AML check error:", err);
+              amlResult = { isHit: false, hitTypes: [], matchDetails: null, error: String(err?.message || err) };
+            })
+        );
+      }
+
+      // Wait for all checks to complete
+      await Promise.all(smileChecks);
+
+      // ── Determine final verification status ───────────────────────────────
+      // AML hit → rejected immediately. Biometric failure → flagged for review.
+      // All clear → verified.
+      let finalStatus: "verified" | "rejected" | "in_review" = "verified";
+      let outcomeNote = "All checks passed";
+
+      if (amlResult && amlResult.isHit && !amlResult.error) {
+        finalStatus = "rejected";
+        outcomeNote = `AML/sanctions match — hit types: ${amlResult.hitTypes.join(", ") || "unspecified"}`;
+      } else if (biometricResult && !biometricResult.success && !biometricResult.error) {
+        // Definitive biometric failure (not a config/network error) → flag for review
+        finalStatus = "in_review";
+        outcomeNote = `Biometric match failed — ${biometricResult.resultText}`;
+      } else if (biometricResult?.error || amlResult?.error) {
+        // Infrastructure error during checks → keep in_review for manual processing
+        finalStatus = "in_review";
+        outcomeNote = "Verification checks encountered an error — manual review required";
+      }
+
+      // Augment notes with Smile ID outcome (never expose Smile ID branding externally)
+      const updatedNotes: Record<string, any> = { ...notesData, outcome: outcomeNote, status: finalStatus };
+      if (biometricResult) {
+        updatedNotes.biometric = {
+          passed: biometricResult.success,
+          livenessScore: biometricResult.livenessScore,
+          biometricMatch: biometricResult.biometricMatch,
+          resultCode: biometricResult.resultCode,
+        };
+      }
+      if (amlResult) {
+        updatedNotes.aml = {
+          isHit: amlResult.isHit,
+          hitTypes: amlResult.hitTypes,
+        };
+      }
+
+      // Update verification request with final status and enriched notes
+      await db.update(kycVerificationRequests)
+        .set({ status: finalStatus, notes: JSON.stringify(updatedNotes), updatedAt: new Date() })
+        .where(eq(kycVerificationRequests.id, request.id));
+
+      // ── Deduct credit (always — checks were run regardless of outcome) ─────
+      try {
+        await billingService.deductCredit(session.orgId, verificationType, request.id);
+      } catch (creditErr) {
+        // Log but don't roll back — the verification was already processed
+        console.error("[KYC Session] Credit deduction error (non-blocking):", creditErr);
+      }
+
+      // Mark session completed
       await db.update(kycSessions).set({
         status: "completed",
         completedAt: new Date(),
@@ -2701,24 +2809,47 @@ export function registerKycServiceRoutes(app: Express) {
         updatedAt: new Date(),
       }).where(eq(kycSessions.id, session.id));
 
+      // Upsert verified entity registry if the subject was approved
+      if (finalStatus === "verified") {
+        try {
+          const amlStatus = amlResult ? (amlResult.isHit ? "hit" : "clear") : null;
+          await upsertVerifiedEntity({
+            request: { ...request, status: finalStatus, updatedAt: new Date() } as any,
+            orgId: session.orgId,
+            amlScreeningStatus: amlStatus,
+          });
+        } catch (registryErr) {
+          console.error("[KYC Session] Registry upsert error (non-blocking):", registryErr);
+        }
+      }
+
       // Build return URL with session params appended
       let returnUrlWithParams = session.returnUrl;
       if (returnUrlWithParams) {
         const separator = returnUrlWithParams.includes("?") ? "&" : "?";
-        returnUrlWithParams = `${returnUrlWithParams}${separator}session_id=${session.id}&status=completed`;
+        returnUrlWithParams = `${returnUrlWithParams}${separator}session_id=${session.id}&status=${finalStatus}`;
       }
 
-      await webhookService.deliverWebhook(session.orgId, "session.completed", {
+      // Fire webhook — "verification.completed" with outcome (NO Smile ID branding)
+      await webhookService.deliverWebhook(session.orgId, "verification.completed", {
         sessionId: session.id,
         sessionToken: token,
         verificationRequestId: request.id,
         subjectEmail: session.subjectEmail,
         subjectName,
+        verificationType,
+        status: finalStatus,
+        outcome: outcomeNote,
+        checksPerformed: {
+          biometric: selfieRequired && selfieBase64 ? true : false,
+          aml: !!(subjectName && subjectName.trim().split(" ").length >= 2),
+        },
         metadata: session.metadata,
       });
 
       res.json({
         status: "completed",
+        verificationStatus: finalStatus,
         returnUrl: returnUrlWithParams,
         verificationRequestId: request.id,
       });

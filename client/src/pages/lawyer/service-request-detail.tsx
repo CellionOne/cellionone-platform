@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Loader2, ArrowLeft, CheckCircle2, Clock, XCircle, FileText,
-  User, Building2, Download, MapPin, ShieldCheck, Shield,
+  User, Building2, Download, MapPin, ShieldCheck, Shield, AlertCircle,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -584,6 +584,42 @@ export default function LawyerServiceRequestDetailPage() {
             data-testid="input-notes"
           />
 
+          {isAddDirector && (() => {
+            const dirVerified = directorData?.directorVerificationStatus === 'verified';
+            const dataSubmitted = directorData?.dataStatus === 'submitted';
+            const hasRequiredDocs = documents && documents.some((d: any) => d.docType === 'board_resolution');
+            const canFilingProceed = dirVerified && dataSubmitted && hasRequiredDocs;
+            const isReadyOrBeyond = ['ready_for_filing', 'filed', 'completed'].includes(sr.status);
+
+            return (
+              <div className="rounded-lg border p-4 space-y-3" data-testid="card-add-director-checklist">
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-primary" />
+                  Filing Readiness Checklist
+                </p>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm" data-testid="checklist-data-submitted">
+                    {dataSubmitted ? <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" /> : <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />}
+                    <span className={dataSubmitted ? "text-foreground" : "text-muted-foreground"}>Director data fully submitted by founder</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm" data-testid="checklist-director-verified">
+                    {dirVerified ? <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" /> : <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />}
+                    <span className={dirVerified ? "text-foreground" : "text-muted-foreground"}>New director identity verified on platform</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm" data-testid="checklist-board-resolution">
+                    {hasRequiredDocs ? <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" /> : <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />}
+                    <span className={hasRequiredDocs ? "text-foreground" : "text-muted-foreground"}>Board resolution document uploaded</span>
+                  </div>
+                </div>
+                {!canFilingProceed && !isReadyOrBeyond && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1" data-testid="text-checklist-warning">
+                    All checklist items must be satisfied before filing can proceed.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="flex items-center gap-3 flex-wrap">
             {sr.status === "queued" && (
               <Button
@@ -605,7 +641,28 @@ export default function LawyerServiceRequestDetailPage() {
                 Start Working
               </Button>
             )}
-            {["assigned", "in_progress"].includes(sr.status) && (
+            {isAddDirector && sr.status === "ready_for_filing" && (
+              <Button
+                onClick={() => statusMutation.mutate({ status: "filed", notes: notes || undefined })}
+                disabled={statusMutation.isPending}
+                data-testid="button-mark-filed"
+              >
+                {statusMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                <FileText className="h-4 w-4 mr-1" /> Mark as Filed with CAC
+              </Button>
+            )}
+            {isAddDirector && sr.status === "filed" && (
+              <Button
+                variant="default"
+                onClick={() => statusMutation.mutate({ status: "completed", notes: notes || undefined })}
+                disabled={statusMutation.isPending}
+                data-testid="button-mark-completed-add-dir"
+              >
+                {statusMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                <CheckCircle2 className="h-4 w-4 mr-1" /> Mark as Completed
+              </Button>
+            )}
+            {!isAddDirector && ["assigned", "in_progress"].includes(sr.status) && (
               <Button
                 variant="default"
                 onClick={() => statusMutation.mutate({ status: "completed", notes: notes || undefined })}

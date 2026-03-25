@@ -601,7 +601,7 @@ export function registerKycApiRoutes(app: Express) {
         ? "https://cellionone.com"
         : `http://localhost:${process.env.PORT || 5000}`;
 
-      const sessionUrl = `${baseUrl}/kyc/session/${sessionToken}`;
+      const sessionUrl = `${baseUrl}/verify/${sessionToken}`;
 
       await webhookService.deliverWebhook(orgId, "session.created", {
         sessionId: session.id,

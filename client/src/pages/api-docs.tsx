@@ -833,7 +833,7 @@ export default function ApiDocsPage() {
                   <CodeBlock language="json" code={`{
   "sessionId": 42,
   "sessionToken": "tok_a1b2c3d4e5f6...",
-  "sessionUrl": "https://cellionone.com/kyc/session/tok_a1b2c3d4e5f6...",
+  "sessionUrl": "https://cellionone.com/verify/tok_a1b2c3d4e5f6...",
   "expiresAt": "2026-03-28T10:00:00.000Z",
   "status": "pending"
 }`} />

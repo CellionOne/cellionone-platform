@@ -298,3 +298,101 @@ export async function getVerificationStatus(): Promise<{
     partnerId: PARTNER_ID ? `${PARTNER_ID.substring(0, 4)}...` : 'not set',
   };
 }
+
+export interface AmlCheckResult {
+  isHit: boolean;
+  hitTypes: string[];
+  matchDetails: Record<string, any>[] | null;
+  smileJobId?: string;
+  error?: string;
+}
+
+/**
+ * Perform an AML/sanctions re-screening for a named individual using the Smile ID AML REST API.
+ * Endpoint: POST https://api.smileidentity.com/v1/aml (production)
+ *           POST https://testapi.smileidentity.com/v1/aml (sandbox)
+ * Docs: https://docs.smileidentity.com/apis/aml-check
+ */
+export async function performAmlCheck(
+  fullName: string,
+  userId: string,
+): Promise<AmlCheckResult> {
+  if (!isSmileIdConfigured()) {
+    console.log(`[SmileID] Not configured — skipping AML check for ${fullName}`);
+    return { isHit: false, hitTypes: [], matchDetails: null, error: 'NOT_CONFIGURED' };
+  }
+
+  try {
+    const smileIdentityCore = require('smile-identity-core');
+    const { signature, timestamp } = new smileIdentityCore.Signature(PARTNER_ID, API_KEY).generate_signature();
+
+    const apiBase = SID_SERVER === '1'
+      ? 'https://api.smileidentity.com/v1'
+      : 'https://testapi.smileidentity.com/v1';
+
+    const response = await fetch(`${apiBase}/aml`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        partner_id: PARTNER_ID,
+        signature,
+        timestamp,
+        full_name: fullName,
+        countries: ['NG'],
+      }),
+    });
+
+    const data = await response.json() as any;
+
+    if (!response.ok) {
+      throw new Error(data?.error || data?.message || `AML API error ${response.status}`);
+    }
+
+    const hits: Record<string, any>[] = data?.AMLActions || data?.Hits || [];
+    const isHit = hits.length > 0;
+    const hitTypes: string[] = [];
+    for (const hit of hits) {
+      if (hit?.PEP === 'true' || hit?.PEP === true) hitTypes.push('PEP');
+      if (hit?.Sanction === 'true' || hit?.Sanction === true) hitTypes.push('Sanction');
+      if (hit?.Adverse_Media === 'true' || hit?.Adverse_Media === true) hitTypes.push('Adverse_Media');
+    }
+
+    await storage.createAuditLog({
+      actorUserId: 'system',
+      action: 'smile_id_aml_check',
+      entityType: 'user',
+      entityId: userId,
+      details: {
+        smileJobId: data?.SmileJobID,
+        fullName,
+        isHit,
+        hitTypes,
+        hitCount: hits.length,
+      },
+    });
+
+    return {
+      isHit,
+      hitTypes: [...new Set(hitTypes)],
+      matchDetails: hits.length > 0 ? hits : null,
+      smileJobId: data?.SmileJobID,
+    };
+  } catch (error: any) {
+    console.error('[SmileID] AML check error:', error);
+
+    await storage.createAuditLog({
+      actorUserId: 'system',
+      action: 'smile_id_aml_check_error',
+      entityType: 'user',
+      entityId: userId,
+      details: { error: error.message, fullName },
+    });
+
+    return {
+      isHit: false,
+      hitTypes: [],
+      matchDetails: null,
+      error: error.message,
+    };
+  }
+}

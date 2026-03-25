@@ -7130,7 +7130,7 @@ Important guidelines:
       });
 
       const baseUrl = `${req.protocol}://${req.get("host")}`;
-      const shareableLink = `${baseUrl}/verify/${consentToken}`;
+      const shareableLink = `${baseUrl}/consent/${consentToken}`;
 
       res.json({
         consent,
@@ -7421,7 +7421,7 @@ Important guidelines:
         smileIdJobId: verification?.externalSessionId || null,
         livenessScore: verification?.livenessScore ? Number(verification.livenessScore) : null,
         company: companyData,
-        verificationUrl: `${baseUrl}/verify/${consent.consentToken}`,
+        verificationUrl: `${baseUrl}/consent/${consent.consentToken}`,
       };
 
       const html = generateVerificationCertificateHTML(certData);
@@ -7599,7 +7599,7 @@ CONTENTS
 VERIFICATION
 ------------
 To verify the authenticity of this package, visit:
-${req.protocol}://${req.get("host")}/verify/${consent.consentToken}
+${req.protocol}://${req.get("host")}/consent/${consent.consentToken}
 
 This data was shared with the explicit consent of the data subject.
 Consent was granted on ${consent.createdAt ? new Date(consent.createdAt).toLocaleDateString("en-GB") : "N/A"}

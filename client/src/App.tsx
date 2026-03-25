@@ -346,7 +346,8 @@ function Router() {
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />
-      <Route path="/verify/:token" component={VerifyPage} />
+      <Route path="/consent/:token" component={VerifyPage} />
+      <Route path="/verify/:token" component={KycSessionPage} />
       <Route path="/kyc/terms" component={KycTermsPage} />
       <Route path="/kyc/orgs">
         <ProtectedRoute component={KycOrgsPage} />

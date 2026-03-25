@@ -227,6 +227,7 @@ export const documentFiles = pgTable("document_files", {
     overallScore?: number;
   }>(),
   lastQualityCheckedAt: timestamp("last_quality_checked_at"),
+  expiryDate: timestamp("expiry_date"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   index("idx_documents_owner").on(table.ownerUserId),

@@ -151,7 +151,7 @@ export default function FounderDataSharing() {
   }
 
   function copyLink(token: string) {
-    const link = `${window.location.origin}/verify/${token}`;
+    const link = `${window.location.origin}/consent/${token}`;
     navigator.clipboard.writeText(link).then(() => {
       toast({ title: "Link copied", description: "Verification link copied to clipboard." });
     }).catch(() => {
@@ -476,7 +476,7 @@ function ConsentCard({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => window.open(`/verify/${consent.consentToken}`, "_blank")}
+                onClick={() => window.open(`/consent/${consent.consentToken}`, "_blank")}
                 data-testid={`button-preview-${consent.id}`}
               >
                 <ExternalLink className="w-3.5 h-3.5 mr-1.5" />

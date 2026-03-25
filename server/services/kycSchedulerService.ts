@@ -10,12 +10,14 @@ import {
   kycSanctionsLogs,
   featureFlags,
   identityVerifications,
+  documentFiles,
   notifications,
   users,
 } from "@shared/schema";
 import { getResendClient } from "./emailService";
 import * as webhookService from "./kycWebhookService";
 import * as billingService from "./kycBillingService";
+import * as smileIdService from "./smileIdService";
 
 async function sendKycEmail(to: string, subject: string, html: string) {
   try {
@@ -243,12 +245,11 @@ export async function runSanctionsMonitoring() {
 
   for (const row of verifiedRequests) {
     try {
-      // TODO [PRODUCTION]: Replace stub with real Smile ID AML re-screening call.
-      // Smile ID AML endpoint: POST https://api.smileidentity.com/v1/aml
-      // Required: SMILE_ID_API_KEY env var + subject full name + DOB + nationality.
-      // The stub always returns "clear" so no false alerts are raised in development.
-      // Gate with: if (!process.env.SMILE_ID_API_KEY) use stub; else call real API.
-      const screeningResult: "clear" | "alert" = "clear"; // STUB — replace for production
+      const amlResult = await smileIdService.performAmlCheck(
+        row.request.subjectName || "Unknown",
+        `kyc-org-${row.request.orgId}`,
+      );
+      const screeningResult: "clear" | "alert" = amlResult.isHit ? "alert" : "clear";
       const previousRiskScore = row.request.riskScore;
       const newRiskScore = screeningResult === "alert" ? "red" : (previousRiskScore ?? "green");
 
@@ -259,7 +260,7 @@ export async function runSanctionsMonitoring() {
         previousRiskScore: previousRiskScore || null,
         newRiskScore,
         screeningResult,
-        matchDetails: null,
+        matchDetails: amlResult.matchDetails as any,
         alertSentAt: screeningResult === "alert" ? new Date() : null,
       });
 
@@ -274,6 +275,8 @@ export async function runSanctionsMonitoring() {
           subjectEmail: row.request.subjectEmail,
           previousRiskScore,
           newRiskScore: "red",
+          hitTypes: amlResult.hitTypes,
+          smileJobId: amlResult.smileJobId,
           screenedAt: new Date().toISOString(),
         }).catch(err => console.error("[KYCScheduler] Sanctions webhook error:", err));
 
@@ -285,9 +288,14 @@ export async function runSanctionsMonitoring() {
             eq(kycOrgMembers.role, "org_admin")
           ));
 
+        const hitSummary = amlResult.hitTypes.length > 0
+          ? `Hit types: ${amlResult.hitTypes.join(", ")}.`
+          : "";
+
         const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
           <h2 style="color:#dc2626;">${row.org.name} — Sanctions Alert</h2>
           <p><strong>${row.request.subjectName}</strong> has been flagged during routine AML/sanctions re-screening.</p>
+          <p>${hitSummary}</p>
           <p>Previous risk score: <strong>${previousRiskScore || "N/A"}</strong> → New: <strong>RED</strong></p>
           <p>Please review this individual immediately in your KYC dashboard.</p>
         </div>`;
@@ -417,4 +425,95 @@ export async function runIndividualExpiryCheck() {
     ));
 
   console.log(`[KYCScheduler] Individual expiry check complete: ${notified} user(s) notified`);
+}
+
+/**
+ * Check platform user document_files for upcoming/past expiry dates.
+ * Sends in-app notification + email to the document owner at 30-day, 7-day, and expired thresholds.
+ * Uses milestone-based deduplication to avoid repeat alerts.
+ */
+export async function runDocumentFilesExpiryCheck() {
+  console.log("[KYCScheduler] Running document_files expiry check...");
+
+  const now = new Date();
+  const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  const expiringDocs = await db.select({
+    doc: documentFiles,
+    user: users,
+  })
+    .from(documentFiles)
+    .innerJoin(users, eq(documentFiles.ownerUserId, users.id))
+    .where(and(
+      sql`${documentFiles.expiryDate} IS NOT NULL`,
+      lt(documentFiles.expiryDate, in30Days),
+    ));
+
+  let notified = 0;
+
+  for (const row of expiringDocs) {
+    try {
+      const expiryDate = new Date(row.doc.expiryDate!);
+      const msLeft = expiryDate.getTime() - now.getTime();
+      const daysLeft = Math.ceil(msLeft / (24 * 60 * 60 * 1000));
+
+      let title: string;
+      let message: string;
+      let urgency: "warning" | "error";
+      let dedupWindowMs: number;
+
+      if (daysLeft <= 0) {
+        title = "Document Expired";
+        message = `Your ${row.doc.docType.replace(/_/g, " ")} document has expired. Please upload a new copy to keep your profile up to date.`;
+        urgency = "error";
+        dedupWindowMs = 3 * 24 * 60 * 60 * 1000;
+      } else if (daysLeft <= 7) {
+        title = "Document Expiring Soon";
+        message = `Your ${row.doc.docType.replace(/_/g, " ")} document expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}. Please renew it before it expires.`;
+        urgency = "warning";
+        dedupWindowMs = 3 * 24 * 60 * 60 * 1000;
+      } else {
+        title = "Document Expiring in 30 Days";
+        message = `Your ${row.doc.docType.replace(/_/g, " ")} document will expire within 30 days. Please plan to renew it.`;
+        urgency = "warning";
+        dedupWindowMs = 14 * 24 * 60 * 60 * 1000;
+      }
+
+      const dedupCutoff = new Date(now.getTime() - dedupWindowMs);
+      const existing = await db.select({ id: notifications.id })
+        .from(notifications)
+        .where(and(
+          eq(notifications.userId, row.doc.ownerUserId),
+          sql`${notifications.title} = ${title}`,
+          sql`${notifications.createdAt} > ${dedupCutoff}`,
+        ))
+        .limit(1);
+
+      if (existing.length > 0) continue;
+
+      await db.insert(notifications).values({
+        userId: row.doc.ownerUserId,
+        title,
+        message,
+        type: urgency,
+        isRead: false,
+        linkUrl: "/profile",
+      });
+
+      if (row.user.email) {
+        const emailHtml = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:${urgency === "error" ? "#dc2626" : "#d97706"};">${title}</h2>
+          <p>${message}</p>
+          <p>Please visit your <a href="https://cellionone.com/profile">profile page</a> to upload an updated document.</p>
+        </div>`;
+        await sendKycEmail(row.user.email, title, emailHtml);
+      }
+
+      notified++;
+    } catch (err) {
+      console.error(`[KYCScheduler] Document files expiry error for doc ${row.doc.id}:`, err);
+    }
+  }
+
+  console.log(`[KYCScheduler] Document files expiry check complete: ${notified} document(s) notified`);
 }

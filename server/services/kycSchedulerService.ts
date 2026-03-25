@@ -262,7 +262,7 @@ export async function runSanctionsMonitoring() {
         previousRiskScore: previousRiskScore || null,
         newRiskScore,
         screeningResult,
-        matchDetails: amlResult.matchDetails as any,
+        matchDetails: amlResult.matchDetails,
         alertSentAt: screeningResult === "alert" ? new Date() : null,
       });
 
@@ -375,7 +375,7 @@ export async function runSanctionsMonitoring() {
         previousRiskScore: previousRiskScore || null,
         newRiskScore,
         screeningResult,
-        matchDetails: amlResult.matchDetails as any,
+        matchDetails: amlResult.matchDetails,
         alertSentAt: screeningResult === "alert" ? new Date() : null,
       });
 

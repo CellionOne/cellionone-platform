@@ -302,9 +302,24 @@ export async function getVerificationStatus(): Promise<{
 export interface AmlCheckResult {
   isHit: boolean;
   hitTypes: string[];
-  matchDetails: Record<string, any>[] | null;
+  matchDetails: Record<string, unknown>[] | null;
   smileJobId?: string;
   error?: string;
+}
+
+interface SmileIdAmlHit {
+  PEP?: string | boolean;
+  Sanction?: string | boolean;
+  Adverse_Media?: string | boolean;
+  [key: string]: unknown;
+}
+
+interface SmileIdAmlResponse {
+  AMLActions?: SmileIdAmlHit[];
+  Hits?: SmileIdAmlHit[];
+  SmileJobID?: string;
+  error?: string;
+  message?: string;
 }
 
 /**
@@ -342,13 +357,13 @@ export async function performAmlCheck(
       }),
     });
 
-    const data = await response.json() as any;
+    const data: SmileIdAmlResponse = await response.json();
 
     if (!response.ok) {
       throw new Error(data?.error || data?.message || `AML API error ${response.status}`);
     }
 
-    const hits: Record<string, any>[] = data?.AMLActions || data?.Hits || [];
+    const hits: SmileIdAmlHit[] = data?.AMLActions || data?.Hits || [];
     const isHit = hits.length > 0;
     const hitTypes: string[] = [];
     for (const hit of hits) {
@@ -377,15 +392,16 @@ export async function performAmlCheck(
       matchDetails: hits.length > 0 ? hits : null,
       smileJobId: data?.SmileJobID,
     };
-  } catch (error: any) {
-    console.error('[SmileID] AML check error:', error);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('[SmileID] AML check error:', err);
 
     await storage.createAuditLog({
       actorUserId: 'system',
       action: 'smile_id_aml_check_error',
       entityType: 'user',
       entityId: userId,
-      details: { error: error.message, fullName },
+      details: { error: err.message, fullName },
     });
 
     return {

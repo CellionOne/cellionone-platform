@@ -2650,6 +2650,8 @@ export async function registerRoutes(
         newDirectorNationality: body.newDirectorNationality || null,
         newDirectorOccupation: body.newDirectorOccupation || null,
         newDirectorAddress: body.newDirectorAddress || null,
+        newDirectorProposedRole: body.newDirectorProposedRole || null,
+        newDirectorShareholding: body.newDirectorShareholding || null,
         additionalNotes: body.additionalNotes || null,
         updatedAt: new Date(),
       };
@@ -2692,6 +2694,8 @@ export async function registerRoutes(
         existingDirectors: z.array(z.object({
           name: z.string(),
           role: z.string().optional(),
+          bvn: z.string().optional(),
+          nin: z.string().optional(),
         })).optional(),
         newDirectorFirstName: z.string().min(1),
         newDirectorLastName: z.string().min(1),
@@ -2702,6 +2706,8 @@ export async function registerRoutes(
         newDirectorDateOfBirth: z.string().optional(),
         newDirectorNationality: z.string().optional(),
         newDirectorOccupation: z.string().optional(),
+        newDirectorProposedRole: z.string().optional(),
+        newDirectorShareholding: z.string().optional(),
         additionalNotes: z.string().optional(),
       });
 
@@ -2730,6 +2736,8 @@ export async function registerRoutes(
         newDirectorNationality: parsed.data.newDirectorNationality || null,
         newDirectorOccupation: parsed.data.newDirectorOccupation || null,
         newDirectorAddress: parsed.data.newDirectorAddress || null,
+        newDirectorProposedRole: parsed.data.newDirectorProposedRole || null,
+        newDirectorShareholding: parsed.data.newDirectorShareholding || null,
         additionalNotes: parsed.data.additionalNotes || null,
         dataStatus: 'submitted',
         updatedAt: new Date(),
@@ -2787,6 +2795,23 @@ export async function registerRoutes(
               founderEmail: founder.email,
             });
           }
+        }
+
+        // Notify founder that submission was received
+        if (founder?.email) {
+          await client.emails.send({
+            from: fromEmail,
+            to: founder.email,
+            subject: `Your Add Director request has been submitted (SR #${srId})`,
+            html: `<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f4f4f5;padding:20px;">
+            <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:40px;">
+              <h2 style="color:#18181b">Add Director Request Submitted</h2>
+              <p>Hi ${founderName},</p>
+              <p>Your request to add <strong>${parsed.data.newDirectorFirstName} ${parsed.data.newDirectorLastName}</strong> as a director of <strong>${parsed.data.companyName}</strong> has been received.</p>
+              <p>Next step: Send a verification invitation to the new director so they can verify their identity on Cellion One. Once they complete verification, your request will automatically move to <strong>Ready for Filing</strong>.</p>
+              <a href="https://cellionone.com/founder/service-requests" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin:16px 0">View Service Request</a>
+            </div></body></html>`,
+          });
         }
       } catch (emailErr) {
         console.error('[ADD_DIR] Failed to send notifications:', emailErr);

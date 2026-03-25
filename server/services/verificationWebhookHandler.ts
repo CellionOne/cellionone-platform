@@ -9,7 +9,7 @@
  */
 
 import { db } from "../db";
-import { companyApplications, identityVerifications } from "@shared/schema";
+import { companyApplications, identityVerifications, addDirectorRequests, serviceRequests, users } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import * as verificationService from "./verificationService";
 import { storage } from "../storage";
@@ -193,6 +193,7 @@ async function handleVerificationApproved(
     });
     
     await updatePendingApplications(userId);
+    await updatePendingDirectorSRs(userId);
     
     await storage.createAuditLog({
       actorUserId: userId,
@@ -263,6 +264,77 @@ async function handleVerificationPending(
 ): Promise<WebhookResult> {
   console.log(`[Verification Webhook] Verification still pending for session: ${data.sessionId}`);
   return { success: true };
+}
+
+async function sendFounderNotificationEmail(
+  founderUserId: string,
+  subject: string,
+  bodyHtml: string,
+): Promise<void> {
+  try {
+    const [founderUser] = await db.select().from(users).where(eq(users.id, founderUserId)).limit(1);
+    if (!founderUser?.email) return;
+    const { getResendClient } = await import('./emailService');
+    const { client, fromEmail } = await getResendClient();
+    await client.emails.send({ from: fromEmail, to: founderUser.email, subject, html: bodyHtml });
+  } catch (e) {
+    console.error('[VerificationWebhook] Failed to send founder notification email:', e);
+  }
+}
+
+async function updatePendingDirectorSRs(verifiedUserId: string): Promise<void> {
+  try {
+    const [verifiedUser] = await db.select().from(users).where(eq(users.id, verifiedUserId)).limit(1);
+    if (!verifiedUser?.email) return;
+
+    const pendingADRs = await db.select().from(addDirectorRequests)
+      .where(and(
+        eq(addDirectorRequests.newDirectorEmail, verifiedUser.email),
+        eq(addDirectorRequests.directorVerificationStatus, 'invited'),
+      ));
+
+    for (const adr of pendingADRs) {
+      await db.update(addDirectorRequests)
+        .set({ directorVerifiedAt: new Date(), directorVerificationStatus: 'verified', updatedAt: new Date() })
+        .where(eq(addDirectorRequests.id, adr.id));
+
+      await db.update(serviceRequests)
+        .set({ status: 'ready_for_filing', updatedAt: new Date() })
+        .where(and(
+          eq(serviceRequests.id, adr.serviceRequestId),
+          eq(serviceRequests.status, 'awaiting_director_verification'),
+        ));
+
+      await storage.createAuditLog({
+        actorUserId: verifiedUserId,
+        action: 'director_verified_auto_transition',
+        entityType: 'service_request',
+        entityId: String(adr.serviceRequestId),
+        details: {
+          directorEmail: verifiedUser.email,
+          newStatus: 'ready_for_filing',
+          trigger: 'identity_verification_complete',
+        },
+      });
+
+      await sendFounderNotificationEmail(
+        adr.founderId,
+        `Director Verified — Service Request Ready for Filing`,
+        `<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f4f4f5;padding:20px;">
+        <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:40px;">
+          <h2 style="color:#18181b">Director Identity Verified</h2>
+          <p>The new director you appointed for <strong>${adr.companyName || 'your company'}</strong> (${adr.newDirectorFirstName || ''} ${adr.newDirectorLastName || ''}) has successfully completed their identity verification on Cellion One.</p>
+          <p>Your service request has automatically been updated to <strong>Ready for Filing</strong>. Our legal team will proceed with the CAC filing.</p>
+          <p>Log in to your dashboard to track progress.</p>
+          <a href="https://cellionone.com/founder/service-requests" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin:16px 0">View Service Request</a>
+        </div></body></html>`
+      );
+
+      console.log(`[VerificationWebhook] ADD_DIR SR #${adr.serviceRequestId} auto-transitioned to ready_for_filing`);
+    }
+  } catch (e) {
+    console.error('[VerificationWebhook] Error auto-transitioning director SRs:', e);
+  }
 }
 
 async function updatePendingApplications(userId: string): Promise<void> {

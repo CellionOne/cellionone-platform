@@ -920,7 +920,7 @@ export const addDirectorRequests = pgTable("add_director_requests", {
   companyTin: varchar("company_tin", { length: 20 }),
   incorporationDate: varchar("incorporation_date", { length: 20 }),
   registeredAddress: text("registered_address"),
-  existingDirectors: jsonb("existing_directors"), // [{name, role}]
+  existingDirectors: jsonb("existing_directors"), // [{name, role, bvn?, nin?}]
 
   // New Director Personal Info
   newDirectorFirstName: varchar("new_director_first_name", { length: 100 }),
@@ -932,6 +932,8 @@ export const addDirectorRequests = pgTable("add_director_requests", {
   newDirectorNationality: varchar("new_director_nationality", { length: 100 }),
   newDirectorOccupation: varchar("new_director_occupation", { length: 255 }),
   newDirectorAddress: text("new_director_address"),
+  newDirectorProposedRole: varchar("new_director_proposed_role", { length: 100 }), // e.g. Managing Director, Executive Director
+  newDirectorShareholding: varchar("new_director_shareholding", { length: 50 }), // optional percentage or number of shares
   additionalNotes: text("additional_notes"),
 
   // Workflow status

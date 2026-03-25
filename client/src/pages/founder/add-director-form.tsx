@@ -29,6 +29,8 @@ const addDirectorFormSchema = z.object({
   existingDirectors: z.array(z.object({
     name: z.string().min(1, "Director name is required"),
     role: z.string().optional().default(""),
+    bvn: z.string().optional().default(""),
+    nin: z.string().optional().default(""),
   })).default([]),
   newDirectorFirstName: z.string().min(1, "First name is required"),
   newDirectorLastName: z.string().min(1, "Last name is required"),
@@ -39,6 +41,8 @@ const addDirectorFormSchema = z.object({
   newDirectorNationality: z.string().optional().default("Nigeria"),
   newDirectorOccupation: z.string().optional().default(""),
   newDirectorAddress: z.string().optional().default(""),
+  newDirectorProposedRole: z.string().optional().default(""),
+  newDirectorShareholding: z.string().optional().default(""),
   additionalNotes: z.string().optional().default(""),
 });
 
@@ -438,7 +442,7 @@ export default function AddDirectorFormPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => appendDirector({ name: "", role: "" })}
+                      onClick={() => appendDirector({ name: "", role: "", bvn: "", nin: "" })}
                       data-testid="button-add-existing-director"
                     >
                       <Plus className="h-4 w-4 mr-1" /> Add Director
@@ -465,6 +469,24 @@ export default function AddDirectorFormPage() {
                             <FormLabel className="text-xs">Role (optional)</FormLabel>
                             <FormControl>
                               <Input placeholder="e.g., Managing Director" {...f} data-testid={`input-existing-director-role-${index}`} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )} />
+                        <FormField control={form.control} name={`existingDirectors.${index}.bvn`} render={({ field: f }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">BVN (optional)</FormLabel>
+                            <FormControl>
+                              <Input placeholder="11-digit BVN" {...f} data-testid={`input-existing-director-bvn-${index}`} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )} />
+                        <FormField control={form.control} name={`existingDirectors.${index}.nin`} render={({ field: f }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">NIN (optional)</FormLabel>
+                            <FormControl>
+                              <Input placeholder="11-digit NIN" {...f} data-testid={`input-existing-director-nin-${index}`} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -605,6 +627,30 @@ export default function AddDirectorFormPage() {
                       <FormControl>
                         <Input placeholder="e.g., Entrepreneur, Engineer" {...field} data-testid="input-director-occupation" />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <FormField control={form.control} name="newDirectorProposedRole" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Proposed Role / Designation</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g., Managing Director, Executive Director" {...field} data-testid="input-director-proposed-role" />
+                      </FormControl>
+                      <FormDescription className="text-xs">The specific directorial role they will hold</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="newDirectorShareholding" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Shareholding (optional)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g., 25% or 250,000 shares" {...field} data-testid="input-director-shareholding" />
+                      </FormControl>
+                      <FormDescription className="text-xs">Leave blank if director holds no shares</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )} />

@@ -9,6 +9,7 @@ import {
   kycBillingAccounts,
   kycSessions,
   kycSanctionsLogs,
+  kycSupplierPeople,
   featureFlags,
   identityVerifications,
   documentFiles,
@@ -328,6 +329,113 @@ export async function runSanctionsMonitoring() {
       screened++;
     } catch (err) {
       console.error(`[KYCScheduler] Sanctions screening error for request ${row.request.id}:`, err);
+    }
+  }
+
+  // --- Supplier people screening ---
+  // Screen individuals within verified supplier organisations
+  const supplierPeople = await db.select({
+    person: kycSupplierPeople,
+    request: kycVerificationRequests,
+    org: kycOrganisations,
+  })
+    .from(kycSupplierPeople)
+    .innerJoin(kycVerificationRequests, eq(kycSupplierPeople.verificationRequestId, kycVerificationRequests.id))
+    .innerJoin(kycOrganisations, eq(kycVerificationRequests.orgId, kycOrganisations.id))
+    .where(and(
+      eq(kycVerificationRequests.status, "verified"),
+      eq(kycVerificationRequests.type, "supplier"),
+      eq(kycSupplierPeople.requiresVerification, true),
+      eq(kycSupplierPeople.verificationStatus, "verified"),
+    ));
+
+  for (const row of supplierPeople) {
+    try {
+      const amlResult = await smileIdService.performAmlCheck(
+        row.person.fullName,
+        `kyc-supplier-${row.request.orgId}`,
+      );
+      const screeningResult: "clear" | "alert" = amlResult.isHit ? "alert" : "clear";
+
+      const [lastLog] = await db.select({ newRiskScore: kycSanctionsLogs.newRiskScore })
+        .from(kycSanctionsLogs)
+        .where(and(
+          eq(kycSanctionsLogs.verificationRequestId, row.request.id),
+          eq(kycSanctionsLogs.subjectName, row.person.fullName),
+        ))
+        .orderBy(sql`${kycSanctionsLogs}.created_at DESC`)
+        .limit(1);
+      const previousRiskScore = lastLog?.newRiskScore ?? null;
+      const newRiskScore = screeningResult === "alert" ? "red" : (previousRiskScore ?? "green");
+
+      await db.insert(kycSanctionsLogs).values({
+        verificationRequestId: row.request.id,
+        orgId: row.request.orgId,
+        subjectName: row.person.fullName,
+        previousRiskScore: previousRiskScore || null,
+        newRiskScore,
+        screeningResult,
+        matchDetails: amlResult.matchDetails as any,
+        alertSentAt: screeningResult === "alert" ? new Date() : null,
+      });
+
+      if (screeningResult === "alert") {
+        if (previousRiskScore === "red") {
+          console.log(`[KYCScheduler] Skipping repeat supplier alert for ${row.person.fullName}`);
+          screened++;
+          continue;
+        }
+
+        webhookService.deliverWebhook(row.request.orgId, "sanctions.alert", {
+          requestId: row.request.id,
+          subjectName: row.person.fullName,
+          subjectEmail: row.person.email,
+          supplierPersonId: row.person.id,
+          previousRiskScore,
+          newRiskScore: "red",
+          hitTypes: amlResult.hitTypes,
+          smileJobId: amlResult.smileJobId,
+          screenedAt: new Date().toISOString(),
+        }).catch(err => console.error("[KYCScheduler] Supplier sanctions webhook error:", err));
+
+        const reviewers = await db.select().from(kycOrgMembers)
+          .where(and(
+            eq(kycOrgMembers.orgId, row.request.orgId),
+            eq(kycOrgMembers.inviteStatus, "accepted"),
+            eq(kycOrgMembers.role, "org_admin")
+          ));
+
+        const hitSummary = amlResult.hitTypes.length > 0
+          ? `Hit types: ${amlResult.hitTypes.join(", ")}.`
+          : "";
+
+        const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#dc2626;">${row.org.name} — Supplier Sanctions Alert</h2>
+          <p><strong>${row.person.fullName}</strong> (${row.person.role} of supplier <em>${row.request.subjectName || "verified supplier"}</em>) has been flagged during routine AML/sanctions re-screening.</p>
+          <p>${hitSummary}</p>
+          <p>Previous risk score: <strong>${previousRiskScore || "N/A"}</strong> → New: <strong>RED</strong></p>
+          <p>Please review this individual immediately in your KYC dashboard.</p>
+        </div>`;
+
+        for (const reviewer of reviewers) {
+          await sendKycEmail(reviewer.inviteEmail, `[URGENT] Supplier Sanctions Alert — ${row.person.fullName}`, html);
+          if (reviewer.userId) {
+            storage.createNotification({
+              userId: reviewer.userId,
+              title: "Supplier Sanctions Alert",
+              message: `${row.person.fullName} (${row.person.role}) has been flagged during routine AML/sanctions re-screening and now has a RED risk score. ${hitSummary} Please review immediately in your KYC dashboard.`,
+              type: "error",
+              linkUrl: "/kyc/monitoring",
+            }).catch(err => console.error("[KYCScheduler] Supplier notification error:", err));
+          }
+        }
+
+        alerts++;
+      }
+
+      screened++;
+    } catch (err) {
+      console.error(`[KYCScheduler] Supplier sanctions screening error for person ${row.person.id}:`, err);
     }
   }
 

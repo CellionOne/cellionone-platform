@@ -839,7 +839,7 @@ export default function ApiDocsPage() {
                         <td className="p-2 text-muted-foreground">No</td>
                         <td className="p-2 text-muted-foreground">
                           Data your system already holds. Prefilled fields are shown as read-only confirmations in the wizard and are not re-entered by the subject.
-                          Accepted keys: <code className="bg-muted px-1 rounded text-xs">firstName</code>, <code className="bg-muted px-1 rounded text-xs">lastName</code>, <code className="bg-muted px-1 rounded text-xs">dateOfBirth</code> (YYYY-MM-DD), <code className="bg-muted px-1 rounded text-xs">documentType</code>, <code className="bg-muted px-1 rounded text-xs">idNumber</code>.
+                          Accepted keys: <code className="bg-muted px-1 rounded text-xs">firstName</code>, <code className="bg-muted px-1 rounded text-xs">lastName</code>, <code className="bg-muted px-1 rounded text-xs">dateOfBirth</code> (YYYY-MM-DD), <code className="bg-muted px-1 rounded text-xs">documentType</code>, <code className="bg-muted px-1 rounded text-xs">idNumber</code>, <code className="bg-muted px-1 rounded text-xs">idDocumentUrl</code> (URL of an already-uploaded ID document image — skips the document step).
                         </td>
                       </tr>
                       <tr className="border-t">
@@ -856,13 +856,14 @@ export default function ApiDocsPage() {
 
                 <div className="rounded-lg bg-muted/40 border p-3 text-xs text-muted-foreground space-y-1">
                   <p className="font-medium text-foreground text-sm">Integration Profiles</p>
-                  <p>Configure a default step set for all sessions in your organisation's Settings → Integration tab. Three profiles are available:</p>
+                  <p>Configure a default step set for all sessions in your organisation's Settings → Integration tab. Four profiles are available:</p>
                   <ul className="list-disc list-inside space-y-0.5 mt-1">
-                    <li><strong>Full Hosted</strong> — subject completes identity details, document upload, and selfie (~2–5 min)</li>
-                    <li><strong>Prefill + Selfie</strong> — you supply name/DOB, subject uploads document and takes selfie (~1–2 min)</li>
-                    <li><strong>Selfie Only</strong> — you supply all document data, subject takes a selfie only (~30 sec)</li>
+                    <li><strong>Full Hosted</strong> — subject completes identity details, document upload, and selfie (webhook, ~2–5 min)</li>
+                    <li><strong>Prefill + Selfie</strong> — you supply name/DOB, subject uploads document and takes selfie (webhook, ~1–2 min)</li>
+                    <li><strong>Selfie Only</strong> — you supply all document data, subject takes a selfie only (webhook, ~30 sec)</li>
+                    <li><strong>Data Collection</strong> — subject provides identity details and uploads their ID document, no selfie (instant result)</li>
                   </ul>
-                  <p className="mt-1">Per-session <code className="bg-muted px-1 rounded">requiredSteps</code> always overrides the profile.</p>
+                  <p className="mt-1">Per-session <code className="bg-muted px-1 rounded">requiredSteps</code> always overrides the profile. The <code className="bg-muted px-1 rounded">resultTiming</code> in the response reflects whether biometric processing is involved.</p>
                 </div>
 
                 <div>
@@ -870,7 +871,7 @@ export default function ApiDocsPage() {
                   <CodeBlock language="json" code={`{
   "sessionId": 42,
   "sessionToken": "tok_a1b2c3d4e5f6...",
-  "sessionUrl": "https://cellionone.com/kyc/session/tok_a1b2c3d4e5f6...",
+  "sessionUrl": "https://cellionone.com/verify/tok_a1b2c3d4e5f6...",
   "expiresAt": "2026-03-28T10:00:00.000Z",
   "status": "pending",
   "resultTiming": "webhook",

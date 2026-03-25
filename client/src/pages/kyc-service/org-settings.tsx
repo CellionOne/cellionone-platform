@@ -87,7 +87,7 @@ export default function OrgSettingsPage() {
   const [orgEmployeePortal, setOrgEmployeePortal] = useState(true);
   const [orgSupplierPortal, setOrgSupplierPortal] = useState(true);
   const [orgInitialized, setOrgInitialized] = useState(false);
-  const [integrationProfileMode, setIntegrationProfileMode] = useState<"full_hosted" | "prefill_selfie" | "selfie_only" | null>(null);
+  const [integrationProfileMode, setIntegrationProfileMode] = useState<"full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection" | null>(null);
 
   const { data: org, isLoading } = useQuery<OrgDetail>({
     queryKey: ["/api/kyc-service/organisations", orgId],
@@ -1732,19 +1732,21 @@ function IntegrationProfileTab({
   updateMutation,
 }: {
   orgId: string;
-  currentMode: "full_hosted" | "prefill_selfie" | "selfie_only" | null;
-  onModeChange: (mode: "full_hosted" | "prefill_selfie" | "selfie_only") => void;
+  currentMode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection" | null;
+  onModeChange: (mode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection") => void;
   updateMutation: any;
 }) {
   const { toast } = useToast();
-  const [selectedMode, setSelectedMode] = useState<"full_hosted" | "prefill_selfie" | "selfie_only" | null>(currentMode);
+  const [selectedMode, setSelectedMode] = useState<"full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection" | null>(currentMode);
 
   const profiles: {
-    mode: "full_hosted" | "prefill_selfie" | "selfie_only";
+    mode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection";
     label: string;
     description: string;
     steps: string[];
     timing: string;
+    resultTiming: "instant" | "webhook";
+    requiresBiometric: boolean;
     icon: any;
     timingColor: string;
   }[] = [
@@ -1753,7 +1755,9 @@ function IntegrationProfileTab({
       label: "Full Hosted",
       description: "Your customer provides everything: name, date of birth, ID document photo, and a liveness selfie. Best for onboarding flows where you have no prior data.",
       steps: ["Identity details", "ID document upload", "Liveness selfie"],
-      timing: "~2–5 minutes",
+      timing: "~2–5 minutes (webhook)",
+      resultTiming: "webhook",
+      requiresBiometric: true,
       timingColor: "text-amber-600 dark:text-amber-400",
       icon: Layers,
     },
@@ -1762,7 +1766,9 @@ function IntegrationProfileTab({
       label: "Prefill + Selfie",
       description: "Your system prefills the subject's name and date of birth. The subject only needs to upload their ID document and take a liveness selfie.",
       steps: ["ID document upload", "Liveness selfie"],
-      timing: "~1–2 minutes",
+      timing: "~1–2 minutes (webhook)",
+      resultTiming: "webhook",
+      requiresBiometric: true,
       timingColor: "text-blue-600 dark:text-blue-400",
       icon: ScanFace,
     },
@@ -1771,18 +1777,34 @@ function IntegrationProfileTab({
       label: "Selfie Only",
       description: "Your system has all the subject's document data. The subject only takes a liveness selfie for biometric matching. Fastest experience.",
       steps: ["Liveness selfie only"],
-      timing: "~30 seconds",
+      timing: "~30 seconds (webhook)",
+      resultTiming: "webhook",
+      requiresBiometric: true,
       timingColor: "text-green-600 dark:text-green-400",
       icon: Camera,
+    },
+    {
+      mode: "data_collection",
+      label: "Data Collection",
+      description: "Subjects provide identity details and upload their ID document. No selfie or biometric matching — results are returned instantly via the API response.",
+      steps: ["Identity details", "ID document upload"],
+      timing: "Instant result",
+      resultTiming: "instant",
+      requiresBiometric: false,
+      timingColor: "text-violet-600 dark:text-violet-400",
+      icon: FileText,
     },
   ];
 
   function handleSave() {
     if (!selectedMode) return;
+    const profile = profiles.find(p => p.mode === selectedMode)!;
     updateMutation.mutate(
       {
         integrationProfile: {
           mode: selectedMode,
+          requiresBiometric: profile.requiresBiometric,
+          resultTiming: profile.resultTiming,
           configuredAt: new Date().toISOString(),
         },
       },

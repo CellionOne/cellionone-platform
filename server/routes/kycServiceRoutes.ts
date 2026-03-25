@@ -110,7 +110,9 @@ export function registerKycServiceRoutes(app: Express) {
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
       const integrationProfileSchema = z.object({
-        mode: z.enum(["full_hosted", "prefill_selfie", "selfie_only"]),
+        mode: z.enum(["full_hosted", "prefill_selfie", "selfie_only", "data_collection"]),
+        requiresBiometric: z.boolean(),
+        resultTiming: z.enum(["instant", "webhook"]),
         configuredAt: z.string().optional(),
       }).optional();
 
@@ -149,7 +151,12 @@ export function registerKycServiceRoutes(app: Express) {
         termsAcceptedByUserId: userId,
         termsAcceptedIp: clientIp,
         integrationProfile: data.integrationProfile
-          ? { mode: data.integrationProfile.mode, configuredAt: data.integrationProfile.configuredAt || new Date().toISOString() }
+          ? {
+              mode: data.integrationProfile.mode,
+              requiresBiometric: data.integrationProfile.requiresBiometric,
+              resultTiming: data.integrationProfile.resultTiming,
+              configuredAt: data.integrationProfile.configuredAt || new Date().toISOString(),
+            }
           : null,
       }).returning();
 
@@ -226,9 +233,10 @@ export function registerKycServiceRoutes(app: Express) {
     try {
       const orgId = parseInt(req.params.id);
       const integrationProfileSchema = z.object({
-        mode: z.enum(["full_hosted", "prefill_selfie", "selfie_only"]),
+        mode: z.enum(["full_hosted", "prefill_selfie", "selfie_only", "data_collection"]),
+        requiresBiometric: z.boolean(),
+        resultTiming: z.enum(["instant", "webhook"]),
         configuredAt: z.string().optional(),
-        description: z.string().optional(),
       }).optional();
 
       const schema = z.object({

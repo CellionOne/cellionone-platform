@@ -1092,9 +1092,10 @@ export const kycOrganisations = pgTable("kyc_organisations", {
   termsAcceptedByUserId: varchar("terms_accepted_by_user_id"),
   termsAcceptedIp: varchar("terms_accepted_ip", { length: 45 }),
   integrationProfile: jsonb("integration_profile").$type<{
-    mode: "full_hosted" | "prefill_selfie" | "selfie_only";
+    mode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection";
+    requiresBiometric: boolean;
+    resultTiming: "instant" | "webhook";
     configuredAt?: string;
-    description?: string;
   }>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

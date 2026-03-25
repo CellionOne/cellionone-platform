@@ -601,6 +601,8 @@ export function registerKycApiRoutes(app: Express) {
           resolvedSteps = ["selfie"];
         } else if (mode === "prefill_selfie") {
           resolvedSteps = ["documents", "selfie"];
+        } else if (mode === "data_collection") {
+          resolvedSteps = ["identity", "documents"];
         } else {
           resolvedSteps = ["identity", "documents", "selfie"];
         }

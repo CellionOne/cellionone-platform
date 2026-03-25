@@ -27,6 +27,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Info,
+  FileText,
 } from "lucide-react";
 import type { KycOrganisation } from "@shared/schema";
 
@@ -34,21 +35,23 @@ interface OrgWithRole extends KycOrganisation {
   memberRole?: string;
 }
 
-type ProfileMode = "full_hosted" | "prefill_selfie" | "selfie_only";
+type ProfileMode = "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection";
 
-function deriveProfile(hasIdentity: boolean, hasDocument: boolean): ProfileMode {
+function deriveProfile(hasIdentity: boolean, hasDocument: boolean, needsBiometric: boolean): ProfileMode {
+  if (!needsBiometric) return "data_collection";
   if (hasIdentity && hasDocument) return "selfie_only";
   if (hasIdentity) return "prefill_selfie";
   return "full_hosted";
 }
 
-const PROFILE_LABELS: Record<ProfileMode, { label: string; description: string; steps: string[]; icon: any; color: string }> = {
+const PROFILE_LABELS: Record<ProfileMode, { label: string; description: string; steps: string[]; icon: any; color: string; timing: string }> = {
   full_hosted: {
     label: "Full Hosted",
     description: "Subjects will provide their name, date of birth, ID document, and a liveness selfie.",
     steps: ["Identity details", "ID document upload", "Liveness selfie"],
     icon: Layers,
     color: "text-amber-600 dark:text-amber-400",
+    timing: "Webhook",
   },
   prefill_selfie: {
     label: "Prefill + Selfie",
@@ -56,6 +59,7 @@ const PROFILE_LABELS: Record<ProfileMode, { label: string; description: string; 
     steps: ["ID document upload", "Liveness selfie"],
     icon: ScanFace,
     color: "text-blue-600 dark:text-blue-400",
+    timing: "Webhook",
   },
   selfie_only: {
     label: "Selfie Only",
@@ -63,6 +67,15 @@ const PROFILE_LABELS: Record<ProfileMode, { label: string; description: string; 
     steps: ["Liveness selfie only"],
     icon: Camera,
     color: "text-green-600 dark:text-green-400",
+    timing: "Webhook",
+  },
+  data_collection: {
+    label: "Data Collection",
+    description: "Subjects provide their identity details and upload their ID document. No selfie required — results are returned instantly.",
+    steps: ["Identity details", "ID document upload"],
+    icon: FileText,
+    color: "text-violet-600 dark:text-violet-400",
+    timing: "Instant",
   },
 };
 
@@ -79,6 +92,7 @@ export default function KycOrgsPage() {
 
   const [hasIdentityData, setHasIdentityData] = useState<boolean | null>(null);
   const [hasDocumentData, setHasDocumentData] = useState<boolean | null>(null);
+  const [needsBiometric, setNeedsBiometric] = useState<boolean | null>(null);
 
   const { data: orgs, isLoading } = useQuery<OrgWithRole[]>({
     queryKey: ["/api/kyc-service/organisations"],
@@ -108,6 +122,7 @@ export default function KycOrgsPage() {
     setTermsAccepted(false);
     setHasIdentityData(null);
     setHasDocumentData(null);
+    setNeedsBiometric(null);
     setDialogStep(1);
   }
 
@@ -119,13 +134,16 @@ export default function KycOrgsPage() {
   function handleCreate() {
     const hasId = hasIdentityData ?? false;
     const hasDoc = hasDocumentData ?? false;
-    const mode = deriveProfile(hasId, hasDoc);
+    const biometric = needsBiometric ?? true;
+    const mode = deriveProfile(hasId, hasDoc, biometric);
+    const requiresBiometric = mode !== "data_collection";
+    const resultTiming = requiresBiometric ? "webhook" : "instant";
     createMutation.mutate({
       name,
       category,
       contactEmail,
       termsAccepted,
-      integrationProfile: { mode, configuredAt: new Date().toISOString() },
+      integrationProfile: { mode, requiresBiometric, resultTiming, configuredAt: new Date().toISOString() },
     });
   }
 
@@ -133,10 +151,11 @@ export default function KycOrgsPage() {
 
   const step2Q1Done = hasIdentityData !== null;
   const step2Q2Done = !hasIdentityData || hasDocumentData !== null;
-  const step2Valid = step2Q1Done && step2Q2Done;
+  const step2Q3Done = needsBiometric !== null;
+  const step2Valid = step2Q1Done && step2Q2Done && step2Q3Done;
 
   const derivedProfile = step2Valid
-    ? deriveProfile(hasIdentityData ?? false, hasDocumentData ?? false)
+    ? deriveProfile(hasIdentityData ?? false, hasDocumentData ?? false, needsBiometric ?? true)
     : null;
 
   return (
@@ -285,14 +304,49 @@ export default function KycOrgsPage() {
                       </div>
                     )}
 
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-sm font-medium">Q3. Do you need biometric identity matching?</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Biometric matching requires the subject to take a selfie — results are delivered via webhook</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[{ value: true, label: "Yes, require a selfie" }, { value: false, label: "No, data collection only" }].map(({ value, label }) => (
+                          <button
+                            key={String(value)}
+                            type="button"
+                            onClick={() => setNeedsBiometric(value)}
+                            className={cn(
+                              "flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all",
+                              needsBiometric === value
+                                ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                                : "border-border hover:border-primary/40"
+                            )}
+                            data-testid={`button-q3-${value ? "yes" : "no"}`}
+                          >
+                            {needsBiometric === value && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {derivedProfile && (() => {
                       const profile = PROFILE_LABELS[derivedProfile];
                       const Icon = profile.icon;
                       return (
                         <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Icon className={cn("h-4 w-4 shrink-0", profile.color)} />
-                            <p className="text-sm font-semibold">Recommended: {profile.label}</p>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Icon className={cn("h-4 w-4 shrink-0", profile.color)} />
+                              <p className="text-sm font-semibold">Recommended: {profile.label}</p>
+                            </div>
+                            <span className={cn("text-xs font-medium px-2 py-0.5 rounded-full",
+                              profile.timing === "Instant"
+                                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                            )}>
+                              {profile.timing} result
+                            </span>
                           </div>
                           <p className="text-xs text-muted-foreground">{profile.description}</p>
                           <div className="flex flex-wrap gap-1.5 mt-1">

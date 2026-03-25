@@ -2555,10 +2555,6 @@ export function registerKycServiceRoutes(app: Express) {
 
       const notesData: Record<string, any> = { source: "hosted_session", sessionId: session.id };
       if (dateOfBirth) notesData.dateOfBirth = dateOfBirth;
-      if (documentObjectPath) {
-        notesData.documentObjectPath = documentObjectPath;
-        notesData.documentType = documentType || "unknown";
-      }
       if (selfieBase64) notesData.selfieSubmitted = true;
 
       const [request] = await db.insert(kycVerificationRequests).values({
@@ -2573,6 +2569,56 @@ export function registerKycServiceRoutes(app: Express) {
         expiresAt,
         notes: JSON.stringify(notesData),
       }).returning();
+
+      // Persist uploaded documents into kycSubmittedDocuments
+      // Look up standard individual requirements (prefer org-specific, fall back to global)
+      const allReqs = await db.select().from(kycDocumentRequirements).where(
+        and(
+          eq(kycDocumentRequirements.type, "individual"),
+          eq(kycDocumentRequirements.isStandard, true),
+          eq(kycDocumentRequirements.isActive, true),
+        )
+      );
+      const idDocReq = allReqs.find(r => r.documentName === "Government-Issued ID");
+      const selfieReq = allReqs.find(r => r.documentName === "Passport Photograph");
+
+      if (documentObjectPath && idDocReq) {
+        const fileName = documentObjectPath.split("/").pop() || "id-document";
+        await db.insert(kycSubmittedDocuments).values({
+          verificationRequestId: request.id,
+          requirementId: idDocReq.id,
+          fileName,
+          filePath: documentObjectPath,
+          mimeType: "application/octet-stream",
+          status: "uploaded",
+          detectedDocumentType: documentType || null,
+        });
+      }
+
+      if (selfieBase64 && selfieReq) {
+        try {
+          const base64Data = selfieBase64.replace(/^data:image\/\w+;base64,/, "");
+          const buffer = Buffer.from(base64Data, "base64");
+          const selfieUploadURL = await objectStorageService.getObjectEntityUploadURL();
+          const selfieObjectPath = objectStorageService.normalizeObjectEntityPath(selfieUploadURL);
+          await fetch(selfieUploadURL, {
+            method: "PUT",
+            body: buffer,
+            headers: { "Content-Type": "image/jpeg" },
+          });
+          await db.insert(kycSubmittedDocuments).values({
+            verificationRequestId: request.id,
+            requirementId: selfieReq.id,
+            fileName: "selfie.jpg",
+            filePath: selfieObjectPath,
+            mimeType: "image/jpeg",
+            status: "uploaded",
+            detectedDocumentType: "selfie",
+          });
+        } catch (selfieErr) {
+          console.error("[KYC Session] Selfie storage error (non-blocking):", selfieErr);
+        }
+      }
 
       await db.update(kycSessions).set({
         status: "completed",

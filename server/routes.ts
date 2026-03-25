@@ -6,7 +6,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc } from "drizzle-orm";
 import * as services from "./services";
@@ -2618,7 +2618,27 @@ export async function registerRoutes(
       const documents = await db.select().from(srDocumentsTable)
         .where(eq(srDocumentsTable.serviceRequestId, srId));
 
-      res.json({ directorData: adr || null, documents });
+      let directorData: any = adr || null;
+      if (adr && adr.directorVerificationStatus === "verified" && adr.newDirectorEmail) {
+        const [dirUser] = await db.select({ id: usersTable.id })
+          .from(usersTable).where(eq(usersTable.email, adr.newDirectorEmail));
+        if (dirUser) {
+          const [dirIV] = await db.select({ expiresAt: identityVerifications.expiresAt })
+            .from(identityVerifications)
+            .where(eq(identityVerifications.founderUserId, dirUser.id))
+            .orderBy(desc(identityVerifications.createdAt))
+            .limit(1);
+          if (dirIV?.expiresAt) {
+            directorData = {
+              ...adr,
+              directorExpiresAt: dirIV.expiresAt.toISOString(),
+              directorDaysUntilExpiry: Math.max(0, Math.floor((dirIV.expiresAt.getTime() - Date.now()) / 86400000)),
+            };
+          }
+        }
+      }
+
+      res.json({ directorData, documents });
     } catch (error) {
       console.error("Error fetching director data:", error);
       res.status(500).json({ message: "Failed to fetch director data" });
@@ -3099,7 +3119,26 @@ export async function registerRoutes(
         // Fetch structured director data from dedicated table
         const [adr] = await db.select().from(addDirectorRequestsTable)
           .where(eq(addDirectorRequestsTable.serviceRequestId, sr.id));
-        addDirectorRecord = adr || null;
+        if (adr) {
+          let directorExpiresAt: string | null = null;
+          let directorDaysUntilExpiry: number | null = null;
+          if (adr.directorVerificationStatus === "verified" && adr.newDirectorEmail) {
+            const [dirUser] = await db.select({ id: usersTable.id })
+              .from(usersTable).where(eq(usersTable.email, adr.newDirectorEmail));
+            if (dirUser) {
+              const [dirIV] = await db.select({ expiresAt: identityVerifications.expiresAt })
+                .from(identityVerifications)
+                .where(eq(identityVerifications.founderUserId, dirUser.id))
+                .orderBy(desc(identityVerifications.createdAt))
+                .limit(1);
+              if (dirIV?.expiresAt) {
+                directorExpiresAt = dirIV.expiresAt.toISOString();
+                directorDaysUntilExpiry = Math.max(0, Math.floor((dirIV.expiresAt.getTime() - Date.now()) / 86400000));
+              }
+            }
+          }
+          addDirectorRecord = { ...adr, directorExpiresAt, directorDaysUntilExpiry };
+        }
       } else if (sr.companyProfileId) {
         documents = await db.select().from(srDocumentsTable)
           .where(eq(srDocumentsTable.companyProfileId, sr.companyProfileId));

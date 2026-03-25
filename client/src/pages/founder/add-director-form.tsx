@@ -800,9 +800,28 @@ export default function AddDirectorFormPage() {
                       Send an invitation to <strong>{directorData.newDirectorEmail}</strong> so they can create a Cellion One account and complete their identity verification — a regulatory requirement for CAC filings.
                     </p>
                     {directorData?.directorVerificationStatus === 'verified' ? (
-                      <div className="flex items-center gap-2 text-green-600 text-sm">
-                        <CheckCircle2 className="h-4 w-4" />
-                        <span>Director identity verified</span>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-green-600 text-sm">
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>Director identity verified</span>
+                        </div>
+                        {directorData.directorExpiresAt && (() => {
+                          const days = directorData.directorDaysUntilExpiry ?? null;
+                          const expired = days !== null && days <= 0;
+                          const expiringSoon = days !== null && days > 0 && days <= 30;
+                          return (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground">Verification expiry:</span>
+                              <Badge
+                                variant={expired ? "destructive" : expiringSoon ? "secondary" : "outline"}
+                                className={`text-xs ${expiringSoon ? "border-yellow-500 text-yellow-700 dark:text-yellow-400" : ""}`}
+                                data-testid="badge-director-verification-expiry"
+                              >
+                                {expired ? "Expired" : expiringSoon ? `${days}d remaining` : new Date(directorData.directorExpiresAt).toLocaleDateString("en-NG", { year: "numeric", month: "short" })}
+                              </Badge>
+                            </div>
+                          );
+                        })()}
                       </div>
                     ) : directorData?.directorVerificationStatus === 'invited' ? (
                       <div className="space-y-2">

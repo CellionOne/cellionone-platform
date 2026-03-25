@@ -269,6 +269,13 @@ export async function runSanctionsMonitoring() {
           .set({ riskScore: "red", updatedAt: new Date() })
           .where(eq(kycVerificationRequests.id, row.request.id));
 
+        // Only fire external alerts on NEW escalations — skip if already red
+        if (previousRiskScore === "red") {
+          console.log(`[KYCScheduler] Skipping repeat alert for already-red request ${row.request.id}`);
+          screened++;
+          continue;
+        }
+
         webhookService.deliverWebhook(row.request.orgId, "sanctions.alert", {
           requestId: row.request.id,
           subjectName: row.request.subjectName,

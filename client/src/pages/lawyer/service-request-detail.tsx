@@ -439,6 +439,29 @@ export default function LawyerServiceRequestDetailPage() {
                       </span>
                     </div>
                   )}
+                  {directorData.directorExpiresAt && (
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm text-muted-foreground">ID Verification Expiry</span>
+                      {(() => {
+                        const days = directorData.directorDaysUntilExpiry ?? null;
+                        const expired = days !== null && days <= 0;
+                        const expiringSoon = days !== null && days > 0 && days <= 30;
+                        return (
+                          <Badge
+                            variant={expired ? "destructive" : expiringSoon ? "secondary" : "outline"}
+                            className={expiringSoon ? "border-yellow-500 text-yellow-700 dark:text-yellow-400" : ""}
+                            data-testid="badge-director-expiry"
+                          >
+                            {expired
+                              ? "Expired"
+                              : expiringSoon
+                                ? `${days}d remaining`
+                                : new Date(directorData.directorExpiresAt).toLocaleDateString("en-NG", { year: "numeric", month: "short", day: "numeric" })}
+                          </Badge>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </>

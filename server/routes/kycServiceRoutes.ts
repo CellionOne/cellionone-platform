@@ -2583,20 +2583,36 @@ export function registerKycServiceRoutes(app: Express) {
 
       const { firstName, lastName, dateOfBirth, selfieBase64, documentObjectPath, documentType } = req.body;
 
-      // Server-side validation: require document upload and selfie for data integrity
-      if (!documentObjectPath) {
-        return res.status(422).json({ message: "A government-issued ID document is required to complete verification." });
-      }
-      if (!selfieBase64) {
-        return res.status(422).json({ message: "A selfie photograph is required to complete verification." });
-      }
-      if (!firstName || !lastName) {
+      // Determine which steps are actually required for this session
+      const sessionRequiredSteps = session.requiredSteps as string[] | null;
+      const prefillData = session.prefillData as Record<string, any> | null;
+
+      // null → all steps required; [] → no steps required; explicit list → those steps
+      const selfieRequired = !sessionRequiredSteps || sessionRequiredSteps.includes("selfie");
+      const documentRequired = !sessionRequiredSteps || sessionRequiredSteps.includes("documents");
+      const identityRequired = !sessionRequiredSteps || sessionRequiredSteps.includes("identity");
+
+      // Accept prefilled document URL as a substitute for document upload
+      const effectiveDocumentPath = documentObjectPath || prefillData?.idDocumentUrl || null;
+
+      // Validate only steps that are required and not covered by prefill
+      if (identityRequired && !firstName && !lastName && !prefillData?.firstName) {
         return res.status(422).json({ message: "First name and last name are required to complete verification." });
       }
+      if (documentRequired && !effectiveDocumentPath) {
+        return res.status(422).json({ message: "A government-issued ID document is required to complete verification." });
+      }
+      if (selfieRequired && !selfieBase64) {
+        return res.status(422).json({ message: "A selfie photograph is required to complete verification." });
+      }
+
+      // Build effective subject identity, merging prefill where submission is absent
+      const effectiveFirstName = firstName || prefillData?.firstName || null;
+      const effectiveLastName = lastName || prefillData?.lastName || null;
 
       // Build enriched subject name from personal details if provided
-      const subjectName = (firstName && lastName)
-        ? `${firstName} ${lastName}`.trim()
+      const subjectName = (effectiveFirstName && effectiveLastName)
+        ? `${effectiveFirstName} ${effectiveLastName}`.trim()
         : session.subjectName;
 
       // Create a verification request for this session
@@ -2604,8 +2620,9 @@ export function registerKycServiceRoutes(app: Express) {
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
       const notesData: Record<string, any> = { source: "hosted_session", sessionId: session.id };
-      if (dateOfBirth) notesData.dateOfBirth = dateOfBirth;
+      if (dateOfBirth || prefillData?.dateOfBirth) notesData.dateOfBirth = dateOfBirth || prefillData?.dateOfBirth;
       if (selfieBase64) notesData.selfieSubmitted = true;
+      if (prefillData?.idDocumentUrl && !documentObjectPath) notesData.documentPrefilled = true;
 
       const [request] = await db.insert(kycVerificationRequests).values({
         orgId: session.orgId,
@@ -2632,13 +2649,13 @@ export function registerKycServiceRoutes(app: Express) {
       const idDocReq = allReqs.find(r => r.documentName === "Government-Issued ID");
       const selfieReq = allReqs.find(r => r.documentName === "Passport Photograph");
 
-      if (documentObjectPath && idDocReq) {
-        const fileName = documentObjectPath.split("/").pop() || "id-document";
+      if (effectiveDocumentPath && idDocReq) {
+        const fileName = effectiveDocumentPath.split("/").pop() || "id-document";
         await db.insert(kycSubmittedDocuments).values({
           verificationRequestId: request.id,
           requirementId: idDocReq.id,
           fileName,
-          filePath: documentObjectPath,
+          filePath: effectiveDocumentPath,
           mimeType: "application/octet-stream",
           status: "uploaded",
           detectedDocumentType: documentType || null,

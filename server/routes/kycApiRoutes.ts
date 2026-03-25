@@ -618,9 +618,9 @@ export function registerKycApiRoutes(app: Express) {
         // Keep as [] (not null) so the wizard knows "no steps needed" vs "unspecified"
       }
 
-      // Determine result timing: instant if only identity data collected (no async biometrics),
-      // webhook when selfie or document processing is involved
-      const hasAsyncStep = !resolvedSteps || resolvedSteps.some(s => ["selfie", "documents"].includes(s));
+      // Determine result timing: "webhook" only when a selfie is involved (biometric processing);
+      // "instant" for identity and document-only flows (data_collection profile or identity-only)
+      const hasAsyncStep = !resolvedSteps || resolvedSteps.some(s => s === "selfie");
       const resultTiming = hasAsyncStep ? "webhook" : "instant";
 
       const sessionToken = crypto.randomBytes(32).toString("hex");

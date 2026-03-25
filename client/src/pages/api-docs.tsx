@@ -350,10 +350,90 @@ export default function ApiDocsPage() {
               Billing
             </h2>
             <p className="text-muted-foreground leading-relaxed">
-              Cellion One offers two billing models. All organisations start with pre-paid credits.
+              Cellion One uses a credit-based model — 1 credit = 1 verification, deducted automatically
+              when a session completes. Credits are pre-purchased via Paystack in NGN.
               High-volume organisations can apply for invoiced billing.
             </p>
 
+            {/* Pricing tiers */}
+            <div>
+              <h3 className="text-base font-semibold mb-3">Verification Pricing</h3>
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  {
+                    id: "identity_only",
+                    label: "Identity Check",
+                    price: "₦5,000",
+                    per: "per credit",
+                    timing: "Instant result",
+                    timingColor: "text-violet-600 dark:text-violet-400",
+                    borderColor: "border-violet-200 dark:border-violet-800",
+                    bgColor: "bg-violet-50/60 dark:bg-violet-950/20",
+                    checks: [
+                      "AML & sanctions screening",
+                      "Name-based fraud check",
+                    ],
+                    note: "Best for quick background checks where you already hold ID documents.",
+                  },
+                  {
+                    id: "individual",
+                    label: "Full Individual KYC",
+                    price: "₦15,000",
+                    per: "per credit",
+                    timing: "~2–5 min (webhook)",
+                    timingColor: "text-amber-600 dark:text-amber-400",
+                    borderColor: "border-amber-200 dark:border-amber-800",
+                    bgColor: "bg-amber-50/60 dark:bg-amber-950/20",
+                    checks: [
+                      "Government-issued ID verification",
+                      "Liveness selfie & biometric match",
+                      "AML & sanctions screening",
+                    ],
+                    note: "Full onboarding KYC for individuals. Result delivered via webhook.",
+                  },
+                  {
+                    id: "supplier",
+                    label: "Supplier / Corporate",
+                    price: "₦75,000",
+                    per: "per credit",
+                    timing: "~1 business day",
+                    timingColor: "text-blue-600 dark:text-blue-400",
+                    borderColor: "border-blue-200 dark:border-blue-800",
+                    bgColor: "bg-blue-50/60 dark:bg-blue-950/20",
+                    checks: [
+                      "Corporate entity verification",
+                      "Director & shareholder KYC",
+                      "AML & sanctions screening",
+                    ],
+                    note: "Comprehensive due-diligence for suppliers and corporate counterparties.",
+                  },
+                ].map((tier) => (
+                  <Card key={tier.id} className={`${tier.bgColor} ${tier.borderColor}`}>
+                    <CardContent className="pt-5 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold leading-tight">{tier.label}</p>
+                        <div className="text-right shrink-0">
+                          <p className="text-lg font-bold text-foreground leading-none">{tier.price}</p>
+                          <p className="text-xs text-muted-foreground">{tier.per}</p>
+                        </div>
+                      </div>
+                      <ul className="space-y-1.5">
+                        {tier.checks.map((c) => (
+                          <li key={c} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                            <span className="text-primary mt-0.5">✓</span>
+                            {c}
+                          </li>
+                        ))}
+                      </ul>
+                      <div className={`text-xs font-medium ${tier.timingColor}`}>⏱ {tier.timing}</div>
+                      <p className="text-xs text-muted-foreground border-t pt-2">{tier.note}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            {/* Billing modes */}
             <div className="grid gap-4 sm:grid-cols-2">
               <Card>
                 <CardHeader>
@@ -361,22 +441,12 @@ export default function ApiDocsPage() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <ul className="space-y-2 text-sm text-muted-foreground">
-                    <li>Purchase credits upfront via Paystack</li>
+                    <li>Purchase credits upfront via Paystack (NGN)</li>
                     <li>Minimum 10 credits per purchase</li>
-                    <li>1 credit = 1 verification request</li>
+                    <li>1 credit = 1 verification at the rate for its type</li>
                     <li>Credits never expire</li>
+                    <li>Deducted automatically on session completion</li>
                   </ul>
-                  <Separator />
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span>Individual verification</span>
-                      <span className="font-semibold">₦10,000</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span>Supplier verification</span>
-                      <span className="font-semibold">₦100,000</span>
-                    </div>
-                  </div>
                 </CardContent>
               </Card>
               <Card>
@@ -392,7 +462,7 @@ export default function ApiDocsPage() {
                   </ul>
                   <Separator />
                   <p className="text-sm text-muted-foreground">
-                    Apply through your organisation settings or contact us at{" "}
+                    Apply through your organisation settings or contact{" "}
                     <a href="mailto:service@cellionone.com" className="text-primary hover:underline">
                       service@cellionone.com
                     </a>
@@ -406,15 +476,14 @@ export default function ApiDocsPage() {
                 <h3 className="font-semibold">Insufficient Credits</h3>
                 <p className="text-sm text-muted-foreground">
                   If your balance is zero (prepaid) or you've exceeded your credit limit (invoiced),
-                  verification requests will return <code className="bg-muted px-1 rounded">402 Payment Required</code>:
+                  session completion will return <code className="bg-muted px-1 rounded">402 Payment Required</code>:
                 </p>
                 <CodeBlock
                   language="json"
                   code={`{
-  "error": "INSUFFICIENT_CREDITS",
-  "message": "Insufficient credits. Purchase more credits or contact support.",
-  "billingMode": "prepaid",
-  "currentBalance": 0
+  "message": "Insufficient verification credits. Please top up your account to continue.",
+  "code": "INSUFFICIENT_CREDITS",
+  "verificationType": "individual"
 }`}
                 />
               </CardContent>

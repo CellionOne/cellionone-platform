@@ -111,6 +111,7 @@ export function registerKycServiceRoutes(app: Express) {
 
       const integrationProfileSchema = z.object({
         mode: z.enum(["full_hosted", "prefill_selfie", "selfie_only", "data_collection"]),
+        verificationLocation: z.enum(["hosted", "embedded", "headless"]),
         requiresBiometric: z.boolean(),
         resultTiming: z.enum(["instant", "webhook"]),
         configuredAt: z.string().optional(),
@@ -153,6 +154,7 @@ export function registerKycServiceRoutes(app: Express) {
         integrationProfile: data.integrationProfile
           ? {
               mode: data.integrationProfile.mode,
+              verificationLocation: data.integrationProfile.verificationLocation,
               requiresBiometric: data.integrationProfile.requiresBiometric,
               resultTiming: data.integrationProfile.resultTiming,
               configuredAt: data.integrationProfile.configuredAt || new Date().toISOString(),
@@ -234,6 +236,7 @@ export function registerKycServiceRoutes(app: Express) {
       const orgId = parseInt(req.params.id);
       const integrationProfileSchema = z.object({
         mode: z.enum(["full_hosted", "prefill_selfie", "selfie_only", "data_collection"]),
+        verificationLocation: z.enum(["hosted", "embedded", "headless"]),
         requiresBiometric: z.boolean(),
         resultTiming: z.enum(["instant", "webhook"]),
         configuredAt: z.string().optional(),

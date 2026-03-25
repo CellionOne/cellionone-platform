@@ -1093,6 +1093,7 @@ export const kycOrganisations = pgTable("kyc_organisations", {
   termsAcceptedIp: varchar("terms_accepted_ip", { length: 45 }),
   integrationProfile: jsonb("integration_profile").$type<{
     mode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection";
+    verificationLocation: "hosted" | "embedded" | "headless";
     requiresBiometric: boolean;
     resultTiming: "instant" | "webhook";
     configuredAt?: string;

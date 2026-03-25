@@ -36,11 +36,13 @@ interface OrgWithRole extends KycOrganisation {
 }
 
 type ProfileMode = "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection";
+type DataLevel = "none" | "identity" | "identity_doc";
+type VerificationLocation = "hosted" | "embedded" | "headless";
 
-function deriveProfile(hasIdentity: boolean, hasDocument: boolean, needsBiometric: boolean): ProfileMode {
+function deriveProfile(dataLevel: DataLevel, needsBiometric: boolean): ProfileMode {
   if (!needsBiometric) return "data_collection";
-  if (hasIdentity && hasDocument) return "selfie_only";
-  if (hasIdentity) return "prefill_selfie";
+  if (dataLevel === "identity_doc") return "selfie_only";
+  if (dataLevel === "identity") return "prefill_selfie";
   return "full_hosted";
 }
 
@@ -90,8 +92,8 @@ export default function KycOrgsPage() {
   const [contactEmail, setContactEmail] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
 
-  const [hasIdentityData, setHasIdentityData] = useState<boolean | null>(null);
-  const [hasDocumentData, setHasDocumentData] = useState<boolean | null>(null);
+  const [verificationLocation, setVerificationLocation] = useState<VerificationLocation | null>(null);
+  const [dataLevel, setDataLevel] = useState<DataLevel | null>(null);
   const [needsBiometric, setNeedsBiometric] = useState<boolean | null>(null);
 
   const { data: orgs, isLoading } = useQuery<OrgWithRole[]>({
@@ -120,8 +122,8 @@ export default function KycOrgsPage() {
     setCategory("corporate");
     setContactEmail("");
     setTermsAccepted(false);
-    setHasIdentityData(null);
-    setHasDocumentData(null);
+    setVerificationLocation(null);
+    setDataLevel(null);
     setNeedsBiometric(null);
     setDialogStep(1);
   }
@@ -132,10 +134,9 @@ export default function KycOrgsPage() {
   }
 
   function handleCreate() {
-    const hasId = hasIdentityData ?? false;
-    const hasDoc = hasDocumentData ?? false;
+    const dl = dataLevel ?? "none";
     const biometric = needsBiometric ?? true;
-    const mode = deriveProfile(hasId, hasDoc, biometric);
+    const mode = deriveProfile(dl, biometric);
     const requiresBiometric = mode !== "data_collection";
     const resultTiming = requiresBiometric ? "webhook" : "instant";
     createMutation.mutate({
@@ -143,19 +144,25 @@ export default function KycOrgsPage() {
       category,
       contactEmail,
       termsAccepted,
-      integrationProfile: { mode, requiresBiometric, resultTiming, configuredAt: new Date().toISOString() },
+      integrationProfile: {
+        mode,
+        verificationLocation: verificationLocation ?? "hosted",
+        requiresBiometric,
+        resultTiming,
+        configuredAt: new Date().toISOString(),
+      },
     });
   }
 
   const step1Valid = name.trim().length >= 2 && contactEmail.trim().length > 0 && termsAccepted;
 
-  const step2Q1Done = hasIdentityData !== null;
-  const step2Q2Done = !hasIdentityData || hasDocumentData !== null;
+  const step2Q1Done = verificationLocation !== null;
+  const step2Q2Done = dataLevel !== null;
   const step2Q3Done = needsBiometric !== null;
   const step2Valid = step2Q1Done && step2Q2Done && step2Q3Done;
 
   const derivedProfile = step2Valid
-    ? deriveProfile(hasIdentityData ?? false, hasDocumentData ?? false, needsBiometric ?? true)
+    ? deriveProfile(dataLevel ?? "none", needsBiometric ?? true)
     : null;
 
   return (
@@ -249,82 +256,105 @@ export default function KycOrgsPage() {
                   <div className="space-y-5">
                     <div className="space-y-3">
                       <div>
-                        <p className="text-sm font-medium">Q1. Does your system already hold the subject's name and date of birth?</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">e.g. you collected these during sign-up</p>
+                        <p className="text-sm font-medium">Q1. Where will identity verification happen?</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">This determines how you will present verification to your subjects</p>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {[{ value: true, label: "Yes, we have it" }, { value: false, label: "No, we don't" }].map(({ value, label }) => (
+                      <div className="space-y-2">
+                        {([
+                          { value: "hosted" as VerificationLocation, label: "Hosted link (Cellion wizard)", desc: "Share a link — subjects verify on Cellion's page" },
+                          { value: "embedded" as VerificationLocation, label: "Embedded in your app", desc: "Embed the verification flow inside an iframe" },
+                          { value: "headless" as VerificationLocation, label: "Your own UI (API-driven)", desc: "Build your own interface using the REST API" },
+                        ]).map(({ value, label, desc }) => (
                           <button
-                            key={String(value)}
+                            key={value}
                             type="button"
-                            onClick={() => {
-                              setHasIdentityData(value);
-                              if (!value) setHasDocumentData(null);
-                            }}
+                            onClick={() => setVerificationLocation(value)}
                             className={cn(
-                              "flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all",
-                              hasIdentityData === value
-                                ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                              "w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all",
+                              verificationLocation === value
+                                ? "border-primary bg-primary/10 ring-1 ring-primary"
                                 : "border-border hover:border-primary/40"
                             )}
-                            data-testid={`button-q1-${value ? "yes" : "no"}`}
+                            data-testid={`button-q1-${value}`}
                           >
-                            {hasIdentityData === value && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
-                            {label}
+                            <div className="shrink-0 mt-0.5">
+                              {verificationLocation === value
+                                ? <CheckCircle2 className="h-4 w-4 text-primary" />
+                                : <div className="h-4 w-4 rounded-full border-2 border-muted-foreground" />}
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium">{label}</p>
+                              <p className="text-xs text-muted-foreground">{desc}</p>
+                            </div>
                           </button>
                         ))}
                       </div>
                     </div>
 
-                    {hasIdentityData === true && (
-                      <div className="space-y-3">
-                        <div>
-                          <p className="text-sm font-medium">Q2. Does your system also have a copy of their government-issued ID document?</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">e.g. you already scanned or stored their passport or NIN card</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[{ value: true, label: "Yes, we have it" }, { value: false, label: "No, we don't" }].map(({ value, label }) => (
-                            <button
-                              key={String(value)}
-                              type="button"
-                              onClick={() => setHasDocumentData(value)}
-                              className={cn(
-                                "flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all",
-                                hasDocumentData === value
-                                  ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
-                                  : "border-border hover:border-primary/40"
-                              )}
-                              data-testid={`button-q2-${value ? "yes" : "no"}`}
-                            >
-                              {hasDocumentData === value && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
-                              {label}
-                            </button>
-                          ))}
-                        </div>
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-sm font-medium">Q2. What subject data does your system already hold?</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Pre-collected data will skip those steps for the subject</p>
                       </div>
-                    )}
+                      <div className="space-y-2">
+                        {([
+                          { value: "none" as DataLevel, label: "Nothing yet", desc: "Collect name, DOB, ID document — full flow" },
+                          { value: "identity" as DataLevel, label: "Name and date of birth", desc: "You already have their name and DOB" },
+                          { value: "identity_doc" as DataLevel, label: "Name, DOB and ID document", desc: "You have full identity data and the document scan" },
+                        ]).map(({ value, label, desc }) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setDataLevel(value)}
+                            className={cn(
+                              "w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all",
+                              dataLevel === value
+                                ? "border-primary bg-primary/10 ring-1 ring-primary"
+                                : "border-border hover:border-primary/40"
+                            )}
+                            data-testid={`button-q2-${value}`}
+                          >
+                            <div className="shrink-0 mt-0.5">
+                              {dataLevel === value
+                                ? <CheckCircle2 className="h-4 w-4 text-primary" />
+                                : <div className="h-4 w-4 rounded-full border-2 border-muted-foreground" />}
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium">{label}</p>
+                              <p className="text-xs text-muted-foreground">{desc}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
 
                     <div className="space-y-3">
                       <div>
-                        <p className="text-sm font-medium">Q3. Do you need biometric identity matching?</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">Biometric matching requires the subject to take a selfie — results are delivered via webhook</p>
+                        <p className="text-sm font-medium">Q3. What verification checks do you need?</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Biometric matching requires a selfie and returns results via webhook</p>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
-                        {[{ value: true, label: "Yes, require a selfie" }, { value: false, label: "No, data collection only" }].map(({ value, label }) => (
+                        {[
+                          { value: true, label: "Biometric matching", desc: "Selfie required, webhook result" },
+                          { value: false, label: "Data collection only", desc: "No selfie, instant result" },
+                        ].map(({ value, label, desc }) => (
                           <button
                             key={String(value)}
                             type="button"
                             onClick={() => setNeedsBiometric(value)}
                             className={cn(
-                              "flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all",
+                              "flex flex-col items-center gap-1 rounded-lg border px-3 py-2.5 text-center transition-all",
                               needsBiometric === value
-                                ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                                ? "border-primary bg-primary/10 ring-1 ring-primary"
                                 : "border-border hover:border-primary/40"
                             )}
-                            data-testid={`button-q3-${value ? "yes" : "no"}`}
+                            data-testid={`button-q3-${value ? "biometric" : "data-only"}`}
                           >
-                            {needsBiometric === value && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
-                            {label}
+                            <div className="flex items-center gap-1">
+                              {needsBiometric === value && <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />}
+                              <span className="text-sm font-medium">{label}</span>
+                            </div>
+                            <span className="text-xs text-muted-foreground">{desc}</span>
                           </button>
                         ))}
                       </div>

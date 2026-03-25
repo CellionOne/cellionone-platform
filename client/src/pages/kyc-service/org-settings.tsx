@@ -88,6 +88,7 @@ export default function OrgSettingsPage() {
   const [orgSupplierPortal, setOrgSupplierPortal] = useState(true);
   const [orgInitialized, setOrgInitialized] = useState(false);
   const [integrationProfileMode, setIntegrationProfileMode] = useState<"full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection" | null>(null);
+  const [integrationProfileLocation, setIntegrationProfileLocation] = useState<"hosted" | "embedded" | "headless" | null>(null);
 
   const { data: org, isLoading } = useQuery<OrgDetail>({
     queryKey: ["/api/kyc-service/organisations", orgId],
@@ -102,6 +103,9 @@ export default function OrgSettingsPage() {
     setOrgSupplierPortal(org.supplierPortalEnabled ?? true);
     if (org.integrationProfile?.mode) {
       setIntegrationProfileMode(org.integrationProfile.mode);
+    }
+    if (org.integrationProfile?.verificationLocation) {
+      setIntegrationProfileLocation(org.integrationProfile.verificationLocation as "hosted" | "embedded" | "headless");
     }
     setOrgInitialized(true);
   }
@@ -582,7 +586,9 @@ export default function OrgSettingsPage() {
             <IntegrationProfileTab
               orgId={orgId!}
               currentMode={integrationProfileMode}
+              currentVerificationLocation={integrationProfileLocation}
               onModeChange={setIntegrationProfileMode}
+              onLocationChange={setIntegrationProfileLocation}
               updateMutation={updateOrgMutation}
             />
           </TabsContent>
@@ -1728,16 +1734,21 @@ function BillingTab({ orgId }: { orgId: string }) {
 function IntegrationProfileTab({
   orgId,
   currentMode,
+  currentVerificationLocation,
   onModeChange,
+  onLocationChange,
   updateMutation,
 }: {
   orgId: string;
   currentMode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection" | null;
+  currentVerificationLocation: "hosted" | "embedded" | "headless" | null;
   onModeChange: (mode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection") => void;
+  onLocationChange: (loc: "hosted" | "embedded" | "headless") => void;
   updateMutation: any;
 }) {
   const { toast } = useToast();
   const [selectedMode, setSelectedMode] = useState<"full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection" | null>(currentMode);
+  const [selectedVerificationLocation, setSelectedVerificationLocation] = useState<"hosted" | "embedded" | "headless" | null>(currentVerificationLocation);
 
   const profiles: {
     mode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection";
@@ -1803,6 +1814,7 @@ function IntegrationProfileTab({
       {
         integrationProfile: {
           mode: selectedMode,
+          verificationLocation: selectedVerificationLocation ?? "hosted",
           requiresBiometric: profile.requiresBiometric,
           resultTiming: profile.resultTiming,
           configuredAt: new Date().toISOString(),
@@ -1811,6 +1823,7 @@ function IntegrationProfileTab({
       {
         onSuccess: () => {
           onModeChange(selectedMode);
+          if (selectedVerificationLocation) onLocationChange(selectedVerificationLocation);
           toast({ title: "Integration profile saved", description: "Your hosted session wizard will now adapt to this profile." });
         },
         onError: (error: Error) => {
@@ -1819,6 +1832,8 @@ function IntegrationProfileTab({
       }
     );
   }
+
+  const hasChanged = selectedMode !== currentMode || selectedVerificationLocation !== currentVerificationLocation;
 
   return (
     <div className="space-y-4">
@@ -1884,8 +1899,37 @@ function IntegrationProfileTab({
             })}
           </div>
 
-          <div className="pt-2 border-t">
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 mb-4">
+          <div className="pt-2 border-t space-y-3">
+            <div>
+              <p className="text-sm font-medium mb-2">Where will verification happen?</p>
+              <div className="space-y-2">
+                {([
+                  { value: "hosted" as const, label: "Hosted link (Cellion wizard)", desc: "Share a link — subjects verify on Cellion's page" },
+                  { value: "embedded" as const, label: "Embedded in your app", desc: "Embed the verification flow inside an iframe" },
+                  { value: "headless" as const, label: "Your own UI (API-driven)", desc: "Build your own interface using the REST API" },
+                ]).map(({ value, label, desc }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setSelectedVerificationLocation(value)}
+                    className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-all ${selectedVerificationLocation === value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/40"}`}
+                    data-testid={`button-loc-${value}`}
+                  >
+                    <div className="shrink-0">
+                      {selectedVerificationLocation === value
+                        ? <CheckCircle2 className="h-4 w-4 text-primary" />
+                        : <div className="h-4 w-4 rounded-full border-2 border-muted-foreground" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">{label}</p>
+                      <p className="text-xs text-muted-foreground">{desc}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50">
               <Zap className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
               <div className="text-xs text-muted-foreground space-y-1">
                 <p className="font-medium text-foreground">How it works with the API</p>
@@ -1895,7 +1939,7 @@ function IntegrationProfileTab({
             <div className="flex justify-end">
               <Button
                 onClick={handleSave}
-                disabled={!selectedMode || selectedMode === currentMode || updateMutation.isPending}
+                disabled={!selectedMode || !hasChanged || updateMutation.isPending}
                 data-testid="button-save-integration-profile"
               >
                 {updateMutation.isPending ? "Saving..." : "Save Profile"}

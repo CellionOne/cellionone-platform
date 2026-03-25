@@ -867,6 +867,115 @@ export default function ApiDocsPage() {
                 </div>
 
                 <div>
+                  <p className="text-sm font-medium mb-3">Profile-specific request examples</p>
+                  <div className="space-y-4">
+                    <div className="rounded-lg border overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-muted/60 border-b">
+                        <p className="text-xs font-semibold">Full Hosted — no prior data</p>
+                        <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">Webhook · ~2–5 min</span>
+                      </div>
+                      <CodeBlock language="json" code={`// POST /api/v1/kyc/sessions
+// Subject completes: identity details → document upload → selfie
+{
+  "subjectName": "Amara Okafor",
+  "subjectEmail": "amara@example.com",
+  "returnUrl": "https://yourapp.com/kyc-done",
+  "expiresInHours": 48
+  // No prefill — wizard shows all three steps
+}
+
+// Response
+{
+  "sessionId": 101,
+  "sessionUrl": "https://cellionone.com/verify/tok_abc...",
+  "resultTiming": "webhook",
+  "requiredSteps": ["identity", "documents", "selfie"]
+}`} />
+                    </div>
+
+                    <div className="rounded-lg border overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-muted/60 border-b">
+                        <p className="text-xs font-semibold">Prefill + Selfie — you have name &amp; DOB</p>
+                        <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Webhook · ~1–2 min</span>
+                      </div>
+                      <CodeBlock language="json" code={`// POST /api/v1/kyc/sessions
+// Subject completes: document upload → selfie (identity skipped)
+{
+  "subjectName": "Amara Okafor",
+  "subjectEmail": "amara@example.com",
+  "prefill": {
+    "firstName": "Amara",
+    "lastName": "Okafor",
+    "dateOfBirth": "1992-08-21",
+    "documentType": "national_id",
+    "idNumber": "19283746501"
+  }
+}
+
+// Response
+{
+  "sessionId": 102,
+  "sessionUrl": "https://cellionone.com/verify/tok_def...",
+  "resultTiming": "webhook",
+  "requiredSteps": ["documents", "selfie"]
+}`} />
+                    </div>
+
+                    <div className="rounded-lg border overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-muted/60 border-b">
+                        <p className="text-xs font-semibold">Selfie Only — you have all document data</p>
+                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">Webhook · ~30 sec</span>
+                      </div>
+                      <CodeBlock language="json" code={`// POST /api/v1/kyc/sessions
+// Subject completes: selfie only (identity + document steps skipped)
+{
+  "subjectName": "Amara Okafor",
+  "subjectEmail": "amara@example.com",
+  "prefill": {
+    "firstName": "Amara",
+    "lastName": "Okafor",
+    "dateOfBirth": "1992-08-21",
+    "documentType": "national_id",
+    "idNumber": "19283746501",
+    "idDocumentUrl": "https://storage.yourapp.com/docs/amara-id.jpg"
+  }
+}
+
+// Response
+{
+  "sessionId": 103,
+  "sessionUrl": "https://cellionone.com/verify/tok_ghi...",
+  "resultTiming": "webhook",
+  "requiredSteps": ["selfie"]
+}`} />
+                    </div>
+
+                    <div className="rounded-lg border overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-muted/60 border-b">
+                        <p className="text-xs font-semibold">Data Collection — no biometric matching</p>
+                        <span className="text-xs text-violet-600 dark:text-violet-400 font-medium">Instant result</span>
+                      </div>
+                      <CodeBlock language="json" code={`// POST /api/v1/kyc/sessions
+// Subject completes: identity details → document upload (no selfie)
+{
+  "subjectName": "Amara Okafor",
+  "subjectEmail": "amara@example.com",
+  "requiredSteps": ["identity", "documents"]
+  // resultTiming will be "instant" — no biometric processing
+}
+
+// Response
+{
+  "sessionId": 104,
+  "sessionUrl": "https://cellionone.com/verify/tok_jkl...",
+  "resultTiming": "instant",
+  "requiredSteps": ["identity", "documents"]
+}`} />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
                   <p className="text-sm font-medium mb-2">Response <span className="text-muted-foreground font-normal">201 Created</span></p>
                   <CodeBlock language="json" code={`{
   "sessionId": 42,

@@ -26,12 +26,13 @@ import {
   Eye, Copy, Plus, Trash2, UserPlus, Key, Webhook, ExternalLink,
   Shield, Menu, X, ShieldCheck, ShieldX, Clock, Search,
   RefreshCw, Download, ChevronRight, Zap, Terminal, Activity,
+  Upload, Layers, FileText, Camera, ScanFace, Timer,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
-import type { KycOrganisation, KycVerificationRequest, KycOrgMember, KycApiKey, KycWebhookConfig } from "@shared/schema";
+import type { KycOrganisation, KycVerificationRequest, KycOrgMember, KycApiKey, KycWebhookConfig, KycVerificationTemplate, KycDocumentRequirement } from "@shared/schema";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -298,29 +299,57 @@ function VerificationsSection({ orgId }: { orgId: string }) {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [newOpen, setNewOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [newType, setNewType] = useState("individual");
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newPayment, setNewPayment] = useState("organisation");
+  const [newNotes, setNewNotes] = useState("");
+  const [newTemplateId, setNewTemplateId] = useState("none");
   const { toast } = useToast();
 
   const { data: requests, isLoading } = useQuery<KycVerificationRequest[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
   });
 
+  const { data: templates } = useQuery<KycVerificationTemplate[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "templates"],
+  });
+
   const createMutation = useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: object) => {
       const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/verification-requests`, data);
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"] });
       setNewOpen(false);
-      setNewName(""); setNewEmail(""); setNewType("individual");
+      setNewName(""); setNewEmail(""); setNewType("individual"); setNewNotes(""); setNewTemplateId("none");
       toast({ title: "Verification request created" });
     },
     onError: (e: Error) => toast({ title: "Failed to create request", description: e.message, variant: "destructive" }),
   });
+
+  const bulkImportMutation = useMutation({
+    mutationFn: async (formData: FormData) => {
+      const res = await fetch(`/api/kyc-service/organisations/${orgId}/verification-requests/bulk`, {
+        method: "POST", body: formData, credentials: "include",
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"] });
+      setBulkOpen(false);
+      toast({ title: "Bulk import complete", description: `${data.created ?? 0} requests created.` });
+    },
+    onError: (e: Error) => toast({ title: "Bulk import failed", description: e.message, variant: "destructive" }),
+  });
+
+  function handleBulkSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    bulkImportMutation.mutate(new FormData(e.currentTarget));
+  }
 
   const filtered = (requests || []).filter((r) => {
     if (typeFilter !== "all" && r.type !== typeFilter) return false;
@@ -336,15 +365,21 @@ function VerificationsSection({ orgId }: { orgId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold">Verifications</h2>
           <p className="text-sm text-muted-foreground">{requests?.length ?? 0} total verification requests</p>
         </div>
-        <Button onClick={() => setNewOpen(true)} data-testid="button-new-verification">
-          <Plus className="h-4 w-4 mr-2" />
-          New Request
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setBulkOpen(true)} data-testid="button-bulk-import">
+            <Upload className="h-4 w-4 mr-2" />
+            Bulk Import
+          </Button>
+          <Button onClick={() => setNewOpen(true)} data-testid="button-new-verification">
+            <Plus className="h-4 w-4 mr-2" />
+            New Request
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -430,6 +465,7 @@ function VerificationsSection({ orgId }: { orgId: string }) {
         </CardContent>
       </Card>
 
+      {/* New Request dialog */}
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent>
           <DialogHeader>
@@ -438,9 +474,9 @@ function VerificationsSection({ orgId }: { orgId: string }) {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={newType} onValueChange={setNewType}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Label>Verification Type</Label>
+              <Select value={newType} onValueChange={(v) => { setNewType(v); setNewTemplateId("none"); }}>
+                <SelectTrigger data-testid="select-new-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="individual">Individual</SelectItem>
                   <SelectItem value="supplier">Supplier</SelectItem>
@@ -449,28 +485,96 @@ function VerificationsSection({ orgId }: { orgId: string }) {
             </div>
             <div className="space-y-2">
               <Label>Subject Name</Label>
-              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Full name" data-testid="input-new-name" />
+              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={newType === "supplier" ? "Company name" : "Full name"} data-testid="input-new-name" />
             </div>
             <div className="space-y-2">
               <Label>Subject Email</Label>
               <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="email@example.com" data-testid="input-new-email" />
             </div>
+            {templates && templates.filter(t => t.type === newType).length > 0 && (
+              <div className="space-y-2">
+                <Label>Template (optional)</Label>
+                <Select value={newTemplateId} onValueChange={setNewTemplateId}>
+                  <SelectTrigger data-testid="select-template"><SelectValue placeholder="Select a template" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No template</SelectItem>
+                    {templates.filter(t => t.type === newType).map(t => (
+                      <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Payment Responsibility</Label>
               <Select value={newPayment} onValueChange={setNewPayment}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger data-testid="select-payment"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="organisation">Organisation pays</SelectItem>
                   <SelectItem value="subject">Subject pays</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label>Notes (optional)</Label>
+              <Textarea value={newNotes} onChange={(e) => setNewNotes(e.target.value)} placeholder="Any additional instructions..." data-testid="input-notes" />
+            </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => createMutation.mutate({ type: newType, subjectName: newName, subjectEmail: newEmail, paymentResponsibility: newPayment })} disabled={!newName || !newEmail || createMutation.isPending} data-testid="button-submit-new-verification">
+            <Button
+              onClick={() => createMutation.mutate({
+                type: newType, subjectName: newName, subjectEmail: newEmail,
+                paymentResponsibility: newPayment,
+                templateId: newTemplateId && newTemplateId !== "none" ? parseInt(newTemplateId) : undefined,
+                notes: newNotes || undefined,
+              })}
+              disabled={!newName || !newEmail || createMutation.isPending}
+              data-testid="button-submit-new-verification"
+            >
               {createMutation.isPending ? "Creating..." : "Create Request"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Import dialog */}
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Bulk Import Verifications</DialogTitle>
+            <DialogDescription>Upload a CSV file with name and email columns to create multiple verification requests at once.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleBulkSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="csv-file">CSV File</Label>
+              <Input id="csv-file" name="file" type="file" accept=".csv" required data-testid="input-csv-file" />
+            </div>
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select name="type" defaultValue="individual">
+                <SelectTrigger data-testid="select-bulk-type"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="individual">Individual</SelectItem>
+                  <SelectItem value="supplier">Supplier</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Payment Responsibility</Label>
+              <Select name="paymentResponsibility" defaultValue="organisation">
+                <SelectTrigger data-testid="select-bulk-payment"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="organisation">Organisation pays</SelectItem>
+                  <SelectItem value="subject">Subject pays</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="submit" disabled={bulkImportMutation.isPending} data-testid="button-submit-bulk">
+                {bulkImportMutation.isPending ? "Importing..." : "Import"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
@@ -2048,6 +2152,27 @@ function SettingsSection({ orgId, org }: { orgId: string; org: OrgWithStats | un
   const [employeePortal, setEmployeePortal] = useState(true);
   const [supplierPortal, setSupplierPortal] = useState(true);
 
+  // Document Requirements state
+  const [addReqOpen, setAddReqOpen] = useState(false);
+  const [newReqName, setNewReqName] = useState("");
+  const [newReqDesc, setNewReqDesc] = useState("");
+  const [newReqType, setNewReqType] = useState("individual");
+  const [newReqCategory, setNewReqCategory] = useState("identity");
+  const [newReqMandatory, setNewReqMandatory] = useState(true);
+  const [newReqExpiry, setNewReqExpiry] = useState(false);
+
+  // Templates state
+  const [addTmplOpen, setAddTmplOpen] = useState(false);
+  const [newTmplName, setNewTmplName] = useState("");
+  const [newTmplType, setNewTmplType] = useState("individual");
+  const [newTmplDesc, setNewTmplDesc] = useState("");
+  const [newTmplDirector, setNewTmplDirector] = useState(false);
+  const [newTmplDefault, setNewTmplDefault] = useState(false);
+
+  // Integration Profile state
+  const [selectedMode, setSelectedMode] = useState<"full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection" | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<"hosted" | "embedded" | "headless" | null>(null);
+
   useEffect(() => {
     if (org) {
       setName(org.name || "");
@@ -2056,11 +2181,13 @@ function SettingsSection({ orgId, org }: { orgId: string; org: OrgWithStats | un
       setAddress(org.address || "");
       setEmployeePortal(org.employeePortalEnabled ?? true);
       setSupplierPortal(org.supplierPortalEnabled ?? true);
+      if (org.integrationProfile?.mode) setSelectedMode(org.integrationProfile.mode as "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection");
+      if (org.integrationProfile?.verificationLocation) setSelectedLocation(org.integrationProfile.verificationLocation as "hosted" | "embedded" | "headless");
     }
   }, [org]);
 
   const updateMutation = useMutation({
-    mutationFn: async (data: any) => {
+    mutationFn: async (data: object) => {
       const res = await apiRequest("PATCH", `/api/kyc-service/organisations/${orgId}`, data);
       return res.json();
     },
@@ -2070,6 +2197,92 @@ function SettingsSection({ orgId, org }: { orgId: string; org: OrgWithStats | un
     },
     onError: (e: Error) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
   });
+
+  const { data: requirements } = useQuery<KycDocumentRequirement[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "document-requirements"],
+  });
+
+  const { data: templates } = useQuery<KycVerificationTemplate[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "templates"],
+  });
+
+  const addReqMutation = useMutation({
+    mutationFn: async (data: object) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/document-requirements`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "document-requirements"] });
+      setAddReqOpen(false);
+      setNewReqName(""); setNewReqDesc("");
+      toast({ title: "Requirement added" });
+    },
+    onError: (e: Error) => toast({ title: "Failed to add requirement", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteReqMutation = useMutation({
+    mutationFn: async (reqId: number) => {
+      const res = await apiRequest("DELETE", `/api/kyc-service/organisations/${orgId}/document-requirements/${reqId}`);
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "document-requirements"] }),
+    onError: (e: Error) => toast({ title: "Failed to delete", description: e.message, variant: "destructive" }),
+  });
+
+  const toggleReqMutation = useMutation({
+    mutationFn: async ({ reqId, data }: { reqId: number; data: object }) => {
+      const res = await apiRequest("PATCH", `/api/kyc-service/organisations/${orgId}/document-requirements/${reqId}`, data);
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "document-requirements"] }),
+    onError: (e: Error) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
+  });
+
+  const addTmplMutation = useMutation({
+    mutationFn: async (data: object) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/templates`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "templates"] });
+      setAddTmplOpen(false);
+      setNewTmplName(""); setNewTmplDesc(""); setNewTmplDirector(false); setNewTmplDefault(false);
+      toast({ title: "Template created" });
+    },
+    onError: (e: Error) => toast({ title: "Failed to create template", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteTmplMutation = useMutation({
+    mutationFn: async (tid: number) => {
+      const res = await apiRequest("DELETE", `/api/kyc-service/organisations/${orgId}/templates/${tid}`);
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "templates"] }),
+    onError: (e: Error) => toast({ title: "Failed to delete template", description: e.message, variant: "destructive" }),
+  });
+
+  const integrationProfiles: { mode: "full_hosted" | "prefill_selfie" | "selfie_only" | "data_collection"; label: string; description: string; steps: string[]; timing: string; resultTiming: "instant" | "webhook"; requiresBiometric: boolean; icon: React.ElementType; timingColor: string; }[] = [
+    { mode: "full_hosted", label: "Full Hosted", description: "Customer provides identity details, ID document, and liveness selfie. Best for onboarding flows with no prior data.", steps: ["Identity details", "ID document upload", "Liveness selfie"], timing: "~2–5 min (webhook)", resultTiming: "webhook", requiresBiometric: true, timingColor: "text-amber-600 dark:text-amber-400", icon: Layers },
+    { mode: "prefill_selfie", label: "Prefill + Selfie", description: "Your system prefills name/DOB. The subject uploads their ID and takes a selfie.", steps: ["ID document upload", "Liveness selfie"], timing: "~1–2 min (webhook)", resultTiming: "webhook", requiresBiometric: true, timingColor: "text-blue-600 dark:text-blue-400", icon: ScanFace },
+    { mode: "selfie_only", label: "Selfie Only", description: "You have all document data. Subject takes a liveness selfie only for biometric matching.", steps: ["Liveness selfie only"], timing: "~30 sec (webhook)", resultTiming: "webhook", requiresBiometric: true, timingColor: "text-green-600 dark:text-green-400", icon: Camera },
+    { mode: "data_collection", label: "Data Collection", description: "Subjects provide identity details and upload an ID document. No selfie — instant API result.", steps: ["Identity details", "ID document upload"], timing: "Instant result", resultTiming: "instant", requiresBiometric: false, timingColor: "text-violet-600 dark:text-violet-400", icon: FileText },
+  ];
+
+  function handleSaveIntegrationProfile() {
+    if (!selectedMode) return;
+    const profile = integrationProfiles.find(p => p.mode === selectedMode)!;
+    updateMutation.mutate({
+      integrationProfile: {
+        mode: selectedMode,
+        verificationLocation: selectedLocation ?? "hosted",
+        requiresBiometric: profile.requiresBiometric,
+        resultTiming: profile.resultTiming,
+        configuredAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  const ipChanged = selectedMode !== (org?.integrationProfile?.mode ?? null) || selectedLocation !== (org?.integrationProfile?.verificationLocation ?? null);
 
   return (
     <div className="space-y-6">
@@ -2154,6 +2367,340 @@ function SettingsSection({ orgId, org }: { orgId: string; org: OrgWithStats | un
           </CardContent>
         </Card>
       )}
+
+      {/* ─── Document Requirements ─── */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileText className="h-4 w-4" /> Document Requirements
+            </CardTitle>
+            <CardDescription>Manage standard and custom document requirements for your verifications.</CardDescription>
+          </div>
+          <Button onClick={() => setAddReqOpen(true)} data-testid="button-add-requirement">
+            <Plus className="h-4 w-4 mr-2" /> Add Custom
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {(!requirements || requirements.length === 0) ? (
+            <EmptyState icon={FileText} title="No requirements" description="Standard requirements will appear here." />
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Document</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Mandatory</TableHead>
+                    <TableHead>Expiry</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {requirements.map((req) => (
+                    <TableRow key={req.id} data-testid={`row-req-${req.id}`}>
+                      <TableCell className="text-sm font-medium">{req.documentName}</TableCell>
+                      <TableCell><Badge variant="secondary" className="border-0">{req.type}</Badge></TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{req.documentCategory}</TableCell>
+                      <TableCell>
+                        <Switch
+                          checked={req.isMandatory}
+                          onCheckedChange={(checked) => toggleReqMutation.mutate({ reqId: req.id, data: { isMandatory: checked } })}
+                          disabled={req.isStandard && !req.orgId}
+                          data-testid={`switch-mandatory-${req.id}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Switch
+                          checked={req.hasExpiry}
+                          onCheckedChange={(checked) => toggleReqMutation.mutate({ reqId: req.id, data: { hasExpiry: checked } })}
+                          disabled={req.isStandard && !req.orgId}
+                          data-testid={`switch-expiry-${req.id}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="border-0">{req.isStandard ? "Standard" : "Custom"}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {!req.isStandard && (
+                          <Button variant="ghost" size="icon" onClick={() => deleteReqMutation.mutate(req.id)} disabled={deleteReqMutation.isPending} data-testid={`button-delete-req-${req.id}`}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ─── Verification Templates ─── */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Layers className="h-4 w-4" /> Verification Templates
+            </CardTitle>
+            <CardDescription>Create templates to quickly set up verification requests.</CardDescription>
+          </div>
+          <Button onClick={() => setAddTmplOpen(true)} data-testid="button-add-template">
+            <Plus className="h-4 w-4 mr-2" /> New Template
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {(!templates || templates.length === 0) ? (
+            <EmptyState icon={Layers} title="No templates" description="Create verification templates to streamline request creation." />
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Director Verification</TableHead>
+                    <TableHead>Default</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {templates.map((tmpl) => (
+                    <TableRow key={tmpl.id} data-testid={`row-template-${tmpl.id}`}>
+                      <TableCell>
+                        <p className="text-sm font-medium">{tmpl.name}</p>
+                        {tmpl.description && <p className="text-xs text-muted-foreground">{tmpl.description}</p>}
+                      </TableCell>
+                      <TableCell><Badge variant="secondary" className="border-0">{tmpl.type}</Badge></TableCell>
+                      <TableCell className="text-sm">{tmpl.requireDirectorVerification ? "Yes" : "No"}</TableCell>
+                      <TableCell>{tmpl.isDefault && <Badge variant="secondary" className="border-0">Default</Badge>}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" onClick={() => deleteTmplMutation.mutate(tmpl.id)} disabled={deleteTmplMutation.isPending} data-testid={`button-delete-template-${tmpl.id}`}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ─── Integration Profile ─── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Settings2 className="h-4 w-4" /> Integration Profile
+          </CardTitle>
+          <CardDescription>
+            Choose how much data your system provides when creating a hosted verification session.
+            This controls which steps the subject sees in the verification wizard.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {org?.integrationProfile?.mode && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+              <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+              <p className="text-sm text-primary font-medium">
+                Current profile: <span className="capitalize">{integrationProfiles.find(p => p.mode === org.integrationProfile?.mode)?.label ?? String(org.integrationProfile.mode).replace(/_/g, " ")}</span>
+              </p>
+            </div>
+          )}
+
+          <div className="grid gap-3">
+            {integrationProfiles.map((profile) => {
+              const Icon = profile.icon;
+              const isSelected = selectedMode === profile.mode;
+              return (
+                <div
+                  key={profile.mode}
+                  onClick={() => setSelectedMode(profile.mode)}
+                  className={`cursor-pointer rounded-lg border p-4 transition-all ${isSelected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/40"}`}
+                  data-testid={`card-profile-${profile.mode}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2 rounded-md shrink-0 ${isSelected ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium text-sm">{profile.label}</p>
+                        {isSelected && <Badge variant="default" className="text-xs">Selected</Badge>}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{profile.description}</p>
+                      <div className="flex items-center gap-4 mt-2 flex-wrap">
+                        <div className="flex items-center gap-1">
+                          <Timer className={`h-3 w-3 ${profile.timingColor}`} />
+                          <span className={`text-xs font-medium ${profile.timingColor}`}>{profile.timing}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {profile.steps.map((step) => (
+                            <span key={step} className="text-xs bg-muted px-2 py-0.5 rounded-full">{step}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="pt-2 border-t space-y-3">
+            <p className="text-sm font-medium">Where will verification happen?</p>
+            <div className="space-y-2">
+              {([
+                { value: "hosted" as const, label: "Hosted link (Cellion wizard)", desc: "Share a link — subjects verify on Cellion's page" },
+                { value: "embedded" as const, label: "Embedded in your app", desc: "Embed the verification flow inside an iframe" },
+                { value: "headless" as const, label: "Your own UI (API-driven)", desc: "Build your own interface using the REST API" },
+              ]).map(({ value, label, desc }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setSelectedLocation(value)}
+                  className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-all ${selectedLocation === value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/40"}`}
+                  data-testid={`button-loc-${value}`}
+                >
+                  <div className="shrink-0">
+                    {selectedLocation === value
+                      ? <CheckCircle2 className="h-4 w-4 text-primary" />
+                      : <div className="h-4 w-4 rounded-full border-2 border-muted-foreground" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">{label}</p>
+                    <p className="text-xs text-muted-foreground">{desc}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50">
+              <Zap className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground">How it works with the API</p>
+                <p>When you create a session via the API, you can pass a <code className="bg-muted px-1 py-0.5 rounded text-xs">prefill</code> object and this profile determines which wizard steps the subject sees. You can override <code className="bg-muted px-1 py-0.5 rounded text-xs">requiredSteps</code> on a per-session basis.</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button onClick={handleSaveIntegrationProfile} disabled={!selectedMode || !ipChanged || updateMutation.isPending} data-testid="button-save-integration-profile">
+                {updateMutation.isPending ? "Saving..." : "Save Profile"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ─── Document Requirements dialog ─── */}
+      <Dialog open={addReqOpen} onOpenChange={setAddReqOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Custom Requirement</DialogTitle>
+            <DialogDescription>Create a custom document requirement for your organisation.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Document Name</Label>
+              <Input value={newReqName} onChange={(e) => setNewReqName(e.target.value)} placeholder="e.g. Professional Certificate" data-testid="input-req-name" />
+            </div>
+            <div className="space-y-2">
+              <Label>Description (optional)</Label>
+              <Textarea value={newReqDesc} onChange={(e) => setNewReqDesc(e.target.value)} placeholder="Additional details..." data-testid="input-req-desc" />
+            </div>
+            <div className="grid gap-4 grid-cols-2">
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select value={newReqType} onValueChange={setNewReqType}>
+                  <SelectTrigger data-testid="select-req-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="individual">Individual</SelectItem>
+                    <SelectItem value="supplier">Supplier</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={newReqCategory} onValueChange={setNewReqCategory}>
+                  <SelectTrigger data-testid="select-req-category"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="registration">Registration</SelectItem>
+                    <SelectItem value="tax">Tax</SelectItem>
+                    <SelectItem value="financial">Financial</SelectItem>
+                    <SelectItem value="identity">Identity</SelectItem>
+                    <SelectItem value="compliance">Compliance</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <Label>Mandatory</Label>
+              <Switch checked={newReqMandatory} onCheckedChange={setNewReqMandatory} data-testid="switch-req-mandatory" />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <Label>Has Expiry</Label>
+              <Switch checked={newReqExpiry} onCheckedChange={setNewReqExpiry} data-testid="switch-req-expiry" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddReqOpen(false)}>Cancel</Button>
+            <Button onClick={() => addReqMutation.mutate({ type: newReqType, documentName: newReqName, documentDescription: newReqDesc || undefined, documentCategory: newReqCategory, isMandatory: newReqMandatory, hasExpiry: newReqExpiry })} disabled={!newReqName || addReqMutation.isPending} data-testid="button-submit-requirement">
+              {addReqMutation.isPending ? "Adding..." : "Add Requirement"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── New Template dialog ─── */}
+      <Dialog open={addTmplOpen} onOpenChange={setAddTmplOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Template</DialogTitle>
+            <DialogDescription>Create a verification template for quick request setup.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Template Name</Label>
+              <Input value={newTmplName} onChange={(e) => setNewTmplName(e.target.value)} placeholder="e.g. IT Vendor" data-testid="input-template-name" />
+            </div>
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select value={newTmplType} onValueChange={(v) => { setNewTmplType(v); setNewTmplDirector(false); }}>
+                <SelectTrigger data-testid="select-template-type"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="individual">Individual</SelectItem>
+                  <SelectItem value="supplier">Supplier</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Description (optional)</Label>
+              <Textarea value={newTmplDesc} onChange={(e) => setNewTmplDesc(e.target.value)} placeholder="Template description..." data-testid="input-template-desc" />
+            </div>
+            {newTmplType === "supplier" && (
+              <div className="flex items-center justify-between gap-4">
+                <Label>Require Director Verification</Label>
+                <Switch checked={newTmplDirector} onCheckedChange={setNewTmplDirector} data-testid="switch-director-verification" />
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-4">
+              <Label>Set as Default</Label>
+              <Switch checked={newTmplDefault} onCheckedChange={setNewTmplDefault} data-testid="switch-template-default" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddTmplOpen(false)}>Cancel</Button>
+            <Button onClick={() => addTmplMutation.mutate({ name: newTmplName, type: newTmplType, description: newTmplDesc || undefined, requireDirectorVerification: newTmplDirector, isDefault: newTmplDefault })} disabled={!newTmplName || addTmplMutation.isPending} data-testid="button-submit-template">
+              {addTmplMutation.isPending ? "Creating..." : "Create Template"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

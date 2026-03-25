@@ -1180,6 +1180,18 @@ function ApiKeysPanel({ orgId, org }: { orgId: string; org: OrgWithStats | undef
     },
   });
 
+  const rotateMutation = useMutation({
+    mutationFn: async (keyId: number) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/api-keys/${keyId}/rotate`, {});
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "api-keys"] });
+      toast({ title: "Key rotated", description: `New key: ${data.rawKey || ""}. Copy it now.` });
+    },
+    onError: (e: Error) => toast({ title: "Rotation failed", description: e.message, variant: "destructive" }),
+  });
+
   return (
     <Card>
       <CardHeader>
@@ -1254,9 +1266,14 @@ function ApiKeysPanel({ orgId, org }: { orgId: string; org: OrgWithStats | undef
                       {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : "Never"}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => revokeMutation.mutate(k.id)} disabled={revokeMutation.isPending} data-testid={`button-revoke-key-${k.id}`}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" title="Rotate key" onClick={() => rotateMutation.mutate(k.id)} disabled={rotateMutation.isPending} data-testid={`button-rotate-key-${k.id}`}>
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" title="Revoke key" onClick={() => revokeMutation.mutate(k.id)} disabled={revokeMutation.isPending} data-testid={`button-revoke-key-${k.id}`}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1580,17 +1597,27 @@ const { sessionUrl } = await response.json();
   );
 }
 
+const API_STATUS_POLL_INTERVAL_MS = 30_000;
+
 function ApiStatusPanel() {
   const [status, setStatus] = useState<"checking" | "operational" | "degraded">("checking");
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+
+  function checkHealth() {
+    setStatus("checking");
+    fetch("/api/health", { credentials: "include" })
+      .then(r => { setStatus(r.ok ? "operational" : "degraded"); setLastChecked(new Date()); })
+      .catch(() => { setStatus("degraded"); setLastChecked(new Date()); });
+  }
 
   useEffect(() => {
-    fetch("/api/health", { credentials: "include" })
-      .then(r => setStatus(r.ok ? "operational" : "degraded"))
-      .catch(() => setStatus("degraded"));
+    checkHealth();
+    const interval = setInterval(checkHealth, API_STATUS_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
   }, []);
 
   const statusConfig = {
-    checking: { label: "Checking...", color: "text-muted-foreground", bg: "bg-muted/50", dot: "bg-muted-foreground" },
+    checking: { label: "Checking...", color: "text-muted-foreground", bg: "bg-muted/50", dot: "bg-muted-foreground animate-pulse" },
     operational: { label: "All Systems Operational", color: "text-green-700 dark:text-green-400", bg: "bg-green-50 dark:bg-green-900/20", dot: "bg-green-500 animate-pulse" },
     degraded: { label: "Degraded — Contact Support", color: "text-red-700 dark:text-red-400", bg: "bg-red-50 dark:bg-red-900/20", dot: "bg-red-500" },
   }[status];
@@ -1599,21 +1626,19 @@ function ApiStatusPanel() {
     <Card>
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2"><Activity className="h-4 w-4" />API Status</CardTitle>
-        <CardDescription>Live health check of the Cellion One verification engine</CardDescription>
+        <CardDescription>
+          Live health check · auto-refreshes every 30 seconds
+          {lastChecked && <span className="ml-2 text-xs">Last checked: {lastChecked.toLocaleTimeString()}</span>}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className={cn("flex items-center gap-3 p-4 rounded-lg", statusConfig.bg)}>
           <div className={cn("h-3 w-3 rounded-full shrink-0", statusConfig.dot)} />
           <p className={cn("font-medium", statusConfig.color)}>{statusConfig.label}</p>
         </div>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => {
-          setStatus("checking");
-          fetch("/api/health", { credentials: "include" })
-            .then(r => setStatus(r.ok ? "operational" : "degraded"))
-            .catch(() => setStatus("degraded"));
-        }} data-testid="button-refresh-status">
-          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-          Refresh Status
+        <Button variant="outline" size="sm" className="mt-3" onClick={checkHealth} disabled={status === "checking"} data-testid="button-refresh-status">
+          <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", status === "checking" && "animate-spin")} />
+          {status === "checking" ? "Checking..." : "Refresh Now"}
         </Button>
       </CardContent>
     </Card>
@@ -1641,34 +1666,38 @@ function BillingSection({ orgId }: { orgId: string }) {
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
   });
 
-  const totalBillingPages = Math.ceil((transactions?.length || 0) / BILLING_PAGE_SIZE);
-  const pageTransactions = (transactions || []).slice(billingPage * BILLING_PAGE_SIZE, (billingPage + 1) * BILLING_PAGE_SIZE);
+  const usageRows = (() => {
+    const completed = (requests || []).filter(r => ["verified", "rejected"].includes(r.status));
+    const CREDIT_COST: Record<string, number> = { individual: 1, supplier: 2 };
+    return completed
+      .slice()
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime())
+      .map(r => ({ ...r, creditCost: CREDIT_COST[r.type] ?? 1 }));
+  })();
 
-  function exportTransactionsCsv() {
-    if (!transactions?.length) return;
-    const rows = [["Date", "Description", "Type", "Credits"]];
-    transactions.forEach(t => rows.push([
-      t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "",
-      t.description || "",
-      t.transactionType,
-      t.transactionType === "debit" ? `-${t.amount}` : `+${t.amount}`,
+  const totalBillingPages = Math.ceil(usageRows.length / BILLING_PAGE_SIZE);
+  const pageUsageRows = usageRows.slice(billingPage * BILLING_PAGE_SIZE, (billingPage + 1) * BILLING_PAGE_SIZE);
+
+  const usageByType = {
+    individual: usageRows.filter(r => r.type === "individual").length,
+    supplier: usageRows.filter(r => r.type === "supplier").length,
+    total: usageRows.length,
+  };
+
+  function exportUsageCsv() {
+    if (!usageRows.length) return;
+    const rows = [["Subject Name", "Subject Email", "Type", "Result", "Credits Used", "Date Completed"]];
+    usageRows.forEach(r => rows.push([
+      r.subjectName, r.subjectEmail, r.type, r.status,
+      String(r.creditCost),
+      r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "",
     ]));
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "billing-transactions.csv"; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = "kyc-usage-history.csv"; a.click();
     URL.revokeObjectURL(url);
   }
-
-  const usageByType = (() => {
-    const reqs = requests || [];
-    const completed = reqs.filter(r => r.status === "verified" || r.status === "rejected");
-    return {
-      individual: completed.filter(r => r.type === "individual").length,
-      supplier: completed.filter(r => r.type === "supplier").length,
-      total: completed.length,
-    };
-  })();
 
   const purchaseMutation = useMutation({
     mutationFn: async (qty: number) => {
@@ -1749,44 +1778,54 @@ function BillingSection({ orgId }: { orgId: string }) {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-medium">Usage History</CardTitle>
-            <Button variant="outline" size="sm" onClick={exportTransactionsCsv} disabled={!transactions?.length} data-testid="button-export-transactions">
+            <div>
+              <CardTitle className="text-sm font-medium">Verification Usage History</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">One row per completed verification (verified or rejected) · 1 credit per individual, 2 per supplier</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={exportUsageCsv} disabled={!usageRows.length} data-testid="button-export-usage">
               <Download className="h-3.5 w-3.5 mr-1.5" />
               Export CSV
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {!transactions ? (
+          {!requests ? (
             <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
-          ) : transactions.length === 0 ? (
-            <EmptyState icon={CreditCard} title="No transactions" description="Usage history will appear here as verifications are processed." />
+          ) : usageRows.length === 0 ? (
+            <EmptyState icon={CreditCard} title="No usage yet" description="Completed verifications will appear here as credits are consumed." />
           ) : (
             <div className="space-y-3">
               <div className="rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Description</TableHead>
+                      <TableHead>Subject</TableHead>
                       <TableHead>Type</TableHead>
+                      <TableHead>Result</TableHead>
+                      <TableHead>Date</TableHead>
                       <TableHead className="text-right">Credits</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pageTransactions.map((t: any) => (
-                      <TableRow key={t.id} data-testid={`row-transaction-${t.id}`}>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "—"}
-                        </TableCell>
-                        <TableCell className="text-sm">{t.description || "—"}</TableCell>
+                    {pageUsageRows.map((r) => (
+                      <TableRow key={r.id} data-testid={`row-usage-${r.id}`}>
                         <TableCell>
-                          <Badge variant="secondary" className={cn("border-0 capitalize text-xs", t.transactionType === "debit" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400")}>
-                            {t.transactionType}
+                          <p className="text-sm font-medium">{r.subjectName}</p>
+                          <p className="text-xs text-muted-foreground">{r.subjectEmail}</p>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="border-0 capitalize text-xs">{r.type}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className={cn("border-0 capitalize text-xs", RESULT_COLORS[r.status] || "")}>
+                            {r.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className={cn("text-right font-medium", t.transactionType === "debit" ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400")}>
-                          {t.transactionType === "debit" ? "-" : "+"}{t.amount}
+                        <TableCell className="text-xs text-muted-foreground">
+                          {r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-medium text-sm">
+                          -{r.creditCost}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1796,7 +1835,7 @@ function BillingSection({ orgId }: { orgId: string }) {
               {totalBillingPages > 1 && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">
-                    Page {billingPage + 1} of {totalBillingPages} · {transactions.length} transactions
+                    Page {billingPage + 1} of {totalBillingPages} · {usageRows.length} verifications
                   </span>
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" disabled={billingPage === 0} onClick={() => setBillingPage(p => p - 1)} data-testid="button-billing-prev">Previous</Button>
@@ -2002,21 +2041,23 @@ function TeamSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefi
 
 function SettingsSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefined }) {
   const { toast } = useToast();
-  const [name, setName] = useState(org?.name || "");
-  const [email, setEmail] = useState(org?.contactEmail || "");
-  const [phone, setPhone] = useState(org?.contactPhone || "");
-  const [address, setAddress] = useState(org?.address || "");
-  const [employeePortal, setEmployeePortal] = useState(org?.employeePortalEnabled ?? true);
-  const [supplierPortal, setSupplierPortal] = useState(org?.supplierPortalEnabled ?? true);
-  const [initialized, setInitialized] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [employeePortal, setEmployeePortal] = useState(true);
+  const [supplierPortal, setSupplierPortal] = useState(true);
 
-  if (org && !initialized) {
-    setName(org.name); setEmail(org.contactEmail);
-    setPhone(org.contactPhone || ""); setAddress(org.address || "");
-    setEmployeePortal(org.employeePortalEnabled ?? true);
-    setSupplierPortal(org.supplierPortalEnabled ?? true);
-    setInitialized(true);
-  }
+  useEffect(() => {
+    if (org) {
+      setName(org.name || "");
+      setEmail(org.contactEmail || "");
+      setPhone(org.contactPhone || "");
+      setAddress(org.address || "");
+      setEmployeePortal(org.employeePortalEnabled ?? true);
+      setSupplierPortal(org.supplierPortalEnabled ?? true);
+    }
+  }, [org]);
 
   const updateMutation = useMutation({
     mutationFn: async (data: any) => {

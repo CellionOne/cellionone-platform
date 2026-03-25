@@ -479,11 +479,38 @@ function VerificationsSection({ orgId }: { orgId: string }) {
 
 // ─── Sessions Section ─────────────────────────────────────────────────────────
 
+const REQUIRED_STEP_OPTIONS = ["document", "biometric", "bvn", "nin", "aml"];
+
 function SessionsSection({ orgId }: { orgId: string }) {
   const { toast } = useToast();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [subjectName, setSubjectName] = useState("");
+  const [subjectEmail, setSubjectEmail] = useState("");
+  const [selectedSteps, setSelectedSteps] = useState<string[]>(["document", "biometric"]);
+  const [expiresInHours, setExpiresInHours] = useState("72");
+
   const { data: sessionsData, isLoading } = useQuery<{ sessions: any[] }>({
     queryKey: ["/api/kyc-service/orgs", orgId, "sessions"],
     queryFn: () => fetch(`/api/kyc-service/orgs/${orgId}/sessions`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (data: object) => {
+      const res = await apiRequest("POST", `/api/kyc-service/orgs/${orgId}/sessions`, data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/orgs", orgId, "sessions"] });
+      setCreateOpen(false); setSubjectName(""); setSubjectEmail(""); setSelectedSteps(["document", "biometric"]); setExpiresInHours("72");
+      const link = data?.sessionLink || data?.session?.sessionToken ? `${window.location.origin}/kyc/session/${data.session?.sessionToken}` : null;
+      if (link) {
+        navigator.clipboard.writeText(link).catch(() => {});
+        toast({ title: "Session created — link copied", description: link.slice(0, 60) + "…" });
+      } else {
+        toast({ title: "Session created" });
+      }
+    },
+    onError: (e: Error) => toast({ title: "Failed to create session", description: e.message, variant: "destructive" }),
   });
 
   const SESSION_COLORS: Record<string, string> = {
@@ -495,10 +522,64 @@ function SessionsSection({ orgId }: { orgId: string }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-bold">Hosted Sessions</h2>
-        <p className="text-sm text-muted-foreground">Sessions created via the API — each generates a unique verification link</p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold">Hosted Sessions</h2>
+          <p className="text-sm text-muted-foreground">Shareable verification links for subjects who don't have a Cellion account</p>
+        </div>
+        <Button onClick={() => setCreateOpen(true)} data-testid="button-create-session">
+          <Plus className="h-4 w-4 mr-2" />Create Session
+        </Button>
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Hosted Session</DialogTitle>
+            <DialogDescription>Generate a unique verification link for a subject. You can share the link directly — they don't need a Cellion account.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Subject Name</Label>
+                <Input value={subjectName} onChange={(e) => setSubjectName(e.target.value)} placeholder="Ada Obi" data-testid="input-session-name" />
+              </div>
+              <div className="space-y-2">
+                <Label>Subject Email</Label>
+                <Input type="email" value={subjectEmail} onChange={(e) => setSubjectEmail(e.target.value)} placeholder="ada@example.com" data-testid="input-session-email" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Required Steps</Label>
+              <div className="flex flex-wrap gap-3">
+                {REQUIRED_STEP_OPTIONS.map(step => (
+                  <div key={step} className="flex items-center gap-1.5">
+                    <input type="checkbox" id={`step-${step}`} checked={selectedSteps.includes(step)} onChange={(e) => setSelectedSteps(prev => e.target.checked ? [...prev, step] : prev.filter(s => s !== step))} className="rounded" />
+                    <label htmlFor={`step-${step}`} className="text-sm capitalize">{step}</label>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Expires After</Label>
+              <Select value={expiresInHours} onValueChange={setExpiresInHours}>
+                <SelectTrigger data-testid="select-session-expiry"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="24">24 hours</SelectItem>
+                  <SelectItem value="48">48 hours</SelectItem>
+                  <SelectItem value="72">72 hours</SelectItem>
+                  <SelectItem value="168">7 days</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => createMutation.mutate({ subjectName, subjectEmail, requiredSteps: selectedSteps, expiresInHours: parseInt(expiresInHours) })} disabled={!subjectName.trim() || !subjectEmail.trim() || selectedSteps.length === 0 || createMutation.isPending} data-testid="button-submit-session">
+              {createMutation.isPending ? "Creating…" : "Create & Copy Link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardContent className="pt-4">
@@ -594,7 +675,22 @@ function UsersSection({ orgId }: { orgId: string }) {
   });
 
   const completed = (requests || []).filter(r => COMPLETED_STATUSES.includes(r.status));
-  const filtered = completed.filter(r => {
+
+  const deduplicated = (() => {
+    const byEmail = new Map<string, KycVerificationRequest>();
+    const STATUS_PRIORITY: Record<string, number> = { verified: 0, rejected: 1, expired: 2 };
+    completed.forEach(r => {
+      const key = r.subjectEmail.toLowerCase();
+      const existing = byEmail.get(key);
+      if (!existing) { byEmail.set(key, r); return; }
+      const curPriority = STATUS_PRIORITY[r.status] ?? 99;
+      const exPriority = STATUS_PRIORITY[existing.status] ?? 99;
+      if (curPriority < exPriority) byEmail.set(key, r);
+    });
+    return Array.from(byEmail.values());
+  })();
+
+  const filtered = deduplicated.filter(r => {
     if (resultFilter !== "all" && r.status !== resultFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
@@ -616,7 +712,7 @@ function UsersSection({ orgId }: { orgId: string }) {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold">Users Registry</h2>
-          <p className="text-sm text-muted-foreground">{completed.length} completed verification{completed.length !== 1 ? "s" : ""}</p>
+          <p className="text-sm text-muted-foreground">{deduplicated.length} unique subject{deduplicated.length !== 1 ? "s" : ""}</p>
         </div>
         <Button variant="outline" onClick={exportCsv} disabled={filtered.length === 0} data-testid="button-export-csv">
           <Download className="h-4 w-4 mr-2" />
@@ -858,6 +954,32 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
     { name: "Supplier", count: allReqs.filter(r => r.type === "supplier").length },
   ];
 
+  const avgTimeData = (() => {
+    const buckets: Record<string, { totalMs: number; count: number }> = {};
+    allReqs
+      .filter(r => ["verified", "rejected"].includes(r.status) && r.createdAt && r.updatedAt)
+      .forEach(r => {
+        const d = new Date(r.createdAt!);
+        let key: string;
+        if (granularity === "day") key = d.toISOString().slice(0, 10);
+        else if (granularity === "week") {
+          const dow = d.getDay();
+          const monday = new Date(d); monday.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+          key = monday.toISOString().slice(0, 10);
+        } else key = d.toISOString().slice(0, 7);
+        if (!buckets[key]) buckets[key] = { totalMs: 0, count: 0 };
+        buckets[key].totalMs += new Date(r.updatedAt!).getTime() - d.getTime();
+        buckets[key].count += 1;
+      });
+    return Object.entries(buckets)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-12)
+      .map(([label, { totalMs, count }]) => ({
+        label,
+        avgDays: parseFloat((totalMs / count / (1000 * 60 * 60 * 24)).toFixed(1)),
+      }));
+  })();
+
   if (isLoading) return <div className="flex items-center justify-center py-20"><LoadingSpinner /></div>;
 
   const avgTimeDays = (() => {
@@ -881,7 +1003,7 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
           <h2 className="text-xl font-bold">Analytics</h2>
           <p className="text-sm text-muted-foreground">Verification trends and performance metrics</p>
         </div>
-        <Select value={granularity} onValueChange={(v) => setGranularity(v as any)}>
+        <Select value={granularity} onValueChange={(v) => setGranularity(v as "day" | "week" | "month")}>
           <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="day">Daily</SelectItem>
@@ -966,6 +1088,26 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
           </CardContent>
         </Card>
       </div>
+
+      {avgTimeData.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm font-medium">Average Processing Time (Days to Result)</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={avgTimeData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} unit="d" />
+                <Tooltip
+                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "6px", fontSize: "12px" }}
+                  formatter={(v: number) => [`${v} days`, "Avg Time"]}
+                />
+                <Bar dataKey="avgDays" fill={CHART_COLORS[2]} radius={[4,4,0,0]} name="Avg Days" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
@@ -980,7 +1122,7 @@ function DevelopersSection({ orgId, org }: { orgId: string; org: OrgWithStats | 
         <h2 className="text-xl font-bold">Developers</h2>
         <p className="text-sm text-muted-foreground">API keys, webhooks, quickstart guide, and API status</p>
       </div>
-      <Tabs value={devTab} onValueChange={(v) => setDevTab(v as any)}>
+      <Tabs value={devTab} onValueChange={(v) => setDevTab(v as "keys" | "webhooks" | "quickstart" | "status")}>
         <TabsList>
           <TabsTrigger value="keys" data-testid="dev-tab-keys"><Key className="h-3.5 w-3.5 mr-1.5" />API Keys</TabsTrigger>
           <TabsTrigger value="webhooks" data-testid="dev-tab-webhooks"><Webhook className="h-3.5 w-3.5 mr-1.5" />Webhooks</TabsTrigger>
@@ -996,11 +1138,19 @@ function DevelopersSection({ orgId, org }: { orgId: string; org: OrgWithStats | 
   );
 }
 
+type IntegrationProfile = {
+  mode: string;
+  verificationLocation: string;
+  requiresBiometric: boolean;
+  resultTiming: string;
+  configuredAt?: string;
+};
+
 function ApiKeysPanel({ orgId, org }: { orgId: string; org: OrgWithStats | undefined }) {
   const [showKey, setShowKey] = useState<Record<number, boolean>>({});
   const [genName, setGenName] = useState("");
   const { toast } = useToast();
-  const profile = org?.integrationProfile as any;
+  const profile = org?.integrationProfile as IntegrationProfile | null | undefined;
 
   const { data: keys, isLoading } = useQuery<KycApiKey[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "api-keys"],
@@ -1352,7 +1502,7 @@ function WebhooksPanel({ orgId }: { orgId: string }) {
 
 function QuickstartPanel({ org }: { org: OrgWithStats | undefined }) {
   const { toast } = useToast();
-  const profile = org?.integrationProfile;
+  const profile = org?.integrationProfile as IntegrationProfile | null | undefined;
   const mode = profile?.mode || "full_hosted";
 
   const prefillExamples: Record<string, string> = {
@@ -1472,10 +1622,13 @@ function ApiStatusPanel() {
 
 // ─── Billing Section ──────────────────────────────────────────────────────────
 
+const BILLING_PAGE_SIZE = 20;
+
 function BillingSection({ orgId }: { orgId: string }) {
   const { toast } = useToast();
   const [topUpQty, setTopUpQty] = useState(50);
   const [topUpOpen, setTopUpOpen] = useState(false);
+  const [billingPage, setBillingPage] = useState(0);
 
   const { data: billing, isLoading } = useQuery<any>({
     queryKey: ["/api/kyc-service/organisations", orgId, "billing"],
@@ -1487,6 +1640,9 @@ function BillingSection({ orgId }: { orgId: string }) {
   const { data: requests } = useQuery<KycVerificationRequest[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
   });
+
+  const totalBillingPages = Math.ceil((transactions?.length || 0) / BILLING_PAGE_SIZE);
+  const pageTransactions = (transactions || []).slice(billingPage * BILLING_PAGE_SIZE, (billingPage + 1) * BILLING_PAGE_SIZE);
 
   function exportTransactionsCsv() {
     if (!transactions?.length) return;
@@ -1606,35 +1762,48 @@ function BillingSection({ orgId }: { orgId: string }) {
           ) : transactions.length === 0 ? (
             <EmptyState icon={CreditCard} title="No transactions" description="Usage history will appear here as verifications are processed." />
           ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="text-right">Credits</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions.map((t: any) => (
-                    <TableRow key={t.id} data-testid={`row-transaction-${t.id}`}>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "—"}
-                      </TableCell>
-                      <TableCell className="text-sm">{t.description || "—"}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className={cn("border-0 capitalize text-xs", t.transactionType === "debit" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400")}>
-                          {t.transactionType}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className={cn("text-right font-medium", t.transactionType === "debit" ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400")}>
-                        {t.transactionType === "debit" ? "-" : "+"}{t.amount}
-                      </TableCell>
+            <div className="space-y-3">
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Credits</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {pageTransactions.map((t: any) => (
+                      <TableRow key={t.id} data-testid={`row-transaction-${t.id}`}>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "—"}
+                        </TableCell>
+                        <TableCell className="text-sm">{t.description || "—"}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className={cn("border-0 capitalize text-xs", t.transactionType === "debit" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400")}>
+                            {t.transactionType}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className={cn("text-right font-medium", t.transactionType === "debit" ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400")}>
+                          {t.transactionType === "debit" ? "-" : "+"}{t.amount}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {totalBillingPages > 1 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    Page {billingPage + 1} of {totalBillingPages} · {transactions.length} transactions
+                  </span>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={billingPage === 0} onClick={() => setBillingPage(p => p - 1)} data-testid="button-billing-prev">Previous</Button>
+                    <Button variant="outline" size="sm" disabled={billingPage >= totalBillingPages - 1} onClick={() => setBillingPage(p => p + 1)} data-testid="button-billing-next">Next</Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -1705,6 +1874,18 @@ function TeamSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefi
     onError: (e: Error) => toast({ title: "Remove failed", description: e.message, variant: "destructive" }),
   });
 
+  const changeRoleMutation = useMutation({
+    mutationFn: async ({ memberId, role }: { memberId: number; role: string }) => {
+      const res = await apiRequest("PATCH", `/api/kyc-service/organisations/${orgId}/members/${memberId}`, { role });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId] });
+      toast({ title: "Role updated" });
+    },
+    onError: (e: Error) => toast({ title: "Role change failed", description: e.message, variant: "destructive" }),
+  });
+
   const members = org?.members || [];
 
   return (
@@ -1736,26 +1917,46 @@ function TeamSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefi
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {members.map((m: KycOrgMember) => (
-                    <TableRow key={m.id} data-testid={`row-member-${m.id}`}>
-                      <TableCell className="text-sm">{m.inviteEmail}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="border-0 capitalize">{m.role.replace("org_", "")}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className={cn("border-0", m.inviteStatus === "accepted" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400")}>
-                          {m.inviteStatus}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {m.userId !== org?.createdByUserId && (
-                          <Button variant="ghost" size="icon" onClick={() => removeMutation.mutate(m.id)} disabled={removeMutation.isPending} data-testid={`button-remove-member-${m.id}`}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {members.map((m: KycOrgMember) => {
+                    const isOwner = m.userId === org?.createdByUserId;
+                    return (
+                      <TableRow key={m.id} data-testid={`row-member-${m.id}`}>
+                        <TableCell className="text-sm">{m.inviteEmail}</TableCell>
+                        <TableCell>
+                          {isOwner ? (
+                            <Badge variant="secondary" className="border-0">Owner</Badge>
+                          ) : (
+                            <Select
+                              value={m.role}
+                              onValueChange={(newRole) => changeRoleMutation.mutate({ memberId: m.id, role: newRole })}
+                              disabled={changeRoleMutation.isPending}
+                            >
+                              <SelectTrigger className="h-7 w-[120px] text-xs" data-testid={`select-role-${m.id}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="org_admin">Admin</SelectItem>
+                                <SelectItem value="org_reviewer">Reviewer</SelectItem>
+                                <SelectItem value="org_viewer">Viewer</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className={cn("border-0", m.inviteStatus === "accepted" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400")}>
+                            {m.inviteStatus}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {!isOwner && (
+                            <Button variant="ghost" size="icon" onClick={() => removeMutation.mutate(m.id)} disabled={removeMutation.isPending} data-testid={`button-remove-member-${m.id}`}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

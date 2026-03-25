@@ -70,9 +70,8 @@ import PaymentSuccessPage from "@/pages/payment/success";
 import PaymentCancelPage from "@/pages/payment/cancel";
 import KycTermsPage from "@/pages/kyc-service/terms";
 import KycOrgsPage from "@/pages/kyc-service/orgs";
-import KycOrgDashboard from "@/pages/kyc-service/org-dashboard";
+import KycOrgPortal from "@/pages/kyc-service/org-portal";
 import KycVerificationDetail from "@/pages/kyc-service/verification-detail";
-import KycOrgSettings from "@/pages/kyc-service/org-settings";
 import KycVerifyRequestPage from "@/pages/kyc-service/verify-request";
 import KycEmployeePortalPage from "@/pages/kyc-service/employee-portal";
 import KycSupplierPortalPage from "@/pages/kyc-service/supplier-portal";
@@ -355,11 +354,35 @@ function Router() {
       <Route path="/kyc/org/:id/requests/:reqId">
         <ProtectedRoute component={KycVerificationDetail} />
       </Route>
+      <Route path="/kyc/org/:id/verifications">
+        <ProtectedRoute component={KycOrgPortal} />
+      </Route>
+      <Route path="/kyc/org/:id/sessions">
+        <ProtectedRoute component={KycOrgPortal} />
+      </Route>
+      <Route path="/kyc/org/:id/users">
+        <ProtectedRoute component={KycOrgPortal} />
+      </Route>
+      <Route path="/kyc/org/:id/monitoring">
+        <ProtectedRoute component={KycOrgPortal} />
+      </Route>
+      <Route path="/kyc/org/:id/analytics">
+        <ProtectedRoute component={KycOrgPortal} />
+      </Route>
+      <Route path="/kyc/org/:id/developers">
+        <ProtectedRoute component={KycOrgPortal} />
+      </Route>
+      <Route path="/kyc/org/:id/billing">
+        <ProtectedRoute component={KycOrgPortal} />
+      </Route>
+      <Route path="/kyc/org/:id/team">
+        <ProtectedRoute component={KycOrgPortal} />
+      </Route>
       <Route path="/kyc/org/:id/settings">
-        <ProtectedRoute component={KycOrgSettings} />
+        <ProtectedRoute component={KycOrgPortal} />
       </Route>
       <Route path="/kyc/org/:id">
-        <ProtectedRoute component={KycOrgDashboard} />
+        <ProtectedRoute component={KycOrgPortal} />
       </Route>
       <Route path="/kyc/my-verifications">
         <ProtectedRoute component={KycMyVerifications} />

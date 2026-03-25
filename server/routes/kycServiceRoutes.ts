@@ -2447,7 +2447,8 @@ export function registerKycServiceRoutes(app: Express) {
       if (!session) return res.status(404).json({ message: "Session not found" });
 
       const now = new Date();
-      if (session.expiresAt && session.expiresAt < now && session.status === "pending") {
+      // Expire any non-completed, non-already-expired session that has passed its expiresAt
+      if (session.expiresAt && session.expiresAt < now && session.status !== "expired" && session.status !== "completed") {
         await db.update(kycSessions).set({ status: "expired", updatedAt: new Date() }).where(eq(kycSessions.id, session.id));
         webhookService.deliverWebhook(session.orgId, "session.expired", {
           sessionId: session.id,
@@ -2665,10 +2666,10 @@ export function registerKycServiceRoutes(app: Express) {
         .orderBy(desc(kycSessions.createdAt))
         .limit(100);
 
-      // Mark expired sessions
+      // Mark expired sessions — any non-completed, non-already-expired session past expiresAt
       const now = new Date();
       for (const s of sessions) {
-        if (s.status === "pending" && s.expiresAt < now) {
+        if (s.expiresAt < now && s.status !== "expired" && s.status !== "completed") {
           await db.update(kycSessions).set({ status: "expired", updatedAt: new Date() }).where(eq(kycSessions.id, s.id));
           s.status = "expired";
         }

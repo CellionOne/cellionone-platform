@@ -529,6 +529,7 @@ export default function KycSessionPage() {
   const [completedRequestId, setCompletedRequestId] = useState<number | undefined>();
   const [completedReturnUrl, setCompletedReturnUrl] = useState<string | undefined>();
   const [completedSessionId, setCompletedSessionId] = useState<number | undefined>();
+  const [sessionExpiredMidFlow, setSessionExpiredMidFlow] = useState(false);
 
   const { data: session, isLoading, error } = useQuery<SessionData>({
     queryKey: ["/api/kyc-service/sessions", token],
@@ -543,8 +544,16 @@ export default function KycSessionPage() {
     retry: false,
   });
 
+  function handleMutationError(err: any) {
+    const msg = err?.message || "";
+    if (msg.startsWith("410") || err?.status === 410) {
+      setSessionExpiredMidFlow(true);
+    }
+  }
+
   const startMutation = useMutation({
     mutationFn: () => apiRequest("POST", `/api/kyc-service/sessions/${token}/start`),
+    onError: handleMutationError,
   });
 
   const completeMutation = useMutation({
@@ -563,6 +572,7 @@ export default function KycSessionPage() {
       setCompletedSessionId(session?.sessionId);
       setStepIdx(5);
     },
+    onError: handleMutationError,
   });
 
   function handleConsentAccept() {
@@ -595,7 +605,7 @@ export default function KycSessionPage() {
   }
 
   const sessionError = error as any;
-  const isExpired = sessionError?.status === 410 || session?.status === "expired";
+  const isExpired = sessionExpiredMidFlow || sessionError?.status === 410 || session?.status === "expired";
   const isAlreadyDone = session?.status === "completed" || stepIdx === 5;
   const notFound = !session && !isLoading && !isExpired;
 

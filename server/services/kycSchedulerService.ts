@@ -511,7 +511,7 @@ export async function runIndividualExpiryCheck() {
         title = "Identity Verification Expiring in 30 Days";
         message = "Your identity verification will expire within 30 days. Please plan to renew it soon to avoid any disruption.";
         urgency = "warning";
-        dedupWindowMs = 14 * 24 * 60 * 60 * 1000; // 14-day dedup window (only send once in this period)
+        dedupWindowMs = 30 * 24 * 60 * 60 * 1000; // 30-day dedup window — single shot for this milestone
       }
 
       // Check deduplication: skip if same milestone notification already sent within dedup window

@@ -907,6 +907,52 @@ export const insertServiceRequestSchema = createInsertSchema(serviceRequests).om
 export type ServiceRequest = typeof serviceRequests.$inferSelect;
 export type InsertServiceRequest = z.infer<typeof insertServiceRequestSchema>;
 
+// ============== ADD DIRECTOR REQUESTS (explicit table for ADD_DIR data) ==============
+// status flow: draft → submitted → awaiting_director_verification → ready_for_filing → filed → completed
+export const addDirectorRequests = pgTable("add_director_requests", {
+  id: serial("id").primaryKey(),
+  serviceRequestId: integer("service_request_id").notNull(), // FK to service_requests
+  founderId: varchar("founder_id").notNull(),
+
+  // Company Info
+  companyRcNumber: varchar("company_rc_number", { length: 20 }),
+  companyName: varchar("company_name", { length: 255 }),
+  companyTin: varchar("company_tin", { length: 20 }),
+  incorporationDate: varchar("incorporation_date", { length: 20 }),
+  registeredAddress: text("registered_address"),
+  existingDirectors: jsonb("existing_directors"), // [{name, role}]
+
+  // New Director Personal Info
+  newDirectorFirstName: varchar("new_director_first_name", { length: 100 }),
+  newDirectorLastName: varchar("new_director_last_name", { length: 100 }),
+  newDirectorEmail: varchar("new_director_email", { length: 255 }),
+  newDirectorPhone: varchar("new_director_phone", { length: 20 }),
+  newDirectorNin: varchar("new_director_nin", { length: 30 }),
+  newDirectorDateOfBirth: varchar("new_director_date_of_birth", { length: 20 }),
+  newDirectorNationality: varchar("new_director_nationality", { length: 100 }),
+  newDirectorOccupation: varchar("new_director_occupation", { length: 255 }),
+  newDirectorAddress: text("new_director_address"),
+  additionalNotes: text("additional_notes"),
+
+  // Workflow status
+  dataStatus: varchar("data_status", { length: 50 }).default("draft"), // draft | submitted
+  directorInviteToken: varchar("director_invite_token", { length: 128 }),
+  directorInvitedAt: timestamp("director_invited_at"),
+  directorVerifiedAt: timestamp("director_verified_at"),
+  directorVerificationStatus: varchar("director_verification_status", { length: 50 }).default("not_invited"), // not_invited | invited | verified | skipped
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_add_director_sr").on(table.serviceRequestId),
+  index("idx_add_director_founder").on(table.founderId),
+  index("idx_add_director_invite_token").on(table.directorInviteToken),
+]);
+
+export const insertAddDirectorRequestSchema = createInsertSchema(addDirectorRequests).omit({ id: true, createdAt: true, updatedAt: true });
+export type AddDirectorRequest = typeof addDirectorRequests.$inferSelect;
+export type InsertAddDirectorRequest = z.infer<typeof insertAddDirectorRequestSchema>;
+
 // ============== SERVICE REQUEST COMPANY PROFILES (reusable across services) ==============
 export const serviceRequestCompanyProfiles = pgTable("service_request_company_profiles", {
   id: serial("id").primaryKey(),

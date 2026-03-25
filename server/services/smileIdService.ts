@@ -188,6 +188,105 @@ export async function verifyNin(
   }
 }
 
+export interface BiometricResult {
+  success: boolean;
+  livenessScore?: number;
+  biometricMatch?: boolean;
+  smileJobId?: string;
+  resultCode: string;
+  resultText: string;
+  error?: string;
+}
+
+export async function submitBiometricSelfie(
+  selfieBase64: string,
+  userId: string,
+  jobId: string
+): Promise<BiometricResult> {
+  if (!isSmileIdConfigured()) {
+    console.log(`[SmileID] Not configured — simulating biometric selfie for user ${userId}`);
+    await storage.createAuditLog({
+      actorUserId: userId,
+      action: 'smile_id_biometric_not_configured',
+      entityType: 'user',
+      entityId: userId,
+      details: { jobId, note: 'SmileID not configured; biometric skipped' },
+    });
+    return {
+      success: false,
+      resultCode: 'NOT_CONFIGURED',
+      resultText: 'Smile ID is not configured. Biometric verification is unavailable.',
+    };
+  }
+
+  try {
+    const smileIdentityCore = require('smile-identity-core');
+    const WebApi = smileIdentityCore.WebApi;
+    const connection = new WebApi(PARTNER_ID, null, API_KEY, SID_SERVER);
+
+    const partnerParams = {
+      job_id: jobId,
+      user_id: userId,
+      job_type: 4,
+    };
+
+    const imageDetails = [
+      {
+        image_type_id: 0,
+        image: selfieBase64,
+      },
+    ];
+
+    const options = { return_job_status: true };
+
+    const result = await connection.submit_job(partnerParams, imageDetails, {}, options);
+
+    const actions = result?.job_complete_response?.Actions || result?.Actions || {};
+    const livenessScore = result?.job_complete_response?.ConfidenceValue || result?.ConfidenceValue;
+    const biometricMatch = actions?.Selfie_Provided === 'Passed' || actions?.Human_Face_Detected === 'Passed';
+
+    await storage.createAuditLog({
+      actorUserId: userId,
+      action: 'smile_id_biometric_verification',
+      entityType: 'user',
+      entityId: userId,
+      details: {
+        smileJobId: result?.SmileJobID,
+        resultCode: result?.ResultCode,
+        livenessScore,
+        biometricMatch,
+        jobId,
+      },
+    });
+
+    return {
+      success: biometricMatch || false,
+      livenessScore: livenessScore ? Math.round(Number(livenessScore)) : undefined,
+      biometricMatch: biometricMatch || false,
+      smileJobId: result?.SmileJobID,
+      resultCode: result?.ResultCode || 'UNKNOWN',
+      resultText: result?.ResultText || 'Biometric check processed',
+    };
+  } catch (error: any) {
+    console.error('[SmileID] Biometric selfie submission error:', error);
+
+    await storage.createAuditLog({
+      actorUserId: userId,
+      action: 'smile_id_biometric_error',
+      entityType: 'user',
+      entityId: userId,
+      details: { error: error.message, jobId },
+    });
+
+    return {
+      success: false,
+      resultCode: 'ERROR',
+      resultText: error.message || 'Biometric verification failed',
+      error: error.message,
+    };
+  }
+}
+
 export async function getVerificationStatus(): Promise<{
   configured: boolean;
   environment: string;

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,6 +47,9 @@ import {
   Pen,
   Eraser,
   Info,
+  Video,
+  RefreshCw,
+  X,
 } from "lucide-react";
 
 const NIGERIAN_STATES = [
@@ -119,6 +122,8 @@ export default function PersonalProfilePage() {
         <ProfileForm />
         <Separator />
         <IdentitySection />
+        <Separator />
+        <BiometricSection />
         <Separator />
         <DocumentsSection />
       </div>
@@ -637,6 +642,251 @@ function IdentitySection() {
 
         <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg text-sm text-blue-800 dark:text-blue-300">
           Your identity numbers are encrypted with AES-256-GCM encryption before storage. Only the last 4 digits are ever displayed. Access to these fields is logged in our audit trail.
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BiometricSection() {
+  const { toast } = useToast();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
+
+  const { data: profile } = useQuery<PersonalProfile>({
+    queryKey: ["/api/profile/personal"],
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: async (selfieBase64: string) => {
+      const res = await apiRequest("POST", "/api/verification/smile-id/submit-selfie", {
+        selfieBase64,
+      });
+      return res.json();
+    },
+    onSuccess: (result) => {
+      if (result.resultCode === 'NOT_CONFIGURED') {
+        toast({
+          title: "Selfie recorded",
+          description: "Your selfie has been captured. Live biometric verification will be activated when the service is configured.",
+        });
+      } else if (result.success) {
+        toast({
+          title: "Biometric check passed",
+          description: `Liveness detection passed${result.livenessScore ? ` (confidence: ${result.livenessScore}%)` : ""}.`,
+        });
+      } else {
+        toast({
+          title: "Check submitted",
+          description: "Your selfie has been submitted for review.",
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/profile/personal"] });
+      setCapturedImage(null);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Submission failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const startCamera = useCallback(async () => {
+    setCameraError(null);
+    setCapturedImage(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setCameraOpen(true);
+    } catch (err: any) {
+      setCameraError(
+        err.name === "NotAllowedError"
+          ? "Camera access was denied. Please allow camera access in your browser settings."
+          : err.name === "NotFoundError"
+          ? "No camera found on your device."
+          : "Could not start camera. Please try again."
+      );
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    setCameraOpen(false);
+    setCountdown(null);
+  }, []);
+
+  useEffect(() => {
+    return () => { stopCamera(); };
+  }, [stopCamera]);
+
+  const capturePhoto = useCallback(() => {
+    setCountdown(3);
+    let count = 3;
+    const interval = setInterval(() => {
+      count -= 1;
+      setCountdown(count);
+      if (count <= 0) {
+        clearInterval(interval);
+        setCountdown(null);
+        if (canvasRef.current && videoRef.current) {
+          const canvas = canvasRef.current;
+          const video = videoRef.current;
+          canvas.width = video.videoWidth || 640;
+          canvas.height = video.videoHeight || 480;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+            const base64 = dataUrl.split(",")[1];
+            setCapturedImage(dataUrl);
+            stopCamera();
+            submitMutation.mutate(base64);
+          }
+        }
+      }
+    }, 1000);
+  }, [stopCamera, submitMutation]);
+
+  const hasSelfie = profile?.hasNin || profile?.hasBvn;
+
+  return (
+    <Card data-testid="card-biometric-section">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Video className="h-5 w-5" /> Biometric Selfie
+        </CardTitle>
+        <CardDescription>
+          A live selfie is required for identity verification. Your face will be checked for liveness and matched against your government ID.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {capturedImage && !submitMutation.isPending ? (
+          <div className="space-y-3" data-testid="captured-selfie-preview">
+            <div className="relative rounded-lg overflow-hidden border border-border max-w-xs mx-auto">
+              <img src={capturedImage} alt="Captured selfie" className="w-full" data-testid="img-captured-selfie" />
+              <div className="absolute top-2 right-2">
+                <Badge variant="default" className="bg-green-600">
+                  <CheckCircle2 className="h-3 w-3 mr-1" /> Captured
+                </Badge>
+              </div>
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              {submitMutation.isPending ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Submitting...
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setCapturedImage(null); startCamera(); }}
+                  data-testid="button-retake-selfie"
+                >
+                  <RefreshCw className="h-4 w-4 mr-1" /> Retake
+                </Button>
+              )}
+            </div>
+          </div>
+        ) : cameraOpen ? (
+          <div className="space-y-3" data-testid="camera-view">
+            <div className="relative rounded-lg overflow-hidden border-2 border-primary max-w-xs mx-auto bg-black">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full"
+                data-testid="video-selfie-stream"
+              />
+              <canvas ref={canvasRef} className="hidden" />
+              {countdown !== null && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                  <span className="text-white text-6xl font-bold" data-testid="text-countdown">{countdown}</span>
+                </div>
+              )}
+              <div className="absolute top-2 left-2">
+                <Badge variant="secondary" className="text-xs">
+                  <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse mr-1" />
+                  Live
+                </Badge>
+              </div>
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={stopCamera}
+                data-testid="button-close-camera"
+              >
+                <X className="h-4 w-4 mr-1" /> Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={capturePhoto}
+                disabled={countdown !== null}
+                data-testid="button-capture-selfie"
+              >
+                <Camera className="h-4 w-4 mr-1" />
+                {countdown !== null ? `Taking photo in ${countdown}...` : "Capture Photo"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground text-center">
+              Position your face in the centre of the frame, then click "Capture Photo".
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {cameraError && (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 text-destructive text-sm" data-testid="text-camera-error">
+                <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                <span>{cameraError}</span>
+              </div>
+            )}
+            <div className="flex flex-col items-center gap-3 py-4">
+              <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <Camera className="h-8 w-8 text-primary" />
+              </div>
+              <p className="text-sm text-muted-foreground text-center max-w-xs">
+                Take a clear, well-lit selfie looking directly at the camera. Avoid glasses, hats, or heavy shadows.
+              </p>
+              <Button
+                type="button"
+                onClick={startCamera}
+                disabled={submitMutation.isPending}
+                data-testid="button-open-camera"
+              >
+                <Camera className="h-4 w-4 mr-2" /> Open Camera
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {submitMutation.isPending && (
+          <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground" data-testid="text-submitting-biometric">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Submitting biometric check — please wait...
+          </div>
+        )}
+
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg text-sm text-blue-800 dark:text-blue-300">
+          Your selfie is used only for identity verification via Smile ID and is not stored on our servers after the check is complete.
         </div>
       </CardContent>
     </Card>

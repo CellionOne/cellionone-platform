@@ -6,7 +6,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc } from "drizzle-orm";
 import * as services from "./services";
@@ -1762,6 +1762,56 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/verification/smile-id/submit-selfie", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { selfieBase64 } = req.body;
+
+      if (!selfieBase64 || typeof selfieBase64 !== 'string') {
+        return res.status(400).json({ message: "A base64-encoded selfie image is required" });
+      }
+
+      const maxSizeBytes = 5 * 1024 * 1024;
+      const estimatedBytes = Math.ceil(selfieBase64.length * 0.75);
+      if (estimatedBytes > maxSizeBytes) {
+        return res.status(400).json({ message: "Selfie image is too large (max 5MB)" });
+      }
+
+      const smileIdService = await import('./services/smileIdService');
+      const jobId = `selfie_${userId}_${Date.now()}`;
+      const result = await smileIdService.submitBiometricSelfie(selfieBase64, userId, jobId);
+
+      const verification = await storage.getIdentityVerification(userId);
+      if (verification) {
+        await storage.upsertIdentityVerification({
+          founderUserId: userId,
+          status: verification.status ?? 'in_progress',
+          method: verification.method ?? 'automated',
+          externalProvider: verification.externalProvider ?? 'smile_id',
+          externalSessionId: result.smileJobId || verification.externalSessionId,
+          livenessScore: result.livenessScore ?? verification.livenessScore,
+          notes: verification.notes,
+          verifiedAt: verification.verifiedAt,
+          expiresAt: verification.expiresAt,
+        });
+      }
+
+      await storage.logSensitiveDataAccess({
+        accessorUserId: userId,
+        targetUserId: userId,
+        dataType: 'biometric_selfie',
+        action: 'submit_biometric',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error submitting biometric selfie:", error);
+      res.status(500).json({ message: "Biometric submission failed" });
+    }
+  });
+
   // ============== COMPANY PEOPLE (DIRECTORS/SHAREHOLDERS) ROUTES ==============
 
   app.get("/api/company-people", isAuthenticated, async (req: any, res) => {
@@ -2542,7 +2592,9 @@ export async function registerRoutes(
   });
 
   // ============== ADD DIRECTOR SERVICE REQUEST DATA ==============
-  // Store / retrieve the structured director-appointment data for ADD_DIR requests
+  // Uses add_director_requests table (explicit columns, not JSON blob in notes)
+  // Status flow: draft → submitted → awaiting_director_verification → ready_for_filing → filed → completed
+
   app.get("/api/founder/service-requests/:id/director-data", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
@@ -2552,22 +2604,72 @@ export async function registerRoutes(
       const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
       if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
 
-      // Director data is stored as JSON in notes field
-      let directorData = null;
-      try {
-        if (sr.notes && sr.notes.startsWith('{')) {
-          directorData = JSON.parse(sr.notes);
-        }
-      } catch {}
+      // Fetch from the dedicated add_director_requests table
+      const [adr] = await db.select().from(addDirectorRequestsTable)
+        .where(eq(addDirectorRequestsTable.serviceRequestId, srId));
 
-      // Also fetch any uploaded documents for this service request
+      // Also fetch uploaded documents
       const documents = await db.select().from(srDocumentsTable)
         .where(eq(srDocumentsTable.serviceRequestId, srId));
 
-      res.json({ directorData, documents });
+      res.json({ directorData: adr || null, documents });
     } catch (error) {
       console.error("Error fetching director data:", error);
       res.status(500).json({ message: "Failed to fetch director data" });
+    }
+  });
+
+  // Save draft — upsert the director data without marking as submitted
+  app.put("/api/founder/service-requests/:id/director-data/draft", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid service request ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+      if (sr.serviceType !== 'ADD_DIR') return res.status(400).json({ message: "Not an ADD_DIR request" });
+
+      const body = req.body;
+      const [existing] = await db.select().from(addDirectorRequestsTable)
+        .where(eq(addDirectorRequestsTable.serviceRequestId, srId));
+
+      const draftData = {
+        companyRcNumber: body.companyRcNumber || null,
+        companyName: body.companyName || null,
+        companyTin: body.companyTin || null,
+        incorporationDate: body.incorporationDate || null,
+        registeredAddress: body.registeredAddress || null,
+        existingDirectors: body.existingDirectors || null,
+        newDirectorFirstName: body.newDirectorFirstName || null,
+        newDirectorLastName: body.newDirectorLastName || null,
+        newDirectorEmail: body.newDirectorEmail || null,
+        newDirectorPhone: body.newDirectorPhone || null,
+        newDirectorNin: body.newDirectorNin || null,
+        newDirectorDateOfBirth: body.newDirectorDateOfBirth || null,
+        newDirectorNationality: body.newDirectorNationality || null,
+        newDirectorOccupation: body.newDirectorOccupation || null,
+        newDirectorAddress: body.newDirectorAddress || null,
+        additionalNotes: body.additionalNotes || null,
+        updatedAt: new Date(),
+      };
+
+      let record;
+      if (existing) {
+        [record] = await db.update(addDirectorRequestsTable)
+          .set(draftData)
+          .where(eq(addDirectorRequestsTable.serviceRequestId, srId))
+          .returning();
+      } else {
+        [record] = await db.insert(addDirectorRequestsTable)
+          .values({ serviceRequestId: srId, founderId: userId, dataStatus: 'draft', ...draftData })
+          .returning();
+      }
+
+      res.json(record);
+    } catch (error) {
+      console.error("Error saving director draft:", error);
+      res.status(500).json({ message: "Failed to save draft" });
     }
   });
 
@@ -2608,17 +2710,54 @@ export async function registerRoutes(
         return res.status(400).json({ message: parsed.error.errors.map(e => e.message).join(', ') });
       }
 
-      const [updated] = await db.update(serviceRequestsTable)
-        .set({ notes: JSON.stringify(parsed.data), updatedAt: new Date() })
-        .where(eq(serviceRequestsTable.id, srId))
-        .returning();
+      // Upsert into add_director_requests table
+      const [existing] = await db.select().from(addDirectorRequestsTable)
+        .where(eq(addDirectorRequestsTable.serviceRequestId, srId));
+
+      const recordData = {
+        companyRcNumber: parsed.data.companyRcNumber,
+        companyName: parsed.data.companyName,
+        companyTin: parsed.data.companyTin || null,
+        incorporationDate: parsed.data.incorporationDate || null,
+        registeredAddress: parsed.data.registeredAddress || null,
+        existingDirectors: parsed.data.existingDirectors || null,
+        newDirectorFirstName: parsed.data.newDirectorFirstName,
+        newDirectorLastName: parsed.data.newDirectorLastName,
+        newDirectorEmail: parsed.data.newDirectorEmail || null,
+        newDirectorPhone: parsed.data.newDirectorPhone || null,
+        newDirectorNin: parsed.data.newDirectorNin || null,
+        newDirectorDateOfBirth: parsed.data.newDirectorDateOfBirth || null,
+        newDirectorNationality: parsed.data.newDirectorNationality || null,
+        newDirectorOccupation: parsed.data.newDirectorOccupation || null,
+        newDirectorAddress: parsed.data.newDirectorAddress || null,
+        additionalNotes: parsed.data.additionalNotes || null,
+        dataStatus: 'submitted',
+        updatedAt: new Date(),
+      };
+
+      let adrRecord;
+      if (existing) {
+        [adrRecord] = await db.update(addDirectorRequestsTable)
+          .set(recordData)
+          .where(eq(addDirectorRequestsTable.serviceRequestId, srId))
+          .returning();
+      } else {
+        [adrRecord] = await db.insert(addDirectorRequestsTable)
+          .values({ serviceRequestId: srId, founderId: userId, ...recordData })
+          .returning();
+      }
+
+      // Update service request status to awaiting_director_verification
+      await db.update(serviceRequestsTable)
+        .set({ status: 'awaiting_director_verification', updatedAt: new Date() })
+        .where(eq(serviceRequestsTable.id, srId));
 
       await storage.createAuditLog({
         actorUserId: userId,
         action: 'add_director_data_submitted',
         entityType: 'service_request',
         entityId: String(srId),
-        details: { companyRcNumber: parsed.data.companyRcNumber },
+        details: { companyRcNumber: parsed.data.companyRcNumber, adrId: adrRecord.id },
         ipAddress: req.ip,
       });
 
@@ -2653,10 +2792,92 @@ export async function registerRoutes(
         console.error('[ADD_DIR] Failed to send notifications:', emailErr);
       }
 
-      res.json(updated);
+      res.json(adrRecord);
     } catch (error) {
       console.error("Error saving director data:", error);
       res.status(500).json({ message: "Failed to save director data" });
+    }
+  });
+
+  // Send director invitation email (invites the new director to verify their identity)
+  app.post("/api/founder/service-requests/:id/director-invite", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid service request ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+      if (sr.serviceType !== 'ADD_DIR') return res.status(400).json({ message: "Not an ADD_DIR request" });
+
+      const [adr] = await db.select().from(addDirectorRequestsTable)
+        .where(eq(addDirectorRequestsTable.serviceRequestId, srId));
+      if (!adr) return res.status(400).json({ message: "Director data not submitted yet" });
+      if (!adr.newDirectorEmail) return res.status(400).json({ message: "New director email is required to send an invitation" });
+
+      const inviteToken = crypto.randomBytes(32).toString('hex');
+      await db.update(addDirectorRequestsTable)
+        .set({ directorInviteToken: inviteToken, directorInvitedAt: new Date(), directorVerificationStatus: 'invited', updatedAt: new Date() })
+        .where(eq(addDirectorRequestsTable.id, adr.id));
+
+      const founder = await storage.getUser(userId);
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const registerUrl = `${baseUrl}/register?invite_type=director&token=${inviteToken}&email=${encodeURIComponent(adr.newDirectorEmail)}`;
+
+      const { getResendClient } = await import('./services/emailService');
+      const { client, fromEmail } = await getResendClient();
+      await client.emails.send({
+        from: fromEmail,
+        to: adr.newDirectorEmail,
+        subject: `You've been invited to join ${adr.companyName || 'a company'} as a Director — Action Required`,
+        html: `
+          <!DOCTYPE html><html><body style="font-family:sans-serif;background:#f4f4f5;padding:20px;">
+          <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:40px;">
+            <h2 style="color:#18181b">You've been invited as a Director</h2>
+            <p><strong>${founder?.firstName || 'A founder'} ${founder?.lastName || ''}</strong> has appointed you as a director of <strong>${adr.companyName || 'their company'}</strong> (RC: ${adr.companyRcNumber || 'N/A'}) via Cellion One, Nigeria's legal tech platform.</p>
+            <p>To complete the appointment, you need to create a Cellion One account and verify your identity (BVN/NIN and biometric selfie). This is a regulatory requirement for CAC filings.</p>
+            <a href="${registerUrl}" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin:16px 0">Create Account & Verify Identity</a>
+            <p style="color:#71717a;font-size:13px">If you did not expect this invitation, you can safely ignore this email. The link expires in 7 days.</p>
+          </div></body></html>
+        `,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: 'add_director_invite_sent',
+        entityType: 'service_request',
+        entityId: String(srId),
+        details: { directorEmail: adr.newDirectorEmail },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: 'Invitation sent', invitedEmail: adr.newDirectorEmail });
+    } catch (error: any) {
+      console.error("Error sending director invite:", error);
+      res.status(500).json({ message: error.message || "Failed to send invitation" });
+    }
+  });
+
+  // Mark director as verified (admin/system callback — can also be done manually by lawyer)
+  app.post("/api/founder/service-requests/:id/director-verified", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+
+      await db.update(addDirectorRequestsTable)
+        .set({ directorVerifiedAt: new Date(), directorVerificationStatus: 'verified', updatedAt: new Date() })
+        .where(eq(addDirectorRequestsTable.serviceRequestId, srId));
+
+      // Transition service request to ready_for_filing
+      await db.update(serviceRequestsTable)
+        .set({ status: 'ready_for_filing', updatedAt: new Date() })
+        .where(eq(serviceRequestsTable.id, srId));
+
+      res.json({ message: 'Director marked as verified, status updated to ready_for_filing' });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed" });
     }
   });
 
@@ -2789,10 +3010,15 @@ export async function registerRoutes(
       }
 
       let documents: any[] = [];
+      let addDirectorRecord: any = null;
       if (sr.serviceType === 'ADD_DIR') {
         // ADD_DIR documents are linked by serviceRequestId
         documents = await db.select().from(srDocumentsTable)
           .where(eq(srDocumentsTable.serviceRequestId, sr.id));
+        // Fetch structured director data from dedicated table
+        const [adr] = await db.select().from(addDirectorRequestsTable)
+          .where(eq(addDirectorRequestsTable.serviceRequestId, sr.id));
+        addDirectorRecord = adr || null;
       } else if (sr.companyProfileId) {
         documents = await db.select().from(srDocumentsTable)
           .where(eq(srDocumentsTable.companyProfileId, sr.companyProfileId));
@@ -2837,7 +3063,7 @@ export async function registerRoutes(
         };
       }
 
-      res.json({ serviceRequest: sr, profile, documents, founder, registeredOffice });
+      res.json({ serviceRequest: sr, profile, documents, founder, registeredOffice, addDirectorRecord });
     } catch (error) {
       console.error("Error fetching service request detail:", error);
       res.status(500).json({ message: "Failed to fetch service request" });
@@ -2881,7 +3107,8 @@ export async function registerRoutes(
       if (isNaN(srId)) return res.status(400).json({ message: "Invalid ID" });
 
       const { status, notes } = req.body;
-      const validStatuses = ["assigned", "in_progress", "completed", "cancelled"];
+      // ADD_DIR has extended status flow; regular SRs use the base set
+      const validStatuses = ["assigned", "in_progress", "awaiting_director_verification", "ready_for_filing", "filed", "completed", "cancelled"];
       if (!validStatuses.includes(status)) {
         return res.status(400).json({ message: `Status must be one of: ${validStatuses.join(", ")}` });
       }

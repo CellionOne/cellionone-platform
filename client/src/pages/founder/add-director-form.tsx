@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Building2, User, FileText, Upload, Loader2, CheckCircle2,
-  ArrowLeft, ArrowRight, Plus, Trash2, AlertCircle,
+  ArrowLeft, ArrowRight, Plus, Trash2, AlertCircle, Mail, Save,
 } from "lucide-react";
 
 const addDirectorFormSchema = z.object({
@@ -138,6 +138,21 @@ export default function AddDirectorFormPage() {
     }
   }, [srData, form]);
 
+  const saveDraftMutation = useMutation({
+    mutationFn: async (data: AddDirectorFormData) => {
+      if (!srId) throw new Error("No service request ID");
+      const res = await apiRequest("PUT", `/api/founder/service-requests/${srId}/director-data/draft`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/service-requests", srId, "director-data"] });
+      toast({ title: "Draft saved", description: "Your progress has been saved. You can continue later." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (data: AddDirectorFormData) => {
       if (!srId) throw new Error("No service request ID");
@@ -146,11 +161,26 @@ export default function AddDirectorFormPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/founder/service-requests", srId, "director-data"] });
-      toast({ title: "Details saved", description: "Director appointment details have been saved." });
+      toast({ title: "Details submitted", description: "Director appointment details have been saved." });
       setStep(3);
     },
     onError: (error: Error) => {
       toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const inviteMutation = useMutation({
+    mutationFn: async () => {
+      if (!srId) throw new Error("No service request ID");
+      const res = await apiRequest("POST", `/api/founder/service-requests/${srId}/director-invite`, {});
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/service-requests", srId, "director-data"] });
+      toast({ title: "Invitation sent", description: `An invitation has been sent to ${data.invitedEmail}.` });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Invitation failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -217,6 +247,13 @@ export default function AddDirectorFormPage() {
     }
     setUploadingDocType(docType);
     uploadDocMutation.mutate({ file, docType });
+  };
+
+  const directorData = srData?.directorData;
+
+  const onSaveDraft = () => {
+    const values = form.getValues();
+    saveDraftMutation.mutate(values);
   };
 
   const onSubmitDetails = (data: AddDirectorFormData) => {
@@ -449,7 +486,17 @@ export default function AddDirectorFormPage() {
                   ))}
                 </div>
 
-                <div className="flex justify-end pt-2">
+                <div className="flex items-center justify-between pt-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={onSaveDraft}
+                    disabled={saveDraftMutation.isPending}
+                    data-testid="button-save-draft-step1"
+                  >
+                    {saveDraftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />}
+                    Save Draft
+                  </Button>
                   <Button type="button" onClick={() => {
                     form.trigger(["companyRcNumber", "companyName"]).then(valid => {
                       if (valid) setStep(2);
@@ -583,18 +630,30 @@ export default function AddDirectorFormPage() {
                   </FormItem>
                 )} />
 
-                <div className="flex items-center justify-between pt-2">
+                <div className="flex items-center justify-between pt-2 flex-wrap gap-2">
                   <Button type="button" variant="outline" onClick={() => setStep(1)} data-testid="button-prev-step-2">
                     <ArrowLeft className="h-4 w-4 mr-1" /> Back
                   </Button>
-                  <Button
-                    type="submit"
-                    disabled={saveMutation.isPending}
-                    data-testid="button-save-director-details"
-                  >
-                    {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-                    Save & Continue <ArrowRight className="h-4 w-4 ml-1" />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={onSaveDraft}
+                      disabled={saveDraftMutation.isPending}
+                      data-testid="button-save-draft-step2"
+                    >
+                      {saveDraftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />}
+                      Save Draft
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={saveMutation.isPending}
+                      data-testid="button-save-director-details"
+                    >
+                      {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                      Submit & Continue <ArrowRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -685,23 +744,77 @@ export default function AddDirectorFormPage() {
                   );
                 })}
 
-                <div className="flex items-center justify-between pt-2">
+                {directorData?.newDirectorEmail && (
+                  <div className="rounded-lg border border-border p-4 space-y-3" data-testid="section-director-invite">
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-medium">Invite Director to Verify Identity</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Send an invitation to <strong>{directorData.newDirectorEmail}</strong> so they can create a Cellion One account and complete their identity verification — a regulatory requirement for CAC filings.
+                    </p>
+                    {directorData?.directorVerificationStatus === 'verified' ? (
+                      <div className="flex items-center gap-2 text-green-600 text-sm">
+                        <CheckCircle2 className="h-4 w-4" />
+                        <span>Director identity verified</span>
+                      </div>
+                    ) : directorData?.directorVerificationStatus === 'invited' ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                          <Mail className="h-4 w-4" />
+                          <span>Invitation sent — awaiting director verification</span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => inviteMutation.mutate()}
+                          disabled={inviteMutation.isPending}
+                          data-testid="button-resend-director-invite"
+                        >
+                          {inviteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Mail className="h-4 w-4 mr-1" />}
+                          Resend Invitation
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => inviteMutation.mutate()}
+                        disabled={inviteMutation.isPending}
+                        data-testid="button-send-director-invite"
+                      >
+                        {inviteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Mail className="h-4 w-4 mr-1" />}
+                        Send Invitation Email
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-2 flex-wrap gap-2">
                   <Button type="button" variant="outline" onClick={() => setStep(2)} data-testid="button-prev-step-3">
                     <ArrowLeft className="h-4 w-4 mr-1" /> Back
                   </Button>
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      toast({
-                        title: "Submission complete",
-                        description: "Your Add Director request has been submitted. Our legal team will review and process it shortly.",
-                      });
-                      setLocation("/founder/orders");
-                    }}
-                    data-testid="button-finish"
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-1" /> Finish & Submit
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={onSaveDraft}
+                      disabled={saveDraftMutation.isPending}
+                      data-testid="button-save-draft-step3"
+                    >
+                      {saveDraftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />}
+                      Save Draft
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => setLocation("/founder/orders")}
+                      data-testid="button-finish"
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-1" /> Done — View Orders
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

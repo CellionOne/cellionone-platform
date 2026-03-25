@@ -446,6 +446,63 @@ export default function OrgDashboard() {
           </CardContent>
         </Card>
 
+        {requests && (() => {
+          const now = Date.now();
+          const thirtyDays = now + 30 * 24 * 60 * 60 * 1000;
+          const expiringSoon = requests.filter(r =>
+            r.expiresAt && new Date(r.expiresAt).getTime() > now && new Date(r.expiresAt).getTime() < thirtyDays
+            && !['verified', 'rejected', 'expired'].includes(r.status)
+          );
+          const expiredUnresolved = requests.filter(r =>
+            r.expiresAt && new Date(r.expiresAt).getTime() <= now
+            && !['verified', 'rejected'].includes(r.status)
+          );
+          if (expiringSoon.length === 0 && expiredUnresolved.length === 0) return null;
+          return (
+            <Card data-testid="card-expiry-alerts" className="border-amber-200 dark:border-amber-800">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium flex items-center gap-2 text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="h-4 w-4" />
+                  Document Expiry Alerts
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {expiredUnresolved.map(r => (
+                  <div key={r.id} className="flex items-center justify-between gap-4 p-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800" data-testid={`alert-expired-${r.id}`}>
+                    <div className="flex items-center gap-2">
+                      <XCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-red-800 dark:text-red-300">{r.subjectName}</p>
+                        <p className="text-xs text-red-600 dark:text-red-400">Expired {r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : ""}</p>
+                      </div>
+                    </div>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`/kyc/org/${orgId}/requests/${r.id}`}>View</Link>
+                    </Button>
+                  </div>
+                ))}
+                {expiringSoon.map(r => (
+                  <div key={r.id} className="flex items-center justify-between gap-4 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800" data-testid={`alert-expiring-${r.id}`}>
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-300">{r.subjectName}</p>
+                        <p className="text-xs text-amber-600 dark:text-amber-400">
+                          Expires {r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : ""}
+                          {" "}({Math.ceil((new Date(r.expiresAt!).getTime() - now) / (1000 * 60 * 60 * 24))} days left)
+                        </p>
+                      </div>
+                    </div>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`/kyc/org/${orgId}/requests/${r.id}`}>View</Link>
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          );
+        })()}
+
         <Card data-testid="card-portal-links">
           <CardHeader>
             <CardTitle className="text-sm font-medium">Self-Registration Portal Links</CardTitle>

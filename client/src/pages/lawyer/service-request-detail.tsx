@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Loader2, ArrowLeft, CheckCircle2, Clock, XCircle, FileText,
-  User, Building2, Download, MapPin, ShieldCheck,
+  User, Building2, Download, MapPin, ShieldCheck, Shield,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -183,22 +183,15 @@ export default function LawyerServiceRequestDetailPage() {
     );
   }
 
-  const { serviceRequest: sr, profile, documents, founder, registeredOffice } = data;
+  const { serviceRequest: sr, profile, documents, founder, registeredOffice, addDirectorRecord } = data as any;
   const founderName = founder.firstName && founder.lastName
     ? `${founder.firstName} ${founder.lastName}`
     : founder.email || "Unknown";
 
   const isAddDirector = sr.serviceType === "ADD_DIR";
 
-  // For ADD_DIR: try to parse notes as structured director data
-  let directorData: Record<string, any> | null = null;
-  if (isAddDirector && sr.notes) {
-    try {
-      if (sr.notes.startsWith('{')) {
-        directorData = JSON.parse(sr.notes);
-      }
-    } catch {}
-  }
+  // For ADD_DIR: use the structured addDirectorRecord from the new table
+  const directorData: Record<string, any> | null = addDirectorRecord ?? null;
 
   const docTypeLabels: Record<string, string> = {
     certificate_of_incorporation: "Certificate of Incorporation",
@@ -398,6 +391,54 @@ export default function LawyerServiceRequestDetailPage() {
                       <span className="text-sm font-medium text-right">{val}</span>
                     </div>
                   ))}
+                </CardContent>
+              </Card>
+
+              <Card data-testid="card-director-verification-status">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Shield className="h-4 w-4" /> Director Verification Status
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-sm text-muted-foreground">Invite Status</span>
+                    {directorData.directorVerificationStatus === 'verified' ? (
+                      <Badge variant="default" className="bg-green-600" data-testid="badge-dir-verified">
+                        <CheckCircle2 className="h-3 w-3 mr-1" /> Verified
+                      </Badge>
+                    ) : directorData.directorVerificationStatus === 'invited' ? (
+                      <Badge variant="secondary" data-testid="badge-dir-invited">
+                        <Clock className="h-3 w-3 mr-1" /> Invited
+                      </Badge>
+                    ) : directorData.directorVerificationStatus === 'skipped' ? (
+                      <Badge variant="outline" data-testid="badge-dir-skipped">Skipped</Badge>
+                    ) : (
+                      <Badge variant="outline" data-testid="badge-dir-not-invited">Not Invited</Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-sm text-muted-foreground">Data Status</span>
+                    <Badge variant={directorData.dataStatus === 'submitted' ? 'default' : 'secondary'} data-testid="badge-data-status">
+                      {directorData.dataStatus === 'submitted' ? 'Submitted' : 'Draft'}
+                    </Badge>
+                  </div>
+                  {directorData.invitedAt && (
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm text-muted-foreground">Invited At</span>
+                      <span className="text-sm font-medium">
+                        {new Date(directorData.invitedAt).toLocaleDateString("en-NG", { year: "numeric", month: "short", day: "numeric" })}
+                      </span>
+                    </div>
+                  )}
+                  {directorData.verifiedAt && (
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="text-sm text-muted-foreground">Verified At</span>
+                      <span className="text-sm font-medium">
+                        {new Date(directorData.verifiedAt).toLocaleDateString("en-NG", { year: "numeric", month: "short", day: "numeric" })}
+                      </span>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </>

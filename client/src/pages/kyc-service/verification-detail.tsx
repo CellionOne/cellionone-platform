@@ -30,6 +30,10 @@ import {
   ArrowLeft,
   Send,
   Users,
+  Link2,
+  Copy,
+  Search,
+  AlertTriangle,
 } from "lucide-react";
 import type { KycVerificationRequest, KycSupplierProfile, KycSubmittedDocument, KycSupplierPerson, KycDocumentRequirement } from "@shared/schema";
 
@@ -164,6 +168,15 @@ export default function VerificationDetailPage() {
     });
   }
 
+  function copyVerificationLink(token: string) {
+    const link = `${window.location.origin}/kyc/verify/${token}`;
+    navigator.clipboard.writeText(link).then(() => {
+      toast({ title: "Link copied", description: "Verification link copied to clipboard." });
+    }).catch(() => {
+      toast({ title: "Copy failed", description: "Please copy the link manually.", variant: "destructive" });
+    });
+  }
+
   if (isLoading) {
     return (
       <DashboardLayout role="founder" breadcrumbs={[{ label: "KYC Service", href: "/kyc/orgs" }, { label: "Loading..." }]}>
@@ -183,6 +196,9 @@ export default function VerificationDetailPage() {
   }
 
   const RiskIcon = detail.riskScore ? riskIcons[detail.riskScore] || ShieldCheck : null;
+  const verificationLink = `${window.location.origin}/kyc/verify/${detail.inviteToken}`;
+  const isExpiringSoon = detail.expiresAt && new Date(detail.expiresAt).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000;
+  const isExpired = detail.expiresAt && new Date(detail.expiresAt) < new Date();
 
   return (
     <DashboardLayout
@@ -392,6 +408,106 @@ export default function VerificationDetailPage() {
               </CardContent>
             </Card>
           )}
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card data-testid="card-hosted-link">
+            <CardHeader>
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Link2 className="h-4 w-4" />
+                Hosted Verification Link
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {isExpired ? (
+                <div className="flex items-center gap-2 text-destructive text-sm" data-testid="text-link-expired">
+                  <XCircle className="h-4 w-4 flex-shrink-0" />
+                  This verification request has expired. Create a new request to generate a fresh link.
+                </div>
+              ) : (
+                <>
+                  {isExpiringSoon && (
+                    <div className="flex items-center gap-2 text-amber-600 text-sm p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800" data-testid="text-link-expiring-soon">
+                      <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                      Link expires {new Date(detail.expiresAt!).toLocaleDateString()} — resend to renew.
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Share this link with the subject to allow them to complete their verification without needing a separate email invitation.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-muted/50 border rounded-md px-3 py-2 text-xs font-mono truncate" data-testid="text-verification-link">
+                      {verificationLink}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => copyVerificationLink(detail.inviteToken)}
+                      data-testid="button-copy-verification-link"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card data-testid="card-aml-status">
+            <CardHeader>
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Search className="h-4 w-4" />
+                AML & Sanctions Screening
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {detail.riskScore ? (
+                <>
+                  <div className="flex items-center gap-3">
+                    {detail.riskScore === 'green' ? (
+                      <ShieldCheck className="h-8 w-8 text-green-600 flex-shrink-0" />
+                    ) : detail.riskScore === 'amber' ? (
+                      <ShieldAlert className="h-8 w-8 text-amber-600 flex-shrink-0" />
+                    ) : (
+                      <ShieldX className="h-8 w-8 text-red-600 flex-shrink-0" />
+                    )}
+                    <div>
+                      <p className={`text-sm font-semibold ${riskColors[detail.riskScore] || ""}`} data-testid="text-aml-risk">
+                        {detail.riskScore === 'green' ? 'Clear — No Matches Found' :
+                         detail.riskScore === 'amber' ? 'Review Required — Possible Match' :
+                         'High Risk — Potential Sanctions Match'}
+                      </p>
+                      {detail.reviewedAt && (
+                        <p className="text-xs text-muted-foreground">
+                          Screened {new Date(detail.reviewedAt).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {detail.reviewNotes && (
+                    <div className="p-3 rounded-lg bg-muted/50 border border-border">
+                      <p className="text-xs text-muted-foreground mb-1">Reviewer Notes</p>
+                      <p className="text-sm">{detail.reviewNotes}</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col items-center gap-2 py-4 text-center" data-testid="text-aml-pending">
+                  <ShieldCheck className="h-8 w-8 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">
+                    AML screening will be completed during review.
+                  </p>
+                  {['pending_invite', 'pending_payment', 'in_progress', 'documents_submitted'].includes(detail.status) && (
+                    <Badge variant="secondary" className="border-0">Pending Submission</Badge>
+                  )}
+                  {detail.status === 'under_review' && (
+                    <Badge variant="secondary" className="border-0 bg-orange-100 text-orange-700">Under Review</Badge>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         <Card data-testid="card-documents">

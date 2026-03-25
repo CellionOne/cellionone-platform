@@ -2980,8 +2980,25 @@ export async function registerRoutes(
     }
   });
 
-  // Mark director as verified — admin/lawyer only; NOT accessible to founders
-  // The automatic transition happens via verificationWebhookHandler.updatePendingDirectorSRs
+  // GET full director data for an ADD_DIR service request (admin view)
+  app.get("/api/admin/service-requests/:id/director-data", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid service request ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr) return res.status(404).json({ message: "Service request not found" });
+      if (sr.serviceType !== 'ADD_DIR') return res.status(400).json({ message: "Not an ADD_DIR request" });
+
+      const [adr] = await db.select().from(addDirectorRequestsTable)
+        .where(eq(addDirectorRequestsTable.serviceRequestId, srId));
+
+      res.json({ serviceRequest: sr, directorRecord: adr ?? null });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to fetch director data" });
+    }
+  });
+
   app.post("/api/admin/service-requests/:id/director-verified", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const adminId = getUserId(req);

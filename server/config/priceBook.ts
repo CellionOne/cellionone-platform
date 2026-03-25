@@ -12,7 +12,7 @@
  *   - Tiers: office_only, office_plus_mail
  */
 
-export type ServiceType = 'verification' | 'incorporation' | 'registered_office' | 'kyc_individual' | 'kyc_corporate';
+export type ServiceType = 'verification' | 'incorporation' | 'registered_office' | 'kyc_identity_only' | 'kyc_individual' | 'kyc_corporate';
 export type RegisteredOfficeTier = 'office_only' | 'office_plus_mail';
 export type PaymentProvider = 'paystack';
 export type Currency = 'NGN';
@@ -71,22 +71,31 @@ const PRICE_BOOK: PriceEntry[] = [
     description: 'Registered Office Address (Office + Mail Handling)',
   },
   {
+    serviceType: 'kyc_identity_only',
+    provider: 'paystack',
+    currency: 'NGN',
+    amount: 500000,   // ₦5,000 in kobo — AML & sanctions screening only
+    amountDisplay: '₦5,000',
+    isRecurring: false,
+    description: 'KYC Identity Check (AML & Sanctions Screening)',
+  },
+  {
     serviceType: 'kyc_individual',
     provider: 'paystack',
     currency: 'NGN',
-    amount: 1000000, // ₦10,000 in kobo
-    amountDisplay: '₦10,000',
+    amount: 1500000,  // ₦15,000 in kobo — Full individual KYC (ID + selfie + AML)
+    amountDisplay: '₦15,000',
     isRecurring: false,
-    description: 'KYC Individual Identity Verification',
+    description: 'KYC Full Individual Verification (ID + Biometric + AML)',
   },
   {
     serviceType: 'kyc_corporate',
     provider: 'paystack',
     currency: 'NGN',
-    amount: 10000000, // ₦100,000 in kobo
-    amountDisplay: '₦100,000',
+    amount: 7500000,  // ₦75,000 in kobo — Supplier/corporate entity verification
+    amountDisplay: '₦75,000',
     isRecurring: false,
-    description: 'KYC Corporate/Supplier Verification',
+    description: 'KYC Supplier / Corporate Verification',
   },
 ];
 

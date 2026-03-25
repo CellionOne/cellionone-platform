@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
   Loader2, ShoppingCart, CheckCircle2, Clock, XCircle, ChevronDown, ChevronUp,
-  FileText, UserCheck, FileClock, FileCheck2,
+  FileText, UserCheck, FileClock, FileCheck2, Info, Building2, User, ShieldCheck, MailCheck, AlertCircle,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -107,6 +107,7 @@ export default function AdminOrdersPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
+  const [expandedDirectorSrId, setExpandedDirectorSrId] = useState<number | null>(null);
 
   const { data: orders, isLoading } = useQuery<Order[]>({
     queryKey: ["/api/admin/orders"],
@@ -310,22 +311,39 @@ export default function AdminOrdersPage() {
                                   isPending={assignLawyerMutation.isPending}
                                 />
                               )}
-                              {sr.serviceType === "ADD_DIR" && sr.status === "awaiting_director_verification" && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => markDirectorVerifiedMutation.mutate(sr.id)}
-                                  disabled={markDirectorVerifiedMutation.isPending}
-                                  className="text-xs mt-1"
-                                  data-testid={`button-mark-director-verified-${sr.id}`}
-                                >
-                                  {markDirectorVerifiedMutation.isPending ? (
-                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  ) : (
-                                    <UserCheck className="h-3 w-3 mr-1" />
+                              {sr.serviceType === "ADD_DIR" && (
+                                <div className="flex flex-wrap gap-2 mt-1">
+                                  {sr.status === "awaiting_director_verification" && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => markDirectorVerifiedMutation.mutate(sr.id)}
+                                      disabled={markDirectorVerifiedMutation.isPending}
+                                      className="text-xs"
+                                      data-testid={`button-mark-director-verified-${sr.id}`}
+                                    >
+                                      {markDirectorVerifiedMutation.isPending ? (
+                                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                      ) : (
+                                        <UserCheck className="h-3 w-3 mr-1" />
+                                      )}
+                                      Mark Director Verified
+                                    </Button>
                                   )}
-                                  Mark Director Verified
-                                </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => setExpandedDirectorSrId(expandedDirectorSrId === sr.id ? null : sr.id)}
+                                    className="text-xs"
+                                    data-testid={`button-toggle-director-detail-${sr.id}`}
+                                  >
+                                    <Info className="h-3 w-3 mr-1" />
+                                    {expandedDirectorSrId === sr.id ? "Hide" : "View"} Director Details
+                                  </Button>
+                                </div>
+                              )}
+                              {sr.serviceType === "ADD_DIR" && expandedDirectorSrId === sr.id && (
+                                <DirectorDetailPanel srId={sr.id} />
                               )}
                             </div>
                           ))}
@@ -372,6 +390,152 @@ function AssignLawyerInput({
         {isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
         Assign
       </Button>
+    </div>
+  );
+}
+
+function DirectorDetailPanel({ srId }: { srId: number }) {
+  const { data, isLoading, error } = useQuery<{ serviceRequest: any; directorRecord: any }>({
+    queryKey: ["/api/admin/service-requests", srId, "director-data"],
+    queryFn: () =>
+      fetch(`/api/admin/service-requests/${srId}/director-data`, { credentials: "include" }).then(r => {
+        if (!r.ok) throw new Error("Failed to load director data");
+        return r.json();
+      }),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="mt-3 flex items-center gap-2 text-muted-foreground text-xs" data-testid={`director-panel-loading-${srId}`}>
+        <Loader2 className="h-3 w-3 animate-spin" /> Loading director data…
+      </div>
+    );
+  }
+
+  if (error || !data?.directorRecord) {
+    return (
+      <div className="mt-3 flex items-center gap-2 text-muted-foreground text-xs" data-testid={`director-panel-empty-${srId}`}>
+        <AlertCircle className="h-3 w-3" /> No director data submitted yet.
+      </div>
+    );
+  }
+
+  const adr = data.directorRecord;
+
+  const Field = ({ label, value }: { label: string; value?: string | null }) =>
+    value ? (
+      <div className="space-y-0.5">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="text-sm font-medium break-words" data-testid={`director-field-${label.toLowerCase().replace(/\s+/g, "-")}-${srId}`}>{value}</p>
+      </div>
+    ) : null;
+
+  const verificationStatusBadge = () => {
+    switch (adr.directorVerificationStatus) {
+      case "verified":
+        return <Badge variant="default" className="text-xs"><ShieldCheck className="h-3 w-3 mr-1" />Verified</Badge>;
+      case "invited":
+        return <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0"><MailCheck className="h-3 w-3 mr-1" />Invited</Badge>;
+      case "skipped":
+        return <Badge variant="outline" className="text-xs">Skipped</Badge>;
+      default:
+        return <Badge variant="outline" className="text-xs"><Clock className="h-3 w-3 mr-1" />Not Invited</Badge>;
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-muted/30 p-4 space-y-4" data-testid={`director-detail-panel-${srId}`}>
+      {/* Company Info */}
+      {(adr.companyName || adr.companyRcNumber) && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-1.5 text-sm font-semibold">
+            <Building2 className="h-4 w-4 text-primary" />
+            Company Information
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <Field label="Company Name" value={adr.companyName} />
+            <Field label="RC Number" value={adr.companyRcNumber} />
+            <Field label="TIN" value={adr.companyTin} />
+            <Field label="Incorporation Date" value={adr.incorporationDate} />
+            <Field label="Registered Address" value={adr.registeredAddress} />
+          </div>
+        </div>
+      )}
+
+      {/* New Director Info */}
+      {(adr.newDirectorFirstName || adr.newDirectorEmail) && (
+        <>
+          {(adr.companyName || adr.companyRcNumber) && <Separator />}
+          <div className="space-y-3">
+            <div className="flex items-center gap-1.5 text-sm font-semibold">
+              <User className="h-4 w-4 text-primary" />
+              New Director Details
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <Field label="Full Name" value={[adr.newDirectorFirstName, adr.newDirectorLastName].filter(Boolean).join(" ")} />
+              <Field label="Email" value={adr.newDirectorEmail} />
+              <Field label="Phone" value={adr.newDirectorPhone} />
+              <Field label="NIN" value={adr.newDirectorNin} />
+              <Field label="Date of Birth" value={adr.newDirectorDateOfBirth} />
+              <Field label="Nationality" value={adr.newDirectorNationality} />
+              <Field label="Occupation" value={adr.newDirectorOccupation} />
+              <Field label="Proposed Role" value={adr.newDirectorProposedRole} />
+              <Field label="Shareholding" value={adr.newDirectorShareholding} />
+            </div>
+            {adr.newDirectorAddress && <Field label="Address" value={adr.newDirectorAddress} />}
+            {adr.additionalNotes && <Field label="Additional Notes" value={adr.additionalNotes} />}
+          </div>
+        </>
+      )}
+
+      {/* Verification Status */}
+      <Separator />
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5 text-sm font-semibold">
+          <ShieldCheck className="h-4 w-4 text-primary" />
+          Director Verification
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {verificationStatusBadge()}
+          {adr.directorInvitedAt && (
+            <span className="text-xs text-muted-foreground">
+              Invited: {new Date(adr.directorInvitedAt).toLocaleDateString("en-NG")}
+            </span>
+          )}
+          {adr.directorVerifiedAt && (
+            <span className="text-xs text-muted-foreground">
+              Verified: {new Date(adr.directorVerifiedAt).toLocaleDateString("en-NG")}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Existing Directors */}
+      {adr.existingDirectors && Array.isArray(adr.existingDirectors) && adr.existingDirectors.length > 0 && (
+        <>
+          <Separator />
+          <div className="space-y-2">
+            <p className="text-sm font-semibold">Existing Directors ({adr.existingDirectors.length})</p>
+            <div className="space-y-1">
+              {adr.existingDirectors.map((d: any, i: number) => (
+                <div key={i} className="text-xs text-muted-foreground" data-testid={`existing-director-${i}-${srId}`}>
+                  {d.name} {d.role ? `(${d.role})` : ""}
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Data status */}
+      <div className="flex items-center gap-1.5">
+        <Badge variant="outline" className="text-xs capitalize">{adr.dataStatus || "draft"}</Badge>
+        {adr.updatedAt && (
+          <span className="text-xs text-muted-foreground">
+            Last updated: {new Date(adr.updatedAt).toLocaleString("en-NG")}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

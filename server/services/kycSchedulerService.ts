@@ -386,6 +386,11 @@ export async function runSanctionsMonitoring() {
           continue;
         }
 
+        // Update the supplier verification request risk score to red
+        await db.update(kycVerificationRequests)
+          .set({ riskScore: "red", updatedAt: new Date() })
+          .where(eq(kycVerificationRequests.id, row.request.id));
+
         webhookService.deliverWebhook(row.request.orgId, "sanctions.alert", {
           requestId: row.request.id,
           subjectName: row.person.fullName,

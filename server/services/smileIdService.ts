@@ -408,7 +408,7 @@ export async function performAmlCheck(
       isHit: false,
       hitTypes: [],
       matchDetails: null,
-      error: error.message,
+      error: err.message,
     };
   }
 }

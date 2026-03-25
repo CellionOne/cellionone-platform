@@ -2461,7 +2461,19 @@ export function registerKycServiceRoutes(app: Express) {
         return res.status(410).json({ message: "Session expired", status: "expired" });
       }
       if (session.status === "expired") return res.status(410).json({ message: "Session expired", status: "expired" });
-      if (session.status === "completed") return res.json({ status: "completed", returnUrl: session.returnUrl });
+      if (session.status === "completed") {
+        let enrichedReturnUrl = session.returnUrl;
+        if (enrichedReturnUrl && session.verificationRequestId) {
+          const separator = enrichedReturnUrl.includes("?") ? "&" : "?";
+          enrichedReturnUrl = `${enrichedReturnUrl}${separator}session_id=${session.id}&status=completed&request_id=${session.verificationRequestId}`;
+        }
+        return res.json({
+          status: "completed",
+          sessionId: session.id,
+          verificationRequestId: session.verificationRequestId,
+          returnUrl: enrichedReturnUrl || session.returnUrl,
+        });
+      }
 
       const [org] = await db.select({ name: kycOrganisations.name, logoPath: kycOrganisations.logoPath })
         .from(kycOrganisations).where(eq(kycOrganisations.id, session.orgId));
@@ -2544,6 +2556,17 @@ export function registerKycServiceRoutes(app: Express) {
       }
 
       const { firstName, lastName, dateOfBirth, selfieBase64, documentObjectPath, documentType } = req.body;
+
+      // Server-side validation: require document upload and selfie for data integrity
+      if (!documentObjectPath) {
+        return res.status(422).json({ message: "A government-issued ID document is required to complete verification." });
+      }
+      if (!selfieBase64) {
+        return res.status(422).json({ message: "A selfie photograph is required to complete verification." });
+      }
+      if (!firstName || !lastName) {
+        return res.status(422).json({ message: "First name and last name are required to complete verification." });
+      }
 
       // Build enriched subject name from personal details if provided
       const subjectName = (firstName && lastName)

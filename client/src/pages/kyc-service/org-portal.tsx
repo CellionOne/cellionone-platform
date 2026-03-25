@@ -165,7 +165,7 @@ function KycPortalSidebar({
 
 // ─── Dashboard Section ────────────────────────────────────────────────────────
 
-function DashboardSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefined }) {
+function DashboardSection({ orgId, org, onNav }: { orgId: string; org: OrgWithStats | undefined; onNav: (s: Section) => void }) {
   const { data: requests } = useQuery<KycVerificationRequest[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
   });
@@ -175,10 +175,17 @@ function DashboardSection({ orgId, org }: { orgId: string; org: OrgWithStats | u
 
   const stats = org?.stats;
   const passRate = stats && stats.total > 0 ? Math.round((stats.verified / stats.total) * 100) : 0;
-  const recentActivity = (requests || []).slice(0, 10).sort(
+  const recentActivity = [...(requests || [])].sort(
     (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-  );
+  ).slice(0, 10);
   const isNewOrg = !stats || stats.total === 0;
+
+  const avgProcessingDays = (() => {
+    const completed = (requests || []).filter(r => r.status === "verified" && r.createdAt && r.updatedAt);
+    if (!completed.length) return null;
+    const totalMs = completed.reduce((sum, r) => sum + (new Date(r.updatedAt!).getTime() - new Date(r.createdAt!).getTime()), 0);
+    return Math.round(totalMs / completed.length / (1000 * 60 * 60 * 24));
+  })();
 
   return (
     <div className="space-y-6">
@@ -201,7 +208,7 @@ function DashboardSection({ orgId, org }: { orgId: string; org: OrgWithStats | u
                 <p className="text-sm text-muted-foreground">You haven't created any verifications yet. Get started by generating an API key and creating your first session.</p>
                 <div className="flex flex-wrap gap-2 mt-2">
                   <Button size="sm" asChild><a href="/api-docs">Read API Docs</a></Button>
-                  <Button size="sm" variant="outline" onClick={() => {}}>Go to Developers</Button>
+                  <Button size="sm" variant="outline" onClick={() => onNav("developers")} data-testid="button-go-to-developers">Go to Developers</Button>
                 </div>
               </div>
             </div>
@@ -209,16 +216,17 @@ function DashboardSection({ orgId, org }: { orgId: string; org: OrgWithStats | u
         </Card>
       )}
 
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         {[
-          { label: "Total Verifications", value: stats?.total ?? 0, icon: ClipboardCheck, color: "" },
+          { label: "Total", value: stats?.total ?? 0, icon: ClipboardCheck, color: "" },
           { label: "Pass Rate", value: `${passRate}%`, icon: CheckCircle2, color: "text-green-600 dark:text-green-400" },
-          { label: "Credit Balance", value: billing?.creditBalance ?? "—", icon: CreditCard, color: "text-primary" },
-          { label: "Under Review", value: stats?.underReview ?? 0, icon: Clock, color: "text-amber-600 dark:text-amber-400" },
+          { label: "Avg Days to Result", value: avgProcessingDays !== null ? `${avgProcessingDays}d` : "—", icon: Clock, color: "text-blue-600 dark:text-blue-400" },
+          { label: "Credits", value: billing?.creditBalance ?? "—", icon: CreditCard, color: "text-primary" },
+          { label: "Under Review", value: stats?.underReview ?? 0, icon: ShieldAlert, color: "text-amber-600 dark:text-amber-400" },
         ].map(({ label, value, icon: Icon, color }) => (
           <Card key={label}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
+              <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
               <Icon className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -287,6 +295,8 @@ function VerificationsSection({ orgId }: { orgId: string }) {
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [newType, setNewType] = useState("individual");
   const [newName, setNewName] = useState("");
@@ -315,6 +325,8 @@ function VerificationsSection({ orgId }: { orgId: string }) {
   const filtered = (requests || []).filter((r) => {
     if (typeFilter !== "all" && r.type !== typeFilter) return false;
     if (statusFilter !== "all" && r.status !== statusFilter) return false;
+    if (fromDate && r.createdAt && new Date(r.createdAt) < new Date(fromDate)) return false;
+    if (toDate && r.createdAt && new Date(r.createdAt) > new Date(toDate + "T23:59:59")) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return r.subjectName.toLowerCase().includes(q) || r.subjectEmail.toLowerCase().includes(q);
@@ -357,6 +369,19 @@ function VerificationsSection({ orgId }: { orgId: string }) {
                 {Object.entries(STATUS_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
               </SelectContent>
             </Select>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground shrink-0">From</span>
+              <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-[140px] text-xs" data-testid="input-from-date" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground shrink-0">To</span>
+              <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-[140px] text-xs" data-testid="input-to-date" />
+            </div>
+            {(fromDate || toDate) && (
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => { setFromDate(""); setToDate(""); }} data-testid="button-clear-dates">
+                Clear dates
+              </Button>
+            )}
           </div>
 
           {isLoading ? (
@@ -548,27 +573,41 @@ function SessionsSection({ orgId }: { orgId: string }) {
 
 // ─── Users (Verified Registry) Section ───────────────────────────────────────
 
+const COMPLETED_STATUSES = ["verified", "rejected", "expired"];
+const RESULT_COLORS: Record<string, string> = {
+  verified: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  rejected: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  expired: "bg-muted text-muted-foreground",
+};
+const RESULT_ICONS: Record<string, typeof CheckCircle2> = {
+  verified: CheckCircle2,
+  rejected: XCircle,
+  expired: Clock,
+};
+
 function UsersSection({ orgId }: { orgId: string }) {
   const [search, setSearch] = useState("");
+  const [resultFilter, setResultFilter] = useState("all");
 
   const { data: requests, isLoading } = useQuery<KycVerificationRequest[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
   });
 
-  const verified = (requests || []).filter(r => r.status === "verified");
-  const filtered = verified.filter(r => {
+  const completed = (requests || []).filter(r => COMPLETED_STATUSES.includes(r.status));
+  const filtered = completed.filter(r => {
+    if (resultFilter !== "all" && r.status !== resultFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return r.subjectName.toLowerCase().includes(q) || r.subjectEmail.toLowerCase().includes(q);
   });
 
   function exportCsv() {
-    const rows = [["Name", "Email", "Type", "Date Verified"]];
-    filtered.forEach(r => rows.push([r.subjectName, r.subjectEmail, r.type, r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : ""]));
+    const rows = [["Name", "Email", "Type", "Result", "Date Completed"]];
+    filtered.forEach(r => rows.push([r.subjectName, r.subjectEmail, r.type, r.status, r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : ""]));
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "verified-users.csv"; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = "users-registry.csv"; a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -577,7 +616,7 @@ function UsersSection({ orgId }: { orgId: string }) {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold">Users Registry</h2>
-          <p className="text-sm text-muted-foreground">{verified.length} verified subject{verified.length !== 1 ? "s" : ""}</p>
+          <p className="text-sm text-muted-foreground">{completed.length} completed verification{completed.length !== 1 ? "s" : ""}</p>
         </div>
         <Button variant="outline" onClick={exportCsv} disabled={filtered.length === 0} data-testid="button-export-csv">
           <Download className="h-4 w-4 mr-2" />
@@ -587,15 +626,26 @@ function UsersSection({ orgId }: { orgId: string }) {
 
       <Card>
         <CardContent className="pt-4 space-y-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search verified users..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" data-testid="input-search-users" />
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input placeholder="Search subjects..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" data-testid="input-search-users" />
+            </div>
+            <Select value={resultFilter} onValueChange={setResultFilter}>
+              <SelectTrigger className="w-[140px]" data-testid="select-result-filter"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Results</SelectItem>
+                <SelectItem value="verified">Verified</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+                <SelectItem value="expired">Expired</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {isLoading ? (
             <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
           ) : filtered.length === 0 ? (
-            <EmptyState icon={Users} title="No verified users" description={verified.length > 0 ? "No results match your search." : "Verified subjects will appear here once verifications are completed."} />
+            <EmptyState icon={Users} title="No completed verifications" description={completed.length > 0 ? "No results match your filters." : "Completed verifications will appear here."} />
           ) : (
             <div className="rounded-md border">
               <Table>
@@ -603,33 +653,42 @@ function UsersSection({ orgId }: { orgId: string }) {
                   <TableRow>
                     <TableHead>Subject</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>Verified</TableHead>
+                    <TableHead>Result</TableHead>
+                    <TableHead>Completed</TableHead>
                     <TableHead className="text-right">View</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((r) => (
-                    <TableRow key={r.id} data-testid={`row-user-${r.id}`}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                          <div>
-                            <p className="font-medium text-sm">{r.subjectName}</p>
-                            <p className="text-xs text-muted-foreground">{r.subjectEmail}</p>
+                  {filtered.map((r) => {
+                    const ResultIcon = RESULT_ICONS[r.status] || CheckCircle2;
+                    return (
+                      <TableRow key={r.id} data-testid={`row-user-${r.id}`}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <ResultIcon className={cn("h-4 w-4 shrink-0", r.status === "verified" ? "text-green-500" : r.status === "rejected" ? "text-red-500" : "text-muted-foreground")} />
+                            <div>
+                              <p className="font-medium text-sm">{r.subjectName}</p>
+                              <p className="text-xs text-muted-foreground">{r.subjectEmail}</p>
+                            </div>
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell><Badge variant="secondary" className="border-0 capitalize">{r.type}</Badge></TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" asChild data-testid={`button-view-user-${r.id}`}>
-                          <Link href={`/kyc/org/${orgId}/requests/${r.id}`}><Eye className="h-4 w-4" /></Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell><Badge variant="secondary" className="border-0 capitalize">{r.type}</Badge></TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className={cn("border-0 capitalize", RESULT_COLORS[r.status] || "")} data-testid={`badge-result-${r.id}`}>
+                            {r.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="icon" asChild data-testid={`button-view-user-${r.id}`}>
+                            <Link href={`/kyc/org/${orgId}/requests/${r.id}`}><Eye className="h-4 w-4" /></Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -801,6 +860,13 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
 
   if (isLoading) return <div className="flex items-center justify-center py-20"><LoadingSpinner /></div>;
 
+  const avgTimeDays = (() => {
+    const done = allReqs.filter(r => ["verified", "rejected"].includes(r.status) && r.createdAt && r.updatedAt);
+    if (!done.length) return null;
+    const totalMs = done.reduce((sum, r) => sum + (new Date(r.updatedAt!).getTime() - new Date(r.createdAt!).getTime()), 0);
+    return (totalMs / done.length / (1000 * 60 * 60 * 24)).toFixed(1);
+  })();
+
   if (!allReqs.length) return (
     <div className="space-y-4">
       <h2 className="text-xl font-bold">Analytics</h2>
@@ -823,6 +889,22 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
             <SelectItem value="month">Monthly</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+        {[
+          { label: "Total", value: allReqs.length, color: "" },
+          { label: "Verified", value: allReqs.filter(r => r.status === "verified").length, color: "text-green-600 dark:text-green-400" },
+          { label: "Rejected", value: allReqs.filter(r => r.status === "rejected").length, color: "text-red-600 dark:text-red-400" },
+          { label: "Avg Days to Result", value: avgTimeDays !== null ? `${avgTimeDays}d` : "—", color: "text-blue-600 dark:text-blue-400" },
+        ].map(({ label, value, color }) => (
+          <Card key={label}>
+            <CardContent className="pt-4">
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className={cn("text-2xl font-bold mt-1", color)} data-testid={`analytics-stat-${label.toLowerCase().replace(/ /g, "-")}`}>{value}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <Card>
@@ -905,7 +987,7 @@ function DevelopersSection({ orgId, org }: { orgId: string; org: OrgWithStats | 
           <TabsTrigger value="quickstart" data-testid="dev-tab-quickstart"><Terminal className="h-3.5 w-3.5 mr-1.5" />Quickstart</TabsTrigger>
           <TabsTrigger value="status" data-testid="dev-tab-status"><Activity className="h-3.5 w-3.5 mr-1.5" />API Status</TabsTrigger>
         </TabsList>
-        <TabsContent value="keys" className="mt-4"><ApiKeysPanel orgId={orgId} /></TabsContent>
+        <TabsContent value="keys" className="mt-4"><ApiKeysPanel orgId={orgId} org={org} /></TabsContent>
         <TabsContent value="webhooks" className="mt-4"><WebhooksPanel orgId={orgId} /></TabsContent>
         <TabsContent value="quickstart" className="mt-4"><QuickstartPanel org={org} /></TabsContent>
         <TabsContent value="status" className="mt-4"><ApiStatusPanel /></TabsContent>
@@ -914,10 +996,11 @@ function DevelopersSection({ orgId, org }: { orgId: string; org: OrgWithStats | 
   );
 }
 
-function ApiKeysPanel({ orgId }: { orgId: string }) {
+function ApiKeysPanel({ orgId, org }: { orgId: string; org: OrgWithStats | undefined }) {
   const [showKey, setShowKey] = useState<Record<number, boolean>>({});
   const [genName, setGenName] = useState("");
   const { toast } = useToast();
+  const profile = org?.integrationProfile as any;
 
   const { data: keys, isLoading } = useQuery<KycApiKey[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "api-keys"],
@@ -951,7 +1034,14 @@ function ApiKeysPanel({ orgId }: { orgId: string }) {
     <Card>
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2"><Key className="h-4 w-4" />API Keys</CardTitle>
-        <CardDescription>Generate keys to authenticate API requests. Keys are shown once — copy them immediately.</CardDescription>
+        <CardDescription>
+          Generate keys to authenticate API requests. Keys are shown once — copy them immediately.
+          {profile?.mode && (
+            <span className="ml-2">
+              Integration scope: <Badge variant="secondary" className="border-0 capitalize ml-1">{profile.mode.replace(/_/g, " ")}</Badge>
+            </span>
+          )}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex gap-2">
@@ -960,6 +1050,16 @@ function ApiKeysPanel({ orgId }: { orgId: string }) {
             {genMutation.isPending ? "Generating..." : "Generate Key"}
           </Button>
         </div>
+
+        {profile && (
+          <div className="flex flex-wrap gap-2 p-3 rounded-lg bg-muted/50 border text-xs">
+            <span className="text-muted-foreground">Profile:</span>
+            <span><strong>Mode:</strong> {profile.mode?.replace(/_/g, " ")}</span>
+            <span><strong>Location:</strong> {profile.verificationLocation}</span>
+            <span><strong>Biometric:</strong> {profile.requiresBiometric ? "Yes" : "No"}</span>
+            <span><strong>Result:</strong> {profile.resultTiming}</span>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="space-y-2">{[1,2].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
@@ -972,6 +1072,7 @@ function ApiKeysPanel({ orgId }: { orgId: string }) {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Key</TableHead>
+                  <TableHead>Scope</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Last Used</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -990,6 +1091,11 @@ function ApiKeysPanel({ orgId }: { orgId: string }) {
                           <Eye className="h-3 w-3" />
                         </Button>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="border-0 text-xs capitalize">
+                        {profile?.mode?.replace(/_/g, " ") || "all"}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "—"}
@@ -1013,14 +1119,26 @@ function ApiKeysPanel({ orgId }: { orgId: string }) {
   );
 }
 
+const ALL_WEBHOOK_EVENTS = ["verification.completed", "verification.failed", "session.expired", "session.completed"];
+
 function WebhooksPanel({ orgId }: { orgId: string }) {
   const [addOpen, setAddOpen] = useState(false);
+  const [editWh, setEditWh] = useState<KycWebhookConfig | null>(null);
+  const [historyWhId, setHistoryWhId] = useState<number | null>(null);
   const [newUrl, setNewUrl] = useState("");
   const [newEvents, setNewEvents] = useState<string[]>(["verification.completed"]);
+  const [editUrl, setEditUrl] = useState("");
+  const [editEvents, setEditEvents] = useState<string[]>([]);
   const { toast } = useToast();
 
   const { data: webhooks, isLoading } = useQuery<KycWebhookConfig[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"],
+  });
+
+  const { data: deliveries } = useQuery<any[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "webhooks", historyWhId, "deliveries"],
+    queryFn: () => historyWhId ? fetch(`/api/kyc-service/organisations/${orgId}/webhooks/${historyWhId}/deliveries`, { credentials: "include" }).then(r => r.json()) : Promise.resolve([]),
+    enabled: historyWhId !== null,
   });
 
   const addMutation = useMutation({
@@ -1034,6 +1152,19 @@ function WebhooksPanel({ orgId }: { orgId: string }) {
       toast({ title: "Webhook added" });
     },
     onError: (e: Error) => toast({ title: "Failed to add webhook", description: e.message, variant: "destructive" }),
+  });
+
+  const editMutation = useMutation({
+    mutationFn: async ({ whId, data }: { whId: number; data: any }) => {
+      const res = await apiRequest("PATCH", `/api/kyc-service/organisations/${orgId}/webhooks/${whId}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"] });
+      setEditWh(null);
+      toast({ title: "Webhook updated" });
+    },
+    onError: (e: Error) => toast({ title: "Failed to update webhook", description: e.message, variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -1056,7 +1187,11 @@ function WebhooksPanel({ orgId }: { orgId: string }) {
     onError: (e: Error) => toast({ title: "Test failed", description: e.message, variant: "destructive" }),
   });
 
-  const ALL_EVENTS = ["verification.completed", "verification.failed", "session.expired", "session.completed"];
+  function openEdit(wh: KycWebhookConfig) {
+    setEditWh(wh);
+    setEditUrl(wh.url || "");
+    setEditEvents([...(wh.events || [])]);
+  }
 
   return (
     <Card>
@@ -1087,15 +1222,19 @@ function WebhooksPanel({ orgId }: { orgId: string }) {
                       <span key={ev} className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">{ev}</span>
                     ))}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={wh.isActive ? "default" : "secondary"} className="text-xs border-0">
-                      {wh.isActive ? "Active" : "Inactive"}
-                    </Badge>
-                  </div>
+                  <Badge variant={wh.isActive ? "default" : "secondary"} className="text-xs border-0">
+                    {wh.isActive ? "Active" : "Inactive"}
+                  </Badge>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  <Button variant="ghost" size="sm" onClick={() => setHistoryWhId(prev => prev === wh.id ? null : wh.id)} data-testid={`button-history-webhook-${wh.id}`}>
+                    History
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => testMutation.mutate(wh.id)} disabled={testMutation.isPending} data-testid={`button-test-webhook-${wh.id}`}>
                     Test
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => openEdit(wh)} data-testid={`button-edit-webhook-${wh.id}`}>
+                    <ChevronRight className="h-4 w-4" />
                   </Button>
                   <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(wh.id)} data-testid={`button-delete-webhook-${wh.id}`}>
                     <Trash2 className="h-4 w-4 text-destructive" />
@@ -1103,6 +1242,45 @@ function WebhooksPanel({ orgId }: { orgId: string }) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {historyWhId !== null && (
+          <div className="mt-4 rounded-lg border">
+            <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30">
+              <span className="text-xs font-semibold">Delivery History</span>
+              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setHistoryWhId(null)}>Close</Button>
+            </div>
+            {!deliveries ? (
+              <div className="p-3 space-y-2">{[1,2].map(i => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : deliveries.length === 0 ? (
+              <p className="text-xs text-muted-foreground p-3">No deliveries recorded yet.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Event</TableHead>
+                    <TableHead className="text-xs">Status</TableHead>
+                    <TableHead className="text-xs">Response</TableHead>
+                    <TableHead className="text-xs">Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {deliveries.slice(0, 10).map((d: any) => (
+                    <TableRow key={d.id}>
+                      <TableCell className="text-xs font-mono">{d.eventType}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className={cn("border-0 text-xs", d.responseStatus >= 200 && d.responseStatus < 300 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400")}>
+                          {d.responseStatus || "—"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{d.responseTime ? `${d.responseTime}ms` : "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{d.createdAt ? new Date(d.createdAt).toLocaleDateString() : "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </div>
         )}
       </CardContent>
@@ -1121,10 +1299,10 @@ function WebhooksPanel({ orgId }: { orgId: string }) {
             <div className="space-y-2">
               <Label>Events</Label>
               <div className="space-y-2">
-                {ALL_EVENTS.map(ev => (
+                {ALL_WEBHOOK_EVENTS.map(ev => (
                   <div key={ev} className="flex items-center gap-2">
-                    <input type="checkbox" id={ev} checked={newEvents.includes(ev)} onChange={(e) => setNewEvents(prev => e.target.checked ? [...prev, ev] : prev.filter(x => x !== ev))} className="rounded" />
-                    <label htmlFor={ev} className="text-sm font-mono">{ev}</label>
+                    <input type="checkbox" id={`new-${ev}`} checked={newEvents.includes(ev)} onChange={(e) => setNewEvents(prev => e.target.checked ? [...prev, ev] : prev.filter(x => x !== ev))} className="rounded" />
+                    <label htmlFor={`new-${ev}`} className="text-sm font-mono">{ev}</label>
                   </div>
                 ))}
               </div>
@@ -1133,6 +1311,37 @@ function WebhooksPanel({ orgId }: { orgId: string }) {
           <DialogFooter>
             <Button onClick={() => addMutation.mutate({ url: newUrl, events: newEvents })} disabled={!newUrl || newEvents.length === 0 || addMutation.isPending} data-testid="button-submit-webhook">
               {addMutation.isPending ? "Adding..." : "Add Webhook"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editWh !== null} onOpenChange={() => setEditWh(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Webhook</DialogTitle>
+            <DialogDescription>Update the endpoint URL or subscribed events.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Endpoint URL</Label>
+              <Input value={editUrl} onChange={(e) => setEditUrl(e.target.value)} data-testid="input-edit-webhook-url" />
+            </div>
+            <div className="space-y-2">
+              <Label>Events</Label>
+              <div className="space-y-2">
+                {ALL_WEBHOOK_EVENTS.map(ev => (
+                  <div key={ev} className="flex items-center gap-2">
+                    <input type="checkbox" id={`edit-${ev}`} checked={editEvents.includes(ev)} onChange={(e) => setEditEvents(prev => e.target.checked ? [...prev, ev] : prev.filter(x => x !== ev))} className="rounded" />
+                    <label htmlFor={`edit-${ev}`} className="text-sm font-mono">{ev}</label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => editWh && editMutation.mutate({ whId: editWh.id, data: { url: editUrl, events: editEvents } })} disabled={!editUrl || editEvents.length === 0 || editMutation.isPending} data-testid="button-submit-edit-webhook">
+              {editMutation.isPending ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1273,8 +1482,37 @@ function BillingSection({ orgId }: { orgId: string }) {
   });
   const { data: transactions } = useQuery<any[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "billing", "transactions"],
-    queryFn: () => fetch(`/api/kyc-service/organisations/${orgId}/billing/transactions?limit=50`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch(`/api/kyc-service/organisations/${orgId}/billing/transactions?limit=100`, { credentials: "include" }).then(r => r.json()),
   });
+  const { data: requests } = useQuery<KycVerificationRequest[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
+  });
+
+  function exportTransactionsCsv() {
+    if (!transactions?.length) return;
+    const rows = [["Date", "Description", "Type", "Credits"]];
+    transactions.forEach(t => rows.push([
+      t.createdAt ? new Date(t.createdAt).toLocaleDateString() : "",
+      t.description || "",
+      t.transactionType,
+      t.transactionType === "debit" ? `-${t.amount}` : `+${t.amount}`,
+    ]));
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "billing-transactions.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const usageByType = (() => {
+    const reqs = requests || [];
+    const completed = reqs.filter(r => r.status === "verified" || r.status === "rejected");
+    return {
+      individual: completed.filter(r => r.type === "individual").length,
+      supplier: completed.filter(r => r.type === "supplier").length,
+      total: completed.length,
+    };
+  })();
 
   const purchaseMutation = useMutation({
     mutationFn: async (qty: number) => {
@@ -1331,8 +1569,37 @@ function BillingSection({ orgId }: { orgId: string }) {
         </Card>
       </div>
 
+      {usageByType.total > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm font-medium">Usage Breakdown by Type</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {[
+                { label: "Total Processed", value: usageByType.total, color: "text-foreground" },
+                { label: "Individual", value: usageByType.individual, color: "text-blue-600 dark:text-blue-400" },
+                { label: "Supplier", value: usageByType.supplier, color: "text-purple-600 dark:text-purple-400" },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="rounded-lg bg-muted/40 p-3 border">
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                  <p className={cn("text-xl font-bold mt-1", color)}>{value}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">verifications</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
-        <CardHeader><CardTitle className="text-sm font-medium">Usage History</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium">Usage History</CardTitle>
+            <Button variant="outline" size="sm" onClick={exportTransactionsCsv} disabled={!transactions?.length} data-testid="button-export-transactions">
+              <Download className="h-3.5 w-3.5 mr-1.5" />
+              Export CSV
+            </Button>
+          </div>
+        </CardHeader>
         <CardContent>
           {!transactions ? (
             <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
@@ -1708,7 +1975,7 @@ export default function OrgPortalPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-6">
-            {section === "dashboard" && <DashboardSection orgId={orgId} org={org} />}
+            {section === "dashboard" && <DashboardSection orgId={orgId} org={org} onNav={navigateTo} />}
             {section === "verifications" && <VerificationsSection orgId={orgId} />}
             {section === "sessions" && <SessionsSection orgId={orgId} />}
             {section === "users" && <UsersSection orgId={orgId} />}

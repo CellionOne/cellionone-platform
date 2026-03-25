@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAuth } from "@/hooks/use-auth";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoadingSpinner } from "@/components/loading-spinner";
@@ -30,7 +32,7 @@ import {
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
 } from "recharts";
 import type { KycOrganisation, KycVerificationRequest, KycOrgMember, KycApiKey, KycWebhookConfig, KycVerificationTemplate, KycDocumentRequirement } from "@shared/schema";
 
@@ -180,6 +182,12 @@ function DashboardSection({ orgId, org, onNav }: { orgId: string; org: OrgWithSt
     (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
   ).slice(0, 10);
   const isNewOrg = !stats || stats.total === 0;
+  const now = new Date();
+  const thisMonthCount = (requests || []).filter(r => {
+    if (!r.createdAt) return false;
+    const d = new Date(r.createdAt);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }).length;
 
   const avgProcessingDays = (() => {
     const completed = (requests || []).filter(r => r.status === "verified" && r.createdAt && r.updatedAt);
@@ -219,7 +227,7 @@ function DashboardSection({ orgId, org, onNav }: { orgId: string; org: OrgWithSt
 
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         {[
-          { label: "Total", value: stats?.total ?? 0, icon: ClipboardCheck, color: "" },
+          { label: "This Month", value: thisMonthCount, icon: ClipboardCheck, color: "" },
           { label: "Pass Rate", value: `${passRate}%`, icon: CheckCircle2, color: "text-green-600 dark:text-green-400" },
           { label: "Avg Days to Result", value: avgProcessingDays !== null ? `${avgProcessingDays}d` : "—", icon: Clock, color: "text-blue-600 dark:text-blue-400" },
           { label: "Credits", value: billing?.creditBalance ?? "—", icon: CreditCard, color: "text-primary" },
@@ -292,7 +300,7 @@ function DashboardSection({ orgId, org, onNav }: { orgId: string; org: OrgWithSt
 
 // ─── Verifications Section ────────────────────────────────────────────────────
 
-function VerificationsSection({ orgId }: { orgId: string }) {
+function VerificationsSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean }) {
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -371,14 +379,28 @@ function VerificationsSection({ orgId }: { orgId: string }) {
           <p className="text-sm text-muted-foreground">{requests?.length ?? 0} total verification requests</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setBulkOpen(true)} data-testid="button-bulk-import">
-            <Upload className="h-4 w-4 mr-2" />
-            Bulk Import
-          </Button>
-          <Button onClick={() => setNewOpen(true)} data-testid="button-new-verification">
-            <Plus className="h-4 w-4 mr-2" />
-            New Request
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <Button variant="outline" onClick={() => setBulkOpen(true)} disabled={!isAdmin} data-testid="button-bulk-import">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Bulk Import
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {!isAdmin && <TooltipContent>Only admins can bulk import</TooltipContent>}
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <Button onClick={() => setNewOpen(true)} disabled={!isAdmin} data-testid="button-new-verification">
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Request
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {!isAdmin && <TooltipContent>Only admins can create requests</TooltipContent>}
+          </Tooltip>
         </div>
       </div>
 
@@ -1141,7 +1163,7 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis dataKey="label" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} allowDecimals={false} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "6px", fontSize: "12px" }} />
+              <RechartsTooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "6px", fontSize: "12px" }} />
               <Line type="monotone" dataKey="count" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} name="Verifications" />
             </LineChart>
           </ResponsiveContainer>
@@ -1185,7 +1207,7 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "6px", fontSize: "12px" }} />
+                <RechartsTooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "6px", fontSize: "12px" }} />
                 <Bar dataKey="count" fill={CHART_COLORS[0]} radius={[4,4,0,0]} name="Count" />
               </BarChart>
             </ResponsiveContainer>
@@ -1218,7 +1240,7 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
 
 // ─── Developers Section ───────────────────────────────────────────────────────
 
-function DevelopersSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefined }) {
+function DevelopersSection({ orgId, org, isAdmin }: { orgId: string; org: OrgWithStats | undefined; isAdmin: boolean }) {
   const [devTab, setDevTab] = useState<"keys" | "webhooks" | "quickstart" | "status">("keys");
   return (
     <div className="space-y-4">
@@ -1753,7 +1775,7 @@ function ApiStatusPanel() {
 
 const BILLING_PAGE_SIZE = 20;
 
-function BillingSection({ orgId }: { orgId: string }) {
+function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean }) {
   const { toast } = useToast();
   const [topUpQty, setTopUpQty] = useState(50);
   const [topUpOpen, setTopUpOpen] = useState(false);
@@ -1986,7 +2008,7 @@ function BillingSection({ orgId }: { orgId: string }) {
 
 // ─── Team Section ─────────────────────────────────────────────────────────────
 
-function TeamSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefined }) {
+function TeamSection({ orgId, org, isAdmin }: { orgId: string; org: OrgWithStats | undefined; isAdmin: boolean }) {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("org_reviewer");
@@ -2038,10 +2060,17 @@ function TeamSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefi
           <h2 className="text-xl font-bold">Team</h2>
           <p className="text-sm text-muted-foreground">{members.length} member{members.length !== 1 ? "s" : ""}</p>
         </div>
-        <Button onClick={() => setInviteOpen(true)} data-testid="button-invite-member">
-          <UserPlus className="h-4 w-4 mr-2" />
-          Invite Member
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button onClick={() => setInviteOpen(true)} disabled={!isAdmin} data-testid="button-invite-member">
+                <UserPlus className="h-4 w-4 mr-2" />
+                Invite Member
+              </Button>
+            </span>
+          </TooltipTrigger>
+          {!isAdmin && <TooltipContent>Only admins can invite members</TooltipContent>}
+        </Tooltip>
       </div>
 
       <Card>
@@ -2061,7 +2090,7 @@ function TeamSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefi
                 </TableHeader>
                 <TableBody>
                   {members.map((m: KycOrgMember) => {
-                    const isOwner = m.userId === org?.createdByUserId;
+                    const isOwner = String(m.userId) === String(org?.createdByUserId);
                     return (
                       <TableRow key={m.id} data-testid={`row-member-${m.id}`}>
                         <TableCell className="text-sm">{m.inviteEmail}</TableCell>
@@ -2071,8 +2100,8 @@ function TeamSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefi
                           ) : (
                             <Select
                               value={m.role}
-                              onValueChange={(newRole) => changeRoleMutation.mutate({ memberId: m.id, role: newRole })}
-                              disabled={changeRoleMutation.isPending}
+                              onValueChange={(newRole) => isAdmin && changeRoleMutation.mutate({ memberId: m.id, role: newRole })}
+                              disabled={!isAdmin || changeRoleMutation.isPending}
                             >
                               <SelectTrigger className="h-7 w-[120px] text-xs" data-testid={`select-role-${m.id}`}>
                                 <SelectValue />
@@ -2092,9 +2121,16 @@ function TeamSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefi
                         </TableCell>
                         <TableCell className="text-right">
                           {!isOwner && (
-                            <Button variant="ghost" size="icon" onClick={() => removeMutation.mutate(m.id)} disabled={removeMutation.isPending} data-testid={`button-remove-member-${m.id}`}>
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span>
+                                  <Button variant="ghost" size="icon" onClick={() => removeMutation.mutate(m.id)} disabled={!isAdmin || removeMutation.isPending} data-testid={`button-remove-member-${m.id}`}>
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </span>
+                              </TooltipTrigger>
+                              {!isAdmin && <TooltipContent>Only admins can remove members</TooltipContent>}
+                            </Tooltip>
                           )}
                         </TableCell>
                       </TableRow>
@@ -2143,7 +2179,7 @@ function TeamSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefi
 
 // ─── Settings Section ─────────────────────────────────────────────────────────
 
-function SettingsSection({ orgId, org }: { orgId: string; org: OrgWithStats | undefined }) {
+function SettingsSection({ orgId, org, isAdmin }: { orgId: string; org: OrgWithStats | undefined; isAdmin: boolean }) {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -2334,9 +2370,16 @@ function SettingsSection({ orgId, org }: { orgId: string; org: OrgWithStats | un
             </div>
           </div>
           <div className="flex justify-end">
-            <Button onClick={() => updateMutation.mutate({ name, contactEmail: email, contactPhone: phone || undefined, address: address || undefined, employeePortalEnabled: employeePortal, supplierPortalEnabled: supplierPortal })} disabled={updateMutation.isPending} data-testid="button-save-settings">
-              {updateMutation.isPending ? "Saving..." : "Save Changes"}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button onClick={() => updateMutation.mutate({ name, contactEmail: email, contactPhone: phone || undefined, address: address || undefined, employeePortalEnabled: employeePortal, supplierPortalEnabled: supplierPortal })} disabled={!isAdmin || updateMutation.isPending} data-testid="button-save-settings">
+                    {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {!isAdmin && <TooltipContent>Only admins can save settings</TooltipContent>}
+            </Tooltip>
           </div>
         </CardContent>
       </Card>
@@ -2712,14 +2755,25 @@ export default function OrgPortalPage() {
   const orgId = params.id;
   const [location, navigate] = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { user } = useAuth();
 
   const { data: org, isLoading } = useQuery<OrgWithStats>({
     queryKey: ["/api/kyc-service/organisations", orgId],
   });
 
+  const { data: billing } = useQuery<{ creditBalance: number }>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "billing"],
+    enabled: !!org,
+  });
+
   const basePath = `/kyc/org/${orgId}`;
   const suffix = location.slice(basePath.length).replace(/^\//, "").split("/")[0] || "dashboard";
   const section = (["dashboard", "verifications", "sessions", "users", "monitoring", "analytics", "developers", "billing", "team", "settings"].includes(suffix) ? suffix : "dashboard") as Section;
+
+  const isAdmin = !!org && (
+    (user && org.members?.some((m: KycOrgMember) => m.userId === user.id && (m.role === "org_admin"))) ||
+    (user && String(org.createdByUserId) === user.id)
+  );
 
   function navigateTo(s: Section) {
     navigate(s === "dashboard" ? basePath : `${basePath}/${s}`);
@@ -2745,38 +2799,64 @@ export default function OrgPortalPage() {
 
   return (
     <DashboardLayout role="founder" breadcrumbs={[{ label: "KYC Service", href: "/kyc/orgs" }, { label: org.name, href: basePath }, ...(section !== "dashboard" ? [{ label: sectionLabel }] : [])]}>
-      <div className="flex h-full -mx-4 -my-4 lg:-mx-6 lg:-my-6 overflow-hidden" style={{ minHeight: "calc(100vh - 120px)" }}>
-        <KycPortalSidebar
-          orgId={orgId}
-          org={org}
-          section={section}
-          onNav={navigateTo}
-          sidebarOpen={sidebarOpen}
-          setSidebarOpen={setSidebarOpen}
-        />
+      <TooltipProvider>
+        <div className="flex h-full -mx-4 -my-4 lg:-mx-6 lg:-my-6 overflow-hidden" style={{ minHeight: "calc(100vh - 120px)" }}>
+          <KycPortalSidebar
+            orgId={orgId}
+            org={org}
+            section={section}
+            onNav={navigateTo}
+            sidebarOpen={sidebarOpen}
+            setSidebarOpen={setSidebarOpen}
+          />
 
-        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-3 border-b bg-background lg:hidden">
-            <button onClick={() => setSidebarOpen(true)} data-testid="button-open-sidebar">
-              <Menu className="h-5 w-5" />
-            </button>
-            <span className="text-sm font-medium">{sectionLabel}</span>
-          </div>
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+            {/* Mobile top bar */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b bg-background lg:hidden">
+              <button onClick={() => setSidebarOpen(true)} data-testid="button-open-sidebar">
+                <Menu className="h-5 w-5" />
+              </button>
+              <span className="text-sm font-medium">{sectionLabel}</span>
+            </div>
 
-          <div className="flex-1 overflow-y-auto p-6">
-            {section === "dashboard" && <DashboardSection orgId={orgId} org={org} onNav={navigateTo} />}
-            {section === "verifications" && <VerificationsSection orgId={orgId} />}
-            {section === "sessions" && <SessionsSection orgId={orgId} />}
-            {section === "users" && <UsersSection orgId={orgId} />}
-            {section === "monitoring" && <MonitoringSection orgId={orgId} />}
-            {section === "analytics" && <AnalyticsSection orgId={orgId} />}
-            {section === "developers" && <DevelopersSection orgId={orgId} org={org} />}
-            {section === "billing" && <BillingSection orgId={orgId} />}
-            {section === "team" && <TeamSection orgId={orgId} org={org} />}
-            {section === "settings" && <SettingsSection orgId={orgId} org={org} />}
+            {/* Desktop org header bar */}
+            <div className="hidden lg:flex items-center justify-between px-6 py-3 border-b bg-background/95 backdrop-blur-sm sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <span className="text-primary font-bold text-sm">{org.name[0]?.toUpperCase()}</span>
+                </div>
+                <div>
+                  <p className="font-semibold text-sm leading-none" data-testid="text-org-name-header">{org.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 capitalize">{org.category}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1.5 text-sm" data-testid="text-credit-balance">
+                  <CreditCard className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Credits:</span>
+                  <span className="font-semibold tabular-nums">{billing?.creditBalance ?? org.stats?.total ?? "—"}</span>
+                </div>
+                {!isAdmin && (
+                  <Badge variant="secondary" className="border-0 text-xs">View Only</Badge>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {section === "dashboard" && <DashboardSection orgId={orgId} org={org} onNav={navigateTo} />}
+              {section === "verifications" && <VerificationsSection orgId={orgId} isAdmin={isAdmin} />}
+              {section === "sessions" && <SessionsSection orgId={orgId} />}
+              {section === "users" && <UsersSection orgId={orgId} />}
+              {section === "monitoring" && <MonitoringSection orgId={orgId} />}
+              {section === "analytics" && <AnalyticsSection orgId={orgId} />}
+              {section === "developers" && <DevelopersSection orgId={orgId} org={org} isAdmin={isAdmin} />}
+              {section === "billing" && <BillingSection orgId={orgId} isAdmin={isAdmin} />}
+              {section === "team" && <TeamSection orgId={orgId} org={org} isAdmin={isAdmin} />}
+              {section === "settings" && <SettingsSection orgId={orgId} org={org} isAdmin={isAdmin} />}
+            </div>
           </div>
         </div>
-      </div>
+      </TooltipProvider>
     </DashboardLayout>
   );
 }

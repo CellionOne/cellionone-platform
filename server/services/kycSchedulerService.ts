@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { storage } from "../storage";
 import { eq, and, lt, lte, gte, or, isNull, sql } from "drizzle-orm";
 import {
   kycVerificationRequests,
@@ -309,6 +310,16 @@ export async function runSanctionsMonitoring() {
 
         for (const reviewer of reviewers) {
           await sendKycEmail(reviewer.inviteEmail, `[URGENT] Sanctions Alert — ${row.request.subjectName}`, html);
+          // In-app notification for org admins who have a platform user account
+          if (reviewer.userId) {
+            storage.createNotification({
+              userId: reviewer.userId,
+              title: "Sanctions Alert",
+              message: `${row.request.subjectName || "A subject"} has been flagged during routine AML/sanctions re-screening and now has a RED risk score. ${hitSummary} Please review immediately in your KYC dashboard.`,
+              type: "error",
+              linkUrl: "/kyc/monitoring",
+            }).catch(err => console.error("[KYCScheduler] Notification error:", err));
+          }
         }
 
         alerts++;

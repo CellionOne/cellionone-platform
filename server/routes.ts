@@ -1860,6 +1860,20 @@ export async function registerRoutes(
             }
           }
 
+          let identityExpiresAt: string | null = null;
+          let identityDaysUntilExpiry: number | null = null;
+          if (person.personUserId && person.isVerified) {
+            const [iv] = await db.select({ expiresAt: identityVerifications.expiresAt })
+              .from(identityVerifications)
+              .where(eq(identityVerifications.founderUserId, person.personUserId))
+              .orderBy(desc(identityVerifications.createdAt))
+              .limit(1);
+            if (iv?.expiresAt) {
+              identityExpiresAt = iv.expiresAt.toISOString();
+              identityDaysUntilExpiry = Math.max(0, Math.floor((iv.expiresAt.getTime() - Date.now()) / 86400000));
+            }
+          }
+
           return {
             id: person.id,
             inviteEmail: person.inviteEmail,
@@ -1876,12 +1890,28 @@ export async function registerRoutes(
             hasIdDocument,
             hasNin,
             hasBvn,
+            identityExpiresAt,
+            identityDaysUntilExpiry,
           };
         })
       );
 
       const founderProfile = await storage.getFounderProfile(userId);
       const founderUser = await storage.getUser(userId);
+
+      let founderIdentityExpiresAt: string | null = null;
+      let founderIdentityDaysUntilExpiry: number | null = null;
+      if (founderUser?.identityVerified) {
+        const [founderIV] = await db.select({ expiresAt: identityVerifications.expiresAt })
+          .from(identityVerifications)
+          .where(eq(identityVerifications.founderUserId, userId))
+          .orderBy(desc(identityVerifications.createdAt))
+          .limit(1);
+        if (founderIV?.expiresAt) {
+          founderIdentityExpiresAt = founderIV.expiresAt.toISOString();
+          founderIdentityDaysUntilExpiry = Math.max(0, Math.floor((founderIV.expiresAt.getTime() - Date.now()) / 86400000));
+        }
+      }
 
       const founderReadiness = {
         id: "founder",
@@ -1899,6 +1929,8 @@ export async function registerRoutes(
         hasIdDocument: !!founderProfile?.idDocumentPath,
         hasNin: !!founderProfile?.ninEncrypted,
         hasBvn: !!founderProfile?.bvnEncrypted,
+        identityExpiresAt: founderIdentityExpiresAt,
+        identityDaysUntilExpiry: founderIdentityDaysUntilExpiry,
       };
 
       const allPeople = [founderReadiness, ...readiness];

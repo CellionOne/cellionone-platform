@@ -325,6 +325,8 @@ interface ReadinessData {
     hasIdDocument: boolean;
     hasNin: boolean;
     hasBvn: boolean;
+    identityExpiresAt: string | null;
+    identityDaysUntilExpiry: number | null;
   }[];
   summary: {
     totalPeople: number;
@@ -487,8 +489,27 @@ function PeopleList() {
     }
   };
 
-  const getStatusBadge = (person: CompanyPerson) => {
+  const getStatusBadge = (person: CompanyPerson, readinessInfo?: ReadinessData["people"][0]) => {
     if (person.isVerified) {
+      const days = readinessInfo?.identityDaysUntilExpiry ?? null;
+      const expired = days !== null && days <= 0;
+      const expiringSoon = days !== null && days > 0 && days <= 30;
+      if (expired) {
+        return (
+          <div className="flex items-center gap-1 flex-wrap">
+            <Badge variant="default" className="gap-1"><ShieldCheck className="h-3 w-3" /> Verified</Badge>
+            <Badge variant="destructive" className="gap-1 text-xs" data-testid={`badge-expiry-${person.id}`}>ID Expired</Badge>
+          </div>
+        );
+      }
+      if (expiringSoon) {
+        return (
+          <div className="flex items-center gap-1 flex-wrap">
+            <Badge variant="default" className="gap-1"><ShieldCheck className="h-3 w-3" /> Verified</Badge>
+            <Badge variant="secondary" className="gap-1 text-xs border border-yellow-500 text-yellow-700 dark:text-yellow-400" data-testid={`badge-expiry-${person.id}`}>{days}d remaining</Badge>
+          </div>
+        );
+      }
       return <Badge variant="default" className="gap-1"><ShieldCheck className="h-3 w-3" /> Verified</Badge>;
     }
     if (person.inviteStatus === "accepted") {
@@ -506,7 +527,7 @@ function PeopleList() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium text-sm">{person.inviteEmail}</span>
-                  {getStatusBadge(person)}
+                  {getStatusBadge(person, readinessMap.get(person.id))}
                 </div>
                 <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
                   <span className="font-medium text-foreground">{getRoleLabel(person.role)}</span>

@@ -202,17 +202,23 @@ app.use((req, res, next) => {
       // Start the subscription scheduler for expiry/renewal processing
       startSubscriptionScheduler();
       
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
       // Run compliance deadline check daily
       runComplianceDeadlineCheck().catch(console.error);
-      
+      setInterval(() => runComplianceDeadlineCheck().catch(console.error), ONE_DAY_MS);
+
       // Run KYC document expiry check daily
       runKycExpiryCheck().catch(console.error);
+      setInterval(() => runKycExpiryCheck().catch(console.error), ONE_DAY_MS);
 
       // Run individual user identity expiry check daily
       runIndividualExpiryCheck().catch(console.error);
+      setInterval(() => runIndividualExpiryCheck().catch(console.error), ONE_DAY_MS);
 
       // Run platform document files expiry check daily
       runDocumentFilesExpiryCheck().catch(console.error);
+      setInterval(() => runDocumentFilesExpiryCheck().catch(console.error), ONE_DAY_MS);
 
       // Run sanctions monitoring weekly (gated by feature flag)
       const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;

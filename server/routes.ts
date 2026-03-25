@@ -2797,8 +2797,47 @@ export async function registerRoutes(
           }
         }
 
-        // Notify founder that submission was received
+        // Auto-send director verification invitation if email is provided
+        let directorInviteUrl: string | null = null;
+        if (parsed.data.newDirectorEmail) {
+          const inviteToken = crypto.randomBytes(32).toString('hex');
+          await db.update(addDirectorRequestsTable)
+            .set({ directorInviteToken: inviteToken, directorInvitedAt: new Date(), directorVerificationStatus: 'invited', updatedAt: new Date() })
+            .where(eq(addDirectorRequestsTable.id, adrRecord.id));
+
+          const baseUrl = `${req.protocol}://${req.get("host")}`;
+          directorInviteUrl = `${baseUrl}/register?invite_type=director&token=${inviteToken}&email=${encodeURIComponent(parsed.data.newDirectorEmail)}`;
+
+          await client.emails.send({
+            from: fromEmail,
+            to: parsed.data.newDirectorEmail,
+            subject: `You've been invited to join ${parsed.data.companyName || 'a company'} as a Director — Action Required`,
+            html: `<!DOCTYPE html><html><body style="font-family:sans-serif;background:#f4f4f5;padding:20px;">
+            <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:40px;">
+              <h2 style="color:#18181b">You've been invited as a Director</h2>
+              <p><strong>${founderName}</strong> has appointed you as a director of <strong>${parsed.data.companyName || 'their company'}</strong> (RC: ${parsed.data.companyRcNumber || 'N/A'}) via Cellion One.</p>
+              <p>To complete the appointment, please create a Cellion One account and verify your identity (NIN and biometric selfie). This is a regulatory requirement for CAC filings.</p>
+              <a href="${directorInviteUrl}" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin:16px 0">Create Account & Verify Identity</a>
+              <p style="color:#71717a;font-size:13px">If you did not expect this invitation, you can safely ignore this email. The link expires in 7 days.</p>
+            </div></body></html>`,
+          });
+
+          await storage.createAuditLog({
+            actorUserId: userId,
+            action: 'add_director_invite_auto_sent',
+            entityType: 'service_request',
+            entityId: String(srId),
+            details: { directorEmail: parsed.data.newDirectorEmail },
+            ipAddress: req.ip,
+          });
+        }
+
+        // Notify founder that submission was received and invitation was sent
         if (founder?.email) {
+          const inviteStatus = directorInviteUrl
+            ? `<p>An identity verification invitation has been automatically sent to <strong>${parsed.data.newDirectorEmail}</strong>. Once they complete verification, your request will automatically move to <strong>Ready for Filing</strong>.</p>`
+            : `<p><strong>Note:</strong> No email address was provided for the new director. Please contact them directly to verify their identity on Cellion One.</p>`;
+
           await client.emails.send({
             from: fromEmail,
             to: founder.email,
@@ -2808,7 +2847,7 @@ export async function registerRoutes(
               <h2 style="color:#18181b">Add Director Request Submitted</h2>
               <p>Hi ${founderName},</p>
               <p>Your request to add <strong>${parsed.data.newDirectorFirstName} ${parsed.data.newDirectorLastName}</strong> as a director of <strong>${parsed.data.companyName}</strong> has been received.</p>
-              <p>Next step: Send a verification invitation to the new director so they can verify their identity on Cellion One. Once they complete verification, your request will automatically move to <strong>Ready for Filing</strong>.</p>
+              ${inviteStatus}
               <a href="https://cellionone.com/founder/service-requests" style="display:inline-block;background:#059669;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin:16px 0">View Service Request</a>
             </div></body></html>`,
           });
@@ -2883,22 +2922,33 @@ export async function registerRoutes(
     }
   });
 
-  // Mark director as verified (admin/system callback — can also be done manually by lawyer)
-  app.post("/api/founder/service-requests/:id/director-verified", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+  // Mark director as verified — admin/lawyer only; NOT accessible to founders
+  // The automatic transition happens via verificationWebhookHandler.updatePendingDirectorSRs
+  app.post("/api/admin/service-requests/:id/director-verified", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
-      const userId = getUserId(req);
+      const adminId = getUserId(req);
       const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid service request ID" });
       const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
-      if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+      if (!sr) return res.status(404).json({ message: "Service request not found" });
+      if (sr.serviceType !== 'ADD_DIR') return res.status(400).json({ message: "Not an ADD_DIR request" });
 
       await db.update(addDirectorRequestsTable)
         .set({ directorVerifiedAt: new Date(), directorVerificationStatus: 'verified', updatedAt: new Date() })
         .where(eq(addDirectorRequestsTable.serviceRequestId, srId));
 
-      // Transition service request to ready_for_filing
       await db.update(serviceRequestsTable)
         .set({ status: 'ready_for_filing', updatedAt: new Date() })
         .where(eq(serviceRequestsTable.id, srId));
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: 'director_verified_admin_override',
+        entityType: 'service_request',
+        entityId: String(srId),
+        details: { note: 'Admin manually marked director as verified' },
+        ipAddress: req.ip,
+      });
 
       res.json({ message: 'Director marked as verified, status updated to ready_for_filing' });
     } catch (error: any) {

@@ -1224,7 +1224,7 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} unit="d" />
-                <Tooltip
+                <RechartsTooltip
                   contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "6px", fontSize: "12px" }}
                   formatter={(v: number) => [`${v} days`, "Avg Time"]}
                 />
@@ -2834,7 +2834,7 @@ export default function OrgPortalPage() {
                 <div className="flex items-center gap-1.5 text-sm" data-testid="text-credit-balance">
                   <CreditCard className="h-4 w-4 text-muted-foreground" />
                   <span className="text-muted-foreground">Credits:</span>
-                  <span className="font-semibold tabular-nums">{billing?.creditBalance ?? org.stats?.total ?? "—"}</span>
+                  <span className="font-semibold tabular-nums" data-testid="text-credit-balance-amount">{billing?.creditBalance ?? "—"}</span>
                 </div>
                 {!isAdmin && (
                   <Badge variant="secondary" className="border-0 text-xs">View Only</Badge>

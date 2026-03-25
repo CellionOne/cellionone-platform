@@ -267,10 +267,16 @@ function IdentityStep({ session, onNext }: {
   );
 }
 
-function DocumentsStep({ onNext }: { onNext: () => void }) {
+type DocumentUploadResult = {
+  objectPath: string;
+  docType: string;
+};
+
+function DocumentsStep({ token, onNext }: { token: string; onNext: (result: DocumentUploadResult) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [docType, setDocType] = useState("national_id");
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -283,12 +289,31 @@ function DocumentsStep({ onNext }: { onNext: () => void }) {
     setFile(f);
   }
 
-  function handleNext() {
+  async function handleNext() {
     if (!file) {
       setError("Please upload your document");
       return;
     }
-    onNext();
+    setUploading(true);
+    setError("");
+    try {
+      const urlRes = await fetch(`/api/kyc-service/sessions/${token}/upload-url`, { method: "POST" });
+      if (!urlRes.ok) throw new Error("Failed to get upload URL");
+      const { uploadURL, objectPath } = await urlRes.json();
+
+      const uploadRes = await fetch(uploadURL, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+      });
+      if (!uploadRes.ok) throw new Error("Upload failed");
+
+      onNext({ objectPath, docType });
+    } catch (err: any) {
+      setError(err?.message || "Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -372,9 +397,18 @@ function DocumentsStep({ onNext }: { onNext: () => void }) {
         </CardContent>
       </Card>
 
-      <Button className="w-full" onClick={handleNext} data-testid="button-next-documents">
-        Continue
-        <ChevronRight className="h-4 w-4 ml-1" />
+      <Button className="w-full" onClick={handleNext} disabled={uploading} data-testid="button-next-documents">
+        {uploading ? (
+          <>
+            <LoadingSpinner className="h-4 w-4 mr-2" />
+            Uploading…
+          </>
+        ) : (
+          <>
+            Continue
+            <ChevronRight className="h-4 w-4 ml-1" />
+          </>
+        )}
       </Button>
     </div>
   );
@@ -654,6 +688,7 @@ export default function KycSessionPage() {
   const { token } = useParams<{ token: string }>();
   const [stepIdx, setStepIdx] = useState(0);
   const [identityData, setIdentityData] = useState<IdentityData | null>(null);
+  const [documentUpload, setDocumentUpload] = useState<DocumentUploadResult | null>(null);
   const [selfieBase64, setSelfieBase64] = useState<string | null>(null);
   const [completedRequestId, setCompletedRequestId] = useState<number | undefined>();
   const [completedReturnUrl, setCompletedReturnUrl] = useState<string | undefined>();
@@ -682,6 +717,8 @@ export default function KycSessionPage() {
       lastName: identityData?.lastName,
       dateOfBirth: identityData?.dateOfBirth,
       selfieBase64: selfieBase64,
+      documentObjectPath: documentUpload?.objectPath,
+      documentType: documentUpload?.docType,
     }),
     onSuccess: async (res: any) => {
       const data = await res.json().catch(() => ({}));
@@ -703,7 +740,8 @@ export default function KycSessionPage() {
     setStepIdx(2);
   }
 
-  function handleDocumentsNext() {
+  function handleDocumentsNext(result: DocumentUploadResult) {
+    setDocumentUpload(result);
     setStepIdx(3);
   }
 
@@ -806,7 +844,7 @@ export default function KycSessionPage() {
                   <IdentityStep session={session} onNext={handleIdentityNext} />
                 )}
                 {stepIdx === 2 && (
-                  <DocumentsStep onNext={handleDocumentsNext} />
+                  <DocumentsStep token={token!} onNext={handleDocumentsNext} />
                 )}
                 {stepIdx === 3 && (
                   <SelfieStep onCapture={handleSelfieCapture} />

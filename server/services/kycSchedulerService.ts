@@ -243,8 +243,12 @@ export async function runSanctionsMonitoring() {
 
   for (const row of verifiedRequests) {
     try {
-      // Simulated AML screening result (production: call smileId AML API)
-      const screeningResult: "clear" | "alert" = "clear";
+      // TODO [PRODUCTION]: Replace stub with real Smile ID AML re-screening call.
+      // Smile ID AML endpoint: POST https://api.smileidentity.com/v1/aml
+      // Required: SMILE_ID_API_KEY env var + subject full name + DOB + nationality.
+      // The stub always returns "clear" so no false alerts are raised in development.
+      // Gate with: if (!process.env.SMILE_ID_API_KEY) use stub; else call real API.
+      const screeningResult: "clear" | "alert" = "clear"; // STUB — replace for production
       const previousRiskScore = row.request.riskScore;
       const newRiskScore = screeningResult === "alert" ? "red" : (previousRiskScore ?? "green");
 
@@ -335,35 +339,41 @@ export async function runIndividualExpiryCheck() {
       const expiresAt = new Date(row.iv.expiresAt!);
       const msLeft = expiresAt.getTime() - now.getTime();
       const daysLeft = Math.ceil(msLeft / (24 * 60 * 60 * 1000));
-      const isExpired = daysLeft <= 0;
 
       let title: string;
       let message: string;
       let urgency: "warning" | "error";
+      let dedupWindowMs: number;
 
-      if (isExpired) {
+      // Determine which milestone applies (only one milestone per check run)
+      if (daysLeft <= 0) {
+        // Expired milestone
         title = "Identity Verification Expired";
         message = "Your identity verification has expired. Please re-verify your identity to continue using Cellion One services.";
         urgency = "error";
+        dedupWindowMs = 3 * 24 * 60 * 60 * 1000; // 3-day dedup window
       } else if (daysLeft <= 7) {
+        // 7-day milestone
         title = "Identity Verification Expiring Soon";
         message = `Your identity verification expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}. Please renew it before it expires.`;
         urgency = "warning";
+        dedupWindowMs = 3 * 24 * 60 * 60 * 1000; // 3-day dedup window
       } else {
+        // 30-day milestone (daysLeft > 7 and <= 30)
         title = "Identity Verification Expiring in 30 Days";
-        message = "Your identity verification will expire in 30 days. Please plan to renew it soon.";
+        message = "Your identity verification will expire within 30 days. Please plan to renew it soon to avoid any disruption.";
         urgency = "warning";
+        dedupWindowMs = 14 * 24 * 60 * 60 * 1000; // 14-day dedup window (only send once in this period)
       }
 
-      // Check if we already sent this type of notification within the past 24 hours to avoid duplicates
-      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
+      // Check deduplication: skip if same milestone notification already sent within dedup window
+      const dedupCutoff = new Date(now.getTime() - dedupWindowMs);
       const existing = await db.select({ id: notifications.id })
         .from(notifications)
         .where(and(
           eq(notifications.userId, row.iv.founderUserId),
           sql`${notifications.title} = ${title}`,
-          sql`${notifications.createdAt} > ${oneDayAgo}`,
+          sql`${notifications.createdAt} > ${dedupCutoff}`,
         ))
         .limit(1);
 

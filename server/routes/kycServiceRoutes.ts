@@ -2473,6 +2473,29 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
+  // POST /api/kyc-service/sessions/:token/upload-url — get a presigned upload URL for ID document (no auth, session token validates)
+  app.post("/api/kyc-service/sessions/:token/upload-url", async (req: any, res: Response) => {
+    try {
+      const { token } = req.params;
+      const [session] = await db.select({ id: kycSessions.id, status: kycSessions.status, expiresAt: kycSessions.expiresAt })
+        .from(kycSessions).where(eq(kycSessions.sessionToken, token));
+      if (!session) return res.status(404).json({ message: "Session not found" });
+      if (session.status === "expired" || session.status === "completed") {
+        return res.status(410).json({ message: `Session is ${session.status}` });
+      }
+      if (new Date() > session.expiresAt) {
+        return res.status(410).json({ message: "Session expired" });
+      }
+
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+      res.json({ uploadURL, objectPath });
+    } catch (error: any) {
+      console.error("[KYC Session] Upload URL error:", error);
+      res.status(500).json({ message: "Failed to get upload URL" });
+    }
+  });
+
   // POST /api/kyc-service/sessions/:token/start — subject accepts consent
   app.post("/api/kyc-service/sessions/:token/start", async (req: any, res: Response) => {
     try {
@@ -2511,7 +2534,7 @@ export function registerKycServiceRoutes(app: Express) {
         return res.status(410).json({ message: "Session expired" });
       }
 
-      const { firstName, lastName, dateOfBirth, selfieBase64 } = req.body;
+      const { firstName, lastName, dateOfBirth, selfieBase64, documentObjectPath, documentType } = req.body;
 
       // Build enriched subject name from personal details if provided
       const subjectName = (firstName && lastName)
@@ -2524,6 +2547,10 @@ export function registerKycServiceRoutes(app: Express) {
 
       const notesData: Record<string, any> = { source: "hosted_session", sessionId: session.id };
       if (dateOfBirth) notesData.dateOfBirth = dateOfBirth;
+      if (documentObjectPath) {
+        notesData.documentObjectPath = documentObjectPath;
+        notesData.documentType = documentType || "unknown";
+      }
       if (selfieBase64) notesData.selfieSubmitted = true;
 
       const [request] = await db.insert(kycVerificationRequests).values({

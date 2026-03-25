@@ -191,7 +191,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
   for (const item of items) {
     const serviceType = item.sku;
-    if (['SCUML', 'TM', 'TIN'].includes(serviceType)) {
+    if (['SCUML', 'TM', 'TIN', 'ADD_DIR'].includes(serviceType)) {
       try {
         await db.insert(serviceRequests).values({
           founderId: order.founderId,

@@ -21,6 +21,7 @@ import FounderPostIncChecklist from "@/pages/founder/post-inc-checklist";
 import FounderComplianceCalendar from "@/pages/founder/compliance-calendar";
 import FounderCheckout from "@/pages/founder/checkout";
 import FounderServiceRequestForm from "@/pages/founder/service-request-form";
+import FounderAddDirectorForm from "@/pages/founder/add-director-form";
 import FounderOrders from "@/pages/founder/orders";
 import FounderOrderDetail from "@/pages/founder/order-detail";
 import NewApplication from "@/pages/applications/new";
@@ -226,6 +227,9 @@ function Router() {
       </Route>
       <Route path="/founder/service-request">
         <ProtectedRoute component={FounderServiceRequestForm} />
+      </Route>
+      <Route path="/founder/add-director">
+        <ProtectedRoute component={FounderAddDirectorForm} />
       </Route>
       <Route path="/founder/orders">
         <ProtectedRoute component={FounderOrders} />

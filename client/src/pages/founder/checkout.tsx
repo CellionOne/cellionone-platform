@@ -38,6 +38,7 @@ function getSkuIcon(sku: string) {
   if (sku === "TM") return Shield;
   if (sku === "TIN") return Hash;
   if (sku === "SCUML") return FileText;
+  if (sku === "ADD_DIR") return ClipboardList;
   return FileText;
 }
 
@@ -46,6 +47,7 @@ function getSkuDescription(sku: string): string {
     TIN: "Get your Tax Identification Number from the Federal Inland Revenue Service. Required for opening a corporate bank account.",
     SCUML: "Special Control Unit against Money Laundering certificate from the EFCC. Required for financial transactions.",
     TM: "Protect your brand name with a registered trademark. Covers both stages of the trademark process.",
+    ADD_DIR: "Formally appoint a new director at the Corporate Affairs Commission. Includes Form CAC 7 filing and board resolution preparation.",
   };
   return descriptions[sku] || "";
 }
@@ -54,6 +56,7 @@ function getSkuAdvisory(sku: string): string | null {
   const advisories: Record<string, string> = {
     TIN: "You can apply for TIN registration directly with FIRS at no cost. However, the process requires consistent follow-up and can take considerable time. Our fee covers professional handling and expedited processing on your behalf.",
     SCUML: "You can apply for SCUML registration directly with the EFCC at no cost. However, the process requires consistent follow-up and can take considerable time. Our fee covers professional handling and expedited processing on your behalf.",
+    ADD_DIR: "Filing with the CAC requires accurate documentation including Form CAC 7, a board resolution, and the new director's personal details. Our lawyers handle all CAC correspondence on your behalf.",
   };
   return advisories[sku] || null;
 }
@@ -63,6 +66,7 @@ function getSkuBenefit(sku: string): string {
     TIN: "Needed for corporate bank account",
     SCUML: "Ready in 5 business days",
     TM: "Full brand name protection",
+    ADD_DIR: "CAC-registered within 10 business days",
   };
   return benefits[sku] || "";
 }

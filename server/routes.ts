@@ -2541,6 +2541,181 @@ export async function registerRoutes(
     }
   });
 
+  // ============== ADD DIRECTOR SERVICE REQUEST DATA ==============
+  // Store / retrieve the structured director-appointment data for ADD_DIR requests
+  app.get("/api/founder/service-requests/:id/director-data", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid service request ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+
+      // Director data is stored as JSON in notes field
+      let directorData = null;
+      try {
+        if (sr.notes && sr.notes.startsWith('{')) {
+          directorData = JSON.parse(sr.notes);
+        }
+      } catch {}
+
+      // Also fetch any uploaded documents for this service request
+      const documents = await db.select().from(srDocumentsTable)
+        .where(eq(srDocumentsTable.serviceRequestId, srId));
+
+      res.json({ directorData, documents });
+    } catch (error) {
+      console.error("Error fetching director data:", error);
+      res.status(500).json({ message: "Failed to fetch director data" });
+    }
+  });
+
+  app.put("/api/founder/service-requests/:id/director-data", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid service request ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+      if (sr.serviceType !== 'ADD_DIR') return res.status(400).json({ message: "Not an ADD_DIR request" });
+
+      const dataSchema = z.object({
+        companyRcNumber: z.string().min(1),
+        companyName: z.string().min(1),
+        companyTin: z.string().optional(),
+        incorporationDate: z.string().optional(),
+        registeredAddress: z.string().optional(),
+        existingDirectors: z.array(z.object({
+          name: z.string(),
+          role: z.string().optional(),
+        })).optional(),
+        newDirectorFirstName: z.string().min(1),
+        newDirectorLastName: z.string().min(1),
+        newDirectorEmail: z.string().email().optional().or(z.literal('')),
+        newDirectorPhone: z.string().optional(),
+        newDirectorNin: z.string().optional(),
+        newDirectorAddress: z.string().optional(),
+        newDirectorDateOfBirth: z.string().optional(),
+        newDirectorNationality: z.string().optional(),
+        newDirectorOccupation: z.string().optional(),
+        additionalNotes: z.string().optional(),
+      });
+
+      const parsed = dataSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors.map(e => e.message).join(', ') });
+      }
+
+      const [updated] = await db.update(serviceRequestsTable)
+        .set({ notes: JSON.stringify(parsed.data), updatedAt: new Date() })
+        .where(eq(serviceRequestsTable.id, srId))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: 'add_director_data_submitted',
+        entityType: 'service_request',
+        entityId: String(srId),
+        details: { companyRcNumber: parsed.data.companyRcNumber },
+        ipAddress: req.ip,
+      });
+
+      // Notify admin
+      try {
+        const { getResendClient, ADMIN_NOTIFICATION_EMAIL } = await import('./services/emailService');
+        const { client, fromEmail } = await getResendClient();
+        const founder = await storage.getUser(userId);
+        await client.emails.send({
+          from: fromEmail,
+          to: ADMIN_NOTIFICATION_EMAIL,
+          subject: `[Add Director] New submission - SR #${srId} - ${parsed.data.companyName}`,
+          html: `<p>Founder ${founder?.email || userId} has submitted Add Director details for service request #${srId}.</p><p>Company: ${parsed.data.companyName} (RC: ${parsed.data.companyRcNumber})</p><p>New Director: ${parsed.data.newDirectorFirstName} ${parsed.data.newDirectorLastName}</p>`,
+        });
+      } catch (emailErr) {
+        console.error('[ADD_DIR] Failed to send admin notification:', emailErr);
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error saving director data:", error);
+      res.status(500).json({ message: "Failed to save director data" });
+    }
+  });
+
+  // Upload document for an ADD_DIR service request
+  app.post("/api/founder/service-requests/:id/documents/upload-url", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid service request ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+
+      const { name, size, contentType, docType } = req.body;
+      if (!name || !contentType || !docType) return res.status(400).json({ message: "name, contentType, docType required" });
+
+      const { ObjectStorageService } = await import('./replit_integrations/object_storage');
+      const objectPath = `service-requests/${srId}/${docType}_${Date.now()}_${name}`;
+      const uploadURL = await ObjectStorageService.getSignedUploadUrl(objectPath, contentType);
+
+      res.json({ uploadURL, objectPath });
+    } catch (error) {
+      console.error("Error getting upload URL for service request doc:", error);
+      res.status(500).json({ message: "Failed to get upload URL" });
+    }
+  });
+
+  app.post("/api/founder/service-requests/:id/documents", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      if (isNaN(srId)) return res.status(400).json({ message: "Invalid service request ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+
+      const { docType, filename, storagePath, sizeBytes, mimeType } = req.body;
+      if (!docType || !filename || !storagePath) return res.status(400).json({ message: "docType, filename, storagePath required" });
+
+      const [doc] = await db.insert(srDocumentsTable).values({
+        founderId: userId,
+        serviceRequestId: srId,
+        docType,
+        filename,
+        storagePath,
+        sizeBytes: sizeBytes || null,
+        mimeType: mimeType || null,
+      }).returning();
+
+      res.json(doc);
+    } catch (error) {
+      console.error("Error saving service request document:", error);
+      res.status(500).json({ message: "Failed to save document" });
+    }
+  });
+
+  app.delete("/api/founder/service-requests/:id/documents/:docId", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const srId = parseInt(req.params.id, 10);
+      const docId = parseInt(req.params.docId, 10);
+      if (isNaN(srId) || isNaN(docId)) return res.status(400).json({ message: "Invalid IDs" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr || sr.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+
+      await db.delete(srDocumentsTable).where(and(eq(srDocumentsTable.id, docId), eq(srDocumentsTable.founderId, userId)));
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting service request document:", error);
+      res.status(500).json({ message: "Failed to delete document" });
+    }
+  });
+
   // ============== LAWYER SERVICE REQUESTS ==============
   app.get("/api/lawyer/service-requests", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
     try {
@@ -2598,7 +2773,11 @@ export async function registerRoutes(
       }
 
       let documents: any[] = [];
-      if (sr.companyProfileId) {
+      if (sr.serviceType === 'ADD_DIR') {
+        // ADD_DIR documents are linked by serviceRequestId
+        documents = await db.select().from(srDocumentsTable)
+          .where(eq(srDocumentsTable.serviceRequestId, sr.id));
+      } else if (sr.companyProfileId) {
         documents = await db.select().from(srDocumentsTable)
           .where(eq(srDocumentsTable.companyProfileId, sr.companyProfileId));
       }

@@ -26,6 +26,7 @@ function getServiceLabel(serviceType: string): string {
     SCUML: "SCUML Registration",
     TM: "Trademark Registration",
     TIN: "TIN Registration",
+    ADD_DIR: "Add Director (CAC Filing)",
   };
   return labels[serviceType] || serviceType;
 }

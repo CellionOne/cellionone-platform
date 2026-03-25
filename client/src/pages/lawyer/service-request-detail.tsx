@@ -53,6 +53,7 @@ function getServiceLabel(serviceType: string): string {
     SCUML: "SCUML Registration",
     TM: "Trademark Registration",
     TIN: "TIN Registration",
+    ADD_DIR: "Add Director (CAC Filing)",
   };
   return labels[serviceType] || serviceType;
 }
@@ -187,6 +188,18 @@ export default function LawyerServiceRequestDetailPage() {
     ? `${founder.firstName} ${founder.lastName}`
     : founder.email || "Unknown";
 
+  const isAddDirector = sr.serviceType === "ADD_DIR";
+
+  // For ADD_DIR: try to parse notes as structured director data
+  let directorData: Record<string, any> | null = null;
+  if (isAddDirector && sr.notes) {
+    try {
+      if (sr.notes.startsWith('{')) {
+        directorData = JSON.parse(sr.notes);
+      }
+    } catch {}
+  }
+
   const docTypeLabels: Record<string, string> = {
     certificate_of_incorporation: "Certificate of Incorporation",
     memart: "MEMART",
@@ -194,6 +207,11 @@ export default function LawyerServiceRequestDetailPage() {
     tin_printout: "TIN Printout",
     proof_of_address: "Proof of Address",
     additional_certificate: "Additional Certificate",
+    new_director_id: "New Director's ID Document",
+    new_director_photo: "New Director's Passport Photo",
+    board_resolution: "Board Resolution",
+    signature_specimen: "Signature Specimen",
+    other: "Other Document",
   };
 
   return (
@@ -314,7 +332,85 @@ export default function LawyerServiceRequestDetailPage() {
         </Card>
       )}
 
-      {profile ? (
+      {isAddDirector ? (
+        <>
+          {directorData ? (
+            <>
+              <Card data-testid="card-company-info">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Building2 className="h-5 w-5" /> Company Information
+                  </CardTitle>
+                  <CardDescription>{directorData.companyName}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {[
+                    ["RC Number", directorData.companyRcNumber],
+                    ["Company Name", directorData.companyName],
+                    ["TIN", directorData.companyTin],
+                    ["Incorporation Date", directorData.incorporationDate],
+                    ["Registered Address", directorData.registeredAddress],
+                  ].filter(([, val]) => val).map(([label, val]) => (
+                    <div key={label as string} className="flex items-start justify-between gap-4">
+                      <span className="text-sm text-muted-foreground flex-shrink-0">{label}</span>
+                      <span className="text-sm font-medium text-right">{val}</span>
+                    </div>
+                  ))}
+
+                  {directorData.existingDirectors && directorData.existingDirectors.length > 0 && (
+                    <>
+                      <Separator />
+                      <p className="text-sm font-medium text-muted-foreground">Existing Directors</p>
+                      {directorData.existingDirectors.map((d: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between gap-4">
+                          <span className="text-sm">{d.name}</span>
+                          {d.role && <span className="text-xs text-muted-foreground">{d.role}</span>}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card data-testid="card-new-director">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <User className="h-5 w-5" /> New Director Details
+                  </CardTitle>
+                  <CardDescription>
+                    {directorData.newDirectorFirstName} {directorData.newDirectorLastName}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {[
+                    ["Full Name", `${directorData.newDirectorFirstName} ${directorData.newDirectorLastName}`],
+                    ["Email", directorData.newDirectorEmail],
+                    ["Phone", directorData.newDirectorPhone],
+                    ["NIN", directorData.newDirectorNin],
+                    ["Date of Birth", directorData.newDirectorDateOfBirth],
+                    ["Nationality", directorData.newDirectorNationality],
+                    ["Occupation", directorData.newDirectorOccupation],
+                    ["Address", directorData.newDirectorAddress],
+                    ["Additional Notes", directorData.additionalNotes],
+                  ].filter(([, val]) => val).map(([label, val]) => (
+                    <div key={label as string} className="flex items-start justify-between gap-4">
+                      <span className="text-sm text-muted-foreground flex-shrink-0">{label}</span>
+                      <span className="text-sm font-medium text-right">{val}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="p-6 text-center">
+                <User className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">Founder has not submitted director details yet.</p>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      ) : profile ? (
         <Card data-testid="card-company-profile">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -396,11 +492,17 @@ export default function LawyerServiceRequestDetailPage() {
                     {doc.sizeBytes && ` \u00B7 ${(doc.sizeBytes / 1024).toFixed(0)} KB`}
                   </p>
                 </div>
-                <a href={`/api/founder/service-profiles/${profile?.id}/documents/${doc.id}/download`} target="_blank" rel="noopener noreferrer">
-                  <Button size="icon" variant="ghost" data-testid={`button-download-doc-${doc.id}`}>
+                {isAddDirector ? (
+                  <Button size="icon" variant="ghost" data-testid={`button-download-doc-${doc.id}`} disabled title="Contact founder for document access">
                     <Download className="h-4 w-4" />
                   </Button>
-                </a>
+                ) : (
+                  <a href={`/api/founder/service-profiles/${profile?.id}/documents/${doc.id}/download`} target="_blank" rel="noopener noreferrer">
+                    <Button size="icon" variant="ghost" data-testid={`button-download-doc-${doc.id}`}>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </a>
+                )}
               </div>
             ))}
           </CardContent>
@@ -413,7 +515,7 @@ export default function LawyerServiceRequestDetailPage() {
           <CardDescription>Update the status of this service request</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {sr.notes && (
+          {sr.notes && !isAddDirector && (
             <div className="p-3 rounded-lg bg-muted">
               <p className="text-xs text-muted-foreground mb-1">Notes</p>
               <p className="text-sm">{sr.notes}</p>

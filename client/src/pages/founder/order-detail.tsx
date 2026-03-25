@@ -46,6 +46,7 @@ function getServiceLabel(serviceType: string): string {
     SCUML: "SCUML Registration",
     TM: "Trademark Registration",
     TIN: "TIN Registration",
+    ADD_DIR: "Add Director (CAC Filing)",
   };
   return labels[serviceType] || serviceType;
 }
@@ -131,6 +132,10 @@ export default function OrderDetailPage() {
     ["queued", "assigned"].includes(sr.status) && !sr.companyProfileId
   ) || [];
 
+  // Separate ADD_DIR requests from standard service requests
+  const pendingAddDirector = pendingServiceRequests.filter(sr => sr.serviceType === "ADD_DIR");
+  const pendingStandardRequests = pendingServiceRequests.filter(sr => sr.serviceType !== "ADD_DIR");
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
       <div className="flex items-center gap-4 flex-wrap">
@@ -143,7 +148,7 @@ export default function OrderDetailPage() {
         {getStatusBadge(order.status)}
       </div>
 
-      {pendingServiceRequests.length > 0 && (
+      {pendingStandardRequests.length > 0 && (
         <Card className="border-primary/30" data-testid="card-service-request-cta">
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center gap-2">
@@ -161,6 +166,25 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {pendingAddDirector.map((sr) => (
+        <Card key={sr.id} className="border-primary/30" data-testid={`card-add-director-cta-${sr.id}`}>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-primary flex-shrink-0" />
+              <p className="font-medium">Action Required: Add Director Details</p>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Provide company information and the new director's personal details so our lawyers can file with the CAC.
+            </p>
+            <Link href={`/founder/add-director?srId=${sr.id}&orderId=${order.id}`}>
+              <Button size="sm" data-testid={`button-add-director-form-${sr.id}`}>
+                Fill Add Director Form <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      ))}
 
       {serviceRequests && serviceRequests.length > 0 && (
         <Card data-testid="card-service-requests">

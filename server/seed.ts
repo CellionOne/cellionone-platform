@@ -76,6 +76,7 @@ export async function seedDatabase() {
       { sku: "TIN", name: "TIN Registration (FIRS)", category: "post_incorporation", priceNgn: 2000000, cellionCutNgn: 1000000, metadata: { note: "Price may vary by company location" } },
       { sku: "NGO", name: "Registration of Incorporated Trustees (NGO)", category: "incorporation", priceNgn: 25000000, cellionCutNgn: 4000000, metadata: { note: "Includes filing fees, newspaper publications, constitution and legal charges" } },
       { sku: "VERIFY", name: "Identity & Company Verification", category: "verification", priceNgn: 1000000, cellionCutNgn: 1000000, metadata: { note: "One-time verification fee per person. Covers BVN/NIN validation, government ID document verification, biometric selfie matching, and AML/sanctions screening through Smile ID." } },
+      { sku: "ADD_DIR", name: "Add Director to Company", category: "post_incorporation", priceNgn: 7500000, cellionCutNgn: 2000000, metadata: { note: "Post-incorporation service to formally appoint a new director at the Corporate Affairs Commission (CAC). Includes Form CAC 7 filing and board resolution preparation." } },
     ];
     for (const item of catalogItems) {
       await db.insert(productCatalog).values(item).onConflictDoNothing();

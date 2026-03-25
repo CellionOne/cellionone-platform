@@ -16,6 +16,8 @@ import {
   XCircle,
   Camera,
   Link2,
+  AlertTriangle,
+  CalendarClock,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -26,6 +28,9 @@ interface VerificationInfo {
   verificationFeePerPerson: number;
   totalVerificationFee: number;
   hasPaidVerification?: boolean;
+  founderVerificationStatus?: string;
+  founderExpiresAt?: string | null;
+  founderDaysUntilExpiry?: number | null;
 }
 
 function formatNgn(kobo: number): string {
@@ -46,6 +51,15 @@ export default function IdentityVerificationPage() {
   const founderVerified = verificationInfo?.founderVerified ?? false;
   const people = verificationInfo?.people ?? [];
   const allVerified = verificationInfo?.unverifiedCount === 0;
+  const daysUntilExpiry = verificationInfo?.founderDaysUntilExpiry ?? null;
+  const founderExpiresAt = verificationInfo?.founderExpiresAt;
+  const verificationExpired = verificationInfo?.founderVerificationStatus === "expired";
+  const verificationExpiringSoon = founderVerified && daysUntilExpiry !== null && daysUntilExpiry <= 30;
+
+  function formatExpiryDate(dateStr: string | null | undefined): string {
+    if (!dateStr) return "N/A";
+    return new Date(dateStr).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  }
 
   return (
     <DashboardLayout
@@ -59,6 +73,26 @@ export default function IdentityVerificationPage() {
             Verification is required for all key persons before placing orders
           </p>
         </div>
+
+        {!isLoading && verificationExpired && (
+          <Alert variant="destructive" data-testid="alert-verification-expired">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Verification Expired</AlertTitle>
+            <AlertDescription>
+              Your identity verification expired on {formatExpiryDate(founderExpiresAt)}. You must re-verify to continue placing orders. Please go to your profile to complete a new biometric check.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {!isLoading && verificationExpiringSoon && !verificationExpired && (
+          <Alert className="border-yellow-300 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-950/30 [&>svg]:text-yellow-600" data-testid="alert-verification-expiring">
+            <CalendarClock className="h-4 w-4" />
+            <AlertTitle className="text-yellow-800 dark:text-yellow-300">Verification Expiring Soon</AlertTitle>
+            <AlertDescription className="text-yellow-700 dark:text-yellow-400">
+              Your identity verification expires on {formatExpiryDate(founderExpiresAt)} ({daysUntilExpiry} day{daysUntilExpiry === 1 ? "" : "s"} remaining). Renew now to avoid service disruption.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {allVerified && !isLoading ? (
           <Card className="border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30" data-testid="card-all-verified">
@@ -183,10 +217,16 @@ export default function IdentityVerificationPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center justify-between p-3 rounded-lg border border-border" data-testid="row-founder-status">
+            <div className={`flex items-center justify-between p-3 rounded-lg border ${verificationExpired ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20' : verificationExpiringSoon ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950/20' : 'border-border'}`} data-testid="row-founder-status">
               <div className="flex items-center gap-3">
-                <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 ${founderVerified ? 'bg-green-100 dark:bg-green-900/50' : 'bg-yellow-100 dark:bg-yellow-900/50'}`}>
-                  {founderVerified ? (
+                <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  verificationExpired ? 'bg-red-100 dark:bg-red-900/50' :
+                  founderVerified ? 'bg-green-100 dark:bg-green-900/50' :
+                  'bg-yellow-100 dark:bg-yellow-900/50'
+                }`}>
+                  {verificationExpired ? (
+                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                  ) : founderVerified ? (
                     <CheckCircle2 className="h-4 w-4 text-green-600" />
                   ) : (
                     <Clock className="h-4 w-4 text-yellow-600" />
@@ -195,11 +235,26 @@ export default function IdentityVerificationPage() {
                 <div>
                   <p className="text-sm font-medium">You (Founder)</p>
                   <p className="text-xs text-muted-foreground">{user?.email}</p>
+                  {founderVerified && founderExpiresAt && (
+                    <p className="text-xs text-muted-foreground mt-0.5" data-testid="text-founder-expiry-date">
+                      Expires {formatExpiryDate(founderExpiresAt)}
+                    </p>
+                  )}
                 </div>
               </div>
-              <Badge variant={founderVerified ? "default" : "secondary"} data-testid="badge-founder-verified">
-                {founderVerified ? "Verified" : "Pending"}
-              </Badge>
+              <div className="flex flex-col items-end gap-1">
+                <Badge
+                  variant={verificationExpired ? "destructive" : founderVerified ? "default" : "secondary"}
+                  data-testid="badge-founder-verified"
+                >
+                  {verificationExpired ? "Expired" : founderVerified ? "Verified" : "Pending"}
+                </Badge>
+                {verificationExpiringSoon && !verificationExpired && daysUntilExpiry !== null && (
+                  <Badge variant="outline" className="text-yellow-700 border-yellow-400 bg-yellow-50 dark:text-yellow-300 dark:border-yellow-700 dark:bg-yellow-950/30 text-xs" data-testid="badge-founder-expiry-warning">
+                    {daysUntilExpiry}d remaining
+                  </Badge>
+                )}
+              </div>
             </div>
 
             {people.map(person => (

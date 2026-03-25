@@ -2351,8 +2351,11 @@ export async function registerRoutes(
   app.get("/api/checkout/verification-info", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      const companyPeople = await storage.getCompanyPeopleByFounder(userId);
+      const [user, companyPeople, verificationStatus] = await Promise.all([
+        storage.getUser(userId),
+        storage.getCompanyPeopleByFounder(userId),
+        verificationService.getVerificationStatus(userId),
+      ]);
 
       const founderVerified = !!user?.isIdentityVerified;
       const people = companyPeople
@@ -2373,6 +2376,9 @@ export async function registerRoutes(
         unverifiedCount,
         verificationFeePerPerson: 500000,
         totalVerificationFee: unverifiedCount * 500000,
+        founderVerificationStatus: verificationStatus.status,
+        founderExpiresAt: verificationStatus.expiresAt,
+        founderDaysUntilExpiry: verificationStatus.daysUntilExpiry,
       });
     } catch (error) {
       console.error("Error fetching verification info:", error);

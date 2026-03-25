@@ -887,7 +887,7 @@ export default function ApiDocsPage() {
                     <tbody>
                       <tr className="border-t">
                         <td className="p-2 font-mono text-xs">resultTiming</td>
-                        <td className="p-2 text-muted-foreground"><code className="bg-muted px-1 rounded text-xs">"instant"</code> if only identity data is collected; <code className="bg-muted px-1 rounded text-xs">"webhook"</code> when a selfie or document is involved (biometric processing takes a few seconds).</td>
+                        <td className="p-2 text-muted-foreground"><code className="bg-muted px-1 rounded text-xs">"instant"</code> when no selfie is required (identity details and/or document collection only); <code className="bg-muted px-1 rounded text-xs">"webhook"</code> when a selfie is required (biometric matching runs asynchronously and takes a few seconds).</td>
                       </tr>
                       <tr className="border-t">
                         <td className="p-2 font-mono text-xs">requiredSteps</td>

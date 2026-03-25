@@ -231,9 +231,10 @@ function IdentityStep({ session, onNext }: {
   session: SessionData;
   onNext: (data: IdentityData) => void;
 }) {
-  const [firstName, setFirstName] = useState(session.subjectName.split(" ")[0] || "");
-  const [lastName, setLastName] = useState(session.subjectName.split(" ").slice(1).join(" ") || "");
-  const [dob, setDob] = useState("");
+  const prefill = session.prefillData;
+  const [firstName, setFirstName] = useState(prefill?.firstName || session.subjectName.split(" ")[0] || "");
+  const [lastName, setLastName] = useState(prefill?.lastName || session.subjectName.split(" ").slice(1).join(" ") || "");
+  const [dob, setDob] = useState(prefill?.dateOfBirth || "");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   function validate() {

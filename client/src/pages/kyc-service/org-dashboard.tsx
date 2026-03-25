@@ -789,7 +789,7 @@ export default function OrgDashboard() {
                               <TableCell className="text-right">
                                 {session.status === "pending" || session.status === "in_progress" ? (
                                   <Button variant="ghost" size="icon" onClick={() => {
-                                    navigator.clipboard.writeText(`${window.location.origin}/kyc/session/${session.sessionToken}`);
+                                    navigator.clipboard.writeText(`${window.location.origin}/verify/${session.sessionToken}`);
                                     toast({ title: "Link copied", description: "Session link copied to clipboard." });
                                   }} data-testid={`button-copy-session-${session.id}`}>
                                     <Copy className="h-4 w-4" />
@@ -892,54 +892,113 @@ export default function OrgDashboard() {
                       Sanctions monitoring runs weekly when enabled by Cellion One admin. Contact <a href="mailto:service@cellionone.com" className="underline hover:text-foreground">service@cellionone.com</a> to activate.
                     </div>
                   </div>
-                ) : (
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Subject</TableHead>
-                          <TableHead>Result</TableHead>
-                          <TableHead>Risk Change</TableHead>
-                          <TableHead>Screened At</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {sanctionsData.logs.map((log: any) => (
-                          <TableRow key={log.id} data-testid={`row-sanctions-${log.id}`}>
-                            <TableCell>
-                              <p className="text-sm font-medium">{log.subjectName}</p>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="secondary"
-                                className={`border-0 ${log.screeningResult === "alert" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"}`}
-                                data-testid={`badge-sanctions-result-${log.id}`}
-                              >
-                                {log.screeningResult === "alert" ? "⚠ Alert" : "✓ Clear"}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                <span className={`capitalize ${log.previousRiskScore === "red" ? "text-red-500" : log.previousRiskScore === "amber" ? "text-amber-500" : "text-green-500"}`}>
-                                  {log.previousRiskScore || "—"}
-                                </span>
-                                <span>→</span>
-                                <span className={`capitalize ${log.newRiskScore === "red" ? "text-red-500" : log.newRiskScore === "amber" ? "text-amber-500" : "text-green-500"}`}>
-                                  {log.newRiskScore || "—"}
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-xs text-muted-foreground">
-                                {new Date(log.createdAt).toLocaleDateString()}
-                              </span>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
+                ) : (() => {
+                  // Derive per-entity latest screening status (most recent log per subject)
+                  const latestBySubject = Object.values(
+                    sanctionsData.logs.reduce((acc: Record<string, any>, log: any) => {
+                      if (!acc[log.subjectName] || new Date(log.createdAt) > new Date(acc[log.subjectName].createdAt)) {
+                        acc[log.subjectName] = log;
+                      }
+                      return acc;
+                    }, {} as Record<string, any>)
+                  );
+                  return (
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Current Status per Entity</p>
+                        <div className="rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Subject</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Risk Score</TableHead>
+                                <TableHead>Last Screened</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {latestBySubject.map((log: any) => (
+                                <TableRow key={`latest-${log.id}`} data-testid={`row-sanctions-latest-${log.id}`}>
+                                  <TableCell>
+                                    <p className="text-sm font-medium">{log.subjectName}</p>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge
+                                      variant="secondary"
+                                      className={`border-0 ${log.screeningResult === "alert" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"}`}
+                                      data-testid={`badge-sanctions-latest-${log.id}`}
+                                    >
+                                      {log.screeningResult === "alert" ? "⚠ Alert" : "✓ Clear"}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className={`text-sm font-medium capitalize ${log.newRiskScore === "red" ? "text-red-500" : log.newRiskScore === "amber" ? "text-amber-500" : "text-green-600"}`}>
+                                      {log.newRiskScore || "—"}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="text-xs text-muted-foreground">
+                                      {new Date(log.createdAt).toLocaleDateString()}
+                                    </span>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Full Screening History</p>
+                        <div className="rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Subject</TableHead>
+                                <TableHead>Result</TableHead>
+                                <TableHead>Risk Change</TableHead>
+                                <TableHead>Screened At</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {sanctionsData.logs.map((log: any) => (
+                                <TableRow key={log.id} data-testid={`row-sanctions-${log.id}`}>
+                                  <TableCell>
+                                    <p className="text-sm font-medium">{log.subjectName}</p>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge
+                                      variant="secondary"
+                                      className={`border-0 ${log.screeningResult === "alert" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"}`}
+                                      data-testid={`badge-sanctions-result-${log.id}`}
+                                    >
+                                      {log.screeningResult === "alert" ? "⚠ Alert" : "✓ Clear"}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                      <span className={`capitalize ${log.previousRiskScore === "red" ? "text-red-500" : log.previousRiskScore === "amber" ? "text-amber-500" : "text-green-500"}`}>
+                                        {log.previousRiskScore || "—"}
+                                      </span>
+                                      <span>→</span>
+                                      <span className={`capitalize ${log.newRiskScore === "red" ? "text-red-500" : log.newRiskScore === "amber" ? "text-amber-500" : "text-green-500"}`}>
+                                        {log.newRiskScore || "—"}
+                                      </span>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="text-xs text-muted-foreground">
+                                      {new Date(log.createdAt).toLocaleDateString()}
+                                    </span>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           </TabsContent>

@@ -608,6 +608,12 @@ export function registerKycApiRoutes(app: Express) {
         }
       }
 
+      // When prefill is supplied but no profile/requiredSteps exist, default to full steps
+      // so the prefill removal loop can correctly eliminate covered steps
+      if (data.prefill && !resolvedSteps) {
+        resolvedSteps = ["identity", "documents", "selfie"];
+      }
+
       // Auto-remove steps already covered by prefill data
       if (data.prefill && resolvedSteps) {
         const p = data.prefill;

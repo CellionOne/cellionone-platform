@@ -2688,11 +2688,21 @@ function SettingsSection({ orgId, org, isAdmin }: { orgId: string; org: OrgWithS
         </CardHeader>
         <CardContent className="space-y-4">
           {org?.integrationProfile?.mode && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
-              <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-              <p className="text-sm text-primary font-medium">
-                Current profile: <span className="capitalize">{integrationProfiles.find(p => p.mode === org.integrationProfile?.mode)?.label ?? String(org.integrationProfile.mode).replace(/_/g, " ")}</span>
-              </p>
+            <div className="flex items-center justify-between gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                <p className="text-sm text-primary font-medium">
+                  Current profile: <span className="capitalize">{integrationProfiles.find(p => p.mode === org.integrationProfile?.mode)?.label ?? String(org.integrationProfile.mode).replace(/_/g, " ")}</span>
+                </p>
+              </div>
+              {(() => {
+                const p = integrationProfiles.find(pr => pr.mode === org.integrationProfile?.mode);
+                return p ? (
+                  <span className="text-xs text-muted-foreground font-medium whitespace-nowrap">
+                    {p.billingLabel} · ₦{p.billingPrice.toLocaleString()}/credit
+                  </span>
+                ) : null;
+              })()}
             </div>
           )}
 

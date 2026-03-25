@@ -612,7 +612,7 @@ export function registerKycApiRoutes(app: Express) {
       if (data.prefill && resolvedSteps) {
         const p = data.prefill;
         const hasIdentityPrefill = !!(p.firstName && p.lastName && p.dateOfBirth);
-        const hasDocumentPrefill = !!(p.idDocumentUrl || (p.idNumber && p.documentType));
+        const hasDocumentPrefill = !!(p.idDocumentUrl); // only skip doc step when actual document image is prefilled
         if (hasIdentityPrefill) resolvedSteps = resolvedSteps.filter(s => s !== "identity");
         if (hasDocumentPrefill) resolvedSteps = resolvedSteps.filter(s => s !== "documents");
         // Keep as [] (not null) so the wizard knows "no steps needed" vs "unspecified"

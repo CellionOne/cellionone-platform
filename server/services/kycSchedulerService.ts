@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { storage } from "../storage";
-import { eq, and, lt, lte, gte, or, isNull, sql } from "drizzle-orm";
+import { eq, and, lt, lte, gte, or, isNull, sql, desc, inArray } from "drizzle-orm";
 import {
   kycVerificationRequests,
   kycSubmittedDocuments,
@@ -363,7 +363,7 @@ export async function runSanctionsMonitoring() {
           eq(kycSanctionsLogs.verificationRequestId, row.request.id),
           eq(kycSanctionsLogs.subjectName, row.person.fullName),
         ))
-        .orderBy(sql`${kycSanctionsLogs}.created_at DESC`)
+        .orderBy(desc(kycSanctionsLogs.createdAt))
         .limit(1);
       const previousRiskScore = lastLog?.newRiskScore ?? null;
       const newRiskScore = screeningResult === "alert" ? "red" : (previousRiskScore ?? "green");
@@ -453,6 +453,20 @@ export async function runIndividualExpiryCheck() {
   const now = new Date();
   const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
+  // Get the most recent verification ID per user (avoid alerting on old/superseded records)
+  const latestIds = await db.select({
+    maxId: sql<number>`MAX(${identityVerifications.id})`.as("max_id"),
+  })
+    .from(identityVerifications)
+    .where(eq(identityVerifications.status, "verified"))
+    .groupBy(identityVerifications.founderUserId);
+
+  const latestVerificationIds = latestIds.map(r => r.maxId).filter(Boolean);
+  if (latestVerificationIds.length === 0) {
+    console.log("[KYCScheduler] Individual expiry check complete: 0 user(s) notified");
+    return;
+  }
+
   // Fetch verified identity verifications that expire within 30 days or are already expired
   const expiringVerifications = await db.select({
     iv: identityVerifications,
@@ -461,7 +475,7 @@ export async function runIndividualExpiryCheck() {
     .from(identityVerifications)
     .innerJoin(users, eq(identityVerifications.founderUserId, users.id))
     .where(and(
-      eq(identityVerifications.status, "verified"),
+      inArray(identityVerifications.id, latestVerificationIds),
       lt(identityVerifications.expiresAt, in30Days),
       sql`${identityVerifications.expiresAt} IS NOT NULL`,
     ));

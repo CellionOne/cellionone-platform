@@ -109,6 +109,11 @@ export function registerKycServiceRoutes(app: Express) {
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
+      const integrationProfileSchema = z.object({
+        mode: z.enum(["full_hosted", "prefill_selfie", "selfie_only"]),
+        configuredAt: z.string().optional(),
+      }).optional();
+
       const schema = z.object({
         name: z.string().min(2).max(255),
         category: z.enum(["corporate", "government", "ngo", "educational"]),
@@ -116,6 +121,7 @@ export function registerKycServiceRoutes(app: Express) {
         contactPhone: z.string().optional(),
         address: z.string().optional(),
         termsAccepted: z.literal(true, { errorMap: () => ({ message: "You must accept the KYC Service Agreement" }) }),
+        integrationProfile: integrationProfileSchema,
       });
 
       const data = schema.parse(req.body);
@@ -142,6 +148,9 @@ export function registerKycServiceRoutes(app: Express) {
         termsVersion: TERMS_VERSION,
         termsAcceptedByUserId: userId,
         termsAcceptedIp: clientIp,
+        integrationProfile: data.integrationProfile
+          ? { mode: data.integrationProfile.mode, configuredAt: data.integrationProfile.configuredAt || new Date().toISOString() }
+          : null,
       }).returning();
 
       await db.insert(kycOrgMembers).values({

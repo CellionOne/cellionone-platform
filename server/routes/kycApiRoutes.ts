@@ -606,9 +606,20 @@ export function registerKycApiRoutes(app: Express) {
         }
       }
 
-      // Determine result timing: instant if only identity (BVN/NIN), webhook if biometric check
-      const hasSelfie = !resolvedSteps || resolvedSteps.includes("selfie");
-      const resultTiming = hasSelfie ? "webhook" : "instant";
+      // Auto-remove steps already covered by prefill data
+      if (data.prefill && resolvedSteps) {
+        const p = data.prefill;
+        const hasIdentityPrefill = !!(p.firstName && p.lastName && p.dateOfBirth);
+        const hasDocumentPrefill = !!(p.idDocumentUrl || (p.idNumber && p.documentType));
+        if (hasIdentityPrefill) resolvedSteps = resolvedSteps.filter(s => s !== "identity");
+        if (hasDocumentPrefill) resolvedSteps = resolvedSteps.filter(s => s !== "documents");
+        if (resolvedSteps.length === 0) resolvedSteps = null;
+      }
+
+      // Determine result timing: instant if only identity data collected (no async biometrics),
+      // webhook when selfie or document processing is involved
+      const hasAsyncStep = !resolvedSteps || resolvedSteps.some(s => ["selfie", "documents"].includes(s));
+      const resultTiming = hasAsyncStep ? "webhook" : "instant";
 
       const sessionToken = crypto.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + data.expiresInHours * 60 * 60 * 1000);

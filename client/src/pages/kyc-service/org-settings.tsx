@@ -587,7 +587,7 @@ export default function OrgSettingsPage() {
             />
           </TabsContent>
 
-          <ApiKeysTab orgId={orgId!} />
+          <ApiKeysTab orgId={orgId!} integrationProfile={org?.integrationProfile ?? null} />
           <WebhooksTab orgId={orgId!} />
           <BillingTab orgId={orgId!} />
         </Tabs>
@@ -780,7 +780,7 @@ function formatCurrency(kobo: number): string {
   return `\u20A6${(kobo / 100).toLocaleString("en-NG")}`;
 }
 
-function ApiKeysTab({ orgId }: { orgId: string }) {
+function ApiKeysTab({ orgId, integrationProfile }: { orgId: string; integrationProfile: { mode: string } | null }) {
   const { toast } = useToast();
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
@@ -858,6 +858,28 @@ function ApiKeysTab({ orgId }: { orgId: string }) {
 
   return (
     <TabsContent value="api-keys" className="space-y-4 mt-4">
+      {!integrationProfile && (
+        <div className="flex items-start gap-3 p-4 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30" data-testid="banner-integration-required">
+          <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Integration profile required</p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+              Configure your integration profile before generating API keys. This determines how the hosted verification wizard works for your subjects.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const tab = document.querySelector('[data-testid="tab-integration"]') as HTMLButtonElement;
+                tab?.click();
+              }}
+              className="text-xs font-medium text-amber-800 dark:text-amber-300 underline mt-1 hover:no-underline"
+              data-testid="link-go-to-integration-tab"
+            >
+              Go to Integration tab →
+            </button>
+          </div>
+        </div>
+      )}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-1 space-y-0">
           <div>
@@ -867,7 +889,7 @@ function ApiKeysTab({ orgId }: { orgId: string }) {
             </CardTitle>
             <CardDescription>Manage API keys for programmatic access to KYC verification.</CardDescription>
           </div>
-          <Button onClick={() => setGenerateDialogOpen(true)} data-testid="button-generate-api-key">
+          <Button onClick={() => setGenerateDialogOpen(true)} disabled={!integrationProfile} data-testid="button-generate-api-key">
             <Plus className="h-4 w-4 mr-2" />
             Generate Key
           </Button>

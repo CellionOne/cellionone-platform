@@ -613,7 +613,7 @@ export function registerKycApiRoutes(app: Express) {
         const hasDocumentPrefill = !!(p.idDocumentUrl || (p.idNumber && p.documentType));
         if (hasIdentityPrefill) resolvedSteps = resolvedSteps.filter(s => s !== "identity");
         if (hasDocumentPrefill) resolvedSteps = resolvedSteps.filter(s => s !== "documents");
-        if (resolvedSteps.length === 0) resolvedSteps = null;
+        // Keep as [] (not null) so the wizard knows "no steps needed" vs "unspecified"
       }
 
       // Determine result timing: instant if only identity data collected (no async biometrics),

@@ -24,9 +24,9 @@ import {
   Layers,
   ScanFace,
   Camera,
-  Timer,
   CheckCircle2,
   ChevronRight,
+  Info,
 } from "lucide-react";
 import type { KycOrganisation } from "@shared/schema";
 
@@ -36,43 +36,35 @@ interface OrgWithRole extends KycOrganisation {
 
 type ProfileMode = "full_hosted" | "prefill_selfie" | "selfie_only";
 
-const INTEGRATION_PROFILES: {
-  mode: ProfileMode;
-  label: string;
-  description: string;
-  steps: string[];
-  timing: string;
-  timingColor: string;
-  icon: any;
-}[] = [
-  {
-    mode: "full_hosted",
+function deriveProfile(hasIdentity: boolean, hasDocument: boolean): ProfileMode {
+  if (hasIdentity && hasDocument) return "selfie_only";
+  if (hasIdentity) return "prefill_selfie";
+  return "full_hosted";
+}
+
+const PROFILE_LABELS: Record<ProfileMode, { label: string; description: string; steps: string[]; icon: any; color: string }> = {
+  full_hosted: {
     label: "Full Hosted",
-    description: "Your system has no prior data. The subject provides their name, date of birth, ID document, and a liveness selfie.",
-    steps: ["Identity details", "ID document", "Liveness selfie"],
-    timing: "~2–5 min",
-    timingColor: "text-amber-600 dark:text-amber-400",
+    description: "Subjects will provide their name, date of birth, ID document, and a liveness selfie.",
+    steps: ["Identity details", "ID document upload", "Liveness selfie"],
     icon: Layers,
+    color: "text-amber-600 dark:text-amber-400",
   },
-  {
-    mode: "prefill_selfie",
+  prefill_selfie: {
     label: "Prefill + Selfie",
-    description: "Your system supplies the subject's name and date of birth. The subject only uploads their ID document and takes a selfie.",
-    steps: ["ID document", "Liveness selfie"],
-    timing: "~1–2 min",
-    timingColor: "text-blue-600 dark:text-blue-400",
+    description: "Subjects will upload their ID document and take a liveness selfie. You supply their name and DOB via the API.",
+    steps: ["ID document upload", "Liveness selfie"],
     icon: ScanFace,
+    color: "text-blue-600 dark:text-blue-400",
   },
-  {
-    mode: "selfie_only",
+  selfie_only: {
     label: "Selfie Only",
-    description: "Your system has all document data. The subject only takes a liveness selfie for biometric matching — fastest experience.",
+    description: "Subjects only take a liveness selfie. You supply all identity data via the API — fastest experience.",
     steps: ["Liveness selfie only"],
-    timing: "~30 sec",
-    timingColor: "text-green-600 dark:text-green-400",
     icon: Camera,
+    color: "text-green-600 dark:text-green-400",
   },
-];
+};
 
 export default function KycOrgsPage() {
   const [, navigate] = useLocation();
@@ -84,7 +76,9 @@ export default function KycOrgsPage() {
   const [category, setCategory] = useState("corporate");
   const [contactEmail, setContactEmail] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [selectedProfile, setSelectedProfile] = useState<ProfileMode | null>("full_hosted");
+
+  const [hasIdentityData, setHasIdentityData] = useState<boolean | null>(null);
+  const [hasDocumentData, setHasDocumentData] = useState<boolean | null>(null);
 
   const { data: orgs, isLoading } = useQuery<OrgWithRole[]>({
     queryKey: ["/api/kyc-service/organisations"],
@@ -100,7 +94,7 @@ export default function KycOrgsPage() {
       setCreateDialogOpen(false);
       resetForm();
       navigate(`/kyc/org/${org.id}`);
-      toast({ title: "Organisation created", description: "Your integration profile has been saved. Create your first API key to get started." });
+      toast({ title: "Organisation created", description: "Your integration profile is saved. Generate an API key to start creating verification sessions." });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to create organisation", description: error.message, variant: "destructive" });
@@ -112,7 +106,8 @@ export default function KycOrgsPage() {
     setCategory("corporate");
     setContactEmail("");
     setTermsAccepted(false);
-    setSelectedProfile("full_hosted");
+    setHasIdentityData(null);
+    setHasDocumentData(null);
     setDialogStep(1);
   }
 
@@ -122,17 +117,27 @@ export default function KycOrgsPage() {
   }
 
   function handleCreate() {
-    if (!selectedProfile) return;
+    const hasId = hasIdentityData ?? false;
+    const hasDoc = hasDocumentData ?? false;
+    const mode = deriveProfile(hasId, hasDoc);
     createMutation.mutate({
       name,
       category,
       contactEmail,
       termsAccepted,
-      integrationProfile: { mode: selectedProfile, configuredAt: new Date().toISOString() },
+      integrationProfile: { mode, configuredAt: new Date().toISOString() },
     });
   }
 
   const step1Valid = name.trim().length >= 2 && contactEmail.trim().length > 0 && termsAccepted;
+
+  const step2Q1Done = hasIdentityData !== null;
+  const step2Q2Done = !hasIdentityData || hasDocumentData !== null;
+  const step2Valid = step2Q1Done && step2Q2Done;
+
+  const derivedProfile = step2Valid
+    ? deriveProfile(hasIdentityData ?? false, hasDocumentData ?? false)
+    : null;
 
   return (
     <DashboardLayout role="founder" breadcrumbs={[{ label: "KYC Service" }]}>
@@ -152,23 +157,21 @@ export default function KycOrgsPage() {
             <DialogContent className="max-w-md">
               <DialogHeader>
                 <div className="flex items-center gap-2 mb-1">
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all",
-                      dialogStep === 1 ? "border-primary bg-primary text-primary-foreground" : "border-primary bg-primary text-primary-foreground"
-                    )}>1</span>
-                    <span className={cn("text-xs", dialogStep === 1 ? "text-primary font-medium" : "text-muted-foreground")}>Details</span>
-                    <ChevronRight className="h-3 w-3 mx-1" />
-                    <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all",
-                      dialogStep === 2 ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground"
-                    )}>2</span>
-                    <span className={cn("text-xs", dialogStep === 2 ? "text-primary font-medium" : "text-muted-foreground")}>Integration</span>
-                  </div>
+                  <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold border-2",
+                    "border-primary bg-primary text-primary-foreground"
+                  )}>1</span>
+                  <span className={cn("text-xs", dialogStep === 1 ? "text-primary font-medium" : "text-muted-foreground")}>Details</span>
+                  <ChevronRight className="h-3 w-3 text-muted-foreground mx-0.5" />
+                  <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold border-2",
+                    dialogStep === 2 ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground text-muted-foreground"
+                  )}>2</span>
+                  <span className={cn("text-xs", dialogStep === 2 ? "text-primary font-medium" : "text-muted-foreground")}>Integration</span>
                 </div>
-                <DialogTitle>{dialogStep === 1 ? "Create Organisation" : "Integration Profile"}</DialogTitle>
+                <DialogTitle>{dialogStep === 1 ? "Create Organisation" : "Integration Setup"}</DialogTitle>
                 <DialogDescription>
                   {dialogStep === 1
                     ? "Set up a new organisation for KYC verification management."
-                    : "Choose how the hosted verification wizard works for your subjects. You can change this later in settings."}
+                    : "Tell us what data your system already holds. This determines which steps your subjects need to complete."}
                 </DialogDescription>
               </DialogHeader>
 
@@ -215,13 +218,8 @@ export default function KycOrgsPage() {
                   </div>
                   <DialogFooter>
                     <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-                    <Button
-                      onClick={() => setDialogStep(2)}
-                      disabled={!step1Valid}
-                      data-testid="button-next-step"
-                    >
-                      Next
-                      <ArrowRight className="h-4 w-4 ml-1" />
+                    <Button onClick={() => setDialogStep(2)} disabled={!step1Valid} data-testid="button-next-step">
+                      Next <ArrowRight className="h-4 w-4 ml-1" />
                     </Button>
                   </DialogFooter>
                 </>
@@ -229,55 +227,95 @@ export default function KycOrgsPage() {
 
               {dialogStep === 2 && (
                 <>
-                  <div className="space-y-3">
-                    {INTEGRATION_PROFILES.map((profile) => {
+                  <div className="space-y-5">
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-sm font-medium">Q1. Does your system already hold the subject's name and date of birth?</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">e.g. you collected these during sign-up</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[{ value: true, label: "Yes, we have it" }, { value: false, label: "No, we don't" }].map(({ value, label }) => (
+                          <button
+                            key={String(value)}
+                            type="button"
+                            onClick={() => {
+                              setHasIdentityData(value);
+                              if (!value) setHasDocumentData(null);
+                            }}
+                            className={cn(
+                              "flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all",
+                              hasIdentityData === value
+                                ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                                : "border-border hover:border-primary/40"
+                            )}
+                            data-testid={`button-q1-${value ? "yes" : "no"}`}
+                          >
+                            {hasIdentityData === value && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {hasIdentityData === true && (
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-medium">Q2. Does your system also have a copy of their government-issued ID document?</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">e.g. you already scanned or stored their passport or NIN card</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[{ value: true, label: "Yes, we have it" }, { value: false, label: "No, we don't" }].map(({ value, label }) => (
+                            <button
+                              key={String(value)}
+                              type="button"
+                              onClick={() => setHasDocumentData(value)}
+                              className={cn(
+                                "flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-all",
+                                hasDocumentData === value
+                                  ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                                  : "border-border hover:border-primary/40"
+                              )}
+                              data-testid={`button-q2-${value ? "yes" : "no"}`}
+                            >
+                              {hasDocumentData === value && <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {derivedProfile && (() => {
+                      const profile = PROFILE_LABELS[derivedProfile];
                       const Icon = profile.icon;
-                      const isSelected = selectedProfile === profile.mode;
                       return (
-                        <div
-                          key={profile.mode}
-                          onClick={() => setSelectedProfile(profile.mode)}
-                          className={cn(
-                            "cursor-pointer rounded-lg border p-3 transition-all",
-                            isSelected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/40"
-                          )}
-                          data-testid={`card-onboard-profile-${profile.mode}`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className={cn("p-1.5 rounded-md shrink-0 transition-colors", isSelected ? "bg-primary text-primary-foreground" : "bg-muted")}>
-                              <Icon className="h-4 w-4" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="font-medium text-sm">{profile.label}</p>
-                                {isSelected && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
-                              </div>
-                              <p className="text-xs text-muted-foreground mt-0.5">{profile.description}</p>
-                              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                                <div className="flex items-center gap-1">
-                                  <Timer className={cn("h-3 w-3", profile.timingColor)} />
-                                  <span className={cn("text-xs font-medium", profile.timingColor)}>{profile.timing}</span>
-                                </div>
-                                <div className="flex flex-wrap gap-1">
-                                  {profile.steps.map((s) => (
-                                    <span key={s} className="text-xs bg-muted px-1.5 py-0.5 rounded-full">{s}</span>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
+                        <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Icon className={cn("h-4 w-4 shrink-0", profile.color)} />
+                            <p className="text-sm font-semibold">Recommended: {profile.label}</p>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{profile.description}</p>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {profile.steps.map(s => (
+                              <span key={s} className="text-xs bg-background border rounded-full px-2 py-0.5">{s}</span>
+                            ))}
                           </div>
                         </div>
                       );
-                    })}
+                    })()}
+
+                    <div className="flex items-start gap-2 p-2.5 rounded-lg bg-muted/50 text-xs text-muted-foreground">
+                      <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>You can change this at any time in your organisation settings under the Integration tab.</span>
+                    </div>
                   </div>
                   <DialogFooter>
                     <Button variant="outline" onClick={() => setDialogStep(1)} data-testid="button-back-step">
-                      <ArrowLeft className="h-4 w-4 mr-1" />
-                      Back
+                      <ArrowLeft className="h-4 w-4 mr-1" /> Back
                     </Button>
                     <Button
                       onClick={handleCreate}
-                      disabled={!selectedProfile || createMutation.isPending}
+                      disabled={!step2Valid || createMutation.isPending}
                       data-testid="button-submit-create-org"
                     >
                       {createMutation.isPending ? <LoadingSpinner className="h-4 w-4 mr-2" /> : null}

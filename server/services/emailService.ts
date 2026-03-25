@@ -687,6 +687,7 @@ export async function sendServiceRequestAssignedEmail(
     SCUML: 'SCUML Certificate (EFCC)',
     TM: 'Trademark Registration',
     TIN: 'TIN Registration (FIRS)',
+    ADD_DIR: 'Add Director (CAC Filing)',
   };
   const serviceName = serviceNames[details.serviceType] || details.serviceType;
 
@@ -750,6 +751,7 @@ export async function sendServiceRequestStatusUpdateEmail(
     SCUML: 'SCUML Certificate (EFCC)',
     TM: 'Trademark Registration',
     TIN: 'TIN Registration (FIRS)',
+    ADD_DIR: 'Add Director (CAC Filing)',
   };
   const serviceName = serviceNames[details.serviceType] || details.serviceType;
 

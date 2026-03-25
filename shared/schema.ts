@@ -887,11 +887,12 @@ export const serviceRequests = pgTable("service_requests", {
   founderId: varchar("founder_id").notNull(),
   orderId: integer("order_id"),
   orderItemId: integer("order_item_id"),
-  serviceType: varchar("service_type", { length: 50 }).notNull(), // SCUML | TM | TIN
+  serviceType: varchar("service_type", { length: 50 }).notNull(), // SCUML | TM | TIN | ADD_DIR
   status: varchar("status", { length: 50 }).default("queued"), // queued | assigned | in_progress | completed | cancelled
   assignedLawyerId: varchar("assigned_lawyer_id"),
   companyProfileId: integer("company_profile_id"),
-  notes: text("notes"),
+  notes: text("notes"), // For ADD_DIR: stores structured director data as JSON
+  lawyerNotes: text("lawyer_notes"), // Lawyer's internal comments, separate from structured notes
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

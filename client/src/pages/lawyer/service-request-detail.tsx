@@ -493,7 +493,20 @@ export default function LawyerServiceRequestDetailPage() {
                   </p>
                 </div>
                 {isAddDirector ? (
-                  <Button size="icon" variant="ghost" data-testid={`button-download-doc-${doc.id}`} disabled title="Contact founder for document access">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    data-testid={`button-download-doc-${doc.id}`}
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`/api/lawyer/service-requests/${srId}/documents/${doc.id}/download`, { credentials: "include" });
+                        const data = await res.json();
+                        if (data.downloadURL) window.open(data.downloadURL, "_blank", "noopener,noreferrer");
+                      } catch {
+                        toast({ title: "Download failed", description: "Could not retrieve the document.", variant: "destructive" });
+                      }
+                    }}
+                  >
                     <Download className="h-4 w-4" />
                   </Button>
                 ) : (
@@ -515,10 +528,10 @@ export default function LawyerServiceRequestDetailPage() {
           <CardDescription>Update the status of this service request</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {sr.notes && !isAddDirector && (
+          {(isAddDirector ? sr.lawyerNotes : sr.notes) && (
             <div className="p-3 rounded-lg bg-muted">
-              <p className="text-xs text-muted-foreground mb-1">Notes</p>
-              <p className="text-sm">{sr.notes}</p>
+              <p className="text-xs text-muted-foreground mb-1">Lawyer Notes</p>
+              <p className="text-sm">{isAddDirector ? sr.lawyerNotes : sr.notes}</p>
             </div>
           )}
 

@@ -2622,19 +2622,35 @@ export async function registerRoutes(
         ipAddress: req.ip,
       });
 
-      // Notify admin
+      // Notify admin and assigned lawyer
       try {
-        const { getResendClient, ADMIN_NOTIFICATION_EMAIL } = await import('./services/emailService');
+        const emailService = await import('./services/emailService');
+        const { getResendClient, ADMIN_NOTIFICATION_EMAIL } = emailService;
         const { client, fromEmail } = await getResendClient();
         const founder = await storage.getUser(userId);
+        const founderName = founder?.firstName ? `${founder.firstName} ${founder.lastName || ''}`.trim() : (founder?.email || String(userId));
+
         await client.emails.send({
           from: fromEmail,
           to: ADMIN_NOTIFICATION_EMAIL,
           subject: `[Add Director] New submission - SR #${srId} - ${parsed.data.companyName}`,
           html: `<p>Founder ${founder?.email || userId} has submitted Add Director details for service request #${srId}.</p><p>Company: ${parsed.data.companyName} (RC: ${parsed.data.companyRcNumber})</p><p>New Director: ${parsed.data.newDirectorFirstName} ${parsed.data.newDirectorLastName}</p>`,
         });
+
+        // Notify assigned lawyer if one exists
+        if (sr.assignedLawyerId) {
+          const lawyer = await storage.getUser(sr.assignedLawyerId);
+          if (lawyer?.email && founder?.email) {
+            await emailService.sendServiceRequestAssignedEmail(lawyer.email, {
+              serviceType: 'ADD_DIR',
+              serviceRequestId: srId,
+              founderName,
+              founderEmail: founder.email,
+            });
+          }
+        }
       } catch (emailErr) {
-        console.error('[ADD_DIR] Failed to send admin notification:', emailErr);
+        console.error('[ADD_DIR] Failed to send notifications:', emailErr);
       }
 
       res.json(updated);
@@ -2828,6 +2844,36 @@ export async function registerRoutes(
     }
   });
 
+  // Lawyer document download — works for ADD_DIR (by serviceRequestId) and profile-based requests
+  app.get("/api/lawyer/service-requests/:id/documents/:docId/download", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const srId = parseInt(req.params.id, 10);
+      const docId = parseInt(req.params.docId, 10);
+      if (isNaN(srId) || isNaN(docId)) return res.status(400).json({ message: "Invalid ID" });
+
+      const [sr] = await db.select().from(serviceRequestsTable).where(eq(serviceRequestsTable.id, srId));
+      if (!sr) return res.status(404).json({ message: "Service request not found" });
+
+      // Fetch the document
+      let doc: any = null;
+      if (sr.serviceType === 'ADD_DIR') {
+        const docs = await db.select().from(srDocumentsTable).where(eq(srDocumentsTable.serviceRequestId, srId));
+        doc = docs.find(d => d.id === docId);
+      } else if (sr.companyProfileId) {
+        const docs = await db.select().from(srDocumentsTable).where(eq(srDocumentsTable.companyProfileId, sr.companyProfileId));
+        doc = docs.find(d => d.id === docId);
+      }
+
+      if (!doc) return res.status(404).json({ message: "Document not found" });
+
+      const downloadURL = await objectStorageService.getObjectEntityDownloadURL(doc.storagePath);
+      res.json({ downloadURL });
+    } catch (error: any) {
+      console.error("Error getting document download URL for lawyer:", error);
+      res.status(500).json({ message: error.message || "Failed to get download URL" });
+    }
+  });
+
   app.put("/api/lawyer/service-requests/:id/status", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
     try {
       const lawyerId = getUserId(req);
@@ -2848,7 +2894,14 @@ export async function registerRoutes(
         assignedLawyerId: lawyerId,
         updatedAt: new Date(),
       };
-      if (notes) updateData.notes = notes;
+      // For ADD_DIR, director data is stored in `notes` — lawyer comments go in `lawyerNotes`
+      if (notes) {
+        if (sr.serviceType === 'ADD_DIR') {
+          updateData.lawyerNotes = notes;
+        } else {
+          updateData.notes = notes;
+        }
+      }
       if (status === "completed") updateData.completedAt = new Date();
 
       const [updated] = await db.update(serviceRequestsTable)

@@ -3196,7 +3196,7 @@ export async function registerRoutes(
         assignedLawyerId: lawyerId,
         updatedAt: new Date(),
       };
-      // For ADD_DIR, director data is stored in `notes` — lawyer comments go in `lawyerNotes`
+      // For ADD_DIR, director data is stored in the add_director_requests table — lawyer comments go in `lawyerNotes`
       if (notes) {
         if (sr.serviceType === 'ADD_DIR') {
           updateData.lawyerNotes = notes;

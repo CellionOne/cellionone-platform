@@ -423,19 +423,19 @@ export default function LawyerServiceRequestDetailPage() {
                       {directorData.dataStatus === 'submitted' ? 'Submitted' : 'Draft'}
                     </Badge>
                   </div>
-                  {directorData.invitedAt && (
+                  {directorData.directorInvitedAt && (
                     <div className="flex items-center justify-between gap-4">
                       <span className="text-sm text-muted-foreground">Invited At</span>
                       <span className="text-sm font-medium">
-                        {new Date(directorData.invitedAt).toLocaleDateString("en-NG", { year: "numeric", month: "short", day: "numeric" })}
+                        {new Date(directorData.directorInvitedAt).toLocaleDateString("en-NG", { year: "numeric", month: "short", day: "numeric" })}
                       </span>
                     </div>
                   )}
-                  {directorData.verifiedAt && (
+                  {directorData.directorVerifiedAt && (
                     <div className="flex items-center justify-between gap-4">
                       <span className="text-sm text-muted-foreground">Verified At</span>
                       <span className="text-sm font-medium">
-                        {new Date(directorData.verifiedAt).toLocaleDateString("en-NG", { year: "numeric", month: "short", day: "numeric" })}
+                        {new Date(directorData.directorVerifiedAt).toLocaleDateString("en-NG", { year: "numeric", month: "short", day: "numeric" })}
                       </span>
                     </div>
                   )}

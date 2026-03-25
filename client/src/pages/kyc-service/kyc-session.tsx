@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -10,6 +10,7 @@ import { LoadingSpinner } from "@/components/loading-spinner";
 import {
   Shield, CheckCircle2, XCircle, Clock, ChevronRight,
   User, FileText, Camera, AlertTriangle, ExternalLink, Mail,
+  RefreshCw, Video,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -25,11 +26,17 @@ type SessionData = {
   returnUrl?: string;
 };
 
+type IdentityData = {
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+};
+
 const STEPS = [
   { id: "consent", label: "Consent", icon: Shield },
   { id: "identity", label: "Identity", icon: User },
   { id: "documents", label: "Documents", icon: FileText },
-  { id: "complete", label: "Complete", icon: CheckCircle2 },
+  { id: "selfie", label: "Selfie", icon: Camera },
 ];
 
 function StepIndicator({ currentStep }: { currentStep: number }) {
@@ -41,9 +48,7 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
         const active = idx === currentStep;
         return (
           <div key={step.id} className="flex items-center">
-            <div className={cn(
-              "flex flex-col items-center gap-1",
-            )}>
+            <div className="flex flex-col items-center gap-1">
               <div className={cn(
                 "w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all",
                 done ? "bg-primary border-primary text-primary-foreground" :
@@ -155,7 +160,10 @@ function ConsentStep({ session, onAccept, isPending }: {
   );
 }
 
-function IdentityStep({ session, onNext }: { session: SessionData; onNext: () => void }) {
+function IdentityStep({ session, onNext }: {
+  session: SessionData;
+  onNext: (data: IdentityData) => void;
+}) {
   const [firstName, setFirstName] = useState(session.subjectName.split(" ")[0] || "");
   const [lastName, setLastName] = useState(session.subjectName.split(" ").slice(1).join(" ") || "");
   const [dob, setDob] = useState("");
@@ -176,7 +184,7 @@ function IdentityStep({ session, onNext }: { session: SessionData; onNext: () =>
   }
 
   function handleNext() {
-    if (validate()) onNext();
+    if (validate()) onNext({ firstName: firstName.trim(), lastName: lastName.trim(), dateOfBirth: dob });
   }
 
   return (
@@ -372,45 +380,221 @@ function DocumentsStep({ onNext }: { onNext: () => void }) {
   );
 }
 
-function CompleteStep({ session, onComplete, isPending }: {
-  session: SessionData;
+function SelfieStep({ onCapture }: { onCapture: (base64: string) => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const [phase, setPhase] = useState<"idle" | "streaming" | "captured" | "error">("idle");
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState("");
+
+  const stopStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  useEffect(() => () => stopStream(), [stopStream]);
+
+  async function startCamera() {
+    setCameraError("");
+    setPhase("idle");
+    setCapturedImage(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setPhase("streaming");
+    } catch (err: any) {
+      const msg = err?.name === "NotAllowedError"
+        ? "Camera access was denied. Please allow camera access and try again."
+        : err?.name === "NotFoundError"
+          ? "No camera found on this device."
+          : "Could not start camera. Please try again.";
+      setCameraError(msg);
+      setPhase("error");
+    }
+  }
+
+  function capture() {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    setCapturedImage(dataUrl);
+    setPhase("captured");
+    stopStream();
+  }
+
+  function retake() {
+    setCapturedImage(null);
+    startCamera();
+  }
+
+  function confirm() {
+    if (capturedImage) onCapture(capturedImage);
+  }
+
+  return (
+    <div className="space-y-5" data-testid="step-selfie">
+      <div className="space-y-1">
+        <h2 className="text-xl font-bold">Liveness Selfie</h2>
+        <p className="text-sm text-muted-foreground">
+          Take a clear selfie to verify your identity against your document
+        </p>
+      </div>
+
+      {phase === "idle" && (
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="pt-4 space-y-2 text-left">
+              <p className="text-sm font-semibold">Before you take your selfie:</p>
+              <ul className="space-y-1.5 text-sm text-muted-foreground">
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                  Face the camera directly and stay still
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                  Remove glasses or hats if wearing them
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                  Ensure good lighting — no shadows on your face
+                </li>
+              </ul>
+            </CardContent>
+          </Card>
+          <Button className="w-full" onClick={startCamera} data-testid="button-start-camera">
+            <Video className="h-4 w-4 mr-2" />
+            Start Camera
+          </Button>
+        </div>
+      )}
+
+      {phase === "error" && (
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
+            <AlertTriangle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-red-700 dark:text-red-400">Camera not available</p>
+              <p className="text-xs text-red-600 dark:text-red-500">{cameraError}</p>
+            </div>
+          </div>
+          <Button variant="outline" className="w-full" onClick={startCamera} data-testid="button-retry-camera">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Try Again
+          </Button>
+        </div>
+      )}
+
+      {phase === "streaming" && (
+        <div className="space-y-4">
+          <div className="relative rounded-xl overflow-hidden bg-black aspect-video border border-border">
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              className="w-full h-full object-cover"
+              data-testid="video-selfie-preview"
+            />
+            <div className="absolute inset-0 border-4 border-primary/30 rounded-xl pointer-events-none" />
+            <div className="absolute top-3 left-3">
+              <Badge className="text-xs bg-red-500 text-white border-0 animate-pulse">
+                ● LIVE
+              </Badge>
+            </div>
+          </div>
+          <Button className="w-full" onClick={capture} data-testid="button-capture-selfie">
+            <Camera className="h-4 w-4 mr-2" />
+            Take Photo
+          </Button>
+        </div>
+      )}
+
+      {phase === "captured" && capturedImage && (
+        <div className="space-y-4">
+          <div className="relative rounded-xl overflow-hidden border border-border aspect-video bg-black">
+            <img
+              src={capturedImage}
+              alt="Captured selfie"
+              className="w-full h-full object-cover"
+              data-testid="img-captured-selfie"
+            />
+            <div className="absolute top-3 right-3">
+              <Badge className="text-xs bg-green-500 text-white border-0">
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+                Captured
+              </Badge>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Button variant="outline" onClick={retake} data-testid="button-retake-selfie">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retake
+            </Button>
+            <Button onClick={confirm} data-testid="button-confirm-selfie">
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              Use This Photo
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <canvas ref={canvasRef} className="hidden" />
+    </div>
+  );
+}
+
+function SubmitStep({ onComplete, isPending }: {
   onComplete: () => void;
   isPending: boolean;
 }) {
   return (
-    <div className="space-y-6 text-center" data-testid="step-complete">
+    <div className="space-y-6 text-center" data-testid="step-submit">
       <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
-        <Camera className="h-10 w-10 text-primary" />
+        <Shield className="h-10 w-10 text-primary" />
       </div>
       <div className="space-y-2">
-        <h2 className="text-xl font-bold">Selfie Verification</h2>
+        <h2 className="text-xl font-bold">Ready to Submit</h2>
         <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-          We need a quick selfie to match against your document. Make sure you're in a well-lit area.
+          All information collected. Tap the button below to submit your verification for review.
         </p>
       </div>
 
       <Card>
         <CardContent className="pt-4 space-y-2 text-left">
-          <p className="text-sm font-semibold">Before you take your selfie:</p>
           <ul className="space-y-1.5 text-sm text-muted-foreground">
             <li className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-              Face the camera directly
+              Personal details confirmed
             </li>
             <li className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-              Remove glasses or hat if wearing them
+              ID document uploaded
             </li>
             <li className="flex items-center gap-2">
               <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-              Ensure good lighting — no shadows on your face
+              Selfie captured
             </li>
           </ul>
         </CardContent>
       </Card>
 
       <Button className="w-full" onClick={onComplete} disabled={isPending} data-testid="button-submit-session">
-        {isPending ? <LoadingSpinner className="h-4 w-4 mr-2" /> : <Camera className="h-4 w-4 mr-2" />}
+        {isPending ? <LoadingSpinner className="h-4 w-4 mr-2" /> : <Shield className="h-4 w-4 mr-2" />}
         Submit Verification
       </Button>
 
@@ -421,9 +605,11 @@ function CompleteStep({ session, onComplete, isPending }: {
   );
 }
 
-function DoneState({ returnUrl, requestId }: { returnUrl?: string | null; requestId?: number }) {
-  const [, navigate] = useLocation();
-
+function DoneState({ returnUrl, requestId, sessionId }: {
+  returnUrl?: string | null;
+  requestId?: number;
+  sessionId?: number;
+}) {
   useEffect(() => {
     if (returnUrl) {
       const timer = setTimeout(() => {
@@ -467,7 +653,11 @@ function DoneState({ returnUrl, requestId }: { returnUrl?: string | null; reques
 export default function KycSessionPage() {
   const { token } = useParams<{ token: string }>();
   const [stepIdx, setStepIdx] = useState(0);
+  const [identityData, setIdentityData] = useState<IdentityData | null>(null);
+  const [selfieBase64, setSelfieBase64] = useState<string | null>(null);
   const [completedRequestId, setCompletedRequestId] = useState<number | undefined>();
+  const [completedReturnUrl, setCompletedReturnUrl] = useState<string | undefined>();
+  const [completedSessionId, setCompletedSessionId] = useState<number | undefined>();
 
   const { data: session, isLoading, error } = useQuery<SessionData>({
     queryKey: ["/api/kyc-service/sessions", token],
@@ -487,11 +677,18 @@ export default function KycSessionPage() {
   });
 
   const completeMutation = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/kyc-service/sessions/${token}/complete`),
+    mutationFn: () => apiRequest("POST", `/api/kyc-service/sessions/${token}/complete`, {
+      firstName: identityData?.firstName,
+      lastName: identityData?.lastName,
+      dateOfBirth: identityData?.dateOfBirth,
+      selfieBase64: selfieBase64,
+    }),
     onSuccess: async (res: any) => {
       const data = await res.json().catch(() => ({}));
       setCompletedRequestId(data.verificationRequestId);
-      setStepIdx(4);
+      setCompletedReturnUrl(data.returnUrl || session?.returnUrl || undefined);
+      setCompletedSessionId(session?.sessionId);
+      setStepIdx(5);
     },
   });
 
@@ -499,6 +696,20 @@ export default function KycSessionPage() {
     startMutation.mutate(undefined, {
       onSuccess: () => setStepIdx(1),
     });
+  }
+
+  function handleIdentityNext(data: IdentityData) {
+    setIdentityData(data);
+    setStepIdx(2);
+  }
+
+  function handleDocumentsNext() {
+    setStepIdx(3);
+  }
+
+  function handleSelfieCapture(base64: string) {
+    setSelfieBase64(base64);
+    setStepIdx(4);
   }
 
   if (isLoading) {
@@ -511,8 +722,8 @@ export default function KycSessionPage() {
 
   const sessionError = error as any;
   const isExpired = sessionError?.status === 410 || session?.status === "expired";
-  const isAlreadyDone = session?.status === "completed" || stepIdx === 4;
-  const notFound = !session && !isLoading;
+  const isAlreadyDone = session?.status === "completed" || stepIdx === 5;
+  const notFound = !session && !isLoading && !isExpired;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-50 to-background dark:from-zinc-950 dark:to-zinc-900" data-testid="kyc-session-page">
@@ -530,7 +741,7 @@ export default function KycSessionPage() {
           <ThemeToggle />
         </div>
 
-        {notFound && !isExpired && (
+        {notFound && (
           <Card>
             <CardContent className="pt-8 pb-8 text-center space-y-3">
               <XCircle className="w-14 h-14 text-red-400 mx-auto" />
@@ -554,20 +765,19 @@ export default function KycSessionPage() {
               <p className="text-sm text-muted-foreground max-w-xs mx-auto">
                 This verification link has expired. Please contact the organisation to request a new link.
               </p>
-              {session?.status === "expired" && (
-                <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                  <Mail className="h-3.5 w-3.5" />
-                  Contact the organisation that invited you
-                </div>
-              )}
+              <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                <Mail className="h-3.5 w-3.5" />
+                Contact the organisation that invited you
+              </div>
             </CardContent>
           </Card>
         )}
 
         {isAlreadyDone && !isExpired && (
           <DoneState
-            returnUrl={session?.returnUrl}
+            returnUrl={completedReturnUrl || session?.returnUrl}
             requestId={completedRequestId}
+            sessionId={completedSessionId || session?.sessionId}
           />
         )}
 
@@ -593,14 +803,16 @@ export default function KycSessionPage() {
                   />
                 )}
                 {stepIdx === 1 && (
-                  <IdentityStep session={session} onNext={() => setStepIdx(2)} />
+                  <IdentityStep session={session} onNext={handleIdentityNext} />
                 )}
                 {stepIdx === 2 && (
-                  <DocumentsStep onNext={() => setStepIdx(3)} />
+                  <DocumentsStep onNext={handleDocumentsNext} />
                 )}
                 {stepIdx === 3 && (
-                  <CompleteStep
-                    session={session}
+                  <SelfieStep onCapture={handleSelfieCapture} />
+                )}
+                {stepIdx === 4 && (
+                  <SubmitStep
                     onComplete={() => completeMutation.mutate()}
                     isPending={completeMutation.isPending}
                   />

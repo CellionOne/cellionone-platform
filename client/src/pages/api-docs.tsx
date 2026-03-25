@@ -786,8 +786,8 @@ export default function ApiDocsPage() {
                   <CodeBlock language="json" code={`{
   "subjectName": "Ngozi Adeyemi",
   "subjectEmail": "ngozi@example.com",
-  "redirectUrl": "https://yourapp.com/kyc-done",
-  "expiresInHours": 72
+  "returnUrl": "https://yourapp.com/kyc-done",
+  "expiresInHours": 48
 }`} />
                   <table className="w-full text-sm mt-3 border rounded-md overflow-hidden">
                     <thead className="bg-muted/50">
@@ -812,16 +812,18 @@ export default function ApiDocsPage() {
                         <td className="p-2 text-muted-foreground">Email address for session notifications</td>
                       </tr>
                       <tr className="border-t">
-                        <td className="p-2 font-mono text-xs">redirectUrl</td>
-                        <td className="p-2 text-muted-foreground">string</td>
+                        <td className="p-2 font-mono text-xs">returnUrl</td>
+                        <td className="p-2 text-muted-foreground">string (URL)</td>
                         <td className="p-2 text-muted-foreground">No</td>
-                        <td className="p-2 text-muted-foreground">URL to redirect to after session completes</td>
+                        <td className="p-2 text-muted-foreground">
+                          URL to redirect to after session completes. Cellion One appends <code className="bg-muted px-1 rounded text-xs">?session_id=X&status=completed</code> so your app can confirm completion without polling.
+                        </td>
                       </tr>
                       <tr className="border-t">
                         <td className="p-2 font-mono text-xs">expiresInHours</td>
                         <td className="p-2 text-muted-foreground">number</td>
                         <td className="p-2 text-muted-foreground">No</td>
-                        <td className="p-2 text-muted-foreground">Link expiry in hours (default: 72, max: 168)</td>
+                        <td className="p-2 text-muted-foreground">Link expiry in hours (default: 48, max: 168). When expired, a <code className="bg-muted px-1 rounded text-xs">session.expired</code> webhook is fired.</td>
                       </tr>
                     </tbody>
                   </table>

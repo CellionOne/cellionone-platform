@@ -2505,25 +2505,38 @@ export function registerKycServiceRoutes(app: Express) {
       const [session] = await db.select().from(kycSessions).where(eq(kycSessions.sessionToken, token));
       if (!session) return res.status(404).json({ message: "Session not found" });
       if (session.status === "expired") return res.status(410).json({ message: "Session expired" });
-      if (session.status === "completed") return res.json({ status: "completed", returnUrl: session.returnUrl });
+      if (session.status === "completed") return res.json({ status: "completed", returnUrl: session.returnUrl, verificationRequestId: session.verificationRequestId });
       if (new Date() > session.expiresAt) {
         await db.update(kycSessions).set({ status: "expired", updatedAt: new Date() }).where(eq(kycSessions.id, session.id));
         return res.status(410).json({ message: "Session expired" });
       }
 
+      const { firstName, lastName, dateOfBirth, selfieBase64 } = req.body;
+
+      // Build enriched subject name from personal details if provided
+      const subjectName = (firstName && lastName)
+        ? `${firstName} ${lastName}`.trim()
+        : session.subjectName;
+
       // Create a verification request for this session
       const inviteToken = generateToken();
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+      const notesData: Record<string, any> = { source: "hosted_session", sessionId: session.id };
+      if (dateOfBirth) notesData.dateOfBirth = dateOfBirth;
+      if (selfieBase64) notesData.selfieSubmitted = true;
+
       const [request] = await db.insert(kycVerificationRequests).values({
         orgId: session.orgId,
         type: session.type,
-        status: "in_progress",
+        status: "documents_submitted",
         subjectEmail: session.subjectEmail,
-        subjectName: session.subjectName,
+        subjectName,
         paymentResponsibility: "organisation",
         paymentStatus: "not_required",
         inviteToken,
         expiresAt,
+        notes: JSON.stringify(notesData),
       }).returning();
 
       await db.update(kycSessions).set({
@@ -2533,16 +2546,27 @@ export function registerKycServiceRoutes(app: Express) {
         updatedAt: new Date(),
       }).where(eq(kycSessions.id, session.id));
 
+      // Build return URL with session params appended
+      let returnUrlWithParams = session.returnUrl;
+      if (returnUrlWithParams) {
+        const separator = returnUrlWithParams.includes("?") ? "&" : "?";
+        returnUrlWithParams = `${returnUrlWithParams}${separator}session_id=${session.id}&status=completed`;
+      }
+
       await webhookService.deliverWebhook(session.orgId, "session.completed", {
         sessionId: session.id,
         sessionToken: token,
         verificationRequestId: request.id,
         subjectEmail: session.subjectEmail,
-        subjectName: session.subjectName,
+        subjectName,
         metadata: session.metadata,
       });
 
-      res.json({ status: "completed", returnUrl: session.returnUrl, verificationRequestId: request.id });
+      res.json({
+        status: "completed",
+        returnUrl: returnUrlWithParams,
+        verificationRequestId: request.id,
+      });
     } catch (error: any) {
       console.error("[KYC Session] Complete session error:", error);
       res.status(500).json({ message: "Failed to complete session" });

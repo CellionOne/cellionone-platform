@@ -574,7 +574,7 @@ export function registerKycApiRoutes(app: Express) {
         subjectEmail: z.string().email(),
         subjectName: z.string().min(1).max(255),
         returnUrl: z.string().url().optional(),
-        expiresInHours: z.number().min(1).max(72).default(24),
+        expiresInHours: z.number().min(1).max(168).default(48),
         metadata: z.record(z.unknown()).optional(),
       });
       const data = schema.parse(req.body);

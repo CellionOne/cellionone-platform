@@ -9,6 +9,9 @@ import {
   kycSessions,
   kycSanctionsLogs,
   featureFlags,
+  identityVerifications,
+  notifications,
+  users,
 } from "@shared/schema";
 import { getResendClient } from "./emailService";
 import * as webhookService from "./kycWebhookService";
@@ -145,15 +148,34 @@ export async function runKycExpiryCheck() {
     statusesUpdated++;
   }
 
-  // Also expire pending hosted sessions that have passed their expiry
+  // Also expire pending/in_progress hosted sessions that have passed their expiry and fire webhooks
   try {
     const now = new Date();
-    await db.update(kycSessions)
-      .set({ status: "expired", updatedAt: new Date() })
+    const staleSessions = await db.select().from(kycSessions)
       .where(and(
-        sql`${kycSessions.status} = 'pending'`,
+        sql`${kycSessions.status} IN ('pending', 'in_progress')`,
         lt(kycSessions.expiresAt, now)
       ));
+
+    for (const session of staleSessions) {
+      await db.update(kycSessions)
+        .set({ status: "expired", updatedAt: new Date() })
+        .where(eq(kycSessions.id, session.id));
+
+      webhookService.deliverWebhook(session.orgId, "session.expired", {
+        sessionId: session.id,
+        sessionToken: session.sessionToken,
+        type: session.type,
+        subjectEmail: session.subjectEmail,
+        subjectName: session.subjectName,
+        expiredAt: now.toISOString(),
+        metadata: session.metadata,
+      }).catch(err => console.error(`[KYCScheduler] session.expired webhook error (session ${session.id}):`, err));
+    }
+
+    if (staleSessions.length > 0) {
+      console.log(`[KYCScheduler] Expired ${staleSessions.length} hosted session(s)`);
+    }
   } catch (err) {
     console.error("[KYCScheduler] Session expiry error:", err);
   }
@@ -280,4 +302,109 @@ export async function runSanctionsMonitoring() {
   }
 
   console.log(`[KYCScheduler] Sanctions monitoring complete: ${screened} screened, ${alerts} alerts raised`);
+}
+
+/**
+ * Check platform user identity_verifications for upcoming/past expiry.
+ * Sends in-app notification + email at 30-day, 7-day and 0-day (expired) thresholds.
+ * Skips users who already received a notification at the same threshold recently.
+ */
+export async function runIndividualExpiryCheck() {
+  console.log("[KYCScheduler] Running individual identity expiry check...");
+
+  const now = new Date();
+  const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  // Fetch verified identity verifications that expire within 30 days or are already expired
+  const expiringVerifications = await db.select({
+    iv: identityVerifications,
+    user: users,
+  })
+    .from(identityVerifications)
+    .innerJoin(users, eq(identityVerifications.founderUserId, users.id))
+    .where(and(
+      eq(identityVerifications.status, "verified"),
+      lt(identityVerifications.expiresAt, in30Days),
+      sql`${identityVerifications.expiresAt} IS NOT NULL`,
+    ));
+
+  let notified = 0;
+
+  for (const row of expiringVerifications) {
+    try {
+      const expiresAt = new Date(row.iv.expiresAt!);
+      const msLeft = expiresAt.getTime() - now.getTime();
+      const daysLeft = Math.ceil(msLeft / (24 * 60 * 60 * 1000));
+      const isExpired = daysLeft <= 0;
+
+      let title: string;
+      let message: string;
+      let urgency: "warning" | "error";
+
+      if (isExpired) {
+        title = "Identity Verification Expired";
+        message = "Your identity verification has expired. Please re-verify your identity to continue using Cellion One services.";
+        urgency = "error";
+      } else if (daysLeft <= 7) {
+        title = "Identity Verification Expiring Soon";
+        message = `Your identity verification expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}. Please renew it before it expires.`;
+        urgency = "warning";
+      } else {
+        title = "Identity Verification Expiring in 30 Days";
+        message = "Your identity verification will expire in 30 days. Please plan to renew it soon.";
+        urgency = "warning";
+      }
+
+      // Check if we already sent this type of notification within the past 24 hours to avoid duplicates
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      const existing = await db.select({ id: notifications.id })
+        .from(notifications)
+        .where(and(
+          eq(notifications.userId, row.iv.founderUserId),
+          sql`${notifications.title} = ${title}`,
+          sql`${notifications.createdAt} > ${oneDayAgo}`,
+        ))
+        .limit(1);
+
+      if (existing.length > 0) continue;
+
+      // Create in-app notification
+      await db.insert(notifications).values({
+        userId: row.iv.founderUserId,
+        title,
+        message,
+        type: urgency,
+        isRead: false,
+        linkUrl: "/profile",
+      });
+
+      // Send email if user has an email address
+      if (row.user.email) {
+        const emailHtml = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:${urgency === "error" ? "#dc2626" : "#d97706"};">${title}</h2>
+          <p>${message}</p>
+          <p>Please visit your <a href="https://cellionone.com/profile">profile page</a> to renew your identity verification.</p>
+          <p style="color:#6b7280;font-size:0.85em;">If you have already renewed, please ignore this message.</p>
+        </div>`;
+
+        await sendKycEmail(row.user.email, title, emailHtml);
+      }
+
+      notified++;
+    } catch (err) {
+      console.error(`[KYCScheduler] Individual expiry check error for verification ${row.iv.id}:`, err);
+    }
+  }
+
+  // Mark expired verifications as expired status
+  await db.update(identityVerifications)
+    .set({ status: "expired", updatedAt: new Date() })
+    .where(and(
+      eq(identityVerifications.status, "verified"),
+      lt(identityVerifications.expiresAt, now),
+      sql`${identityVerifications.expiresAt} IS NOT NULL`,
+    ));
+
+  console.log(`[KYCScheduler] Individual expiry check complete: ${notified} user(s) notified`);
 }

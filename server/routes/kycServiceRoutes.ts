@@ -9,7 +9,7 @@ import {
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
   kycApiKeys, kycApiUsageLogs, kycBillingAccounts, kycBillingRequests, kycCreditTransactions, kycInvoices,
   kycSessions, kycSanctionsLogs,
-  userRoles,
+  users, userRoles,
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
   type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
   type KycDocumentRequirement, type KycVerificationTemplate,
@@ -2066,6 +2066,10 @@ export function registerKycServiceRoutes(app: Express) {
       const adminUserId = getUserId(req);
       if (!adminUserId) return res.status(401).json({ message: "Unauthorized" });
 
+      // Fetch admin email for membership record metadata
+      const [adminUser] = await db.select({ email: users.email }).from(users).where(eq(users.id, adminUserId));
+      const adminEmail = adminUser?.email ?? "";
+
       const ALLOWED_PERMISSIONS = ["verify:identity", "verify:individual", "verify:supplier"] as const;
       const schema = z.object({
         name: z.string().min(2).max(255),
@@ -2081,10 +2085,10 @@ export function registerKycServiceRoutes(app: Express) {
       const resolvedBillingMode = data.billingMode ?? (data.clientType === "application" ? "exempt" : "prepaid");
       const keyName = data.keyName || `${data.clientType === "application" ? "App" : "Default"} Key`;
 
-      // Generate a unique slug (check before transaction to avoid lock contention)
+      // Generate a unique slug with retry on collision
       let slug = slugify(data.name);
-      const [existing] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.slug, slug));
-      if (existing) slug = `${slug}-${Date.now().toString(36)}`;
+      const [existing] = await db.select({ id: kycOrganisations.id }).from(kycOrganisations).where(eq(kycOrganisations.slug, slug));
+      if (existing) slug = `${slug}-${Date.now().toString(36)}-${crypto.randomBytes(2).toString("hex")}`;
 
       // Wrap all 4 writes in a single transaction — partial failure rolls back everything
       const { org, billingAccount, key, apiKey } = await db.transaction(async (tx) => {
@@ -2106,12 +2110,12 @@ export function registerKycServiceRoutes(app: Express) {
           termsAcceptedIp: "admin-provisioned",
         }).returning();
 
-        // 2. Add admin as org_admin member
+        // 2. Add admin as org_admin member (inviteEmail = admin's own email for metadata consistency)
         await tx.insert(kycOrgMembers).values({
           orgId: newOrg.id,
           userId: adminUserId,
           role: "org_admin",
-          inviteEmail: data.contactEmail,
+          inviteEmail: adminEmail,
           inviteStatus: "accepted",
         });
 

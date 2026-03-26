@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import { Link } from "wouter";
 import {
   UserCircle,
@@ -233,9 +233,11 @@ function ProfileForm() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("docType", "id_document");
+      const csrf = await getCsrfToken();
       const res = await fetch("/api/profile/personal/upload", {
         method: "POST",
         credentials: "include",
+        headers: { "X-CSRF-Token": csrf },
         body: formData,
       });
       if (!res.ok) {
@@ -916,13 +918,13 @@ function BiometricSection() {
   const hasSelfie = profile?.hasNin || profile?.hasBvn;
 
   return (
-    <Card data-testid="card-biometric-section">
+    <Card data-testid="card-biometric-section" className="border-primary/30">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <Video className="h-5 w-5" /> Biometric Selfie
+          <Video className="h-5 w-5 text-primary" /> Verify My Identity — Biometric Selfie
         </CardTitle>
         <CardDescription>
-          A live selfie is required for identity verification. Your face will be checked for liveness and matched against your government ID.
+          Capture a live selfie here to complete Step 3 of your identity verification. This is the only place you need to do this — you do not need to go anywhere else.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -1126,9 +1128,11 @@ function DocumentsSection() {
       formData.append("file", file);
       formData.append("docType", docType);
 
+      const csrf = await getCsrfToken();
       const res = await fetch("/api/profile/personal/upload", {
         method: "POST",
         credentials: "include",
+        headers: { "X-CSRF-Token": csrf },
         body: formData,
       });
       if (!res.ok) {

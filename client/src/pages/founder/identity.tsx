@@ -1,6 +1,5 @@
 import { Link } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { useState, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,17 +14,12 @@ import {
   Users,
   Clock,
   XCircle,
-  Camera,
   Link2,
   AlertTriangle,
   CalendarClock,
-  Upload,
-  Loader2,
+  Camera,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { LiveCaptureWidget } from "@/components/live-capture-widget";
 
 interface VerificationInfo {
   founderVerified: boolean;
@@ -49,74 +43,10 @@ function formatRole(role: string): string {
 
 export default function IdentityVerificationPage() {
   const { user } = useAuth();
-  const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selfieDone, setSelfieDone] = useState(false);
-  const [selfieError, setSelfieError] = useState("");
 
   const { data: verificationInfo, isLoading } = useQuery<VerificationInfo>({
     queryKey: ["/api/checkout/verification-info"],
   });
-
-  const [selfieVerified, setSelfieVerified] = useState<boolean | null>(null);
-  const [selfieLiveness, setSelfieLiveness] = useState<number | null>(null);
-
-  const selfieMutation = useMutation({
-    mutationFn: async (selfieBase64: string) => {
-      const res = await apiRequest("POST", "/api/verification/smile-id/submit-selfie", { selfieBase64 });
-      return res.json();
-    },
-    onSuccess: (result) => {
-      setSelfieError("");
-      const verified = result.verified === true;
-      setSelfieVerified(verified);
-      setSelfieLiveness(result.livenessScore ?? null);
-      if (verified) {
-        setSelfieDone(true);
-        toast({
-          title: "Identity verified",
-          description: `Liveness check passed${result.livenessScore ? ` (confidence: ${Math.round(result.livenessScore)}%)` : ""}. Your identity is now verified.`,
-        });
-      } else if (result.resultCode === "NOT_CONFIGURED") {
-        setSelfieDone(true);
-        toast({
-          title: "Selfie recorded",
-          description: "Your selfie has been captured and will be reviewed when the verification service is activated.",
-        });
-      } else {
-        toast({
-          title: "Liveness not confirmed",
-          description: "Your selfie did not pass liveness detection. Please ensure good lighting and retake.",
-          variant: "destructive",
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: ["/api/checkout/verification-info"] });
-    },
-    onError: (err: any) => {
-      setSelfieError(err?.message ?? "Selfie submission failed. Please try again.");
-      toast({ title: "Submission failed", description: err?.message ?? "Please try again.", variant: "destructive" });
-    },
-  });
-
-  function handleCapture(base64DataUrl: string) {
-    setSelfieError("");
-    selfieMutation.mutate(base64DataUrl);
-  }
-
-  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setSelfieError("Please upload an image file.");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = ev.target?.result as string;
-      if (result) handleCapture(result);
-    };
-    reader.readAsDataURL(file);
-  }
 
   const founderVerified = verificationInfo?.founderVerified ?? false;
   const people = verificationInfo?.people ?? [];
@@ -149,7 +79,11 @@ export default function IdentityVerificationPage() {
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Verification Expired</AlertTitle>
             <AlertDescription>
-              Your identity verification expired on {formatExpiryDate(founderExpiresAt)}. You must re-verify to continue placing orders. Use the biometric selfie step below to submit a new verification.
+              Your identity verification expired on {formatExpiryDate(founderExpiresAt)}. You must re-verify to continue placing orders. Go to your{" "}
+              <Link href="/profile" className="font-medium underline">
+                Personal Profile
+              </Link>{" "}
+              to capture a new biometric selfie.
             </AlertDescription>
           </Alert>
         )}
@@ -186,58 +120,57 @@ export default function IdentityVerificationPage() {
             </CardHeader>
           </Card>
         ) : !isLoading ? (
-          <>
-            <Card data-testid="card-not-verified">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <Shield className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle>Verify Identities</CardTitle>
-                    <CardDescription>
-                      Each key person (you + directors/shareholders) requires a one-time verification fee
-                    </CardDescription>
-                  </div>
+          <Card data-testid="card-not-verified">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Shield className="h-5 w-5 text-primary" />
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-lg border border-border p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-sm text-muted-foreground">Verification Fee (per person)</span>
-                    <span className="font-bold text-lg">{verificationInfo?.verificationFeePerPerson ? formatNgn(verificationInfo.verificationFeePerPerson) : "—"}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-sm text-muted-foreground">Persons needing verification</span>
-                    <span className="font-semibold">{verificationInfo?.unverifiedCount || 0}</span>
-                  </div>
-                  <Separator />
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-sm font-medium">Total Verification Fee</span>
-                    <span className="font-bold text-lg text-primary">{formatNgn(verificationInfo?.totalVerificationFee || 0)}</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    This fee will be automatically added to your next order at checkout.
-                  </p>
+                <div>
+                  <CardTitle>Verify Identities</CardTitle>
+                  <CardDescription>
+                    Each key person (you + directors/shareholders) requires a one-time verification fee
+                  </CardDescription>
                 </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm text-muted-foreground">Verification Fee (per person)</span>
+                  <span className="font-bold text-lg">{verificationInfo?.verificationFeePerPerson ? formatNgn(verificationInfo.verificationFeePerPerson) : "—"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm text-muted-foreground">Persons needing verification</span>
+                  <span className="font-semibold">{verificationInfo?.unverifiedCount || 0}</span>
+                </div>
+                <Separator />
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm font-medium">Total Verification Fee</span>
+                  <span className="font-bold text-lg text-primary">{formatNgn(verificationInfo?.totalVerificationFee || 0)}</span>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  This fee will be automatically added to your next order at checkout.
+                </p>
+              </div>
 
-                <Link href="/founder/checkout">
-                  <Button className="w-full" data-testid="button-go-to-checkout">
-                    Go to Services & Checkout <ArrowRight className="h-4 w-4 ml-1" />
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          </>
+              <Link href="/founder/checkout">
+                <Button className="w-full" data-testid="button-go-to-checkout">
+                  Go to Services & Checkout <ArrowRight className="h-4 w-4 ml-1" />
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
         ) : null}
 
-        {!founderVerified && !isLoading && (
-          <Card className="border-primary/20 bg-primary/5" data-testid="card-biometric-step">
+        {/* Biometric selfie status — canonical step is on Personal Profile page */}
+        {!isLoading && (
+          <Card data-testid="card-biometric-step">
             <CardHeader className="pb-3">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
-                  {selfieDone ? (
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                <div className={`h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 ${founderVerified ? "bg-green-100 dark:bg-green-900/50" : "bg-primary/15"}`}>
+                  {founderVerified ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-600" />
                   ) : (
                     <Camera className="h-5 w-5 text-primary" />
                   )}
@@ -245,104 +178,38 @@ export default function IdentityVerificationPage() {
                 <div>
                   <CardTitle className="text-base">Step 3 of 4: Biometric Selfie</CardTitle>
                   <CardDescription>
-                    {selfieDone
-                      ? "Selfie submitted — processing in progress"
-                      : "Take a live selfie to confirm your identity"}
+                    {founderVerified
+                      ? "Your biometric selfie has been captured and verified"
+                      : "Capture your live selfie on your Personal Profile page"}
                   </CardDescription>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center text-xs font-bold shrink-0">1</div>
-                  <span className="line-through opacity-60">BVN/NIN validation</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center text-xs font-bold shrink-0">2</div>
-                  <span className="line-through opacity-60">Government ID authenticity</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className={`h-5 w-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${selfieDone ? "bg-green-500 text-white" : "bg-primary text-primary-foreground"}`}>
-                    {selfieDone ? "✓" : "3"}
-                  </div>
-                  <span className={`font-medium ${selfieDone ? "text-green-700 dark:text-green-400 line-through opacity-70" : "text-foreground"}`}>
-                    Biometric selfie with liveness detection
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-5 w-5 rounded-full bg-muted flex items-center justify-center text-xs font-bold shrink-0">4</div>
-                  <span>AML and sanctions screening</span>
-                </div>
-              </div>
-
-              {selfieVerified === false && !selfieMutation.isPending && (
-                <div className="flex items-center gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800" data-testid="alert-selfie-failed">
-                  <XCircle className="h-5 w-5 text-red-600 shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Verification failed — please retake</p>
-                    <p className="text-xs text-red-600 dark:text-red-500">Ensure good lighting with no shadows on your face, then take a new selfie below.</p>
-                  </div>
-                </div>
-              )}
-              {selfieDone && selfieVerified === true ? (
+            <CardContent>
+              {founderVerified ? (
                 <div className="flex items-center gap-3 p-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800" data-testid="alert-selfie-done">
                   <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
                   <div>
-                    <p className="text-sm font-medium text-green-700 dark:text-green-400">Identity verified</p>
+                    <p className="text-sm font-medium text-green-700 dark:text-green-400">Selfie complete</p>
                     <p className="text-xs text-green-600 dark:text-green-500">
-                      Liveness confirmed{selfieLiveness ? ` — confidence: ${Math.round(selfieLiveness)}%` : ""}. Your profile is now fully verified.
+                      Liveness confirmed. Your profile is verified.
+                      {founderExpiresAt && ` Expires ${formatExpiryDate(founderExpiresAt)}.`}
                     </p>
                   </div>
                 </div>
-              ) : selfieDone ? (
-                <div className="flex items-center gap-3 p-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800" data-testid="alert-selfie-done">
-                  <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium text-green-700 dark:text-green-400">Selfie received</p>
-                    <p className="text-xs text-green-600 dark:text-green-500">Your verification result will be updated shortly.</p>
-                  </div>
-                </div>
-              ) : selfieMutation.isPending ? (
-                <div className="flex items-center justify-center gap-3 p-6" data-testid="selfie-submitting">
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                  <span className="text-sm text-muted-foreground">Submitting selfie…</span>
-                </div>
               ) : (
                 <div className="space-y-3">
-                  <LiveCaptureWidget onCapture={handleCapture} data-testid="widget-live-capture" />
-
-                  {selfieError && (
-                    <p className="text-xs text-red-600 dark:text-red-400 text-center" data-testid="text-selfie-error">{selfieError}</p>
-                  )}
-
-                  <div className="relative">
-                    <div className="absolute inset-0 flex items-center"><Separator /></div>
-                    <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-primary/5 px-2 text-muted-foreground">or</span>
-                    </div>
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    className="w-full text-sm"
-                    onClick={() => fileInputRef.current?.click()}
-                    data-testid="button-upload-selfie"
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload a photo instead
-                  </Button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="user"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                    data-testid="input-selfie-upload"
-                  />
+                  <p className="text-sm text-muted-foreground">
+                    Your biometric selfie is captured directly on your Personal Profile page. This keeps all your identity information in one place.
+                  </p>
+                  <Link href="/profile#biometric">
+                    <Button className="w-full" variant="outline" data-testid="button-go-to-selfie">
+                      <Link2 className="h-4 w-4 mr-2" />
+                      Go to Personal Profile to capture selfie
+                    </Button>
+                  </Link>
                   <p className="text-xs text-muted-foreground text-center">
-                    Use the upload option if your camera is unavailable
+                    Scroll to the "Verify My Identity — Biometric Selfie" section on your profile page
                   </p>
                 </div>
               )}

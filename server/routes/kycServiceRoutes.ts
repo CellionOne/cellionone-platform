@@ -2111,12 +2111,12 @@ export function registerKycServiceRoutes(app: Express) {
           termsAcceptedIp: "admin-provisioned",
         }).returning();
 
-        // 2. Add admin as org_admin member (inviteEmail = admin's own email for metadata consistency)
+        // 2. Add admin as org_admin member (inviteEmail = admin's email; fallback to contactEmail)
         await tx.insert(kycOrgMembers).values({
           orgId: newOrg.id,
           userId: adminUserId,
           role: "org_admin",
-          inviteEmail: adminEmail,
+          inviteEmail: adminEmail || data.contactEmail,
           inviteStatus: "accepted",
         });
 
@@ -2128,20 +2128,10 @@ export function registerKycServiceRoutes(app: Express) {
           isActive: true,
         }).returning();
 
-        // 4. Generate API key (inserts into kycApiKeys)
-        const randomPart = crypto.randomBytes(16).toString("hex");
-        const fullKey = `co_live_${randomPart}`;
-        const keyPrefix = fullKey.slice(0, 12);
-        const keyHash = crypto.createHash("sha256").update(fullKey).digest("hex");
-        const [newApiKey] = await tx.insert(kycApiKeys).values({
-          organisationId: newOrg.id,
-          keyPrefix,
-          keyHash,
-          name: keyName,
-          permissions: data.permissions,
-          rateLimitPerMinute: 60,
-          isActive: true,
-        }).returning();
+        // 4. Generate API key via shared service (passes tx for atomicity)
+        const { key: fullKey, apiKey: newApiKey } = await kycApiKeyService.generateApiKey(
+          newOrg.id, keyName, data.permissions, tx
+        );
 
         return { org: newOrg, billingAccount: newBillingAccount, key: fullKey, apiKey: newApiKey };
       });

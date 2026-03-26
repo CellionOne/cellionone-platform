@@ -16,14 +16,15 @@ function hashKey(key: string): string {
 export async function generateApiKey(
   orgId: number,
   name: string,
-  permissions: string[]
+  permissions: string[],
+  dbOrTx: typeof db = db
 ): Promise<{ key: string; apiKey: KycApiKey }> {
   const randomPart = crypto.randomBytes(16).toString("hex");
   const fullKey = `${API_KEY_PREFIX}${randomPart}`;
   const keyPrefix = fullKey.slice(0, 12);
   const keyHash = hashKey(fullKey);
 
-  const [apiKey] = await db.insert(kycApiKeys).values({
+  const [apiKey] = await dbOrTx.insert(kycApiKeys).values({
     organisationId: orgId,
     keyPrefix,
     keyHash,

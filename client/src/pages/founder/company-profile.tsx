@@ -475,6 +475,7 @@ function EditCompanyDialog({
       toast({ title: "Company updated", description: "Company profile saved successfully." });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", profile.id] });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", profile.id, "compliance"] });
     },
     onError: (error: Error) => {
       toast({ title: "Save failed", description: error.message, variant: "destructive" });

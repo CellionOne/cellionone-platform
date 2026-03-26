@@ -9,7 +9,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, asc } from "drizzle-orm";
+import { eq, desc, and, asc, ne } from "drizzle-orm";
 import * as services from "./services";
 import { registeredOfficeService } from "./services/registeredOfficeService";
 import { mailroomService } from "./services/mailroomService";
@@ -6798,6 +6798,32 @@ Important guidelines:
         .set(allowedFields)
         .where(eq(companyProfiles.id, profileId))
         .returning();
+
+      // If incorporation date changed, recalculate compliance deadlines
+      if (allowedFields.incorporationDate !== undefined && allowedFields.incorporationDate instanceof Date) {
+        // Delete all non-completed deadlines for this profile
+        await db
+          .delete(complianceDeadlines)
+          .where(
+            and(
+              eq(complianceDeadlines.companyProfileId, profileId),
+              ne(complianceDeadlines.status, "completed")
+            )
+          );
+
+        // Regenerate deadlines from the new incorporation date
+        const deadlinesData = generateComplianceDeadlines(profileId, userId, allowedFields.incorporationDate);
+        const now = new Date();
+        const fourteenDaysFromNow = new Date();
+        fourteenDaysFromNow.setDate(fourteenDaysFromNow.getDate() + 14);
+
+        for (const dl of deadlinesData) {
+          let status = "upcoming";
+          if (dl.dueDate < now) status = "overdue";
+          else if (dl.dueDate <= fourteenDaysFromNow) status = "due_soon";
+          await db.insert(complianceDeadlines).values({ ...dl, status });
+        }
+      }
 
       res.json(updated);
     } catch (error: any) {

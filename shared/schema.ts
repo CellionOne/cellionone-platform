@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, json, jsonb, serial, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, json, jsonb, serial, index, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1107,6 +1107,7 @@ export const kycOrganisations = pgTable("kyc_organisations", {
 }, (table) => [
   index("idx_kyc_org_slug").on(table.slug),
   index("idx_kyc_org_status").on(table.status),
+  check("chk_kyc_org_client_type", sql`${table.clientType} IN ('organisation', 'application')`),
 ]);
 
 export const insertKycOrganisationSchema = createInsertSchema(kycOrganisations).omit({ id: true, createdAt: true, updatedAt: true });

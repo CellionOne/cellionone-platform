@@ -4,7 +4,21 @@ import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { db } from "../db";
 import { eq, and } from "drizzle-orm";
-import { kycOrgMembers } from "@shared/schema";
+import { kycOrgMembers, kycOrganisations } from "@shared/schema";
+
+async function requireActiveOrg(orgId: number, res: Response): Promise<boolean> {
+  const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId)).limit(1);
+  if (!org) { res.status(404).json({ message: "Organisation not found" }); return false; }
+  if (org.status === "pending_review") {
+    res.status(403).json({ message: "Your organisation is pending admin review. You cannot publish RFQs or submit bids until it has been approved.", code: "ORG_PENDING_REVIEW" });
+    return false;
+  }
+  if (org.status === "suspended") {
+    res.status(403).json({ message: "Your organisation has been suspended. Please contact support.", code: "ORG_SUSPENDED" });
+    return false;
+  }
+  return true;
+}
 
 function getUserId(req: any): string {
   return req.user?.claims?.sub;
@@ -244,6 +258,8 @@ export function registerProcurementRoutes(app: Express) {
       const member = await getUserOrgMembership(userId, rfq.buyerOrgId);
       if (!member) return res.status(403).json({ message: "Not authorized" });
 
+      if (!await requireActiveOrg(rfq.buyerOrgId, res)) return;
+
       const updated = await storage.updateRfqStatus(id, "open");
       res.json(updated);
     } catch (e: any) {
@@ -442,6 +458,8 @@ export function registerProcurementRoutes(app: Express) {
 
       const member = await getUserOrgMembership(userId, bid.supplierOrgId);
       if (!member) return res.status(403).json({ message: "Not authorized" });
+
+      if (!await requireActiveOrg(bid.supplierOrgId, res)) return;
 
       const updated = await storage.updateBidStatus(id, "submitted");
 

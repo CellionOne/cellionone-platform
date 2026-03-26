@@ -6,7 +6,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc } from "drizzle-orm";
 import * as services from "./services";
@@ -413,6 +413,34 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // ============== INTENT CAPTURE ==============
+  // POST /api/me/intent — persist the user's chosen platform intent
+  // Valid values: founder_new_co | founder_existing_co | kyc_service | procurement
+  app.post("/api/me/intent", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const VALID_INTENTS = ["founder_new_co", "founder_existing_co", "kyc_service", "procurement"] as const;
+      const schema = z.object({ intent: z.enum(VALID_INTENTS) });
+      const { intent } = schema.parse(req.body);
+
+      await storage.updateUser(userId, { primaryIntent: intent });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "intent_selected",
+        entityType: "user",
+        entityId: userId,
+        details: { intent },
+        ipAddress: req.ip,
+      });
+
+      res.json({ intent });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid intent value", errors: error.errors });
+      res.status(500).json({ message: "Failed to save intent" });
     }
   });
 
@@ -4051,6 +4079,13 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         details: { newStatus: status },
         ipAddress: req.ip,
       });
+
+      // When a company application reaches "completed", auto-populate the Verified Entities Registry
+      if (status === "completed") {
+        addCompanyToVerifiedRegistry(application).catch((err) =>
+          console.error("[Routes] Failed to add company to verified registry:", err)
+        );
+      }
       
       res.json(updated);
     } catch (error) {
@@ -4060,6 +4095,44 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
   });
 
   // ============== EXECUTION DECLARATION ROUTES (Lawyer) ==============
+
+  async function addCompanyToVerifiedRegistry(application: any): Promise<void> {
+    if (!application) return;
+    const { or, sql: sqlHelper } = await import("drizzle-orm");
+    const now = new Date();
+    const companyName = application.companyName1 || "Unnamed Company";
+    const rcNumber = application.rcNumber || null;
+
+    const conditions: any[] = [
+      eq(verifiedEntities.entityType, "company"),
+    ];
+    if (rcNumber) conditions.push(eq(verifiedEntities.rcNumber, rcNumber));
+    const [existing] = rcNumber
+      ? await db.select().from(verifiedEntities).where(and(...conditions)).limit(1)
+      : [];
+
+    if (existing) {
+      await db.update(verifiedEntities).set({
+        verificationCount: sqlHelper`${verifiedEntities.verificationCount} + 1`,
+        lastVerifiedAt: now,
+        fullName: companyName,
+        updatedAt: now,
+      }).where(eq(verifiedEntities.id, existing.id));
+    } else {
+      await db.insert(verifiedEntities).values({
+        entityType: "company",
+        fullName: companyName,
+        email: "",
+        rcNumber: rcNumber || undefined,
+        country: "NG",
+        verificationCount: 1,
+        lastVerifiedAt: now,
+        firstVerifiedAt: now,
+      });
+    }
+    console.log(`[Routes] Company "${companyName}" added to Verified Entities Registry`);
+  }
+
   app.post("/api/lawyer/applications/:id/execution-declaration", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
@@ -6591,6 +6664,62 @@ Important guidelines:
     } catch (error: any) {
       console.error("Error creating company profile from application:", error);
       res.status(500).json({ message: error.message || "Failed to create company profile" });
+    }
+  });
+
+  // ============== EXISTING COMPANY PROFILE ROUTE ==============
+
+  app.post("/api/founder/company-profiles/existing", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const data = z.object({
+        companyName: z.string().min(2),
+        companyType: z.string().min(2),
+        rcNumber: z.string().min(2),
+        incorporationDate: z.string().optional(),
+        registeredAddress: z.any().optional(),
+      }).parse(req.body);
+
+      const [newProfile] = await db
+        .insert(companyProfiles)
+        .values({
+          applicationId: null,
+          founderId: userId,
+          companyName: data.companyName,
+          companyType: data.companyType,
+          rcNumber: data.rcNumber,
+          incorporationDate: data.incorporationDate ? new Date(data.incorporationDate) : new Date(),
+          registeredAddress: data.registeredAddress || {},
+          directors: [],
+          shareholders: [],
+          businessActivities: [],
+          isExistingCompany: true,
+          existingCompanyStatus: "pending_review",
+        })
+        .returning();
+
+      for (const task of DEFAULT_POST_INC_TASKS) {
+        await db.insert(postIncorporationTasks).values({
+          companyProfileId: newProfile.id,
+          founderId: userId,
+          ...task,
+          status: "not_started",
+        });
+      }
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "existing_company_registered",
+        entityType: "company_profile",
+        entityId: newProfile.id.toString(),
+        details: { companyName: data.companyName, rcNumber: data.rcNumber },
+      });
+
+      res.status(201).json(newProfile);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("Error creating existing company profile:", error);
+      res.status(500).json({ message: "Failed to register existing company" });
     }
   });
 

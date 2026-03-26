@@ -35,6 +35,9 @@ export const users = pgTable("users", {
   twoFactorSecret: varchar("two_factor_secret", { length: 255 }),
   twoFactorBackupCodes: varchar("two_factor_backup_codes", { length: 1000 }),
   lastTwoFactorAt: timestamp("last_two_factor_at"),
+  // Intent captured on the post-registration welcome screen
+  // Values: founder_new_co | founder_existing_co | kyc_service | procurement
+  primaryIntent: varchar("primary_intent", { length: 50 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

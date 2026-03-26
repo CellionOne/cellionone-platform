@@ -156,7 +156,7 @@ interface KycInvoice {
 export default function AdminKycOverview() {
   const { toast } = useToast();
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
-  const [confirmAction, setConfirmAction] = useState<{ orgId: number; action: "active" | "suspended"; orgName: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ orgId: number; action: "active" | "suspended"; orgName: string; fromStatus?: string } | null>(null);
   const [approveDialog, setApproveDialog] = useState<BillingRequest | null>(null);
   const [rejectDialog, setRejectDialog] = useState<BillingRequest | null>(null);
   const [creditLimitInput, setCreditLimitInput] = useState("1000");
@@ -413,8 +413,12 @@ export default function AdminKycOverview() {
                                 <Badge variant="secondary">{org.category}</Badge>
                               </TableCell>
                               <TableCell>
-                                <Badge variant={org.status === "active" ? "default" : "destructive"} data-testid={`badge-status-${org.id}`}>
-                                  {org.status}
+                                <Badge
+                                  variant={org.status === "active" ? "default" : org.status === "pending_review" ? "secondary" : "destructive"}
+                                  className={org.status === "pending_review" ? "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300" : ""}
+                                  data-testid={`badge-status-${org.id}`}
+                                >
+                                  {org.status === "pending_review" ? "Pending Review" : org.status}
                                 </Badge>
                               </TableCell>
                               <TableCell>{org.memberCount}</TableCell>
@@ -431,7 +435,30 @@ export default function AdminKycOverview() {
                                   >
                                     <Eye className="h-4 w-4" />
                                   </Button>
-                                  {org.status === "active" ? (
+                                  {org.status === "pending_review" ? (
+                                    <>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20"
+                                        onClick={() => setConfirmAction({ orgId: org.id, action: "active", orgName: org.name, fromStatus: "pending_review" })}
+                                        data-testid={`button-approve-org-${org.id}`}
+                                        title="Approve"
+                                      >
+                                        <PlayCircle className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                        onClick={() => setConfirmAction({ orgId: org.id, action: "suspended", orgName: org.name, fromStatus: "pending_review" })}
+                                        data-testid={`button-reject-org-${org.id}`}
+                                        title="Reject"
+                                      >
+                                        <Ban className="h-4 w-4" />
+                                      </Button>
+                                    </>
+                                  ) : org.status === "active" ? (
                                     <Button
                                       size="icon"
                                       variant="ghost"
@@ -816,12 +843,18 @@ export default function AdminKycOverview() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {confirmAction?.action === "suspended" ? "Suspend Organisation" : "Reactivate Organisation"}
+              {confirmAction?.action === "suspended"
+                ? (confirmAction?.fromStatus === "pending_review" ? "Reject Organisation" : "Suspend Organisation")
+                : (confirmAction?.fromStatus === "pending_review" ? "Approve Organisation" : "Reactivate Organisation")}
             </DialogTitle>
             <DialogDescription>
               {confirmAction?.action === "suspended"
-                ? `Are you sure you want to suspend "${confirmAction?.orgName}"? This will prevent them from creating new verification requests.`
-                : `Are you sure you want to reactivate "${confirmAction?.orgName}"?`}
+                ? (confirmAction?.fromStatus === "pending_review"
+                    ? `Are you sure you want to reject "${confirmAction?.orgName}"? The organisation will not be able to use KYC or Procurement features.`
+                    : `Are you sure you want to suspend "${confirmAction?.orgName}"? This will prevent them from creating new verification requests.`)
+                : (confirmAction?.fromStatus === "pending_review"
+                    ? `Approve "${confirmAction?.orgName}" and grant access to all KYC Service and Procurement features. A confirmation email will be sent to the organisation.`
+                    : `Are you sure you want to reactivate "${confirmAction?.orgName}"?`)}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -838,7 +871,10 @@ export default function AdminKycOverview() {
               disabled={statusMutation.isPending}
               data-testid="button-confirm-action"
             >
-              {statusMutation.isPending ? "Updating..." : confirmAction?.action === "suspended" ? "Suspend" : "Reactivate"}
+              {statusMutation.isPending ? "Updating..."
+                : confirmAction?.action === "suspended"
+                  ? (confirmAction?.fromStatus === "pending_review" ? "Reject" : "Suspend")
+                  : (confirmAction?.fromStatus === "pending_review" ? "Approve" : "Reactivate")}
             </Button>
           </DialogFooter>
         </DialogContent>

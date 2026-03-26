@@ -9,7 +9,7 @@
  */
 
 import { db } from "../db";
-import { companyApplications, identityVerifications, addDirectorRequests, serviceRequests, users } from "@shared/schema";
+import { companyApplications, identityVerifications, addDirectorRequests, serviceRequests, users, founderProfiles } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import * as verificationService from "./verificationService";
 import { storage } from "../storage";
@@ -194,6 +194,9 @@ async function handleVerificationApproved(
     
     await updatePendingApplications(userId);
     await updatePendingDirectorSRs(userId);
+
+    // Auto-populate verified entities registry for the individual
+    await addIndividualToVerifiedRegistry(userId);
     
     await storage.createAuditLog({
       actorUserId: userId,
@@ -382,5 +385,83 @@ async function updatePendingApplications(userId: string): Promise<void> {
     });
     
     console.log(`[Verification Webhook] Application ${app.id} auto-submitted after verification`);
+  }
+}
+
+/**
+ * addIndividualToVerifiedRegistry — writes the verified individual into
+ * the cross-platform Verified Entities Registry. Called automatically when
+ * a founder's 4-step Smile ID verification reaches "verified" status.
+ */
+async function addIndividualToVerifiedRegistry(userId: string): Promise<void> {
+  try {
+    const { db } = await import("../db");
+    const { verifiedEntities } = await import("@shared/schema");
+    const { eq, or, and: andCond } = await import("drizzle-orm");
+    const crypto = await import("crypto");
+    const { decryptField, isEncryptedField } = await import("./encryptionService");
+
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const [profile] = await db.select().from(founderProfiles).where(eq(founderProfiles.userId, userId)).limit(1);
+    if (!user) return;
+
+    const hashValue = (v: string) => crypto.createHash("sha256").update(v.trim().toLowerCase()).digest("hex");
+    const tryHash = (enc: string | null | undefined): string | null => {
+      if (!enc) return null;
+      try {
+        const plain = isEncryptedField(enc) ? decryptField(enc) : enc;
+        return hashValue(plain);
+      } catch { return null; }
+    };
+
+    const bvnHash = tryHash(profile?.bvnEncrypted || null);
+    const ninHash = tryHash(profile?.ninEncrypted || null);
+    const now = new Date();
+
+    const matchConditions: any[] = [];
+    if (bvnHash) matchConditions.push(eq(verifiedEntities.bvnHash, bvnHash));
+    if (ninHash) matchConditions.push(eq(verifiedEntities.ninHash, ninHash));
+
+    let existing: any = null;
+    if (matchConditions.length > 0) {
+      const [found] = await db.select().from(verifiedEntities)
+        .where(andCond(eq(verifiedEntities.entityType, "individual"), or(...matchConditions)));
+      existing = found;
+    }
+    if (!existing && user.email) {
+      const [found] = await db.select().from(verifiedEntities)
+        .where(andCond(eq(verifiedEntities.entityType, "individual"), eq(verifiedEntities.email, user.email)));
+      existing = found;
+    }
+
+    const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email || "Unknown";
+
+    if (existing) {
+      const { sql: sqlHelper } = await import("drizzle-orm");
+      await db.update(verifiedEntities).set({
+        verificationCount: sqlHelper`${verifiedEntities.verificationCount} + 1`,
+        lastVerifiedAt: now,
+        fullName,
+        email: user.email || existing.email,
+        bvnHash: bvnHash || existing.bvnHash,
+        ninHash: ninHash || existing.ninHash,
+        updatedAt: now,
+      }).where(eq(verifiedEntities.id, existing.id));
+    } else {
+      await db.insert(verifiedEntities).values({
+        entityType: "individual",
+        fullName,
+        email: user.email || "",
+        bvnHash,
+        ninHash,
+        country: "NG",
+        verificationCount: 1,
+        lastVerifiedAt: now,
+        firstVerifiedAt: now,
+      });
+    }
+    console.log(`[VerificationWebhook] Individual ${userId} added to Verified Entities Registry`);
+  } catch (err) {
+    console.error("[VerificationWebhook] Failed to add individual to verified registry:", err);
   }
 }

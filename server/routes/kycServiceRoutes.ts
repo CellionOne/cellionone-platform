@@ -144,7 +144,7 @@ export function registerKycServiceRoutes(app: Express) {
         contactPhone: data.contactPhone || null,
         address: data.address || null,
         createdByUserId: userId,
-        status: "active",
+        status: "pending_review",
         settings: {},
         employeePortalEnabled: true,
         supplierPortalEnabled: true,
@@ -171,7 +171,27 @@ export function registerKycServiceRoutes(app: Express) {
         inviteStatus: "accepted",
       });
 
-      res.status(201).json(org);
+      // Notify admin that a new KYC org is awaiting review
+      try {
+        const resend = getResendClient();
+        await resend.emails.send({
+          from: "Cellion One <service@cellionone.com>",
+          to: "service@cellionone.com",
+          subject: `[KYC] New Organisation Awaiting Review: ${data.name}`,
+          html: `<p>A new KYC Service organisation has been created and is pending review.</p>
+            <ul>
+              <li><strong>Name:</strong> ${data.name}</li>
+              <li><strong>Category:</strong> ${data.category}</li>
+              <li><strong>Contact Email:</strong> ${data.contactEmail}</li>
+              <li><strong>Org ID:</strong> ${org.id}</li>
+            </ul>
+            <p>Please review and approve or reject this organisation in the <a href="https://cellionone.com/admin/kyc">Admin KYC Dashboard</a>.</p>`,
+        });
+      } catch (emailErr) {
+        console.error("[KYC] Failed to send admin notification email:", emailErr);
+      }
+
+      res.status(201).json({ ...org, pendingReview: true });
     } catch (error: any) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
       console.error("[KYC] Create org error:", error);
@@ -1970,7 +1990,8 @@ export function registerKycServiceRoutes(app: Express) {
       if (isNaN(orgId)) return res.status(400).json({ message: "Invalid org ID" });
 
       const schema = z.object({
-        status: z.enum(["active", "suspended"]),
+        status: z.enum(["pending_review", "active", "suspended"]),
+        reviewNotes: z.string().optional(),
       });
       const data = schema.parse(req.body);
 
@@ -1980,6 +2001,26 @@ export function registerKycServiceRoutes(app: Express) {
         .returning();
 
       if (!updated) return res.status(404).json({ message: "Organisation not found" });
+
+      // Notify the org creator of the review decision
+      if (data.status === "active" || data.status === "suspended") {
+        try {
+          const resend = getResendClient();
+          const isApproved = data.status === "active";
+          await resend.emails.send({
+            from: "Cellion One <service@cellionone.com>",
+            to: updated.contactEmail,
+            subject: isApproved
+              ? "Your KYC Organisation Has Been Approved"
+              : "Update on Your KYC Organisation Application",
+            html: isApproved
+              ? `<p>Your organisation <strong>${updated.name}</strong> has been approved on Cellion One. You can now access all KYC Service features.</p><p><a href="https://cellionone.com/kyc">Open your KYC dashboard</a></p>`
+              : `<p>Your organisation <strong>${updated.name}</strong> has been suspended. ${data.reviewNotes ? `<br>Reason: ${data.reviewNotes}` : ""}</p><p>Please contact <a href="mailto:service@cellionone.com">service@cellionone.com</a> for assistance.</p>`,
+          });
+        } catch (emailErr) {
+          console.error("[KYC Admin] Failed to send review decision email:", emailErr);
+        }
+      }
 
       res.json(updated);
     } catch (error: any) {

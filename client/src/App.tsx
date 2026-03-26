@@ -94,6 +94,11 @@ import BuildingManagerDashboard from "@/pages/building-manager/dashboard";
 import BuildingManagerUtilityBill from "@/pages/building-manager/utility-bill";
 import BuildingManagerSubscribers from "@/pages/building-manager/subscribers";
 import BuildingManagerMailIntake from "@/pages/building-manager/mail-intake";
+import WelcomePage from "@/pages/welcome";
+import ExistingCompanyPage from "@/pages/founder/existing-company";
+
+const INTENT_EXEMPT_PATHS = ["/welcome", "/settings", "/personal-profile", "/notifications", "/login", "/register"];
+const INTENT_EXEMPT_ROLES = ["admin", "lawyer", "building_manager"];
 
 function ProtectedRoute({ 
   component: Component, 
@@ -112,10 +117,11 @@ function ProtectedRoute({
     window.location.href = "/login";
     return <LoadingPage />;
   }
+
+  const userRoles = user?.roles || [];
   
   // Check role-based access
   if (roles && roles.length > 0) {
-    const userRoles = user?.roles || [];
     const hasRequiredRole = roles.some(role => userRoles.includes(role));
     
     if (!hasRequiredRole) {
@@ -130,6 +136,16 @@ function ProtectedRoute({
       }
       return <LoadingPage />;
     }
+  }
+
+  // Intent gate: founders without a chosen intent are redirected to /welcome
+  // (exempt: non-founder roles, the welcome page itself, and settings/profile pages)
+  const isExemptRole = INTENT_EXEMPT_ROLES.some(r => userRoles.includes(r));
+  const currentPath = window.location.pathname;
+  const isExemptPath = INTENT_EXEMPT_PATHS.some(p => currentPath.startsWith(p));
+  if (!isExemptRole && !isExemptPath && !user?.primaryIntent) {
+    window.location.href = "/welcome";
+    return <LoadingPage />;
   }
   
   return <Component />;
@@ -162,6 +178,9 @@ function RoleBasedRedirect() {
   } else if (roles.includes("building_manager")) {
     return <Redirect to="/building-manager/dashboard" />;
   } else if (roles.includes("founder")) {
+    if (!user?.primaryIntent) {
+      return <Redirect to="/welcome" />;
+    }
     return <Redirect to="/founder/dashboard" />;
   } else {
     // Unknown role - log error and redirect to login
@@ -186,6 +205,12 @@ function Router() {
         )}
       </Route>
       
+      <Route path="/welcome">
+        <ProtectedRoute component={WelcomePage} />
+      </Route>
+      <Route path="/founder/existing-company">
+        <ProtectedRoute component={ExistingCompanyPage} />
+      </Route>
       <Route path="/founder/dashboard">
         <ProtectedRoute component={FounderDashboard} />
       </Route>

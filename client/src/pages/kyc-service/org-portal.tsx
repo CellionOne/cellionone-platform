@@ -2996,6 +2996,30 @@ export default function OrgPortalPage() {
               </div>
             </div>
 
+            {/* Pending review banner */}
+            {org.status === "pending_review" && (
+              <div className="mx-6 mt-4 rounded-lg border border-yellow-200 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-800 px-4 py-3 flex items-start gap-3" data-testid="banner-pending-review">
+                <Clock className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
+                <div className="text-sm">
+                  <p className="font-medium text-yellow-800 dark:text-yellow-300">Organisation pending review</p>
+                  <p className="text-yellow-700 dark:text-yellow-400 mt-0.5">
+                    Your organisation is under review by the Cellion One team. Publishing RFQs and submitting bids will be enabled once approved. This typically takes 1–2 business days.
+                  </p>
+                </div>
+              </div>
+            )}
+            {org.status === "suspended" && (
+              <div className="mx-6 mt-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 px-4 py-3 flex items-start gap-3" data-testid="banner-suspended">
+                <ShieldX className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+                <div className="text-sm">
+                  <p className="font-medium text-red-800 dark:text-red-300">Organisation suspended</p>
+                  <p className="text-red-700 dark:text-red-400 mt-0.5">
+                    Your organisation has been suspended. Please contact <a href="mailto:service@cellionone.com" className="underline">service@cellionone.com</a> for assistance.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto p-6">
               {section === "dashboard" && <DashboardSection orgId={orgId} org={org} onNav={navigateTo} />}
               {section === "verifications" && <VerificationsSection orgId={orgId} isAdmin={isAdmin} />}

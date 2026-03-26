@@ -704,12 +704,14 @@ export type InsertLegalChatMessage = z.infer<typeof insertLegalChatMessageSchema
 // ============== COMPANY PROFILE ==============
 export const companyProfiles = pgTable("company_profiles", {
   id: serial("id").primaryKey(),
-  applicationId: integer("application_id").notNull(),
+  applicationId: integer("application_id"),
   founderId: varchar("founder_id").notNull(),
   companyName: varchar("company_name", { length: 255 }).notNull(),
   rcNumber: varchar("rc_number", { length: 100 }),
   companyType: varchar("company_type", { length: 100 }),
   incorporationDate: timestamp("incorporation_date"),
+  isExistingCompany: boolean("is_existing_company").default(false),
+  existingCompanyStatus: varchar("existing_company_status", { length: 30 }).default("pending_review"),
   registeredAddress: json("registered_address").$type<{
     line1?: string;
     line2?: string;

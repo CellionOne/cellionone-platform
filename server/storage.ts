@@ -469,6 +469,7 @@ export class DatabaseStorage implements IStorage {
     passwordHash: string;
     verificationToken: string;
     verificationTokenExpiry: Date;
+    primaryIntent: string;
   }>): Promise<User> {
     const [user] = await db.update(users).set({
       ...data,

@@ -2574,22 +2574,28 @@ export async function registerRoutes(
   app.get("/api/checkout/verification-info", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const [user, companyPeople, verificationStatus] = await Promise.all([
+      const applicationId = req.query.applicationId ? parseInt(req.query.applicationId as string, 10) : null;
+      const [user, allCompanyPeople, verificationStatus] = await Promise.all([
         storage.getUser(userId),
         storage.getCompanyPeopleByFounder(userId),
         verificationService.getVerificationStatus(userId),
       ]);
 
       const founderVerified = !!user?.isIdentityVerified;
-      const people = companyPeople
-        .filter(p => p.personUserId)
-        .map(p => ({
-          id: p.id,
-          email: p.inviteEmail,
-          role: p.role,
-          isVerified: !!p.isVerified,
-          inviteStatus: p.inviteStatus,
-        }));
+
+      // Include ALL declared team members (draft/pending/accepted) scoped to this application
+      const scopedPeople = applicationId
+        ? allCompanyPeople.filter(p => p.applicationId === applicationId)
+        : allCompanyPeople;
+
+      const people = scopedPeople.map(p => ({
+        id: p.id,
+        email: p.inviteEmail,
+        role: p.role,
+        title: p.title,
+        isVerified: !!p.isVerified,
+        inviteStatus: p.inviteStatus,
+      }));
 
       const unverifiedCount = (founderVerified ? 0 : 1) + people.filter(p => !p.isVerified).length;
 
@@ -2638,7 +2644,13 @@ export async function registerRoutes(
       }
 
       const companyPeopleAll = await storage.getCompanyPeopleByFounder(userId);
-      const acceptedPeople = companyPeopleAll.filter(p => p.personUserId && p.inviteStatus === 'accepted');
+      // Scope to the application being purchased when applicationId is provided
+      const scopedPeople = applicationId
+        ? companyPeopleAll.filter(p => p.applicationId === applicationId)
+        : companyPeopleAll;
+
+      // Check profile completeness only for accepted (linked) team members
+      const acceptedPeople = scopedPeople.filter(p => p.personUserId && p.inviteStatus === 'accepted');
       for (const person of acceptedPeople) {
         const personProfile = await storage.getFounderProfile(person.personUserId!);
         if (!personProfile?.isProfileComplete) {
@@ -2658,8 +2670,8 @@ export async function registerRoutes(
         if (!user.isIdentityVerified) {
           verifyCount = 1;
         }
-        const companyPeople = await storage.getCompanyPeopleByFounder(userId);
-        const unverifiedPeople = companyPeople.filter(p => !p.isVerified && p.personUserId);
+        // Include ALL declared people (draft/pending/accepted) who are not yet verified
+        const unverifiedPeople = scopedPeople.filter(p => !p.isVerified);
         verifyCount += unverifiedPeople.length;
 
         if (verifyCount > 0) {

@@ -86,7 +86,7 @@ export default function CheckoutPage() {
 
   interface VerificationInfo {
     founderVerified: boolean;
-    people: { id: number; email: string; role: string; isVerified: boolean; inviteStatus: string }[];
+    people: { id: number; email: string | null; role: string; title: string | null; isVerified: boolean; inviteStatus: string }[];
     unverifiedCount: number;
     verificationFeePerPerson: number;
     totalVerificationFee: number;
@@ -605,7 +605,10 @@ export default function CheckoutPage() {
                             {verificationInfo.people.filter(p => !p.isVerified).map(p => (
                               <p key={p.id} className="flex items-center gap-1" data-testid={`verify-line-${p.id}`}>
                                 <span className="text-yellow-600 dark:text-yellow-400">•</span>
-                                <span>{p.email} ({p.role.replace(/_/g, " ")}) — {formatNgn(verifyProduct.priceNgn)}</span>
+                                <span>
+                                  {p.title || p.email}{p.title && p.email ? ` (${p.email})` : ""}
+                                  {" "}— {p.role.replace(/_/g, " ")} — {formatNgn(verifyProduct.priceNgn)}
+                                </span>
                               </p>
                             ))}
                           </div>

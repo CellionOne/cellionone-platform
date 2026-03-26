@@ -5,6 +5,7 @@ import {
   kycSupplierProfiles,
   kycSubmittedDocuments,
   founderProfiles,
+  users,
   type KycVerificationRequest,
 } from "@shared/schema";
 import crypto from "crypto";
@@ -290,5 +291,65 @@ async function upsertCompany(
       amlScreeningStatus: amlScreeningStatus || null,
       firstVerifiedAt: now,
     });
+  }
+}
+
+/**
+ * Upsert a verified individual directly from a user ID (Smile ID / platform verification flow).
+ * Called by the verification webhook handler when a founder's identity verification reaches "verified".
+ */
+export async function upsertVerifiedIndividualByUserId(userId: string): Promise<void> {
+  try {
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const [profile] = await db.select().from(founderProfiles).where(eq(founderProfiles.userId, userId)).limit(1);
+    if (!user) return;
+
+    const bvnHash = tryDecryptAndHash(profile?.bvnEncrypted || "");
+    const ninHash = tryDecryptAndHash(profile?.ninEncrypted || "");
+    const now = new Date();
+    const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email || "Unknown";
+
+    const matchConditions: ReturnType<typeof eq>[] = [];
+    if (bvnHash) matchConditions.push(eq(verifiedEntities.bvnHash, bvnHash));
+    if (ninHash) matchConditions.push(eq(verifiedEntities.ninHash, ninHash));
+
+    let existing = null;
+    if (matchConditions.length > 0) {
+      const [found] = await db.select().from(verifiedEntities)
+        .where(and(eq(verifiedEntities.entityType, "individual"), or(...matchConditions)));
+      existing = found;
+    }
+    if (!existing && user.email) {
+      const [found] = await db.select().from(verifiedEntities)
+        .where(and(eq(verifiedEntities.entityType, "individual"), eq(verifiedEntities.email, user.email)));
+      existing = found;
+    }
+
+    if (existing) {
+      await db.update(verifiedEntities).set({
+        verificationCount: sql`${verifiedEntities.verificationCount} + 1`,
+        lastVerifiedAt: now,
+        fullName,
+        email: user.email || existing.email,
+        bvnHash: bvnHash || existing.bvnHash,
+        ninHash: ninHash || existing.ninHash,
+        updatedAt: now,
+      }).where(eq(verifiedEntities.id, existing.id));
+    } else {
+      await db.insert(verifiedEntities).values({
+        entityType: "individual",
+        fullName,
+        email: user.email || "",
+        bvnHash,
+        ninHash,
+        country: "NG",
+        verificationCount: 1,
+        lastVerifiedAt: now,
+        firstVerifiedAt: now,
+      });
+    }
+    console.log(`[VerifiedEntityService] Individual ${userId} added to Verified Entities Registry`);
+  } catch (err) {
+    console.error("[VerifiedEntityService] Failed to add individual to verified registry:", err);
   }
 }

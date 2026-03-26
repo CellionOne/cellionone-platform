@@ -6654,7 +6654,7 @@ Important guidelines:
 
   // ============== EXISTING COMPANY PROFILE ROUTE ==============
 
-  app.post("/api/founder/company-profiles/existing", isAuthenticated, async (req: any, res) => {
+  app.post("/api/founder/company-profiles/existing", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const data = z.object({

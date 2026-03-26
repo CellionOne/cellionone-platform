@@ -1085,7 +1085,7 @@ export const kycOrganisations = pgTable("kyc_organisations", {
   address: text("address"),
   logoPath: varchar("logo_path", { length: 500 }),
   createdByUserId: varchar("created_by_user_id").notNull(),
-  status: varchar("status", { length: 20 }).default("active").notNull(),
+  status: varchar("status", { length: 20 }).default("pending_review").notNull(),
   settings: jsonb("settings").default({}),
   employeePortalEnabled: boolean("employee_portal_enabled").default(true),
   supplierPortalEnabled: boolean("supplier_portal_enabled").default(true),

@@ -193,10 +193,10 @@ export default function AdminKycOverview() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: async ({ orgId, status, fromStatus }: { orgId: number; status: string; fromStatus?: string }) => {
+    mutationFn: async ({ orgId, status, fromStatus, notes }: { orgId: number; status: string; fromStatus?: string; notes?: string }) => {
       if (fromStatus === "pending_review") {
         const action = status === "active" ? "approve" : "reject";
-        await apiRequest("POST", `/api/admin/kyc-orgs/${orgId}/review`, { action });
+        await apiRequest("POST", `/api/admin/kyc-orgs/${orgId}/review`, { action, ...(notes ? { notes } : {}) });
       } else {
         await apiRequest("PATCH", `/api/admin/kyc/organisations/${orgId}/status`, { status });
       }
@@ -844,7 +844,7 @@ export default function AdminKycOverview() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) { setConfirmAction(null); setRejectNotes(""); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -862,15 +862,32 @@ export default function AdminKycOverview() {
                     : `Are you sure you want to reactivate "${confirmAction?.orgName}"?`)}
             </DialogDescription>
           </DialogHeader>
+          {confirmAction?.action === "suspended" && confirmAction?.fromStatus === "pending_review" && (
+            <div className="py-2">
+              <label className="text-sm font-medium text-foreground mb-1 block">
+                Rejection reason <span className="text-muted-foreground">(optional)</span>
+              </label>
+              <textarea
+                className="w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Explain why this organisation is being rejected..."
+                value={rejectNotes}
+                onChange={(e) => setRejectNotes(e.target.value)}
+                data-testid="textarea-reject-notes"
+              />
+            </div>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmAction(null)} data-testid="button-cancel-action">
+            <Button variant="outline" onClick={() => { setConfirmAction(null); setRejectNotes(""); }} data-testid="button-cancel-action">
               Cancel
             </Button>
             <Button
               variant={confirmAction?.action === "suspended" ? "destructive" : "default"}
               onClick={() => {
                 if (confirmAction) {
-                  statusMutation.mutate({ orgId: confirmAction.orgId, status: confirmAction.action, fromStatus: confirmAction.fromStatus });
+                  const notes = confirmAction.action === "suspended" && confirmAction.fromStatus === "pending_review" && rejectNotes.trim()
+                    ? rejectNotes.trim()
+                    : undefined;
+                  statusMutation.mutate({ orgId: confirmAction.orgId, status: confirmAction.action, fromStatus: confirmAction.fromStatus, notes });
                 }
               }}
               disabled={statusMutation.isPending}

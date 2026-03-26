@@ -304,8 +304,10 @@ export async function upsertVerifiedIndividualByUserId(userId: string): Promise<
     const [profile] = await db.select().from(founderProfiles).where(eq(founderProfiles.userId, userId)).limit(1);
     if (!user) return;
 
-    const bvnHash = tryDecryptAndHash(profile?.bvnEncrypted || "");
-    const ninHash = tryDecryptAndHash(profile?.ninEncrypted || "");
+    const bvnRaw = profile?.bvnEncrypted || null;
+    const ninRaw = profile?.ninEncrypted || null;
+    const bvnHash = bvnRaw ? tryDecryptAndHash(bvnRaw) : null;
+    const ninHash = ninRaw ? tryDecryptAndHash(ninRaw) : null;
     const now = new Date();
     const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email || "Unknown";
 

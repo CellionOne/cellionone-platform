@@ -66,6 +66,8 @@ export default function FounderDashboard() {
   });
 
   const firstProfileId = profiles?.[0]?.id;
+  const existingCompanyPendingReview =
+    profiles?.some((p) => p.isExistingCompany && p.existingCompanyStatus === "pending_review") ?? false;
 
   const { data: tasks } = useQuery<PostIncorporationTask[]>({
     queryKey: ["/api/founder/company-profiles", firstProfileId, "checklist"],
@@ -118,6 +120,20 @@ export default function FounderDashboard() {
         </div>
 
         <InvitationBanner />
+
+        {existingCompanyPendingReview && (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3">
+            <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                Your existing company is under review
+              </p>
+              <p className="text-sm text-amber-700 dark:text-amber-400 mt-0.5">
+                Our team is verifying your company details. You'll receive an email once the review is complete and your account is fully activated.
+              </p>
+            </div>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex justify-center py-12">

@@ -1948,7 +1948,7 @@ export async function registerRoutes(
       const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year
       await storage.upsertIdentityVerification({
         founderUserId: userId,
-        status: passed ? 'completed' : (verification?.status ?? 'in_progress'),
+        status: passed ? 'verified' : (verification?.status ?? 'in_progress'),
         method: verification?.method ?? 'automated',
         externalProvider: verification?.externalProvider ?? 'smile_id',
         externalSessionId: result.smileJobId || verification?.externalSessionId,

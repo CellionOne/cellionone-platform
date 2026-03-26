@@ -587,25 +587,25 @@ export default function CheckoutPage() {
                         <div className="flex items-center gap-2 min-w-0">
                           <ShieldCheck className="h-4 w-4 text-primary flex-shrink-0" />
                           <span className="text-sm truncate">
-                            {verifyProduct.name} {unverifiedCount > 1 ? `× ${unverifiedCount}` : ""}
+                            Identity Verification — {unverifiedCount} {unverifiedCount === 1 ? "person" : "people"} × {formatNgn(verifyProduct.priceNgn)}
                           </span>
                         </div>
                         <span className="text-sm font-medium flex-shrink-0">{formatNgn(verifyProduct.priceNgn * unverifiedCount)}</span>
                       </div>
                       <div className="text-xs text-muted-foreground pl-6 space-y-1">
-                        <p>
-                          {formatNgn(verifyProduct.priceNgn)} per person — covers BVN/NIN validation, document verification, biometric selfie matching, and AML screening via Cellion's verification engine.
-                        </p>
+                        <p>Covers BVN/NIN validation, document verification, biometric selfie matching, and AML screening.</p>
                         {verificationInfo && (
-                          <div className="space-y-0.5">
+                          <div className="space-y-0.5 mt-1">
                             {!verificationInfo.founderVerified && (
-                              <p className="flex items-center gap-1">
-                                <span className="text-yellow-600 dark:text-yellow-400">•</span> You (founder)
+                              <p className="flex items-center gap-1" data-testid="verify-line-founder">
+                                <span className="text-yellow-600 dark:text-yellow-400">•</span>
+                                <span>You (Founder) — {formatNgn(verifyProduct.priceNgn)}</span>
                               </p>
                             )}
                             {verificationInfo.people.filter(p => !p.isVerified).map(p => (
-                              <p key={p.id} className="flex items-center gap-1">
-                                <span className="text-yellow-600 dark:text-yellow-400">•</span> {p.email} ({p.role.replace("_", " ")})
+                              <p key={p.id} className="flex items-center gap-1" data-testid={`verify-line-${p.id}`}>
+                                <span className="text-yellow-600 dark:text-yellow-400">•</span>
+                                <span>{p.email} ({p.role.replace(/_/g, " ")}) — {formatNgn(verifyProduct.priceNgn)}</span>
                               </p>
                             ))}
                           </div>

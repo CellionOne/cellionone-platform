@@ -2133,7 +2133,17 @@ export async function registerRoutes(
     try {
       const userId = req.user?.claims?.sub;
       const invitations = await storage.getCompanyPeopleByPersonUserId(userId);
-      res.json(invitations);
+      const enriched = await Promise.all(invitations.map(async (inv) => {
+        let companyName: string | null = null;
+        if (inv.applicationId) {
+          const app = await storage.getApplication(inv.applicationId);
+          companyName = app?.companyName1 || null;
+        }
+        const founder = await storage.getUser(inv.founderId);
+        const founderName = founder ? `${founder.firstName || ''} ${founder.lastName || ''}`.trim() || null : null;
+        return { ...inv, companyName, founderName };
+      }));
+      res.json(enriched);
     } catch (error) {
       console.error("Error getting invitations:", error);
       res.status(500).json({ message: "Failed to get invitations" });
@@ -2234,13 +2244,14 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Person not found" });
       }
 
-      const { role, title, sharesAllocated, shareClass, sharePercentage } = req.body;
+      const { role, title, sharesAllocated, shareClass, sharePercentage, applicationId: newApplicationId } = req.body;
       const updated = await storage.updateCompanyPerson(id, {
         role: role || person.role,
         title: title !== undefined ? title : person.title,
         sharesAllocated: sharesAllocated !== undefined ? sharesAllocated : person.sharesAllocated,
         shareClass: shareClass !== undefined ? shareClass : person.shareClass,
         sharePercentage: sharePercentage !== undefined ? sharePercentage : person.sharePercentage,
+        ...(newApplicationId !== undefined ? { applicationId: newApplicationId } : {}),
       });
 
       res.json(updated);

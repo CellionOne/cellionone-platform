@@ -42,6 +42,7 @@ const steps = [
 
 interface DirectorEntry {
   localId: string;
+  personId?: number;
   fullName: string;
   inviteEmail: string;
   role: string;
@@ -189,6 +190,21 @@ export default function NewApplicationPage() {
     return () => clearTimeout(timer);
   }, [formData, currentStep, autoSave]);
 
+  const persistDirectorMutation = useMutation({
+    mutationFn: async (dir: Omit<DirectorEntry, "localId" | "personId">) => {
+      const res = await apiRequest("POST", "/api/company-people", {
+        inviteEmail: dir.inviteEmail,
+        role: dir.role,
+        title: dir.fullName || null,
+        deferInvite: true,
+        sharesAllocated: dir.sharesAllocated ? parseInt(dir.sharesAllocated, 10) : null,
+        shareClass: dir.shareClass || null,
+        sharePercentage: dir.sharePercentage || null,
+      });
+      return res.json() as Promise<{ id: number }>;
+    },
+  });
+
   const createMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
       const response = await apiRequest("POST", "/api/applications", {
@@ -210,17 +226,22 @@ export default function NewApplicationPage() {
       }
 
       for (const dir of directors) {
-        if (!dir.inviteEmail) continue;
-        await apiRequest("POST", "/api/company-people", {
-          inviteEmail: dir.inviteEmail,
-          role: dir.role,
-          title: dir.fullName || null,
-          applicationId: app.id,
-          sharesAllocated: dir.sharesAllocated ? parseInt(dir.sharesAllocated, 10) : null,
-          shareClass: dir.shareClass || null,
-          sharePercentage: dir.sharePercentage || null,
-          deferInvite: true,
-        });
+        if (dir.personId) {
+          await apiRequest("PUT", `/api/company-people/${dir.personId}`, {
+            applicationId: app.id,
+          });
+        } else if (dir.inviteEmail) {
+          await apiRequest("POST", "/api/company-people", {
+            inviteEmail: dir.inviteEmail,
+            role: dir.role,
+            title: dir.fullName || null,
+            applicationId: app.id,
+            deferInvite: true,
+            sharesAllocated: dir.sharesAllocated ? parseInt(dir.sharesAllocated, 10) : null,
+            shareClass: dir.shareClass || null,
+            sharePercentage: dir.sharePercentage || null,
+          });
+        }
       }
       
       return app;
@@ -249,9 +270,15 @@ export default function NewApplicationPage() {
     },
   });
 
-  const addDirector = () => {
+  const addDirector = async () => {
     if (!newDirector.fullName || !newDirector.inviteEmail || !newDirector.role) return;
-    setDirectors(prev => [...prev, { ...newDirector, localId: crypto.randomUUID() }]);
+    const localId = crypto.randomUUID();
+    try {
+      const person = await persistDirectorMutation.mutateAsync({ ...newDirector });
+      setDirectors(prev => [...prev, { ...newDirector, localId, personId: person.id }]);
+    } catch {
+      setDirectors(prev => [...prev, { ...newDirector, localId }]);
+    }
     setNewDirector({ fullName: "", inviteEmail: "", role: "director", sharesAllocated: "", shareClass: "ordinary", sharePercentage: "" });
   };
 
@@ -304,8 +331,13 @@ export default function NewApplicationPage() {
         return !!formData.companyName1;
       case 3:
         return !!formData.businessDescription;
-      case 4:
-        return totalSharePercentage <= 100;
+      case 4: {
+        const hasShareholderRoles = directors.some(d =>
+          ["shareholder", "director_shareholder"].includes(d.role)
+        );
+        if (hasShareholderRoles) return totalSharePercentage === 100;
+        return true;
+      }
       case 5:
         if (formData.useRegisteredOffice) {
           return !!formData.registeredOfficeTier;
@@ -522,7 +554,7 @@ export default function NewApplicationPage() {
                 <div className="rounded-lg border bg-muted/30 p-4 flex items-start gap-3 text-sm" data-testid="directors-info-banner">
                   <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
                   <p className="text-muted-foreground">
-                    Add co-founders, directors, and shareholders. Each person will receive an email invitation to complete their profile and identity verification — required before your application can be processed. You can also manage this team later from your dashboard.
+                    Declare co-founders, directors, and shareholders. Each person is saved immediately — invitation emails are sent only after incorporation payment is confirmed. Shareholders must have share percentages totalling exactly 100%. You can also manage this team later from your dashboard.
                   </p>
                 </div>
 
@@ -558,16 +590,40 @@ export default function NewApplicationPage() {
                         </Button>
                       </div>
                     ))}
-                    {totalSharePercentage > 100 && (
-                      <p className="text-xs text-destructive flex items-center gap-1" data-testid="text-share-pct-warning">
-                        ⚠ Total share percentage is {totalSharePercentage}% — exceeds 100%. Please review allocations.
-                      </p>
-                    )}
-                    {totalSharePercentage > 0 && totalSharePercentage <= 100 && (
-                      <p className="text-xs text-muted-foreground" data-testid="text-share-pct-total">
-                        Total declared: {totalSharePercentage}% of shares allocated to listed members.
-                      </p>
-                    )}
+                    {(() => {
+                      const hasShareholderRoles = directors.some(d =>
+                        ["shareholder", "director_shareholder"].includes(d.role)
+                      );
+                      if (totalSharePercentage > 100) {
+                        return (
+                          <p className="text-xs text-destructive flex items-center gap-1" data-testid="text-share-pct-warning">
+                            ⚠ Total share percentage is {totalSharePercentage.toFixed(2)}% — exceeds 100%. Please review allocations.
+                          </p>
+                        );
+                      }
+                      if (hasShareholderRoles && totalSharePercentage < 100) {
+                        return (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1" data-testid="text-share-pct-remaining">
+                            ℹ {(100 - totalSharePercentage).toFixed(2)}% remaining — share percentages must total exactly 100% to proceed.
+                          </p>
+                        );
+                      }
+                      if (hasShareholderRoles && totalSharePercentage === 100) {
+                        return (
+                          <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1" data-testid="text-share-pct-complete">
+                            ✓ 100% of shares allocated — you can proceed.
+                          </p>
+                        );
+                      }
+                      if (!hasShareholderRoles && totalSharePercentage > 0) {
+                        return (
+                          <p className="text-xs text-muted-foreground" data-testid="text-share-pct-total">
+                            Total declared: {totalSharePercentage.toFixed(2)}% of shares allocated to listed members.
+                          </p>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 )}
 

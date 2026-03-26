@@ -2102,6 +2102,7 @@ export function registerKycServiceRoutes(app: Express) {
           createdByUserId: adminUserId,
           status: "active",
           settings: {},
+          // Admin-provisioned clients are API-only — portals are for self-service orgs
           employeePortalEnabled: false,
           supplierPortalEnabled: false,
           termsAcceptedAt: new Date(),

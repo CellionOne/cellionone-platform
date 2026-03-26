@@ -843,7 +843,7 @@ function BiometricSection() {
   const isVerified = profile?.isVerified;
 
   return (
-    <Card data-testid="card-biometric-section" className="border-primary/30">
+    <Card id="biometric" data-testid="card-biometric-section" className="border-primary/30">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
           <ShieldCheck className="h-5 w-5 text-primary" /> Verify My Identity — Biometric Selfie

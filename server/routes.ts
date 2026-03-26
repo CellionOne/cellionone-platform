@@ -1483,6 +1483,9 @@ export async function registerRoutes(
         } catch { bvnLast4 = null; }
       }
 
+      const [userRow] = await db.select({ isIdentityVerified: usersTable.isIdentityVerified })
+        .from(usersTable).where(eq(usersTable.id, userId));
+
       res.json({
         userId: profile.userId,
         fullName: profile.fullName,
@@ -1508,6 +1511,7 @@ export async function registerRoutes(
         hasSignature: !!profile.signaturePath,
         profileCompletion: profile.profileCompletion,
         isProfileComplete: profile.isProfileComplete,
+        isVerified: userRow?.isIdentityVerified ?? false,
       });
     } catch (error) {
       console.error("Error getting personal profile:", error);

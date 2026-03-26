@@ -6,7 +6,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc } from "drizzle-orm";
 import * as services from "./services";
@@ -408,8 +408,54 @@ export async function registerRoutes(
         (req.session as any)._loginAuditLogged = true;
       }
       
+      // Auto-infer primaryIntent for existing users who have data but no intent set.
+      // This ensures users who registered before the intent gate was introduced are
+      // not bounced to /welcome on their next login.
+      let resolvedUser = user;
+      if (user && !user.primaryIntent) {
+        const isExemptRole = ["admin", "lawyer", "building_manager"].some(r => roles.includes(r));
+        if (!isExemptRole) {
+          const inferredIntent = await (async () => {
+            const [kycMember] = await db
+              .select({ id: kycOrgMembers.id })
+              .from(kycOrgMembers)
+              .where(and(eq(kycOrgMembers.userId, userId), eq(kycOrgMembers.inviteStatus, "accepted")))
+              .limit(1);
+            if (kycMember) return "kyc_service";
+
+            const [existingProfile] = await db
+              .select({ id: companyProfiles.id })
+              .from(companyProfiles)
+              .where(and(eq(companyProfiles.userId, userId), eq(companyProfiles.isExistingCompany, true)))
+              .limit(1);
+            if (existingProfile) return "founder_existing_co";
+
+            const [app] = await db
+              .select({ id: companyApplicationsTable.id })
+              .from(companyApplicationsTable)
+              .where(eq(companyApplicationsTable.userId, userId))
+              .limit(1);
+            if (app) return "founder_new_co";
+
+            const [profile] = await db
+              .select({ id: companyProfiles.id })
+              .from(companyProfiles)
+              .where(eq(companyProfiles.userId, userId))
+              .limit(1);
+            if (profile) return "founder_new_co";
+
+            return null;
+          })();
+
+          if (inferredIntent) {
+            await storage.updateUser(userId, { primaryIntent: inferredIntent });
+            resolvedUser = { ...user, primaryIntent: inferredIntent };
+          }
+        }
+      }
+
       // Return user without sensitive fields
-      const { passwordHash, verificationToken, verificationTokenExpiry, resetToken, resetTokenExpiry, ...safeUser } = user || {};
+      const { passwordHash, verificationToken, verificationTokenExpiry, resetToken, resetTokenExpiry, ...safeUser } = resolvedUser || {};
       res.json({ ...safeUser, roles });
     } catch (error) {
       console.error("Error fetching user:", error);

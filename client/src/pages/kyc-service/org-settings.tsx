@@ -45,6 +45,7 @@ import {
   Zap,
   CheckCircle2,
   Timer,
+  ShieldCheck,
 } from "lucide-react";
 import type {
   KycOrganisation, KycOrgMember, KycDocumentRequirement, KycVerificationTemplate,
@@ -1457,24 +1458,54 @@ function BillingTab({ orgId }: { orgId: string }) {
 
   return (
     <TabsContent value="billing" className="space-y-4 mt-4">
+      {billing?.billingMode === "exempt" && (
+        <div className="rounded-md border border-purple-200 bg-purple-50 dark:border-purple-800/40 dark:bg-purple-900/20 p-4 flex items-start gap-3" data-testid="banner-exempt-billing">
+          <ShieldCheck className="h-5 w-5 text-purple-600 dark:text-purple-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-purple-800 dark:text-purple-300">Complimentary Access</p>
+            <p className="text-sm text-purple-700 dark:text-purple-400 mt-0.5">
+              Your organisation has been granted complimentary API access. All verification requests are processed at no charge. Usage is tracked internally for reporting purposes.
+            </p>
+          </div>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <CreditCard className="h-4 w-4" />
             Billing Overview
           </CardTitle>
-          <CardDescription>Manage your billing account and purchase verification credits.</CardDescription>
+          <CardDescription>
+            {billing?.billingMode === "exempt"
+              ? "Your account has complimentary access — no credits required."
+              : "Manage your billing account and purchase verification credits."}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-md border p-3">
               <p className="text-xs text-muted-foreground">Billing Mode</p>
-              <p className="text-lg font-semibold capitalize" data-testid="text-billing-mode">{billing?.billingMode || "prepaid"}</p>
+              <Badge
+                variant="secondary"
+                className={`border-0 mt-1 text-sm font-semibold ${
+                  billing?.billingMode === "exempt"
+                    ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
+                    : billing?.billingMode === "invoiced"
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                    : "bg-muted text-foreground"
+                }`}
+                data-testid="text-billing-mode"
+              >
+                {billing?.billingMode === "exempt" ? "Exempt" : billing?.billingMode === "invoiced" ? "Invoiced" : "Prepaid"}
+              </Badge>
             </div>
-            <div className="rounded-md border p-3">
-              <p className="text-xs text-muted-foreground">Credit Balance</p>
-              <p className="text-lg font-semibold" data-testid="text-credit-balance">{billing?.creditBalance ?? 0}</p>
-            </div>
+            {billing?.billingMode !== "exempt" && (
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Credit Balance</p>
+                <p className="text-lg font-semibold" data-testid="text-credit-balance">{billing?.creditBalance ?? 0}</p>
+              </div>
+            )}
             <div className="rounded-md border p-3">
               <p className="text-xs text-muted-foreground">Status</p>
               <Badge variant="secondary" className={`border-0 mt-1 ${billing?.isActive ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`} data-testid="text-billing-status">
@@ -1527,7 +1558,7 @@ function BillingTab({ orgId }: { orgId: string }) {
         </Card>
       )}
 
-      {billing?.billingMode !== "invoiced" && (
+      {billing?.billingMode !== "invoiced" && billing?.billingMode !== "exempt" && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Invoiced Billing</CardTitle>

@@ -164,6 +164,8 @@ export default function AdminKycOverview() {
   const [adjustDialog, setAdjustDialog] = useState<BillingAccount | null>(null);
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
+  const [billingModeDialog, setBillingModeDialog] = useState<BillingAccount | null>(null);
+  const [selectedBillingMode, setSelectedBillingMode] = useState<"prepaid" | "invoiced" | "exempt">("prepaid");
   const [markPaidDialog, setMarkPaidDialog] = useState<KycInvoice | null>(null);
   const [paystackRef, setPaystackRef] = useState("");
 
@@ -268,6 +270,20 @@ export default function AdminKycOverview() {
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error.message || "Failed to adjust credits.", variant: "destructive" });
+    },
+  });
+
+  const billingModeMutation = useMutation({
+    mutationFn: async ({ orgId, billingMode }: { orgId: number; billingMode: "prepaid" | "invoiced" | "exempt" }) => {
+      await apiRequest("PATCH", `/api/admin/kyc/organisations/${orgId}/billing`, { billingMode });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/kyc/billing-accounts"] });
+      toast({ title: "Billing mode updated", description: `Organisation billing mode has been changed to ${selectedBillingMode}.` });
+      setBillingModeDialog(null);
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Failed to update billing mode.", variant: "destructive" });
     },
   });
 
@@ -629,8 +645,18 @@ export default function AdminKycOverview() {
                                 {account.orgName || `Org #${account.organisationId}`}
                               </TableCell>
                               <TableCell>
-                                <Badge variant="secondary" data-testid={`badge-billing-mode-${account.id}`}>
-                                  {account.billingMode}
+                                <Badge
+                                  variant="secondary"
+                                  className={
+                                    account.billingMode === "exempt"
+                                      ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 border-0"
+                                      : account.billingMode === "invoiced"
+                                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border-0"
+                                      : ""
+                                  }
+                                  data-testid={`badge-billing-mode-${account.id}`}
+                                >
+                                  {account.billingMode === "exempt" ? "Exempt" : account.billingMode === "invoiced" ? "Invoiced" : "Prepaid"}
                                 </Badge>
                               </TableCell>
                               <TableCell>
@@ -655,19 +681,33 @@ export default function AdminKycOverview() {
                                 {formatDate(account.createdAt)}
                               </TableCell>
                               <TableCell>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setAdjustDialog(account);
-                                    setAdjustAmount("");
-                                    setAdjustReason("");
-                                  }}
-                                  data-testid={`button-adjust-credits-${account.id}`}
-                                >
-                                  <DollarSign className="h-4 w-4 mr-1" />
-                                  Adjust
-                                </Button>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setAdjustDialog(account);
+                                      setAdjustAmount("");
+                                      setAdjustReason("");
+                                    }}
+                                    data-testid={`button-adjust-credits-${account.id}`}
+                                  >
+                                    <DollarSign className="h-4 w-4 mr-1" />
+                                    Adjust
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setBillingModeDialog(account);
+                                      setSelectedBillingMode(account.billingMode as "prepaid" | "invoiced" | "exempt");
+                                    }}
+                                    data-testid={`button-set-billing-mode-${account.id}`}
+                                  >
+                                    <CreditCard className="h-4 w-4 mr-1" />
+                                    Mode
+                                  </Button>
+                                </div>
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1069,6 +1109,73 @@ export default function AdminKycOverview() {
               data-testid="button-confirm-adjust"
             >
               {adjustMutation.isPending ? "Adjusting..." : "Apply Adjustment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!billingModeDialog} onOpenChange={(open) => { if (!open) setBillingModeDialog(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set Billing Mode</DialogTitle>
+            <DialogDescription>
+              Change the billing mode for {billingModeDialog?.orgName || `Org #${billingModeDialog?.organisationId}`}.
+              Current mode: <span className="font-medium capitalize">{billingModeDialog?.billingMode}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Billing Mode</Label>
+              <div className="flex flex-col gap-2">
+                {(["prepaid", "invoiced", "exempt"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setSelectedBillingMode(mode)}
+                    className={`flex items-start gap-3 rounded-md border p-3 text-left transition-colors ${
+                      selectedBillingMode === mode
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-muted/50"
+                    }`}
+                    data-testid={`option-billing-mode-${mode}`}
+                  >
+                    <div className={`mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                      selectedBillingMode === mode ? "border-primary" : "border-muted-foreground"
+                    }`}>
+                      {selectedBillingMode === mode && <div className="h-2 w-2 rounded-full bg-primary" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium capitalize">{mode}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {mode === "prepaid" && "Organisation buys credits upfront. API calls deduct from balance."}
+                        {mode === "invoiced" && "Organisation is invoiced monthly. No credit balance needed."}
+                        {mode === "exempt" && "No charges applied. API calls are free. Usage is still logged for internal tracking."}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {selectedBillingMode === "exempt" && (
+              <div className="rounded-md border border-purple-200 bg-purple-50 dark:border-purple-800/40 dark:bg-purple-900/20 p-3 text-sm text-purple-800 dark:text-purple-300">
+                Exempt mode grants complimentary API access. All verification calls will be logged at ₦0 for internal cost tracking. Use this for first-party or trusted partner applications.
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBillingModeDialog(null)} data-testid="button-cancel-billing-mode">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (billingModeDialog) {
+                  billingModeMutation.mutate({ orgId: billingModeDialog.organisationId, billingMode: selectedBillingMode });
+                }
+              }}
+              disabled={billingModeMutation.isPending || selectedBillingMode === billingModeDialog?.billingMode}
+              data-testid="button-confirm-billing-mode"
+            >
+              {billingModeMutation.isPending ? "Updating..." : "Update Mode"}
             </Button>
           </DialogFooter>
         </DialogContent>

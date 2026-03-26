@@ -175,6 +175,22 @@ export async function deductCredit(
   const account = await getBillingAccount(orgId);
   if (!account) throw new Error("No billing account found");
 
+  const tier = getPricingTier(verificationType);
+
+  // Exempt orgs: log usage at ₦0 but skip balance check and deduction
+  if (account.billingMode === "exempt") {
+    const [transaction] = await db.insert(kycCreditTransactions).values({
+      billingAccountId: account.id,
+      type: "usage",
+      verificationType,
+      amount: 0,
+      balance: account.creditBalance,
+      description: `Exempt usage — ${tier.label} verification — Request #${requestId}`,
+      verificationRequestId: requestId,
+    }).returning();
+    return transaction;
+  }
+
   if (account.billingMode === "prepaid") {
     if (account.creditBalance <= 0) {
       throw new Error("Insufficient credits");
@@ -182,7 +198,6 @@ export async function deductCredit(
   }
 
   const newBalance = account.creditBalance - 1;
-  const tier = getPricingTier(verificationType);
 
   await db.update(kycBillingAccounts)
     .set({ creditBalance: newBalance, updatedAt: new Date() })
@@ -204,6 +219,9 @@ export async function deductCredit(
 export async function hasCredits(orgId: number, verificationType: string): Promise<boolean> {
   const account = await getBillingAccount(orgId);
   if (!account || !account.isActive) return false;
+
+  // Exempt orgs always have access
+  if (account.billingMode === "exempt") return true;
 
   if (account.billingMode === "prepaid") {
     return account.creditBalance > 0;

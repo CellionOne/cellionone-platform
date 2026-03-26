@@ -2485,6 +2485,7 @@ export function registerKycServiceRoutes(app: Express) {
         creditAdjustment: z.number().int().optional(),
         adjustmentReason: z.string().optional(),
         isActive: z.boolean().optional(),
+        billingMode: z.enum(["prepaid", "invoiced", "exempt"]).optional(),
       });
       const data = schema.parse(req.body);
 
@@ -2500,6 +2501,12 @@ export function registerKycServiceRoutes(app: Express) {
       if (data.isActive !== undefined) {
         await db.update(kycBillingAccounts)
           .set({ isActive: data.isActive, updatedAt: new Date() })
+          .where(eq(kycBillingAccounts.organisationId, orgId));
+      }
+
+      if (data.billingMode !== undefined) {
+        await db.update(kycBillingAccounts)
+          .set({ billingMode: data.billingMode, updatedAt: new Date() })
           .where(eq(kycBillingAccounts.organisationId, orgId));
       }
 

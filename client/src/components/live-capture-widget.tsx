@@ -131,7 +131,7 @@ export function LiveCaptureWidget({ onCapture, className }: LiveCaptureWidgetPro
       )}
 
       {phase === "streaming" && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div className="relative rounded-xl overflow-hidden bg-black aspect-video border border-border">
             <video
               ref={videoRef}
@@ -148,6 +148,10 @@ export function LiveCaptureWidget({ onCapture, className }: LiveCaptureWidgetPro
               </Badge>
             </div>
           </div>
+          <p className="text-xs text-amber-600 dark:text-amber-400 flex items-start gap-1.5" data-testid="text-camera-guidance">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            If the preview appears black, disable camera effects (filters/virtual backgrounds) or try a different browser.
+          </p>
           <Button className="w-full" onClick={capture} data-testid="button-capture-selfie">
             <Camera className="h-4 w-4 mr-2" />
             Take Photo

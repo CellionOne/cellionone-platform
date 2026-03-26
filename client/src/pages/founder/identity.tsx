@@ -58,14 +58,39 @@ export default function IdentityVerificationPage() {
     queryKey: ["/api/checkout/verification-info"],
   });
 
+  const [selfieVerified, setSelfieVerified] = useState<boolean | null>(null);
+  const [selfieLiveness, setSelfieLiveness] = useState<number | null>(null);
+
   const selfieMutation = useMutation({
-    mutationFn: (selfieBase64: string) =>
-      apiRequest("POST", "/api/verification/smile-id/submit-selfie", { selfieBase64 }),
-    onSuccess: () => {
-      setSelfieDone(true);
+    mutationFn: async (selfieBase64: string) => {
+      const res = await apiRequest("POST", "/api/verification/smile-id/submit-selfie", { selfieBase64 });
+      return res.json();
+    },
+    onSuccess: (result) => {
       setSelfieError("");
+      const verified = result.verified === true;
+      setSelfieVerified(verified);
+      setSelfieLiveness(result.livenessScore ?? null);
+      if (verified) {
+        setSelfieDone(true);
+        toast({
+          title: "Identity verified",
+          description: `Liveness check passed${result.livenessScore ? ` (confidence: ${Math.round(result.livenessScore)}%)` : ""}. Your identity is now verified.`,
+        });
+      } else if (result.resultCode === "NOT_CONFIGURED") {
+        setSelfieDone(true);
+        toast({
+          title: "Selfie recorded",
+          description: "Your selfie has been captured and will be reviewed when the verification service is activated.",
+        });
+      } else {
+        toast({
+          title: "Liveness not confirmed",
+          description: "Your selfie did not pass liveness detection. Please ensure good lighting and retake.",
+          variant: "destructive",
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/checkout/verification-info"] });
-      toast({ title: "Selfie submitted", description: "Your biometric selfie has been submitted for processing." });
     },
     onError: (err: any) => {
       setSelfieError(err?.message ?? "Selfie submission failed. Please try again.");
@@ -180,7 +205,7 @@ export default function IdentityVerificationPage() {
                 <div className="rounded-lg border border-border p-4 space-y-3">
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-sm text-muted-foreground">Verification Fee (per person)</span>
-                    <span className="font-bold text-lg">{formatNgn(verificationInfo?.verificationFeePerPerson || 1000000)}</span>
+                    <span className="font-bold text-lg">{verificationInfo?.verificationFeePerPerson ? formatNgn(verificationInfo.verificationFeePerPerson) : "—"}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-sm text-muted-foreground">Persons needing verification</span>
@@ -251,7 +276,26 @@ export default function IdentityVerificationPage() {
                 </div>
               </div>
 
-              {selfieDone ? (
+              {selfieVerified === false && !selfieMutation.isPending && (
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800" data-testid="alert-selfie-failed">
+                  <XCircle className="h-5 w-5 text-red-600 shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Liveness not confirmed</p>
+                    <p className="text-xs text-red-600 dark:text-red-500">Please ensure good lighting and retake your selfie below.</p>
+                  </div>
+                </div>
+              )}
+              {selfieDone && selfieVerified === true ? (
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800" data-testid="alert-selfie-done">
+                  <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-green-700 dark:text-green-400">Identity verified</p>
+                    <p className="text-xs text-green-600 dark:text-green-500">
+                      Liveness confirmed{selfieLiveness ? ` — confidence: ${Math.round(selfieLiveness)}%` : ""}. Your profile is now fully verified.
+                    </p>
+                  </div>
+                </div>
+              ) : selfieDone ? (
                 <div className="flex items-center gap-3 p-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800" data-testid="alert-selfie-done">
                   <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
                   <div>
@@ -404,7 +448,7 @@ export default function IdentityVerificationPage() {
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-                <span>The verification fee is {formatNgn(1000000)} per person, added to your checkout</span>
+                <span>The verification fee is {verificationInfo?.verificationFeePerPerson ? formatNgn(verificationInfo.verificationFeePerPerson) : "a one-time fee"} per person, added to your checkout</span>
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
@@ -418,7 +462,7 @@ export default function IdentityVerificationPage() {
             <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-border">
               <p className="text-sm font-medium mb-2">Why do we charge for verification?</p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Your {formatNgn(1000000)} verification fee covers a comprehensive 4-step identity check powered by Cellion's verification engine. This includes: (1) BVN/NIN validation against national databases, (2) government-issued ID document authenticity verification, (3) biometric selfie with liveness detection to confirm you are who you claim to be, and (4) AML and sanctions screening. These checks are required to comply with Nigerian regulatory standards and to give banks, the CAC, and other third parties full confidence in your identity.
+                Your {verificationInfo?.verificationFeePerPerson ? formatNgn(verificationInfo.verificationFeePerPerson) : "verification"} fee covers a comprehensive 4-step identity check powered by Cellion's verification engine. This includes: (1) BVN/NIN validation against national databases, (2) government-issued ID document authenticity verification, (3) biometric selfie with liveness detection to confirm you are who you claim to be, and (4) AML and sanctions screening. These checks are required to comply with Nigerian regulatory standards and to give banks, the CAC, and other third parties full confidence in your identity.
               </p>
             </div>
           </CardContent>

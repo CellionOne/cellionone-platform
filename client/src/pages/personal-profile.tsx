@@ -110,6 +110,29 @@ interface PersonalProfile {
   isProfileComplete: boolean;
 }
 
+function ProfileBottomCTA() {
+  const { data: profile } = useQuery<PersonalProfile>({
+    queryKey: ["/api/profile/personal"],
+  });
+  const completion = profile?.profileCompletion || 0;
+  if (completion < 80) return null;
+  return (
+    <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-6 flex flex-col sm:flex-row items-center gap-4" data-testid="cta-bottom-identity">
+      <div className="flex-1 text-center sm:text-left">
+        <p className="text-lg font-semibold">Your profile is ready — verify your identity.</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Identity verification unlocks company registration, orders, and service requests on the platform.
+        </p>
+      </div>
+      <Link href="/founder/identity">
+        <Button size="lg" className="shrink-0 w-full sm:w-auto" data-testid="button-bottom-verify-identity">
+          Verify Identity <ArrowRight className="h-4 w-4 ml-2" />
+        </Button>
+      </Link>
+    </div>
+  );
+}
+
 export default function PersonalProfilePage() {
   const { user } = useAuth();
   const roles = user?.roles || [];
@@ -130,6 +153,7 @@ export default function PersonalProfilePage() {
         <BiometricSection />
         <Separator />
         <DocumentsSection />
+        <ProfileBottomCTA />
       </div>
     </DashboardLayout>
   );
@@ -183,27 +207,12 @@ function ProfileHeader() {
           </div>
           <Progress value={completion} className="h-2" data-testid="progress-completion" />
         </div>
-        {completion >= 80 && !profile?.isProfileComplete && (
-          <div className="mt-4 flex items-center justify-between rounded-lg bg-primary/5 border border-primary/20 px-4 py-3" data-testid="cta-identity-verification">
-            <div>
-              <p className="text-sm font-medium">Your profile is nearly complete!</p>
-              <p className="text-xs text-muted-foreground">Proceed to identity verification to unlock company registration and orders.</p>
-            </div>
-            <Link href="/founder/identity">
-              <Button size="sm" className="shrink-0 ml-3" data-testid="button-go-to-identity">
-                Verify Identity <ArrowRight className="h-4 w-4 ml-1" />
-              </Button>
-            </Link>
-          </div>
-        )}
         {profile?.isProfileComplete && (
-          <div className="mt-4 flex items-center justify-between rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 px-4 py-3" data-testid="cta-profile-complete">
-            <div>
-              <p className="text-sm font-medium text-green-800 dark:text-green-300">Profile complete!</p>
-              <p className="text-xs text-green-700 dark:text-green-400">You're ready to proceed with identity verification and company registration.</p>
-            </div>
+          <div className="mt-4 flex items-center gap-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 px-4 py-3" data-testid="cta-profile-complete">
+            <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+            <p className="text-sm font-medium text-green-800 dark:text-green-300 flex-1">Profile complete! Scroll down to proceed to identity verification.</p>
             <Link href="/founder/identity">
-              <Button size="sm" variant="outline" className="shrink-0 ml-3 border-green-300 text-green-700 hover:bg-green-50 dark:border-green-700 dark:text-green-400" data-testid="button-go-to-identity-complete">
+              <Button size="sm" variant="outline" className="shrink-0 border-green-300 text-green-700 hover:bg-green-50 dark:border-green-700 dark:text-green-400" data-testid="button-go-to-identity-complete">
                 Go to Identity <ArrowRight className="h-4 w-4 ml-1" />
               </Button>
             </Link>
@@ -216,6 +225,31 @@ function ProfileHeader() {
 
 function ProfileForm() {
   const { toast } = useToast();
+  const [idDocUploading, setIdDocUploading] = useState(false);
+
+  async function handleIdDocUpload(file: File) {
+    setIdDocUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("docType", "id_document");
+      const res = await fetch("/api/profile/personal/upload", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Upload failed");
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/profile/personal"] });
+      toast({ title: "Government ID uploaded", description: "Your ID document has been uploaded successfully." });
+    } catch (error: any) {
+      toast({ title: "Upload failed", description: error?.message || "Please try again.", variant: "destructive" });
+    } finally {
+      setIdDocUploading(false);
+    }
+  }
 
   const { data: profile, isLoading } = useQuery<PersonalProfile>({
     queryKey: ["/api/profile/personal"],
@@ -534,6 +568,76 @@ function ProfileForm() {
                     </FormItem>
                   )}
                 />
+              </div>
+              <div className="mt-4 flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${profile?.hasIdDocument ? "bg-green-100 dark:bg-green-950 text-green-600 dark:text-green-400" : "bg-muted text-muted-foreground"}`}>
+                    <CreditCard className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">
+                      Government-Issued ID Document
+                      {profile?.hasIdDocument && (
+                        <Badge variant="default" className="gap-1 text-xs ml-2">
+                          <CheckCircle2 className="h-3 w-3" /> Uploaded
+                        </Badge>
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Upload a clear copy of your {profile?.idType?.replace(/_/g, " ") || "government ID"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 ml-3">
+                  {profile?.hasIdDocument && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const res = await apiRequest("GET", "/api/profile/personal/document/id_document");
+                          const { downloadURL } = await res.json();
+                          window.open(downloadURL, "_blank");
+                        } catch {
+                          toast({ title: "Error", description: "Could not load document.", variant: "destructive" });
+                        }
+                      }}
+                      data-testid="button-view-id_document"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <label>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/jpeg,image/png,application/pdf"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleIdDocUpload(file);
+                        e.target.value = "";
+                      }}
+                      data-testid="input-upload-id_document"
+                    />
+                    <Button
+                      type="button"
+                      variant={profile?.hasIdDocument ? "outline" : "default"}
+                      size="sm"
+                      asChild
+                      disabled={idDocUploading}
+                    >
+                      <span className="cursor-pointer">
+                        {idDocUploading ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                        ) : (
+                          <Upload className="h-4 w-4 mr-1" />
+                        )}
+                        {profile?.hasIdDocument ? "Replace" : "Upload"}
+                      </span>
+                    </Button>
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -1069,14 +1173,6 @@ function DocumentsSection() {
       icon: Camera,
       uploaded: profile?.hasPassportPhoto || false,
       accept: "image/jpeg,image/png",
-    },
-    {
-      type: "id_document",
-      label: "Government-Issued ID",
-      description: `Upload a clear copy of your ${profile?.idType?.replace(/_/g, " ") || "government ID"}`,
-      icon: CreditCard,
-      uploaded: profile?.hasIdDocument || false,
-      accept: "image/jpeg,image/png,application/pdf",
     },
   ];
 

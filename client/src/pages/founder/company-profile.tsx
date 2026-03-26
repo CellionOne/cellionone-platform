@@ -47,6 +47,25 @@ interface ProfileWithTasks extends CompanyProfile {
   tasks?: PostIncorporationTask[];
 }
 
+interface RegisteredAddress {
+  line1?: string;
+  line2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+}
+
+interface CompanyUpdatePayload {
+  companyName: string;
+  companyType: string;
+  rcNumber: string | null;
+  tinNumber: string | null;
+  shareCapital: string | null;
+  incorporationDate: string | null;
+  registeredAddress: RegisteredAddress;
+  businessActivities: string[];
+}
+
 const COMPANY_TYPES = [
   { value: "LTD", label: "Private Limited Company (LTD)" },
   { value: "PLC", label: "Public Limited Company (PLC)" },
@@ -195,7 +214,7 @@ function ProfileDetailView({
     );
   }
 
-  const address = profile.registeredAddress as any;
+  const address = (profile.registeredAddress || {}) as RegisteredAddress;
   const directors = (profile.directors || []) as { name: string; role?: string; email?: string }[];
   const shareholders = (profile.shareholders || []) as { name: string; shares?: number; percentage?: number }[];
   const activities = (profile.businessActivities || []) as string[];
@@ -426,7 +445,7 @@ function EditCompanyDialog({
   onClose: () => void;
   toast: ReturnType<typeof useToast>["toast"];
 }) {
-  const addr = profile.registeredAddress as any;
+  const addr = (profile.registeredAddress || {}) as RegisteredAddress;
   const activities = (profile.businessActivities || []) as string[];
 
   const [form, setForm] = useState({
@@ -438,16 +457,16 @@ function EditCompanyDialog({
       ? new Date(profile.incorporationDate).toISOString().split("T")[0]
       : "",
     shareCapital: profile.shareCapital || "",
-    addressLine1: addr?.line1 || "",
-    addressLine2: addr?.line2 || "",
-    addressCity: addr?.city || "",
-    addressState: addr?.state || "",
-    addressPostalCode: addr?.postalCode || "",
+    addressLine1: addr.line1 || "",
+    addressLine2: addr.line2 || "",
+    addressCity: addr.city || "",
+    addressState: addr.state || "",
+    addressPostalCode: addr.postalCode || "",
     businessActivities: activities.join(", "),
   });
 
   const updateMutation = useMutation({
-    mutationFn: async (data: Record<string, any>) => {
+    mutationFn: async (data: CompanyUpdatePayload) => {
       const res = await apiRequest("PUT", `/api/founder/company-profiles/${profile.id}`, data);
       return res.json();
     },
@@ -468,11 +487,35 @@ function EditCompanyDialog({
       return;
     }
 
-    const payload: Record<string, any> = {
+    const rc = form.rcNumber.trim();
+    if (rc && !/^[A-Za-z0-9\-]{4,20}$/.test(rc)) {
+      toast({ title: "Invalid RC Number", description: "RC Number should be 4–20 alphanumeric characters.", variant: "destructive" });
+      return;
+    }
+
+    const tin = form.tinNumber.trim();
+    if (tin && !/^\d{8,12}$/.test(tin.replace(/[-\s]/g, ""))) {
+      toast({ title: "Invalid TIN", description: "TIN should be 8–12 digits.", variant: "destructive" });
+      return;
+    }
+
+    if (form.incorporationDate) {
+      const parsed = new Date(form.incorporationDate);
+      if (isNaN(parsed.getTime())) {
+        toast({ title: "Invalid date", description: "Please enter a valid incorporation date.", variant: "destructive" });
+        return;
+      }
+      if (parsed > new Date()) {
+        toast({ title: "Invalid date", description: "Incorporation date cannot be in the future.", variant: "destructive" });
+        return;
+      }
+    }
+
+    const payload: CompanyUpdatePayload = {
       companyName: form.companyName.trim(),
       companyType: form.companyType,
-      rcNumber: form.rcNumber.trim() || null,
-      tinNumber: form.tinNumber.trim() || null,
+      rcNumber: rc || null,
+      tinNumber: tin || null,
       shareCapital: form.shareCapital.trim() || null,
       incorporationDate: form.incorporationDate
         ? new Date(form.incorporationDate).toISOString()

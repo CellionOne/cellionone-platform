@@ -348,27 +348,26 @@ export default function ComplianceCalendarPage() {
           </div>
         )}
 
-        {effectiveProfileId && !deadlinesLoading && selectedProfile && !selectedProfile.incorporationDate && (!deadlines || deadlines.length === 0) && (
-          <Card data-testid="card-missing-inc-date">
-            <CardContent className="flex flex-col items-center justify-center py-10 gap-4 text-center">
-              <Calendar className="h-12 w-12 text-muted-foreground/40" />
-              <div>
-                <h3 className="font-semibold">Incorporation date needed</h3>
-                <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                  Your compliance deadlines are calculated from your incorporation date. Please add it to your company profile first.
-                </p>
-              </div>
-              <Link href="/founder/company-profile">
-                <Button variant="outline" data-testid="link-add-inc-date">
-                  <Building2 className="h-4 w-4 mr-2" />
-                  Update Company Profile
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-        )}
-
         {effectiveProfileId && !deadlinesLoading && (
+          selectedProfile && !selectedProfile.incorporationDate ? (
+            <Card data-testid="card-missing-inc-date">
+              <CardContent className="flex flex-col items-center justify-center py-10 gap-4 text-center">
+                <Calendar className="h-12 w-12 text-muted-foreground/40" />
+                <div>
+                  <h3 className="font-semibold">Incorporation date needed</h3>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                    Your compliance deadlines are calculated from your incorporation date. Please add it to your company profile first.
+                  </p>
+                </div>
+                <Link href="/founder/company-profile">
+                  <Button variant="outline" data-testid="link-add-inc-date">
+                    <Building2 className="h-4 w-4 mr-2" />
+                    Update Company Profile
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          ) : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="summary-cards">
               <Card data-testid="card-summary-upcoming">
@@ -497,6 +496,7 @@ export default function ComplianceCalendarPage() {
               </ScrollArea>
             )}
           </>
+          )
         )}
       </div>
     </DashboardLayout>

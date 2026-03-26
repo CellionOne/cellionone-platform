@@ -143,9 +143,8 @@ type ProvisionStep = "select-type" | "fill-details" | "success";
 type ProvisionClientType = "organisation" | "application";
 
 const PROVISION_PERMISSIONS = [
-  { id: "verify_identity", label: "Verify Identity", description: "BVN/NIN lookup + AML screening" },
-  { id: "verify_individual", label: "Verify Individual", description: "Full individual KYC with biometrics" },
-  { id: "verify_supplier", label: "Verify Supplier", description: "Corporate entity + key persons KYC" },
+  { id: "verify:individual", label: "Individual Verification", description: "Full individual KYC with biometrics (includes identity checks)" },
+  { id: "verify:supplier", label: "Supplier Verification", description: "Corporate entity + key persons KYC" },
 ] as const;
 
 interface KycInvoice {
@@ -190,7 +189,7 @@ export default function AdminKycOverview() {
   const [provisionName, setProvisionName] = useState("");
   const [provisionEmail, setProvisionEmail] = useState("");
   const [provisionBillingMode, setProvisionBillingMode] = useState<"prepaid" | "exempt" | "invoiced">("prepaid");
-  const [provisionPermissions, setProvisionPermissions] = useState<string[]>(["verify_identity"]);
+  const [provisionPermissions, setProvisionPermissions] = useState<string[]>(["verify:individual"]);
   const [provisionKeyName, setProvisionKeyName] = useState("");
   const [provisionResult, setProvisionResult] = useState<{ key: string; orgName: string; orgId: number; billingMode: string } | null>(null);
   const [keyCopied, setKeyCopied] = useState(false);
@@ -201,7 +200,7 @@ export default function AdminKycOverview() {
     setProvisionName("");
     setProvisionEmail("");
     setProvisionBillingMode("prepaid");
-    setProvisionPermissions(["verify_identity"]);
+    setProvisionPermissions(["verify:individual"]);
     setProvisionKeyName("");
     setProvisionResult(null);
     setKeyCopied(false);
@@ -1320,7 +1319,7 @@ export default function AdminKycOverview() {
 
       {/* Provision API Client dialog */}
       <Dialog open={provisionOpen} onOpenChange={(open) => { if (!open) { setProvisionOpen(false); resetProvisionDialog(); } }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
           {provisionStep === "select-type" && (
             <>
               <DialogHeader>
@@ -1374,7 +1373,7 @@ export default function AdminKycOverview() {
 
           {provisionStep === "fill-details" && (
             <>
-              <DialogHeader>
+              <DialogHeader className="shrink-0">
                 <DialogTitle className="flex items-center gap-2">
                   {provisionClientType === "application" ? (
                     <><Zap className="h-5 w-5 text-sky-600" /> New Application</>
@@ -1386,100 +1385,102 @@ export default function AdminKycOverview() {
                   Fill in the details. An API key will be generated immediately.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="provision-name">{provisionClientType === "application" ? "Application Name" : "Organisation Name"} *</Label>
-                  <Input
-                    id="provision-name"
-                    value={provisionName}
-                    onChange={(e) => setProvisionName(e.target.value)}
-                    placeholder={provisionClientType === "application" ? "e.g. Cellion Internal Checker" : "e.g. FastCash Microfinance"}
-                    data-testid="input-provision-name"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="provision-email">Contact Email *</Label>
-                  <Input
-                    id="provision-email"
-                    type="email"
-                    value={provisionEmail}
-                    onChange={(e) => setProvisionEmail(e.target.value)}
-                    placeholder="contact@example.com"
-                    data-testid="input-provision-email"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="provision-key-name">API Key Name</Label>
-                  <Input
-                    id="provision-key-name"
-                    value={provisionKeyName}
-                    onChange={(e) => setProvisionKeyName(e.target.value)}
-                    placeholder={provisionClientType === "application" ? "App Key" : "Default Key"}
-                    data-testid="input-provision-key-name"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Billing Mode</Label>
-                  <div className="flex flex-col gap-2">
-                    {(["prepaid", "exempt", "invoiced"] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setProvisionBillingMode(mode)}
-                        className={`flex items-center gap-3 rounded-md border p-2.5 text-left transition-colors ${
-                          provisionBillingMode === mode ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                        }`}
-                        data-testid={`option-provision-billing-${mode}`}
-                      >
-                        <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                          provisionBillingMode === mode ? "border-primary" : "border-muted-foreground"
-                        }`}>
-                          {provisionBillingMode === mode && <div className="h-2 w-2 rounded-full bg-primary" />}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium capitalize">{mode}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {mode === "prepaid" && "Client buys credits upfront."}
-                            {mode === "exempt" && "No charges. Free access with usage logging."}
-                            {mode === "invoiced" && "Monthly invoiced billing."}
-                          </p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Permissions *</Label>
+              <div className="overflow-y-auto flex-1 pr-1">
+                <div className="space-y-4 py-4">
                   <div className="space-y-2">
-                    {PROVISION_PERMISSIONS.map((perm) => (
-                      <label
-                        key={perm.id}
-                        className="flex items-start gap-3 rounded-md border p-2.5 cursor-pointer hover:bg-muted/50"
-                        data-testid={`label-permission-${perm.id}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={provisionPermissions.includes(perm.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setProvisionPermissions((prev) => [...prev, perm.id]);
-                            } else {
-                              setProvisionPermissions((prev) => prev.filter((p) => p !== perm.id));
-                            }
-                          }}
-                          className="mt-0.5"
-                          data-testid={`checkbox-permission-${perm.id}`}
-                        />
-                        <div>
-                          <p className="text-sm font-medium">{perm.label}</p>
-                          <p className="text-xs text-muted-foreground">{perm.description}</p>
-                        </div>
-                      </label>
-                    ))}
+                    <Label htmlFor="provision-name">{provisionClientType === "application" ? "Application Name" : "Organisation Name"} *</Label>
+                    <Input
+                      id="provision-name"
+                      value={provisionName}
+                      onChange={(e) => setProvisionName(e.target.value)}
+                      placeholder={provisionClientType === "application" ? "e.g. Cellion Internal Checker" : "e.g. FastCash Microfinance"}
+                      data-testid="input-provision-name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="provision-email">Contact Email *</Label>
+                    <Input
+                      id="provision-email"
+                      type="email"
+                      value={provisionEmail}
+                      onChange={(e) => setProvisionEmail(e.target.value)}
+                      placeholder="contact@example.com"
+                      data-testid="input-provision-email"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="provision-key-name">API Key Name</Label>
+                    <Input
+                      id="provision-key-name"
+                      value={provisionKeyName}
+                      onChange={(e) => setProvisionKeyName(e.target.value)}
+                      placeholder={provisionClientType === "application" ? "App Key" : "Default Key"}
+                      data-testid="input-provision-key-name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Billing Mode</Label>
+                    <div className="flex flex-col gap-2">
+                      {(["prepaid", "exempt", "invoiced"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setProvisionBillingMode(mode)}
+                          className={`flex items-center gap-3 rounded-md border p-2.5 text-left transition-colors ${
+                            provisionBillingMode === mode ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                          }`}
+                          data-testid={`option-provision-billing-${mode}`}
+                        >
+                          <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                            provisionBillingMode === mode ? "border-primary" : "border-muted-foreground"
+                          }`}>
+                            {provisionBillingMode === mode && <div className="h-2 w-2 rounded-full bg-primary" />}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium capitalize">{mode}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {mode === "prepaid" && "Client buys credits upfront."}
+                              {mode === "exempt" && "No charges. Free access with usage logging."}
+                              {mode === "invoiced" && "Monthly invoiced billing."}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Permissions *</Label>
+                    <div className="space-y-2">
+                      {PROVISION_PERMISSIONS.map((perm) => (
+                        <label
+                          key={perm.id}
+                          className="flex items-start gap-3 rounded-md border p-2.5 cursor-pointer hover:bg-muted/50"
+                          data-testid={`label-permission-${perm.id}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={provisionPermissions.includes(perm.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setProvisionPermissions((prev) => [...prev, perm.id]);
+                              } else {
+                                setProvisionPermissions((prev) => prev.filter((p) => p !== perm.id));
+                              }
+                            }}
+                            className="mt-0.5"
+                            data-testid={`checkbox-permission-${perm.id}`}
+                          />
+                          <div>
+                            <p className="text-sm font-medium">{perm.label}</p>
+                            <p className="text-xs text-muted-foreground">{perm.description}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
-              <DialogFooter>
+              <DialogFooter className="shrink-0 pt-2">
                 <Button variant="outline" onClick={() => setProvisionStep("select-type")} data-testid="button-provision-back">Back</Button>
                 <Button
                   onClick={() => {

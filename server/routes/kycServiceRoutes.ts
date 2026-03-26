@@ -2080,48 +2080,65 @@ export function registerKycServiceRoutes(app: Express) {
       const resolvedBillingMode = data.billingMode ?? (data.clientType === "application" ? "exempt" : "prepaid");
       const keyName = data.keyName || `${data.clientType === "application" ? "App" : "Default"} Key`;
 
-      // Generate a unique slug
+      // Generate a unique slug (check before transaction to avoid lock contention)
       let slug = slugify(data.name);
       const [existing] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.slug, slug));
       if (existing) slug = `${slug}-${Date.now().toString(36)}`;
 
-      // Create org with status "active" — no review needed
-      const [org] = await db.insert(kycOrganisations).values({
-        name: data.name,
-        slug,
-        clientType: data.clientType,
-        category: "corporate",
-        contactEmail: data.contactEmail,
-        createdByUserId: adminUserId,
-        status: "active",
-        settings: {},
-        employeePortalEnabled: false,
-        supplierPortalEnabled: false,
-        termsAcceptedAt: new Date(),
-        termsVersion: TERMS_VERSION,
-        termsAcceptedByUserId: adminUserId,
-        termsAcceptedIp: "admin-provisioned",
-      }).returning();
+      // Wrap all 4 writes in a single transaction — partial failure rolls back everything
+      const { org, billingAccount, key, apiKey } = await db.transaction(async (tx) => {
+        // 1. Create org with status "active" — no review needed
+        const [newOrg] = await tx.insert(kycOrganisations).values({
+          name: data.name,
+          slug,
+          clientType: data.clientType,
+          category: "corporate",
+          contactEmail: data.contactEmail,
+          createdByUserId: adminUserId,
+          status: "active",
+          settings: {},
+          employeePortalEnabled: false,
+          supplierPortalEnabled: false,
+          termsAcceptedAt: new Date(),
+          termsVersion: TERMS_VERSION,
+          termsAcceptedByUserId: adminUserId,
+          termsAcceptedIp: "admin-provisioned",
+        }).returning();
 
-      // Add admin as org_admin member
-      await db.insert(kycOrgMembers).values({
-        orgId: org.id,
-        userId: adminUserId,
-        role: "org_admin",
-        inviteEmail: data.contactEmail,
-        inviteStatus: "accepted",
+        // 2. Add admin as org_admin member
+        await tx.insert(kycOrgMembers).values({
+          orgId: newOrg.id,
+          userId: adminUserId,
+          role: "org_admin",
+          inviteEmail: data.contactEmail,
+          inviteStatus: "accepted",
+        });
+
+        // 3. Create billing account with the chosen mode
+        const [newBillingAccount] = await tx.insert(kycBillingAccounts).values({
+          organisationId: newOrg.id,
+          billingMode: resolvedBillingMode,
+          creditBalance: 0,
+          isActive: true,
+        }).returning();
+
+        // 4. Generate API key (inserts into kycApiKeys)
+        const randomPart = crypto.randomBytes(16).toString("hex");
+        const fullKey = `co_live_${randomPart}`;
+        const keyPrefix = fullKey.slice(0, 12);
+        const keyHash = crypto.createHash("sha256").update(fullKey).digest("hex");
+        const [newApiKey] = await tx.insert(kycApiKeys).values({
+          organisationId: newOrg.id,
+          keyPrefix,
+          keyHash,
+          name: keyName,
+          permissions: data.permissions,
+          rateLimitPerMinute: 60,
+          isActive: true,
+        }).returning();
+
+        return { org: newOrg, billingAccount: newBillingAccount, key: fullKey, apiKey: newApiKey };
       });
-
-      // Create billing account with the chosen mode
-      const [billingAccount] = await db.insert(kycBillingAccounts).values({
-        organisationId: org.id,
-        billingMode: resolvedBillingMode,
-        creditBalance: 0,
-        isActive: true,
-      }).returning();
-
-      // Generate API key immediately
-      const { key, apiKey } = await kycApiKeyService.generateApiKey(org.id, keyName, data.permissions);
 
       res.status(201).json({
         org,

@@ -269,6 +269,12 @@ export async function getBillingRequests(orgId: number): Promise<KycBillingReque
     .limit(50);
 }
 
+export async function getPendingBillingRequests(): Promise<KycBillingRequest[]> {
+  return db.select().from(kycBillingRequests)
+    .orderBy(desc(kycBillingRequests.createdAt))
+    .limit(200);
+}
+
 export async function getTransactions(orgId: number, limit = 100): Promise<KycCreditTransaction[]> {
   const account = await getBillingAccount(orgId);
   if (!account) return [];

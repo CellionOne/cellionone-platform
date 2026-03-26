@@ -6714,10 +6714,83 @@ Important guidelines:
 
       if (!existing) return res.status(404).json({ message: "Company profile not found" });
 
-      const allowedFields: Record<string, any> = {};
-      if (req.body.rcNumber !== undefined) allowedFields.rcNumber = req.body.rcNumber;
-      if (req.body.tinNumber !== undefined) allowedFields.tinNumber = req.body.tinNumber;
-      if (req.body.incorporationDate !== undefined) allowedFields.incorporationDate = req.body.incorporationDate ? new Date(req.body.incorporationDate) : null;
+      // Validate and whitelist all editable fields
+      const body = req.body as {
+        companyName?: string;
+        companyType?: string;
+        rcNumber?: string | null;
+        tinNumber?: string | null;
+        shareCapital?: string | null;
+        incorporationDate?: string | null;
+        registeredAddress?: {
+          line1?: string;
+          line2?: string;
+          city?: string;
+          state?: string;
+          postalCode?: string;
+        };
+        businessActivities?: string[];
+      };
+
+      const allowedFields: Partial<typeof companyProfiles.$inferInsert> = {};
+
+      if (body.companyName !== undefined) {
+        const name = String(body.companyName).trim();
+        if (!name) return res.status(400).json({ message: "Company name cannot be empty" });
+        allowedFields.companyName = name;
+      }
+
+      if (body.companyType !== undefined) {
+        const validTypes = ["LTD", "PLC", "LLC", "UNLIMITED", "TRUST", "NGO", "COOPERATIVE"];
+        if (!validTypes.includes(String(body.companyType))) return res.status(400).json({ message: "Invalid company type" });
+        allowedFields.companyType = String(body.companyType);
+      }
+
+      if (body.rcNumber !== undefined) {
+        const rc = body.rcNumber ? String(body.rcNumber).trim() : null;
+        if (rc && !/^[A-Za-z0-9\-]{4,20}$/.test(rc)) return res.status(400).json({ message: "Invalid RC Number format" });
+        allowedFields.rcNumber = rc;
+      }
+
+      if (body.tinNumber !== undefined) {
+        const tin = body.tinNumber ? String(body.tinNumber).trim() : null;
+        if (tin && !/^\d{8,12}$/.test(tin.replace(/[-\s]/g, ""))) return res.status(400).json({ message: "TIN must be 8–12 digits" });
+        allowedFields.tinNumber = tin;
+      }
+
+      if (body.shareCapital !== undefined) {
+        allowedFields.shareCapital = body.shareCapital ? String(body.shareCapital).trim() : null;
+      }
+
+      if (body.incorporationDate !== undefined) {
+        if (body.incorporationDate) {
+          const d = new Date(body.incorporationDate);
+          if (isNaN(d.getTime())) return res.status(400).json({ message: "Invalid incorporation date" });
+          if (d > new Date()) return res.status(400).json({ message: "Incorporation date cannot be in the future" });
+          allowedFields.incorporationDate = d;
+        } else {
+          allowedFields.incorporationDate = null;
+        }
+      }
+
+      if (body.registeredAddress !== undefined) {
+        const addr = body.registeredAddress;
+        if (addr && typeof addr === "object") {
+          allowedFields.registeredAddress = {
+            line1: addr.line1 ? String(addr.line1).trim() : undefined,
+            line2: addr.line2 ? String(addr.line2).trim() : undefined,
+            city: addr.city ? String(addr.city).trim() : undefined,
+            state: addr.state ? String(addr.state).trim() : undefined,
+            postalCode: addr.postalCode ? String(addr.postalCode).trim() : undefined,
+          };
+        }
+      }
+
+      if (body.businessActivities !== undefined) {
+        if (!Array.isArray(body.businessActivities)) return res.status(400).json({ message: "businessActivities must be an array" });
+        allowedFields.businessActivities = body.businessActivities.map((a) => String(a).trim()).filter(Boolean);
+      }
+
       allowedFields.updatedAt = new Date();
 
       const [updated] = await db

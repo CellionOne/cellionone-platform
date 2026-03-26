@@ -6741,7 +6741,7 @@ Important guidelines:
       }
 
       if (body.companyType !== undefined) {
-        const validTypes = ["LTD", "PLC", "LLC", "UNLIMITED", "TRUST", "NGO", "COOPERATIVE"];
+        const validTypes = ["LTD", "PLC", "LLC", "LLP", "NGO", "CBO", "TRUST"];
         if (!validTypes.includes(String(body.companyType))) return res.status(400).json({ message: "Invalid company type" });
         allowedFields.companyType = String(body.companyType);
       }

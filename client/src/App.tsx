@@ -97,7 +97,7 @@ import BuildingManagerMailIntake from "@/pages/building-manager/mail-intake";
 import WelcomePage from "@/pages/welcome";
 import ExistingCompanyPage from "@/pages/founder/existing-company";
 
-const INTENT_EXEMPT_PATHS = ["/welcome", "/settings", "/personal-profile", "/notifications", "/login", "/register"];
+const INTENT_EXEMPT_PATHS = ["/welcome", "/settings", "/profile", "/notifications", "/login", "/register"];
 const INTENT_EXEMPT_ROLES = ["admin", "lawyer", "building_manager"];
 
 function ProtectedRoute({ 

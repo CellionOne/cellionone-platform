@@ -49,6 +49,9 @@ export default function WelcomePage() {
       await apiRequest("POST", "/api/me/intent", { intent });
     },
     onSuccess: (_, intent) => {
+      queryClient.setQueryData(["/api/auth/user"], (prev: any) =>
+        prev ? { ...prev, primaryIntent: intent } : prev
+      );
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       if (intent === "founder_new_co") {
         navigate("/founder/dashboard");

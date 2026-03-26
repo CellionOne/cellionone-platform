@@ -6799,9 +6799,9 @@ Important guidelines:
         .where(eq(companyProfiles.id, profileId))
         .returning();
 
-      // If incorporation date changed, recalculate compliance deadlines
-      if (allowedFields.incorporationDate !== undefined && allowedFields.incorporationDate instanceof Date) {
-        // Delete all non-completed deadlines for this profile
+      // If incorporation date was explicitly changed, sync compliance deadlines
+      if (allowedFields.incorporationDate !== undefined) {
+        // Always delete non-completed deadlines to keep DB consistent with new or cleared date
         await db
           .delete(complianceDeadlines)
           .where(
@@ -6811,17 +6811,19 @@ Important guidelines:
             )
           );
 
-        // Regenerate deadlines from the new incorporation date
-        const deadlinesData = generateComplianceDeadlines(profileId, userId, allowedFields.incorporationDate);
-        const now = new Date();
-        const fourteenDaysFromNow = new Date();
-        fourteenDaysFromNow.setDate(fourteenDaysFromNow.getDate() + 14);
+        // Only regenerate when a valid date was provided (not when cleared to null)
+        if (allowedFields.incorporationDate instanceof Date) {
+          const deadlinesData = generateComplianceDeadlines(profileId, userId, allowedFields.incorporationDate);
+          const now = new Date();
+          const fourteenDaysFromNow = new Date();
+          fourteenDaysFromNow.setDate(fourteenDaysFromNow.getDate() + 14);
 
-        for (const dl of deadlinesData) {
-          let status = "upcoming";
-          if (dl.dueDate < now) status = "overdue";
-          else if (dl.dueDate <= fourteenDaysFromNow) status = "due_soon";
-          await db.insert(complianceDeadlines).values({ ...dl, status });
+          for (const dl of deadlinesData) {
+            let status = "upcoming";
+            if (dl.dueDate < now) status = "overdue";
+            else if (dl.dueDate <= fourteenDaysFromNow) status = "due_soon";
+            await db.insert(complianceDeadlines).values({ ...dl, status });
+          }
         }
       }
 

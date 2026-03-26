@@ -80,6 +80,12 @@ export default function CheckoutPage() {
 
   const isVerified = !!(user as any)?.isIdentityVerified;
 
+  const applicationId = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get("applicationId");
+    return v ? parseInt(v, 10) : null;
+  })();
+
   const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
   });
@@ -92,8 +98,12 @@ export default function CheckoutPage() {
     totalVerificationFee: number;
   }
 
+  const verificationInfoUrl = applicationId
+    ? `/api/checkout/verification-info?applicationId=${applicationId}`
+    : "/api/checkout/verification-info";
+
   const { data: verificationInfo } = useQuery<VerificationInfo>({
-    queryKey: ["/api/checkout/verification-info"],
+    queryKey: [verificationInfoUrl],
   });
 
   interface ReadinessSummary {
@@ -195,6 +205,7 @@ export default function CheckoutPage() {
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/checkout/split", {
         items: allCheckoutSkus.map(sku => ({ sku })),
+        ...(applicationId ? { applicationId } : {}),
       });
       return res.json();
     },

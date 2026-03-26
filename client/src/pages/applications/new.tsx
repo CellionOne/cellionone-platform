@@ -214,10 +214,12 @@ export default function NewApplicationPage() {
         await apiRequest("POST", "/api/company-people", {
           inviteEmail: dir.inviteEmail,
           role: dir.role,
+          title: dir.fullName || null,
           applicationId: app.id,
           sharesAllocated: dir.sharesAllocated ? parseInt(dir.sharesAllocated, 10) : null,
           shareClass: dir.shareClass || null,
           sharePercentage: dir.sharePercentage || null,
+          deferInvite: true,
         });
       }
       
@@ -231,7 +233,7 @@ export default function NewApplicationPage() {
       toast({
         title: "Application created",
         description: directors.length > 0
-          ? `Application saved. Invitation emails sent to ${directors.length} team member${directors.length > 1 ? "s" : ""}.`
+          ? `Application saved. Invitation emails will be sent to ${directors.length} team member${directors.length > 1 ? "s" : ""} once payment is complete.`
           : formData.useRegisteredOffice 
             ? "Your application has been saved with registered office selection."
             : "Your application has been saved as a draft.",
@@ -303,7 +305,7 @@ export default function NewApplicationPage() {
       case 3:
         return !!formData.businessDescription;
       case 4:
-        return true;
+        return totalSharePercentage <= 100;
       case 5:
         if (formData.useRegisteredOffice) {
           return !!formData.registeredOfficeTier;

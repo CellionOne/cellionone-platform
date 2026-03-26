@@ -42,8 +42,18 @@ interface ReadinessPerson {
   personUserId: string | null;
   firstName: string | null;
   lastName: string | null;
+  title: string | null;
   profileCompletion: number;
   isProfileComplete: boolean;
+}
+
+interface ReadinessSummary {
+  people: ReadinessPerson[];
+  summary: {
+    totalPeople: number;
+    readyCount: number;
+    allReady: boolean;
+  };
 }
 
 interface ApplicationDetails {
@@ -74,9 +84,10 @@ export default function ApplicationDetailsPage() {
     enabled: !!applicationId,
   });
 
-  const { data: teamReadiness } = useQuery<ReadinessPerson[]>({
+  const { data: teamReadiness } = useQuery<ReadinessSummary>({
     queryKey: ["/api/company-people/readiness"],
   });
+  const teamPeople = teamReadiness?.people ?? [];
 
   const { uploadFile, isUploading: isFileUploading } = useUpload({
     applicationId: parseInt(applicationId || "0", 10),
@@ -427,7 +438,7 @@ export default function ApplicationDetailsPage() {
               </Card>
             )}
 
-            {teamReadiness && teamReadiness.filter(p => p.role === "founder" || p.applicationId === parseInt(applicationId || "0", 10)).length > 0 && (
+            {teamPeople.filter(p => p.role === "founder" || p.applicationId === parseInt(applicationId || "0", 10)).length > 0 && (
               <Card data-testid="card-team-verification-status">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
@@ -439,10 +450,10 @@ export default function ApplicationDetailsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {teamReadiness.filter(p => p.role === "founder" || p.applicationId === parseInt(applicationId || "0", 10)).map((person) => {
+                  {teamPeople.filter(p => p.role === "founder" || p.applicationId === parseInt(applicationId || "0", 10)).map((person) => {
                     const name = person.firstName && person.lastName
                       ? `${person.firstName} ${person.lastName}`
-                      : person.inviteEmail || "Unknown";
+                      : person.title || person.inviteEmail || "Unknown";
                     const isVerified = !!person.isVerified;
                     const hasProfile = person.isProfileComplete;
                     const isPending = person.inviteStatus === "pending" && !person.personUserId;

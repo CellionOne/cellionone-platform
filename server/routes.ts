@@ -2056,6 +2056,7 @@ export async function registerRoutes(
             inviteStatus: person.inviteStatus,
             isVerified: person.isVerified,
             personUserId: person.personUserId,
+            title: person.title,
             firstName,
             lastName,
             profileCompletion,
@@ -2109,8 +2110,9 @@ export async function registerRoutes(
       };
 
       const allPeople = [founderReadiness, ...readiness];
-      const totalPeople = allPeople.length;
-      const readyCount = allPeople.filter(p => p.isProfileComplete).length;
+      const activePeople = allPeople.filter(p => p.inviteStatus !== "draft");
+      const totalPeople = activePeople.length;
+      const readyCount = activePeople.filter(p => p.isProfileComplete).length;
       const allReady = readyCount === totalPeople;
 
       res.json({
@@ -2141,7 +2143,7 @@ export async function registerRoutes(
   app.post("/api/company-people", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
-      const { inviteEmail, role, title, sharesAllocated, shareClass, sharePercentage, applicationId, companyProfileId } = req.body;
+      const { inviteEmail, role, title, sharesAllocated, shareClass, sharePercentage, applicationId, companyProfileId, deferInvite } = req.body;
 
       if (!inviteEmail || !role) {
         return res.status(400).json({ message: "Email and role are required" });
@@ -2153,13 +2155,14 @@ export async function registerRoutes(
 
       const crypto = await import("crypto");
       const inviteToken = crypto.randomBytes(32).toString('hex');
+      const isDraft = !!deferInvite;
 
       const person = await storage.createCompanyPerson({
         founderId: userId,
         inviteEmail: inviteEmail.toLowerCase().trim(),
         inviteToken,
-        inviteStatus: "pending",
-        inviteSentAt: new Date(),
+        inviteStatus: isDraft ? "draft" : "pending",
+        inviteSentAt: isDraft ? null : new Date(),
         role,
         title,
         sharesAllocated: sharesAllocated || null,
@@ -2169,35 +2172,37 @@ export async function registerRoutes(
         companyProfileId: companyProfileId || null,
       });
 
-      try {
-        const emailSvc = await import("./services/emailService");
-        const { client: resend, fromEmail } = await emailSvc.getResendClient();
-        const appUrl = process.env.REPLIT_DEV_DOMAIN
-          ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-          : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+      if (!isDraft) {
+        try {
+          const emailSvc = await import("./services/emailService");
+          const { client: resend, fromEmail } = await emailSvc.getResendClient();
+          const appUrl = process.env.REPLIT_DEV_DOMAIN
+            ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+            : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
 
-        const roleLabel = role === 'director_shareholder' ? 'Director & Shareholder' : role.charAt(0).toUpperCase() + role.slice(1);
-        const user = await storage.getUser(userId);
-        const founderName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'A founder';
+          const roleLabel = role === 'director_shareholder' ? 'Director & Shareholder' : role.charAt(0).toUpperCase() + role.slice(1);
+          const user = await storage.getUser(userId);
+          const founderName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'A founder';
 
-        await resend.emails.send({
-          from: fromEmail,
-          to: inviteEmail.toLowerCase().trim(),
-          subject: `You've been invited as a ${roleLabel} on Cellion One`,
-          html: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-              <h2>Company Director/Shareholder Invitation</h2>
-              <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
-              <p>To accept this invitation, please create an account or sign in using this link:</p>
-              <p><a href="${appUrl}/invite/${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
-              <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/invite/${inviteToken}</p>
-              <hr style="margin: 24px 0;" />
-              <p style="color: #666; font-size: 12px;">This invitation was sent from Cellion One. If you didn't expect this, you can ignore this email.</p>
-            </div>
-          `,
-        });
-      } catch (emailErr: any) {
-        console.warn("[CompanyPeople] Failed to send invite email:", emailErr?.message);
+          await resend.emails.send({
+            from: fromEmail,
+            to: inviteEmail.toLowerCase().trim(),
+            subject: `You've been invited as a ${roleLabel} on Cellion One`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2>Company Director/Shareholder Invitation</h2>
+                <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
+                <p>To accept this invitation, please create an account or sign in using this link:</p>
+                <p><a href="${appUrl}/invite/${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
+                <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/invite/${inviteToken}</p>
+                <hr style="margin: 24px 0;" />
+                <p style="color: #666; font-size: 12px;">This invitation was sent from Cellion One. If you didn't expect this, you can ignore this email.</p>
+              </div>
+            `,
+          });
+        } catch (emailErr: any) {
+          console.warn("[CompanyPeople] Failed to send invite email:", emailErr?.message);
+        }
       }
 
       await storage.createAuditLog({

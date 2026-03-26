@@ -184,6 +184,61 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
           lawyerNet: order.totalLawyerNet,
         },
       });
+
+      // Dispatch deferred invitations for draft company people linked to this application
+      try {
+        const draftPeople = await db.select().from(companyPeople).where(
+          and(
+            eq(companyPeople.applicationId, order.applicationId),
+            eq(companyPeople.inviteStatus, 'draft'),
+          )
+        );
+
+        if (draftPeople.length > 0) {
+          const crypto = await import('crypto');
+          const emailSvc = await import('./emailService');
+          const { client: resend, fromEmail } = await emailSvc.getResendClient();
+          const founderUser = await storage.getUser(order.founderId);
+          const founderName = founderUser ? `${founderUser.firstName || ''} ${founderUser.lastName || ''}`.trim() : 'A founder';
+          const appUrl = process.env.REPLIT_DEV_DOMAIN
+            ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+            : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+
+          for (const person of draftPeople) {
+            const inviteToken = crypto.randomBytes(32).toString('hex');
+            await db.update(companyPeople)
+              .set({ inviteStatus: 'pending', inviteToken, inviteSentAt: new Date() })
+              .where(eq(companyPeople.id, person.id));
+
+            const roleLabel = person.role === 'director_shareholder'
+              ? 'Director & Shareholder'
+              : person.role.charAt(0).toUpperCase() + person.role.slice(1);
+
+            await resend.emails.send({
+              from: fromEmail,
+              to: person.inviteEmail!.toLowerCase().trim(),
+              subject: `You've been invited as a ${roleLabel} on Cellion One`,
+              html: `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                  <h2>Company Director/Shareholder Invitation</h2>
+                  <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
+                  <p>The incorporation payment has been confirmed. Please complete your profile by clicking below:</p>
+                  <p><a href="${appUrl}/invite/${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
+                  <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/invite/${inviteToken}</p>
+                  <hr style="margin: 24px 0;" />
+                  <p style="color: #666; font-size: 12px;">This invitation was sent from Cellion One. If you didn't expect this, you can ignore this email.</p>
+                </div>
+              `,
+            }).catch((emailErr: any) => {
+              console.warn(`[Paystack Webhook] Failed to send deferred invite to ${person.inviteEmail}:`, emailErr?.message);
+            });
+          }
+
+          console.log(`[Paystack Webhook] Dispatched ${draftPeople.length} deferred invitation(s) for application ${order.applicationId}`);
+        }
+      } catch (inviteErr) {
+        console.error(`[Paystack Webhook] Error dispatching deferred invitations for application ${order.applicationId}:`, inviteErr);
+      }
     } catch (err) {
       console.error(`[Paystack Webhook] Error updating application ${order.applicationId}:`, err);
     }

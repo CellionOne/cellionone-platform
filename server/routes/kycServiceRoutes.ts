@@ -71,6 +71,35 @@ function requireOrgMember(allowedRoles?: string[]) {
   };
 }
 
+function requireActiveOrg() {
+  return async (req: any, res: Response, next: NextFunction) => {
+    const orgId = parseInt(req.params.id);
+    if (isNaN(orgId)) return res.status(400).json({ message: "Invalid org ID" });
+
+    const [org] = await db
+      .select({ status: kycOrganisations.status })
+      .from(kycOrganisations)
+      .where(eq(kycOrganisations.id, orgId))
+      .limit(1);
+
+    if (!org) return res.status(404).json({ message: "Organisation not found" });
+
+    if (org.status === "pending_review") {
+      return res.status(403).json({
+        message: "Organisation is pending admin review. Operational features will be available once your account is approved.",
+        code: "ORG_PENDING_REVIEW",
+      });
+    }
+    if (org.status === "suspended") {
+      return res.status(403).json({
+        message: "Organisation has been suspended. Please contact support for assistance.",
+        code: "ORG_SUSPENDED",
+      });
+    }
+    next();
+  };
+}
+
 function calculateRiskScore(docs: KycSubmittedDocument[], requirements: KycDocumentRequirement[], people?: KycSupplierPerson[]): string {
   const mandatoryReqs = requirements.filter(r => r.isMandatory && r.isActive);
   const mandatoryReqIds = new Set(mandatoryReqs.map(r => r.id));
@@ -593,7 +622,7 @@ export function registerKycServiceRoutes(app: Express) {
 
   // ==================== VERIFICATION REQUESTS (T003) ====================
 
-  app.post("/api/kyc-service/organisations/:id/verification-requests", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), async (req: any, res: Response) => {
+  app.post("/api/kyc-service/organisations/:id/verification-requests", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), requireActiveOrg(), async (req: any, res: Response) => {
     try {
       const orgId = parseInt(req.params.id);
       const userId = getUserId(req);
@@ -651,7 +680,7 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
-  app.post("/api/kyc-service/organisations/:id/verification-requests/bulk", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+  app.post("/api/kyc-service/organisations/:id/verification-requests/bulk", isAuthenticated, requireOrgMember(["org_admin"]), requireActiveOrg(), async (req: any, res: Response) => {
     try {
       const orgId = parseInt(req.params.id);
       const userId = getUserId(req);
@@ -792,7 +821,7 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/kyc-service/organisations/:id/verification-requests/:reqId/review", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), async (req: any, res: Response) => {
+  app.patch("/api/kyc-service/organisations/:id/verification-requests/:reqId/review", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), requireActiveOrg(), async (req: any, res: Response) => {
     try {
       const orgId = parseInt(req.params.id);
       const reqId = parseInt(req.params.reqId);
@@ -906,7 +935,7 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
-  app.post("/api/kyc-service/organisations/:id/verification-requests/:reqId/resend-invite", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), async (req: any, res: Response) => {
+  app.post("/api/kyc-service/organisations/:id/verification-requests/:reqId/resend-invite", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), requireActiveOrg(), async (req: any, res: Response) => {
     try {
       const orgId = parseInt(req.params.id);
       const reqId = parseInt(req.params.reqId);
@@ -2078,7 +2107,7 @@ export function registerKycServiceRoutes(app: Express) {
 
   // ==================== API KEY MANAGEMENT ====================
 
-  app.post("/api/kyc-service/organisations/:id/api-keys", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+  app.post("/api/kyc-service/organisations/:id/api-keys", isAuthenticated, requireOrgMember(["org_admin"]), requireActiveOrg(), async (req: any, res: Response) => {
     try {
       const orgId = parseInt(req.params.id);
 
@@ -2313,7 +2342,7 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
-  app.post("/api/kyc-service/organisations/:id/billing/purchase-credits", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+  app.post("/api/kyc-service/organisations/:id/billing/purchase-credits", isAuthenticated, requireOrgMember(["org_admin"]), requireActiveOrg(), async (req: any, res: Response) => {
     try {
       const orgId = parseInt(req.params.id);
       const userId = getUserId(req);
@@ -2347,7 +2376,7 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
-  app.post("/api/kyc-service/organisations/:id/billing/request-invoiced", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+  app.post("/api/kyc-service/organisations/:id/billing/request-invoiced", isAuthenticated, requireOrgMember(["org_admin"]), requireActiveOrg(), async (req: any, res: Response) => {
     try {
       const orgId = parseInt(req.params.id);
       const userId = getUserId(req);

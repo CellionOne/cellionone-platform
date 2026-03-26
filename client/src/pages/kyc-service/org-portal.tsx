@@ -300,7 +300,7 @@ function DashboardSection({ orgId, org, onNav }: { orgId: string; org: OrgWithSt
 
 // ─── Verifications Section ────────────────────────────────────────────────────
 
-function VerificationsSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean }) {
+function VerificationsSection({ orgId, isAdmin, isOrgActive }: { orgId: string; isAdmin: boolean; isOrgActive: boolean }) {
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -382,18 +382,18 @@ function VerificationsSection({ orgId, isAdmin }: { orgId: string; isAdmin: bool
           <Tooltip>
             <TooltipTrigger asChild>
               <span>
-                <Button variant="outline" onClick={() => setBulkOpen(true)} disabled={!isAdmin} data-testid="button-bulk-import">
+                <Button variant="outline" onClick={() => setBulkOpen(true)} disabled={!isAdmin || !isOrgActive} data-testid="button-bulk-import">
                   <Upload className="h-4 w-4 mr-2" />
                   Bulk Import
                 </Button>
               </span>
             </TooltipTrigger>
-            {!isAdmin && <TooltipContent>Only admins can bulk import</TooltipContent>}
+            {!isAdmin ? <TooltipContent>Only admins can bulk import</TooltipContent> : !isOrgActive ? <TooltipContent>Available once your organisation is approved</TooltipContent> : null}
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <span>
-                <Button onClick={() => setNewOpen(true)} disabled={!isAdmin} data-testid="button-new-verification">
+                <Button onClick={() => setNewOpen(true)} disabled={!isAdmin || !isOrgActive} data-testid="button-new-verification">
                   <Plus className="h-4 w-4 mr-2" />
                   New Request
                 </Button>
@@ -1240,7 +1240,7 @@ function AnalyticsSection({ orgId }: { orgId: string }) {
 
 // ─── Developers Section ───────────────────────────────────────────────────────
 
-function DevelopersSection({ orgId, org, isAdmin }: { orgId: string; org: OrgWithStats | undefined; isAdmin: boolean }) {
+function DevelopersSection({ orgId, org, isAdmin, isOrgActive }: { orgId: string; org: OrgWithStats | undefined; isAdmin: boolean; isOrgActive: boolean }) {
   const [devTab, setDevTab] = useState<"keys" | "webhooks" | "quickstart" | "status">("keys");
   return (
     <div className="space-y-4">
@@ -1255,7 +1255,7 @@ function DevelopersSection({ orgId, org, isAdmin }: { orgId: string; org: OrgWit
           <TabsTrigger value="quickstart" data-testid="dev-tab-quickstart"><Terminal className="h-3.5 w-3.5 mr-1.5" />Quickstart</TabsTrigger>
           <TabsTrigger value="status" data-testid="dev-tab-status"><Activity className="h-3.5 w-3.5 mr-1.5" />API Status</TabsTrigger>
         </TabsList>
-        <TabsContent value="keys" className="mt-4"><ApiKeysPanel orgId={orgId} org={org} /></TabsContent>
+        <TabsContent value="keys" className="mt-4"><ApiKeysPanel orgId={orgId} org={org} isOrgActive={isOrgActive} /></TabsContent>
         <TabsContent value="webhooks" className="mt-4"><WebhooksPanel orgId={orgId} /></TabsContent>
         <TabsContent value="quickstart" className="mt-4"><QuickstartPanel org={org} /></TabsContent>
         <TabsContent value="status" className="mt-4"><ApiStatusPanel /></TabsContent>
@@ -1272,7 +1272,7 @@ type IntegrationProfile = {
   configuredAt?: string;
 };
 
-function ApiKeysPanel({ orgId, org }: { orgId: string; org: OrgWithStats | undefined }) {
+function ApiKeysPanel({ orgId, org, isOrgActive }: { orgId: string; org: OrgWithStats | undefined; isOrgActive: boolean }) {
   const [showKey, setShowKey] = useState<Record<number, boolean>>({});
   const [genName, setGenName] = useState("");
   const { toast } = useToast();
@@ -1334,7 +1334,7 @@ function ApiKeysPanel({ orgId, org }: { orgId: string; org: OrgWithStats | undef
       <CardContent className="space-y-4">
         <div className="flex gap-2">
           <Input value={genName} onChange={(e) => setGenName(e.target.value)} placeholder="Key name (e.g. Production)" className="max-w-xs" data-testid="input-key-name" />
-          <Button onClick={() => genMutation.mutate(genName)} disabled={!genName.trim() || genMutation.isPending} data-testid="button-generate-key">
+          <Button onClick={() => genMutation.mutate(genName)} disabled={!genName.trim() || genMutation.isPending || !isOrgActive} data-testid="button-generate-key">
             {genMutation.isPending ? "Generating..." : "Generate Key"}
           </Button>
         </div>
@@ -1818,7 +1818,7 @@ function formatNaira(amount: number): string {
   return `₦${amount.toLocaleString("en-NG")}`;
 }
 
-function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean }) {
+function BillingSection({ orgId, isAdmin, isOrgActive }: { orgId: string; isAdmin: boolean; isOrgActive: boolean }) {
   const { toast } = useToast();
   const [topUpQty, setTopUpQty] = useState(50);
   const [topUpType, setTopUpType] = useState<KycVerificationType>("individual");
@@ -1914,7 +1914,7 @@ function BillingSection({ orgId, isAdmin }: { orgId: string; isAdmin: boolean })
               </div>
               <CreditCard className="h-8 w-8 text-primary/40" />
             </div>
-            <Button className="mt-4 w-full" onClick={() => setTopUpOpen(true)} data-testid="button-top-up">
+            <Button className="mt-4 w-full" onClick={() => setTopUpOpen(true)} disabled={!isOrgActive} data-testid="button-top-up">
               Top Up Credits
             </Button>
           </CardContent>
@@ -3022,13 +3022,13 @@ export default function OrgPortalPage() {
 
             <div className="flex-1 overflow-y-auto p-6">
               {section === "dashboard" && <DashboardSection orgId={orgId} org={org} onNav={navigateTo} />}
-              {section === "verifications" && <VerificationsSection orgId={orgId} isAdmin={isAdmin} />}
+              {section === "verifications" && <VerificationsSection orgId={orgId} isAdmin={isAdmin} isOrgActive={org.status === "active"} />}
               {section === "sessions" && <SessionsSection orgId={orgId} />}
               {section === "users" && <UsersSection orgId={orgId} />}
               {section === "monitoring" && <MonitoringSection orgId={orgId} />}
               {section === "analytics" && <AnalyticsSection orgId={orgId} />}
-              {section === "developers" && <DevelopersSection orgId={orgId} org={org} isAdmin={isAdmin} />}
-              {section === "billing" && <BillingSection orgId={orgId} isAdmin={isAdmin} />}
+              {section === "developers" && <DevelopersSection orgId={orgId} org={org} isAdmin={isAdmin} isOrgActive={org.status === "active"} />}
+              {section === "billing" && <BillingSection orgId={orgId} isAdmin={isAdmin} isOrgActive={org.status === "active"} />}
               {section === "team" && <TeamSection orgId={orgId} org={org} isAdmin={isAdmin} />}
               {section === "settings" && <SettingsSection orgId={orgId} org={org} isAdmin={isAdmin} />}
             </div>

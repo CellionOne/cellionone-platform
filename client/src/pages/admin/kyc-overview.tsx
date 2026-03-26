@@ -732,7 +732,7 @@ export default function AdminKycOverview() {
                                   {account.clientType === "application" && (
                                     <Badge className="bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300 border-0 text-xs" data-testid={`badge-billing-client-type-${account.id}`}>
                                       <Zap className="h-3 w-3 mr-1" />
-                                      App
+                                      Application
                                     </Badge>
                                   )}
                                 </div>

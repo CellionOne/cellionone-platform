@@ -271,6 +271,7 @@ export async function getBillingRequests(orgId: number): Promise<KycBillingReque
 
 export async function getPendingBillingRequests(): Promise<KycBillingRequest[]> {
   return db.select().from(kycBillingRequests)
+    .where(eq(kycBillingRequests.status, "pending"))
     .orderBy(desc(kycBillingRequests.createdAt))
     .limit(200);
 }

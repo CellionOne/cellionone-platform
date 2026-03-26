@@ -1,4 +1,4 @@
-import { useRoute } from "wouter";
+import { useRoute, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingSpinner, LoadingPage } from "@/components/loading-spinner";
 import { ReadinessPanel } from "@/components/readiness-panel";
@@ -24,8 +25,25 @@ import {
   CreditCard,
   Truck,
   MessageSquare,
+  Users,
+  ShieldCheck,
+  Mail,
+  UserCheck,
 } from "lucide-react";
 import type { CompanyApplication, ApplicationChecklistItem, Payment, ClarificationRequest } from "@shared/schema";
+
+interface ReadinessPerson {
+  id: number | string;
+  inviteEmail: string | null;
+  role: string;
+  inviteStatus: string | null;
+  isVerified: boolean | null;
+  personUserId: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  profileCompletion: number;
+  isProfileComplete: boolean;
+}
 
 interface ApplicationDetails {
   application: CompanyApplication;
@@ -53,6 +71,10 @@ export default function ApplicationDetailsPage() {
   const { data, isLoading } = useQuery<ApplicationDetails>({
     queryKey: ["/api/applications", applicationId],
     enabled: !!applicationId,
+  });
+
+  const { data: teamReadiness } = useQuery<ReadinessPerson[]>({
+    queryKey: ["/api/company-people/readiness"],
   });
 
   const { uploadFile, isUploading: isFileUploading } = useUpload({
@@ -399,6 +421,76 @@ export default function ApplicationDetailsPage() {
                     >
                       {submitMutation.isPending ? <LoadingSpinner size="sm" /> : "Submit Application"}
                     </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {teamReadiness && teamReadiness.length > 0 && (
+              <Card data-testid="card-team-verification-status">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Team Verification
+                  </CardTitle>
+                  <CardDescription>
+                    All directors and shareholders must verify their identity before submission.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {teamReadiness.map((person) => {
+                    const name = person.firstName && person.lastName
+                      ? `${person.firstName} ${person.lastName}`
+                      : person.inviteEmail || "Unknown";
+                    const isVerified = !!person.isVerified;
+                    const hasProfile = person.isProfileComplete;
+                    const isPending = person.inviteStatus === "pending" && !person.personUserId;
+
+                    return (
+                      <div
+                        key={String(person.id)}
+                        className="flex items-center justify-between gap-2 py-1.5"
+                        data-testid={`team-person-${person.id}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${
+                            isVerified
+                              ? "bg-green-100 dark:bg-green-950"
+                              : isPending
+                              ? "bg-amber-100 dark:bg-amber-950"
+                              : "bg-muted"
+                          }`}>
+                            {isVerified ? (
+                              <ShieldCheck className="h-3.5 w-3.5 text-green-600" />
+                            ) : isPending ? (
+                              <Mail className="h-3.5 w-3.5 text-amber-600" />
+                            ) : (
+                              <UserCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium truncate">{name}</p>
+                            <p className="text-xs text-muted-foreground capitalize">
+                              {person.role.replace(/_/g, " ")}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge
+                          variant={isVerified ? "default" : "secondary"}
+                          className={`text-xs shrink-0 ${isVerified ? "bg-green-600 hover:bg-green-600" : ""}`}
+                        >
+                          {isVerified ? "Verified" : isPending ? "Invited" : hasProfile ? "Profile Ready" : "Profile Incomplete"}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                  <div className="pt-2 border-t">
+                    <Link href="/founder/company-people">
+                      <Button variant="outline" size="sm" className="w-full" data-testid="button-manage-team-from-app">
+                        <Users className="h-3.5 w-3.5 mr-1.5" />
+                        Manage Team
+                      </Button>
+                    </Link>
                   </div>
                 </CardContent>
               </Card>

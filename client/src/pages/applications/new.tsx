@@ -26,14 +26,28 @@ import {
   MapPin,
   Mail,
   Shield,
+  Users,
+  UserPlus,
+  Trash2,
+  Info,
 } from "lucide-react";
 
 const steps = [
   { id: 1, title: "Company Type", description: "Choose your company structure" },
   { id: 2, title: "Company Names", description: "Propose up to 3 name options" },
   { id: 3, title: "Business Details", description: "Describe your business activities" },
-  { id: 4, title: "Address", description: "Registered office address" },
+  { id: 4, title: "Directors & Shareholders", description: "Declare your team members" },
+  { id: 5, title: "Address", description: "Registered office address" },
 ];
+
+interface DirectorEntry {
+  localId: string;
+  inviteEmail: string;
+  role: string;
+  sharesAllocated: string;
+  shareClass: string;
+  sharePercentage: string;
+}
 
 const companyTypes = [
   { value: "LTD", label: "Private Limited Company (LTD)", description: "Most common for small to medium businesses" },
@@ -58,6 +72,14 @@ export default function NewApplicationPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [online, setOnline] = useState(isOnline());
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [directors, setDirectors] = useState<DirectorEntry[]>([]);
+  const [newDirector, setNewDirector] = useState<Omit<DirectorEntry, "localId">>({
+    inviteEmail: "",
+    role: "director",
+    sharesAllocated: "",
+    shareClass: "ordinary",
+    sharePercentage: "",
+  });
   const [formData, setFormData] = useState({
     applicationType: "incorporation",
     companyType: "",
@@ -178,11 +200,22 @@ export default function NewApplicationPage() {
       });
       const app = await response.json();
       
-      // If using registered office, call the selection API
       if (data.useRegisteredOffice && data.registeredOfficeTier) {
         await apiRequest("POST", "/api/registered-office/select", {
           applicationId: app.id,
           tier: data.registeredOfficeTier,
+        });
+      }
+
+      for (const dir of directors) {
+        if (!dir.inviteEmail) continue;
+        await apiRequest("POST", "/api/company-people", {
+          inviteEmail: dir.inviteEmail,
+          role: dir.role,
+          applicationId: app.id,
+          sharesAllocated: dir.sharesAllocated ? parseInt(dir.sharesAllocated, 10) : null,
+          shareClass: dir.shareClass || null,
+          sharePercentage: dir.sharePercentage || null,
         });
       }
       
@@ -192,11 +225,14 @@ export default function NewApplicationPage() {
       deleteDraft(DRAFT_ID);
       queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/company-people"] });
       toast({
         title: "Application created",
-        description: formData.useRegisteredOffice 
-          ? "Your application has been saved with registered office selection."
-          : "Your application has been saved as a draft.",
+        description: directors.length > 0
+          ? `Application saved. Invitation emails sent to ${directors.length} team member${directors.length > 1 ? "s" : ""}.`
+          : formData.useRegisteredOffice 
+            ? "Your application has been saved with registered office selection."
+            : "Your application has been saved as a draft.",
       });
       navigate(`/applications/${app.id}`);
     },
@@ -208,6 +244,16 @@ export default function NewApplicationPage() {
       });
     },
   });
+
+  const addDirector = () => {
+    if (!newDirector.inviteEmail || !newDirector.role) return;
+    setDirectors(prev => [...prev, { ...newDirector, localId: crypto.randomUUID() }]);
+    setNewDirector({ inviteEmail: "", role: "director", sharesAllocated: "", shareClass: "ordinary", sharePercentage: "" });
+  };
+
+  const removeDirector = (localId: string) => {
+    setDirectors(prev => prev.filter(d => d.localId !== localId));
+  };
 
   const fetchAiSuggestions = async () => {
     if (!formData.businessDescription.trim()) return;
@@ -253,6 +299,8 @@ export default function NewApplicationPage() {
       case 3:
         return !!formData.businessDescription;
       case 4:
+        return true;
+      case 5:
         if (formData.useRegisteredOffice) {
           return !!formData.registeredOfficeTier;
         }
@@ -263,7 +311,7 @@ export default function NewApplicationPage() {
   };
 
   const handleNext = () => {
-    if (currentStep < 4) {
+    if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
     } else {
       createMutation.mutate(formData);
@@ -465,6 +513,146 @@ export default function NewApplicationPage() {
 
             {currentStep === 4 && (
               <div className="space-y-6">
+                <div className="rounded-lg border bg-muted/30 p-4 flex items-start gap-3 text-sm" data-testid="directors-info-banner">
+                  <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                  <p className="text-muted-foreground">
+                    Add co-founders, directors, and shareholders. Each person will receive an email invitation to complete their profile and identity verification — required before your application can be processed. You can also manage this team later from your dashboard.
+                  </p>
+                </div>
+
+                {directors.length > 0 && (
+                  <div className="space-y-2" data-testid="directors-list">
+                    {directors.map((dir) => (
+                      <div
+                        key={dir.localId}
+                        className="flex items-center justify-between gap-3 p-3 rounded-lg border bg-background"
+                        data-testid={`director-row-${dir.localId}`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <Users className="h-4 w-4 text-primary" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{dir.inviteEmail}</p>
+                            <p className="text-xs text-muted-foreground capitalize">
+                              {dir.role.replace(/_/g, " ")}
+                              {dir.sharePercentage ? ` · ${dir.sharePercentage}% ${dir.shareClass || ""}` : ""}
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive shrink-0"
+                          onClick={() => removeDirector(dir.localId)}
+                          data-testid={`button-remove-director-${dir.localId}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="space-y-4 rounded-lg border p-4" data-testid="add-director-form">
+                  <p className="text-sm font-medium flex items-center gap-2">
+                    <UserPlus className="h-4 w-4" />
+                    Add a Team Member
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="dir-email">Email Address *</Label>
+                      <Input
+                        id="dir-email"
+                        type="email"
+                        placeholder="director@example.com"
+                        value={newDirector.inviteEmail}
+                        onChange={(e) => setNewDirector(p => ({ ...p, inviteEmail: e.target.value }))}
+                        data-testid="input-director-email"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dir-role">Role *</Label>
+                      <Select
+                        value={newDirector.role}
+                        onValueChange={(v) => setNewDirector(p => ({ ...p, role: v }))}
+                      >
+                        <SelectTrigger id="dir-role" data-testid="select-director-role">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="director">Director</SelectItem>
+                          <SelectItem value="shareholder">Shareholder</SelectItem>
+                          <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
+                          <SelectItem value="secretary">Company Secretary</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dir-share-class">Share Class</Label>
+                      <Select
+                        value={newDirector.shareClass}
+                        onValueChange={(v) => setNewDirector(p => ({ ...p, shareClass: v }))}
+                      >
+                        <SelectTrigger id="dir-share-class" data-testid="select-director-share-class">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ordinary">Ordinary</SelectItem>
+                          <SelectItem value="preference">Preference</SelectItem>
+                          <SelectItem value="redeemable">Redeemable</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dir-shares">Shares Allocated</Label>
+                      <Input
+                        id="dir-shares"
+                        type="number"
+                        min="0"
+                        placeholder="e.g. 5000"
+                        value={newDirector.sharesAllocated}
+                        onChange={(e) => setNewDirector(p => ({ ...p, sharesAllocated: e.target.value }))}
+                        data-testid="input-director-shares"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dir-pct">Share Percentage (%)</Label>
+                      <Input
+                        id="dir-pct"
+                        type="number"
+                        min="0"
+                        max="100"
+                        placeholder="e.g. 25"
+                        value={newDirector.sharePercentage}
+                        onChange={(e) => setNewDirector(p => ({ ...p, sharePercentage: e.target.value }))}
+                        data-testid="input-director-percentage"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addDirector}
+                    disabled={!newDirector.inviteEmail}
+                    className="gap-2"
+                    data-testid="button-add-director"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Add Person
+                  </Button>
+                </div>
+
+                {directors.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-2" data-testid="text-no-directors">
+                    No team members added yet. You can add them later from your dashboard if preferred.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {currentStep === 5 && (
+              <div className="space-y-6">
                 <div className="space-y-3">
                   <Label className="text-base font-medium">Choose Address Type</Label>
                   <RadioGroup 
@@ -638,7 +826,7 @@ export default function NewApplicationPage() {
                     <LoadingSpinner size="sm" className="mr-2" />
                     Creating...
                   </>
-                ) : currentStep === 4 ? (
+                ) : currentStep === 5 ? (
                   "Create Application"
                 ) : (
                   <>

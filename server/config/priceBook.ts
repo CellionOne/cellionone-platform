@@ -34,8 +34,8 @@ const PRICE_BOOK: PriceEntry[] = [
     serviceType: 'verification',
     provider: 'paystack',
     currency: 'NGN',
-    amount: 2500000, // ₦25,000 in kobo
-    amountDisplay: '₦25,000',
+    amount: 1000000, // ₦10,000 in kobo
+    amountDisplay: '₦10,000',
     isRecurring: false,
     description: 'Identity & Compliance Verification',
   },

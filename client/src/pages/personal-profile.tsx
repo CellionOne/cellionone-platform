@@ -51,6 +51,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { LiveCaptureWidget } from "@/components/live-capture-widget";
+import { InvitationBanner } from "@/components/invitation-banner";
 
 const NIGERIAN_STATES = [
   "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue",
@@ -144,6 +145,7 @@ export default function PersonalProfilePage() {
       breadcrumbs={[{ label: "Dashboard", href: dashboardPath }, { label: "Personal Profile" }]}
     >
       <div className="max-w-3xl mx-auto space-y-6 p-4 overflow-y-auto h-full">
+        <InvitationBanner />
         <ProfileHeader />
         <ProfileForm />
         <Separator />

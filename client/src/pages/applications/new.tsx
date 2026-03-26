@@ -335,7 +335,7 @@ export default function NewApplicationPage() {
         const hasShareholderRoles = directors.some(d =>
           ["shareholder", "director_shareholder"].includes(d.role)
         );
-        if (hasShareholderRoles) return totalSharePercentage === 100;
+        if (hasShareholderRoles) return Math.abs(totalSharePercentage - 100) < 0.01;
         return true;
       }
       case 5:
@@ -608,7 +608,7 @@ export default function NewApplicationPage() {
                           </p>
                         );
                       }
-                      if (hasShareholderRoles && totalSharePercentage === 100) {
+                      if (hasShareholderRoles && Math.abs(totalSharePercentage - 100) < 0.01) {
                         return (
                           <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1" data-testid="text-share-pct-complete">
                             ✓ 100% of shares allocated — you can proceed.

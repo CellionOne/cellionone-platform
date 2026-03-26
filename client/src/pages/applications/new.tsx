@@ -42,6 +42,7 @@ const steps = [
 
 interface DirectorEntry {
   localId: string;
+  fullName: string;
   inviteEmail: string;
   role: string;
   sharesAllocated: string;
@@ -74,6 +75,7 @@ export default function NewApplicationPage() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [directors, setDirectors] = useState<DirectorEntry[]>([]);
   const [newDirector, setNewDirector] = useState<Omit<DirectorEntry, "localId">>({
+    fullName: "",
     inviteEmail: "",
     role: "director",
     sharesAllocated: "",
@@ -246,10 +248,12 @@ export default function NewApplicationPage() {
   });
 
   const addDirector = () => {
-    if (!newDirector.inviteEmail || !newDirector.role) return;
+    if (!newDirector.fullName || !newDirector.inviteEmail || !newDirector.role) return;
     setDirectors(prev => [...prev, { ...newDirector, localId: crypto.randomUUID() }]);
-    setNewDirector({ inviteEmail: "", role: "director", sharesAllocated: "", shareClass: "ordinary", sharePercentage: "" });
+    setNewDirector({ fullName: "", inviteEmail: "", role: "director", sharesAllocated: "", shareClass: "ordinary", sharePercentage: "" });
   };
+
+  const totalSharePercentage = directors.reduce((sum, d) => sum + (parseFloat(d.sharePercentage) || 0), 0);
 
   const removeDirector = (localId: string) => {
     setDirectors(prev => prev.filter(d => d.localId !== localId));
@@ -533,7 +537,8 @@ export default function NewApplicationPage() {
                             <Users className="h-4 w-4 text-primary" />
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{dir.inviteEmail}</p>
+                            <p className="text-sm font-medium truncate">{dir.fullName || dir.inviteEmail}</p>
+                            {dir.fullName && <p className="text-xs text-muted-foreground truncate">{dir.inviteEmail}</p>}
                             <p className="text-xs text-muted-foreground capitalize">
                               {dir.role.replace(/_/g, " ")}
                               {dir.sharePercentage ? ` · ${dir.sharePercentage}% ${dir.shareClass || ""}` : ""}
@@ -551,6 +556,16 @@ export default function NewApplicationPage() {
                         </Button>
                       </div>
                     ))}
+                    {totalSharePercentage > 100 && (
+                      <p className="text-xs text-destructive flex items-center gap-1" data-testid="text-share-pct-warning">
+                        ⚠ Total share percentage is {totalSharePercentage}% — exceeds 100%. Please review allocations.
+                      </p>
+                    )}
+                    {totalSharePercentage > 0 && totalSharePercentage <= 100 && (
+                      <p className="text-xs text-muted-foreground" data-testid="text-share-pct-total">
+                        Total declared: {totalSharePercentage}% of shares allocated to listed members.
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -560,7 +575,18 @@ export default function NewApplicationPage() {
                     Add a Team Member
                   </p>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2 sm:col-span-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="dir-name">Full Name *</Label>
+                      <Input
+                        id="dir-name"
+                        type="text"
+                        placeholder="e.g. Chukwuemeka Obi"
+                        value={newDirector.fullName}
+                        onChange={(e) => setNewDirector(p => ({ ...p, fullName: e.target.value }))}
+                        data-testid="input-director-name"
+                      />
+                    </div>
+                    <div className="space-y-2">
                       <Label htmlFor="dir-email">Email Address *</Label>
                       <Input
                         id="dir-email"
@@ -634,7 +660,7 @@ export default function NewApplicationPage() {
                     type="button"
                     variant="outline"
                     onClick={addDirector}
-                    disabled={!newDirector.inviteEmail}
+                    disabled={!newDirector.fullName || !newDirector.inviteEmail}
                     className="gap-2"
                     data-testid="button-add-director"
                   >

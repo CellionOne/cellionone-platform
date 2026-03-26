@@ -2049,6 +2049,8 @@ export async function registerRoutes(
 
           return {
             id: person.id,
+            applicationId: person.applicationId,
+            companyProfileId: person.companyProfileId,
             inviteEmail: person.inviteEmail,
             role: person.role,
             inviteStatus: person.inviteStatus,

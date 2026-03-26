@@ -34,6 +34,7 @@ import type { CompanyApplication, ApplicationChecklistItem, Payment, Clarificati
 
 interface ReadinessPerson {
   id: number | string;
+  applicationId?: number | null;
   inviteEmail: string | null;
   role: string;
   inviteStatus: string | null;
@@ -426,7 +427,7 @@ export default function ApplicationDetailsPage() {
               </Card>
             )}
 
-            {teamReadiness && teamReadiness.length > 0 && (
+            {teamReadiness && teamReadiness.filter(p => p.role === "founder" || p.applicationId === parseInt(applicationId || "0", 10)).length > 0 && (
               <Card data-testid="card-team-verification-status">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
@@ -438,7 +439,7 @@ export default function ApplicationDetailsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {teamReadiness.map((person) => {
+                  {teamReadiness.filter(p => p.role === "founder" || p.applicationId === parseInt(applicationId || "0", 10)).map((person) => {
                     const name = person.firstName && person.lastName
                       ? `${person.firstName} ${person.lastName}`
                       : person.inviteEmail || "Unknown";

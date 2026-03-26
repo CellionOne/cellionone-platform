@@ -2060,6 +2060,91 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
+  // Admin provision API client — skip self-service form, terms, and review queue
+  app.post("/api/admin/kyc/provision-client", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    try {
+      const adminUserId = getUserId(req);
+      if (!adminUserId) return res.status(401).json({ message: "Unauthorized" });
+
+      const schema = z.object({
+        name: z.string().min(2).max(255),
+        clientType: z.enum(["organisation", "application"]),
+        contactEmail: z.string().email(),
+        billingMode: z.enum(["prepaid", "exempt", "invoiced"]).optional(),
+        permissions: z.array(z.string()).min(1),
+        keyName: z.string().min(1).max(255).optional(),
+      });
+      const data = schema.parse(req.body);
+
+      // Default billing mode: application → exempt, organisation → prepaid
+      const resolvedBillingMode = data.billingMode ?? (data.clientType === "application" ? "exempt" : "prepaid");
+      const keyName = data.keyName || `${data.clientType === "application" ? "App" : "Default"} Key`;
+
+      // Generate a unique slug
+      let slug = slugify(data.name);
+      const [existing] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.slug, slug));
+      if (existing) slug = `${slug}-${Date.now().toString(36)}`;
+
+      // Create org with status "active" — no review needed
+      const [org] = await db.insert(kycOrganisations).values({
+        name: data.name,
+        slug,
+        clientType: data.clientType,
+        category: "corporate",
+        contactEmail: data.contactEmail,
+        createdByUserId: adminUserId,
+        status: "active",
+        settings: {},
+        employeePortalEnabled: false,
+        supplierPortalEnabled: false,
+        termsAcceptedAt: new Date(),
+        termsVersion: TERMS_VERSION,
+        termsAcceptedByUserId: adminUserId,
+        termsAcceptedIp: "admin-provisioned",
+      }).returning();
+
+      // Add admin as org_admin member
+      await db.insert(kycOrgMembers).values({
+        orgId: org.id,
+        userId: adminUserId,
+        role: "org_admin",
+        inviteEmail: data.contactEmail,
+        inviteStatus: "accepted",
+      });
+
+      // Create billing account with the chosen mode
+      const [billingAccount] = await db.insert(kycBillingAccounts).values({
+        organisationId: org.id,
+        billingMode: resolvedBillingMode,
+        creditBalance: 0,
+        isActive: true,
+      }).returning();
+
+      // Generate API key immediately
+      const { key, apiKey } = await kycApiKeyService.generateApiKey(org.id, keyName, data.permissions);
+
+      res.status(201).json({
+        org,
+        billingAccount: {
+          id: billingAccount.id,
+          billingMode: billingAccount.billingMode,
+        },
+        apiKey: {
+          id: apiKey.id,
+          name: apiKey.name,
+          keyPrefix: apiKey.keyPrefix,
+          permissions: apiKey.permissions,
+          createdAt: apiKey.createdAt,
+        },
+        key,
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC Admin] Provision client error:", error);
+      res.status(500).json({ message: "Failed to provision API client" });
+    }
+  });
+
   // Admin review endpoint — action-based contract: POST /api/admin/kyc-orgs/:id/review
   app.post("/api/admin/kyc-orgs/:id/review", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
     try {
@@ -2532,7 +2617,27 @@ export function registerKycServiceRoutes(app: Express) {
 
   app.get("/api/admin/kyc/billing-accounts", isAuthenticated, requireAdmin, async (_req: any, res: Response) => {
     try {
-      const accounts = await billingService.getAllBillingAccounts();
+      const accounts = await db.select({
+        id: kycBillingAccounts.id,
+        organisationId: kycBillingAccounts.organisationId,
+        billingMode: kycBillingAccounts.billingMode,
+        creditBalance: kycBillingAccounts.creditBalance,
+        invoiceEmail: kycBillingAccounts.invoiceEmail,
+        invoiceCompanyName: kycBillingAccounts.invoiceCompanyName,
+        invoiceAddress: kycBillingAccounts.invoiceAddress,
+        paymentTermsDays: kycBillingAccounts.paymentTermsDays,
+        creditLimit: kycBillingAccounts.creditLimit,
+        isActive: kycBillingAccounts.isActive,
+        approvedAt: kycBillingAccounts.approvedAt,
+        approvedBy: kycBillingAccounts.approvedBy,
+        createdAt: kycBillingAccounts.createdAt,
+        updatedAt: kycBillingAccounts.updatedAt,
+        orgName: kycOrganisations.name,
+        clientType: kycOrganisations.clientType,
+      })
+        .from(kycBillingAccounts)
+        .leftJoin(kycOrganisations, eq(kycBillingAccounts.organisationId, kycOrganisations.id))
+        .orderBy(desc(kycBillingAccounts.createdAt));
       res.json(accounts);
     } catch (error: any) {
       console.error("[KYC Admin] List billing accounts error:", error);

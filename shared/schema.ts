@@ -1080,6 +1080,7 @@ export const kycOrganisations = pgTable("kyc_organisations", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   slug: varchar("slug", { length: 255 }).notNull().unique(),
+  clientType: varchar("client_type", { length: 20 }).default("organisation").notNull(),
   category: varchar("category", { length: 50 }).notNull(),
   contactEmail: varchar("contact_email", { length: 255 }).notNull(),
   contactPhone: varchar("contact_phone", { length: 50 }),

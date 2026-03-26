@@ -45,6 +45,9 @@ import {
   Plus,
   Minus,
   Receipt,
+  Zap,
+  Copy,
+  KeyRound,
 } from "lucide-react";
 
 interface KycStats {
@@ -62,6 +65,7 @@ interface KycOrgWithStats {
   name: string;
   slug: string;
   category: string;
+  clientType: string;
   contactEmail: string;
   status: string;
   createdAt: string;
@@ -132,7 +136,17 @@ interface BillingAccount {
   createdAt: string;
   updatedAt: string | null;
   orgName: string | null;
+  clientType: string | null;
 }
+
+type ProvisionStep = "select-type" | "fill-details" | "success";
+type ProvisionClientType = "organisation" | "application";
+
+const PROVISION_PERMISSIONS = [
+  { id: "verify_identity", label: "Verify Identity", description: "BVN/NIN lookup + AML screening" },
+  { id: "verify_individual", label: "Verify Individual", description: "Full individual KYC with biometrics" },
+  { id: "verify_supplier", label: "Verify Supplier", description: "Corporate entity + key persons KYC" },
+] as const;
 
 interface KycInvoice {
   id: number;
@@ -168,6 +182,30 @@ export default function AdminKycOverview() {
   const [selectedBillingMode, setSelectedBillingMode] = useState<"prepaid" | "invoiced" | "exempt">("prepaid");
   const [markPaidDialog, setMarkPaidDialog] = useState<KycInvoice | null>(null);
   const [paystackRef, setPaystackRef] = useState("");
+
+  // Provision API client dialog
+  const [provisionOpen, setProvisionOpen] = useState(false);
+  const [provisionStep, setProvisionStep] = useState<ProvisionStep>("select-type");
+  const [provisionClientType, setProvisionClientType] = useState<ProvisionClientType>("organisation");
+  const [provisionName, setProvisionName] = useState("");
+  const [provisionEmail, setProvisionEmail] = useState("");
+  const [provisionBillingMode, setProvisionBillingMode] = useState<"prepaid" | "exempt" | "invoiced">("prepaid");
+  const [provisionPermissions, setProvisionPermissions] = useState<string[]>(["verify_identity"]);
+  const [provisionKeyName, setProvisionKeyName] = useState("");
+  const [provisionResult, setProvisionResult] = useState<{ key: string; orgName: string; orgId: number; billingMode: string } | null>(null);
+  const [keyCopied, setKeyCopied] = useState(false);
+
+  function resetProvisionDialog() {
+    setProvisionStep("select-type");
+    setProvisionClientType("organisation");
+    setProvisionName("");
+    setProvisionEmail("");
+    setProvisionBillingMode("prepaid");
+    setProvisionPermissions(["verify_identity"]);
+    setProvisionKeyName("");
+    setProvisionResult(null);
+    setKeyCopied(false);
+  }
 
   const { data: stats, isLoading: statsLoading } = useQuery<KycStats>({
     queryKey: ["/api/admin/kyc/stats"],
@@ -304,6 +342,35 @@ export default function AdminKycOverview() {
     },
   });
 
+  const provisionMutation = useMutation({
+    mutationFn: async (payload: {
+      name: string;
+      clientType: "organisation" | "application";
+      contactEmail: string;
+      billingMode: "prepaid" | "exempt" | "invoiced";
+      permissions: string[];
+      keyName?: string;
+    }) => {
+      const res = await apiRequest("POST", "/api/admin/kyc/provision-client", payload);
+      return res.json() as Promise<{ key: string; org: { id: number; name: string }; billingAccount: { billingMode: string } }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/kyc/organisations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/kyc/billing-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/kyc/stats"] });
+      setProvisionResult({
+        key: data.key,
+        orgName: data.org.name,
+        orgId: data.org.id,
+        billingMode: data.billingAccount.billingMode,
+      });
+      setProvisionStep("success");
+    },
+    onError: (error: any) => {
+      toast({ title: "Provisioning failed", description: error.message || "Failed to provision API client.", variant: "destructive" });
+    },
+  });
+
   const isLoading = statsLoading || orgsLoading;
 
   const formatDate = (dateStr: string) => {
@@ -396,6 +463,16 @@ export default function AdminKycOverview() {
               </TabsList>
 
               <TabsContent value="organisations">
+                <div className="flex items-center justify-between mb-4">
+                  <div />
+                  <Button
+                    onClick={() => { resetProvisionDialog(); setProvisionOpen(true); }}
+                    data-testid="button-new-api-client"
+                  >
+                    <KeyRound className="h-4 w-4 mr-2" />
+                    New API Client
+                  </Button>
+                </div>
                 {!orgs || orgs.length === 0 ? (
                   <EmptyState
                     icon={Building2}
@@ -425,9 +502,17 @@ export default function AdminKycOverview() {
                           {orgs.map((org) => (
                             <TableRow key={org.id} data-testid={`row-kyc-org-${org.id}`}>
                               <TableCell>
-                                <div>
-                                  <p className="font-medium">{org.name}</p>
-                                  <p className="text-xs text-muted-foreground">{org.contactEmail}</p>
+                                <div className="flex items-start gap-2">
+                                  <div>
+                                    <p className="font-medium">{org.name}</p>
+                                    <p className="text-xs text-muted-foreground">{org.contactEmail}</p>
+                                  </div>
+                                  {org.clientType === "application" && (
+                                    <Badge className="shrink-0 bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300 border-0 text-xs" data-testid={`badge-client-type-${org.id}`}>
+                                      <Zap className="h-3 w-3 mr-1" />
+                                      App
+                                    </Badge>
+                                  )}
                                 </div>
                               </TableCell>
                               <TableCell>
@@ -641,8 +726,16 @@ export default function AdminKycOverview() {
                         <TableBody>
                           {billingAccounts.map((account) => (
                             <TableRow key={account.id} data-testid={`row-billing-account-${account.id}`}>
-                              <TableCell className="font-medium">
-                                {account.orgName || `Org #${account.organisationId}`}
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{account.orgName || `Org #${account.organisationId}`}</span>
+                                  {account.clientType === "application" && (
+                                    <Badge className="bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300 border-0 text-xs" data-testid={`badge-billing-client-type-${account.id}`}>
+                                      <Zap className="h-3 w-3 mr-1" />
+                                      App
+                                    </Badge>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell>
                                 <Badge
@@ -1222,6 +1315,243 @@ export default function AdminKycOverview() {
               {markPaidMutation.isPending ? "Processing..." : "Mark as Paid"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Provision API Client dialog */}
+      <Dialog open={provisionOpen} onOpenChange={(open) => { if (!open) { setProvisionOpen(false); resetProvisionDialog(); } }}>
+        <DialogContent className="max-w-lg">
+          {provisionStep === "select-type" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>New API Client</DialogTitle>
+                <DialogDescription>
+                  Choose the type of API client to provision. Both types get an API key immediately — no review required.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid grid-cols-1 gap-3 py-4 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => { setProvisionClientType("organisation"); setProvisionBillingMode("prepaid"); }}
+                  className={`flex flex-col gap-2 rounded-lg border p-4 text-left transition-colors ${
+                    provisionClientType === "organisation" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                  }`}
+                  data-testid="option-client-type-organisation"
+                >
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-5 w-5 text-muted-foreground" />
+                    <span className="font-medium text-sm">Organisation</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    An external business client — fintech, bank, or corporate. Defaults to prepaid billing.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setProvisionClientType("application"); setProvisionBillingMode("exempt"); }}
+                  className={`flex flex-col gap-2 rounded-lg border p-4 text-left transition-colors ${
+                    provisionClientType === "application" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                  }`}
+                  data-testid="option-client-type-application"
+                >
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-5 w-5 text-sky-600" />
+                    <span className="font-medium text-sm">Application</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    A first-party or trusted partner integration. Defaults to billing-exempt access.
+                  </p>
+                </button>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setProvisionOpen(false)} data-testid="button-cancel-provision">Cancel</Button>
+                <Button onClick={() => setProvisionStep("fill-details")} data-testid="button-provision-next">
+                  Next
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {provisionStep === "fill-details" && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  {provisionClientType === "application" ? (
+                    <><Zap className="h-5 w-5 text-sky-600" /> New Application</>
+                  ) : (
+                    <><Building2 className="h-5 w-5" /> New Organisation</>
+                  )}
+                </DialogTitle>
+                <DialogDescription>
+                  Fill in the details. An API key will be generated immediately.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="provision-name">{provisionClientType === "application" ? "Application Name" : "Organisation Name"} *</Label>
+                  <Input
+                    id="provision-name"
+                    value={provisionName}
+                    onChange={(e) => setProvisionName(e.target.value)}
+                    placeholder={provisionClientType === "application" ? "e.g. Cellion Internal Checker" : "e.g. FastCash Microfinance"}
+                    data-testid="input-provision-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="provision-email">Contact Email *</Label>
+                  <Input
+                    id="provision-email"
+                    type="email"
+                    value={provisionEmail}
+                    onChange={(e) => setProvisionEmail(e.target.value)}
+                    placeholder="contact@example.com"
+                    data-testid="input-provision-email"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="provision-key-name">API Key Name</Label>
+                  <Input
+                    id="provision-key-name"
+                    value={provisionKeyName}
+                    onChange={(e) => setProvisionKeyName(e.target.value)}
+                    placeholder={provisionClientType === "application" ? "App Key" : "Default Key"}
+                    data-testid="input-provision-key-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Billing Mode</Label>
+                  <div className="flex flex-col gap-2">
+                    {(["prepaid", "exempt", "invoiced"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setProvisionBillingMode(mode)}
+                        className={`flex items-center gap-3 rounded-md border p-2.5 text-left transition-colors ${
+                          provisionBillingMode === mode ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                        }`}
+                        data-testid={`option-provision-billing-${mode}`}
+                      >
+                        <div className={`h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                          provisionBillingMode === mode ? "border-primary" : "border-muted-foreground"
+                        }`}>
+                          {provisionBillingMode === mode && <div className="h-2 w-2 rounded-full bg-primary" />}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium capitalize">{mode}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {mode === "prepaid" && "Client buys credits upfront."}
+                            {mode === "exempt" && "No charges. Free access with usage logging."}
+                            {mode === "invoiced" && "Monthly invoiced billing."}
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Permissions *</Label>
+                  <div className="space-y-2">
+                    {PROVISION_PERMISSIONS.map((perm) => (
+                      <label
+                        key={perm.id}
+                        className="flex items-start gap-3 rounded-md border p-2.5 cursor-pointer hover:bg-muted/50"
+                        data-testid={`label-permission-${perm.id}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={provisionPermissions.includes(perm.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setProvisionPermissions((prev) => [...prev, perm.id]);
+                            } else {
+                              setProvisionPermissions((prev) => prev.filter((p) => p !== perm.id));
+                            }
+                          }}
+                          className="mt-0.5"
+                          data-testid={`checkbox-permission-${perm.id}`}
+                        />
+                        <div>
+                          <p className="text-sm font-medium">{perm.label}</p>
+                          <p className="text-xs text-muted-foreground">{perm.description}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setProvisionStep("select-type")} data-testid="button-provision-back">Back</Button>
+                <Button
+                  onClick={() => {
+                    if (!provisionName.trim() || !provisionEmail.trim() || provisionPermissions.length === 0) {
+                      toast({ title: "Missing fields", description: "Please fill in name, email, and select at least one permission.", variant: "destructive" });
+                      return;
+                    }
+                    provisionMutation.mutate({
+                      name: provisionName.trim(),
+                      clientType: provisionClientType,
+                      contactEmail: provisionEmail.trim(),
+                      billingMode: provisionBillingMode,
+                      permissions: provisionPermissions,
+                      keyName: provisionKeyName.trim() || undefined,
+                    });
+                  }}
+                  disabled={provisionMutation.isPending}
+                  data-testid="button-provision-create"
+                >
+                  {provisionMutation.isPending ? "Provisioning..." : "Create & Generate Key"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {provisionStep === "success" && provisionResult && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                  <CheckCircle2 className="h-5 w-5" />
+                  API Client Ready
+                </DialogTitle>
+                <DialogDescription>
+                  <strong>{provisionResult.orgName}</strong> has been provisioned with a <span className="capitalize">{provisionResult.billingMode}</span> billing account.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-300">
+                  <p className="font-semibold mb-1">Copy this key now — it will never be shown again.</p>
+                  <p>Hand it directly to the client. Store it securely.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>API Key</Label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 rounded bg-muted px-3 py-2 text-xs font-mono break-all" data-testid="text-generated-api-key">
+                      {provisionResult.key}
+                    </code>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(provisionResult.key);
+                        setKeyCopied(true);
+                        setTimeout(() => setKeyCopied(false), 2000);
+                      }}
+                      data-testid="button-copy-api-key"
+                    >
+                      {keyCopied ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  onClick={() => { setProvisionOpen(false); resetProvisionDialog(); }}
+                  data-testid="button-provision-done"
+                >
+                  Done
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </DashboardLayout>

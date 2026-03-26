@@ -5,7 +5,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { useToast } from "@/hooks/use-toast";
@@ -20,8 +37,6 @@ import {
   Calendar,
   FileText,
   Pencil,
-  Check,
-  X,
   PieChart,
   ClipboardList,
 } from "lucide-react";
@@ -31,6 +46,24 @@ import { Link } from "wouter";
 interface ProfileWithTasks extends CompanyProfile {
   tasks?: PostIncorporationTask[];
 }
+
+const COMPANY_TYPES = [
+  { value: "LTD", label: "Private Limited Company (LTD)" },
+  { value: "PLC", label: "Public Limited Company (PLC)" },
+  { value: "LLC", label: "Limited Liability Company (LLC)" },
+  { value: "LLP", label: "Limited Liability Partnership (LLP)" },
+  { value: "NGO", label: "Non-Governmental Organisation (NGO)" },
+  { value: "CBO", label: "Community Based Organisation (CBO)" },
+  { value: "TRUST", label: "Trust" },
+];
+
+const NIGERIAN_STATES = [
+  "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue",
+  "Borno", "Cross River", "Delta", "Ebonyi", "Edo", "Ekiti", "Enugu",
+  "FCT - Abuja", "Gombe", "Imo", "Jigawa", "Kaduna", "Kano", "Katsina",
+  "Kebbi", "Kogi", "Kwara", "Lagos", "Nasarawa", "Niger", "Ogun", "Ondo",
+  "Osun", "Oyo", "Plateau", "Rivers", "Sokoto", "Taraba", "Yobe", "Zamfara",
+];
 
 export default function CompanyProfilePage() {
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
@@ -64,13 +97,11 @@ export default function CompanyProfilePage() {
   return (
     <DashboardLayout role="founder" breadcrumbs={[{ label: "Company Profiles" }]}>
       <div className="space-y-6" data-testid="company-profiles-page">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-semibold" data-testid="text-page-title">Company Profiles</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              View and manage your incorporated companies
-            </p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Company Profiles</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            View and manage your incorporated companies
+          </p>
         </div>
 
         {profilesLoading ? (
@@ -121,9 +152,7 @@ export default function CompanyProfilePage() {
                     </div>
                   )}
                   {!profile.rcNumber && !profile.incorporationDate && (
-                    <p className="text-sm text-muted-foreground">
-                      Pending incorporation details
-                    </p>
+                    <p className="text-sm text-muted-foreground">Pending incorporation details</p>
                   )}
                 </CardContent>
               </Card>
@@ -146,33 +175,7 @@ function ProfileDetailView({
   onBack: () => void;
   toast: ReturnType<typeof useToast>["toast"];
 }) {
-  const [editingField, setEditingField] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState("");
-
-  const updateMutation = useMutation({
-    mutationFn: async (data: Record<string, any>) => {
-      const res = await apiRequest("PUT", `/api/founder/company-profiles/${profile?.id}`, data);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", profile?.id] });
-      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles"] });
-      setEditingField(null);
-      toast({ title: "Updated", description: "Company profile updated successfully." });
-    },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const handleSave = (field: string) => {
-    updateMutation.mutate({ [field]: editValue });
-  };
-
-  const startEditing = (field: string, currentValue: string) => {
-    setEditingField(field);
-    setEditValue(currentValue || "");
-  };
+  const [editOpen, setEditOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -201,23 +204,33 @@ function ProfileDetailView({
 
   return (
     <div className="space-y-6" data-testid="company-profile-detail">
-      <div className="flex items-center gap-3 flex-wrap">
-        <Button variant="ghost" size="icon" onClick={onBack} data-testid="button-back">
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold truncate" data-testid="text-detail-company-name">
-            {profile.companyName}
-          </h1>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <Badge variant="secondary" data-testid="badge-detail-company-type">
-              {profile.companyType || "LTD"}
-            </Badge>
-            {profile.rcNumber && (
-              <Badge variant="outline" data-testid="badge-detail-rc">RC {profile.rcNumber}</Badge>
-            )}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <Button variant="ghost" size="icon" onClick={onBack} data-testid="button-back">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold truncate" data-testid="text-detail-company-name">
+              {profile.companyName}
+            </h1>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <Badge variant="secondary" data-testid="badge-detail-company-type">
+                {profile.companyType || "LTD"}
+              </Badge>
+              {profile.rcNumber && (
+                <Badge variant="outline" data-testid="badge-detail-rc">RC {profile.rcNumber}</Badge>
+              )}
+            </div>
           </div>
         </div>
+        <Button
+          onClick={() => setEditOpen(true)}
+          data-testid="button-edit-company"
+          className="shrink-0"
+        >
+          <Pencil className="h-4 w-4 mr-2" />
+          Edit Company Details
+        </Button>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -228,52 +241,15 @@ function ProfileDetailView({
               Company Details
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <EditableField
-              label="RC Number"
-              value={profile.rcNumber || ""}
-              field="rcNumber"
-              editingField={editingField}
-              editValue={editValue}
-              isPending={updateMutation.isPending}
-              onStartEdit={startEditing}
-              onSave={handleSave}
-              onCancel={() => setEditingField(null)}
-              onEditValueChange={setEditValue}
-              placeholder="Enter RC number"
-              testIdPrefix="rc-number"
+          <CardContent className="space-y-3">
+            <DetailRow label="RC Number" value={profile.rcNumber} testId="text-rc-number" />
+            <DetailRow label="TIN Number" value={profile.tinNumber} testId="text-tin-number" />
+            <DetailRow
+              label="Incorporation Date"
+              value={profile.incorporationDate ? new Date(profile.incorporationDate).toLocaleDateString("en-NG", { year: "numeric", month: "long", day: "numeric" }) : undefined}
+              testId="text-detail-inc-date"
             />
-
-            <div className="space-y-1">
-              <label className="text-sm text-muted-foreground">Incorporation Date</label>
-              <p className="text-sm" data-testid="text-detail-inc-date">
-                {profile.incorporationDate
-                  ? new Date(profile.incorporationDate).toLocaleDateString()
-                  : "Not set"}
-              </p>
-            </div>
-
-            <EditableField
-              label="TIN Number"
-              value={profile.tinNumber || ""}
-              field="tinNumber"
-              editingField={editingField}
-              editValue={editValue}
-              isPending={updateMutation.isPending}
-              onStartEdit={startEditing}
-              onSave={handleSave}
-              onCancel={() => setEditingField(null)}
-              onEditValueChange={setEditValue}
-              placeholder="Enter TIN number"
-              testIdPrefix="tin-number"
-            />
-
-            {profile.shareCapital && (
-              <div className="space-y-1">
-                <label className="text-sm text-muted-foreground">Share Capital</label>
-                <p className="text-sm" data-testid="text-share-capital">{profile.shareCapital}</p>
-              </div>
-            )}
+            <DetailRow label="Share Capital" value={profile.shareCapital} testId="text-share-capital" />
           </CardContent>
         </Card>
 
@@ -285,16 +261,23 @@ function ProfileDetailView({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {address ? (
+            {address && (address.line1 || address.city || address.state) ? (
               <div className="text-sm space-y-1" data-testid="text-address">
                 {address.line1 && <p>{address.line1}</p>}
                 {address.line2 && <p>{address.line2}</p>}
-                <p>
-                  {[address.city, address.state, address.postalCode].filter(Boolean).join(", ")}
-                </p>
+                <p>{[address.city, address.state, address.postalCode].filter(Boolean).join(", ")}</p>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No address on file</p>
+              <p className="text-sm text-muted-foreground">
+                No address on file.{" "}
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="text-primary underline-offset-2 hover:underline"
+                  data-testid="link-add-address"
+                >
+                  Add address
+                </button>
+              </p>
             )}
           </CardContent>
         </Card>
@@ -413,83 +396,298 @@ function ProfileDetailView({
           </Button>
         </Link>
       </div>
+
+      {editOpen && (
+        <EditCompanyDialog
+          profile={profile}
+          onClose={() => setEditOpen(false)}
+          toast={toast}
+        />
+      )}
     </div>
   );
 }
 
-function EditableField({
-  label,
-  value,
-  field,
-  editingField,
-  editValue,
-  isPending,
-  onStartEdit,
-  onSave,
-  onCancel,
-  onEditValueChange,
-  placeholder,
-  testIdPrefix,
+function DetailRow({ label, value, testId }: { label: string; value?: string | null; testId: string }) {
+  return (
+    <div className="space-y-0.5">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-sm" data-testid={testId}>{value || <span className="text-muted-foreground/60 italic">Not set</span>}</p>
+    </div>
+  );
+}
+
+function EditCompanyDialog({
+  profile,
+  onClose,
+  toast,
 }: {
-  label: string;
-  value: string;
-  field: string;
-  editingField: string | null;
-  editValue: string;
-  isPending: boolean;
-  onStartEdit: (field: string, value: string) => void;
-  onSave: (field: string) => void;
-  onCancel: () => void;
-  onEditValueChange: (value: string) => void;
-  placeholder: string;
-  testIdPrefix: string;
+  profile: ProfileWithTasks;
+  onClose: () => void;
+  toast: ReturnType<typeof useToast>["toast"];
 }) {
-  const isEditing = editingField === field;
+  const addr = profile.registeredAddress as any;
+  const activities = (profile.businessActivities || []) as string[];
+
+  const [form, setForm] = useState({
+    companyName: profile.companyName || "",
+    companyType: profile.companyType || "LTD",
+    rcNumber: profile.rcNumber || "",
+    tinNumber: profile.tinNumber || "",
+    incorporationDate: profile.incorporationDate
+      ? new Date(profile.incorporationDate).toISOString().split("T")[0]
+      : "",
+    shareCapital: profile.shareCapital || "",
+    addressLine1: addr?.line1 || "",
+    addressLine2: addr?.line2 || "",
+    addressCity: addr?.city || "",
+    addressState: addr?.state || "",
+    addressPostalCode: addr?.postalCode || "",
+    businessActivities: activities.join(", "),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (data: Record<string, any>) => {
+      const res = await apiRequest("PUT", `/api/founder/company-profiles/${profile.id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      onClose();
+      toast({ title: "Company updated", description: "Company profile saved successfully." });
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", profile.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSave = () => {
+    if (!form.companyName.trim()) {
+      toast({ title: "Company name is required", variant: "destructive" });
+      return;
+    }
+
+    const payload: Record<string, any> = {
+      companyName: form.companyName.trim(),
+      companyType: form.companyType,
+      rcNumber: form.rcNumber.trim() || null,
+      tinNumber: form.tinNumber.trim() || null,
+      shareCapital: form.shareCapital.trim() || null,
+      incorporationDate: form.incorporationDate
+        ? new Date(form.incorporationDate).toISOString()
+        : null,
+      registeredAddress: {
+        line1: form.addressLine1.trim() || undefined,
+        line2: form.addressLine2.trim() || undefined,
+        city: form.addressCity.trim() || undefined,
+        state: form.addressState || undefined,
+        postalCode: form.addressPostalCode.trim() || undefined,
+      },
+      businessActivities: form.businessActivities
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean),
+    };
+
+    updateMutation.mutate(payload);
+  };
+
+  const set = (field: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setForm((prev) => ({ ...prev, [field]: e.target.value }));
+  };
 
   return (
-    <div className="space-y-1">
-      <label className="text-sm text-muted-foreground">{label}</label>
-      {isEditing ? (
-        <div className="flex items-center gap-2">
-          <Input
-            value={editValue}
-            onChange={(e) => onEditValueChange(e.target.value)}
-            placeholder={placeholder}
-            data-testid={`input-${testIdPrefix}`}
-          />
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => onSave(field)}
-            disabled={isPending}
-            data-testid={`button-save-${testIdPrefix}`}
-          >
-            <Check className="h-4 w-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={onCancel}
-            data-testid={`button-cancel-${testIdPrefix}`}
-          >
-            <X className="h-4 w-4" />
-          </Button>
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="dialog-edit-company">
+        <DialogHeader>
+          <DialogTitle>Edit Company Details</DialogTitle>
+          <DialogDescription>
+            Update your company information. Changes will be reflected across the Checklist and Compliance Calendar.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6 py-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2 space-y-1.5">
+              <Label htmlFor="edit-company-name">Company Name *</Label>
+              <Input
+                id="edit-company-name"
+                value={form.companyName}
+                onChange={set("companyName")}
+                placeholder="e.g. Cellion Platforms Nigeria Limited"
+                data-testid="input-edit-company-name"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-company-type">Company Type</Label>
+              <Select
+                value={form.companyType}
+                onValueChange={(v) => setForm((prev) => ({ ...prev, companyType: v }))}
+              >
+                <SelectTrigger id="edit-company-type" data-testid="select-company-type">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {COMPANY_TYPES.map((ct) => (
+                    <SelectItem key={ct.value} value={ct.value} data-testid={`option-type-${ct.value}`}>
+                      {ct.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-rc-number">RC Number</Label>
+              <Input
+                id="edit-rc-number"
+                value={form.rcNumber}
+                onChange={set("rcNumber")}
+                placeholder="e.g. 1234567"
+                data-testid="input-edit-rc-number"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-tin-number">TIN Number</Label>
+              <Input
+                id="edit-tin-number"
+                value={form.tinNumber}
+                onChange={set("tinNumber")}
+                placeholder="e.g. 12345678-0001"
+                data-testid="input-edit-tin-number"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-inc-date">Incorporation Date</Label>
+              <Input
+                id="edit-inc-date"
+                type="date"
+                value={form.incorporationDate}
+                onChange={set("incorporationDate")}
+                data-testid="input-edit-inc-date"
+              />
+              <p className="text-xs text-muted-foreground">Used to calculate compliance deadlines</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-share-capital">Share Capital</Label>
+              <Input
+                id="edit-share-capital"
+                value={form.shareCapital}
+                onChange={set("shareCapital")}
+                placeholder="e.g. ₦10,000,000"
+                data-testid="input-edit-share-capital"
+              />
+            </div>
+          </div>
+
+          <Separator />
+
+          <div>
+            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
+              <MapPin className="h-4 w-4" />
+              Registered Address
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2 space-y-1.5">
+                <Label htmlFor="edit-addr-line1">Address Line 1</Label>
+                <Input
+                  id="edit-addr-line1"
+                  value={form.addressLine1}
+                  onChange={set("addressLine1")}
+                  placeholder="Street address"
+                  data-testid="input-edit-addr-line1"
+                />
+              </div>
+              <div className="sm:col-span-2 space-y-1.5">
+                <Label htmlFor="edit-addr-line2">Address Line 2 (optional)</Label>
+                <Input
+                  id="edit-addr-line2"
+                  value={form.addressLine2}
+                  onChange={set("addressLine2")}
+                  placeholder="Suite, floor, etc."
+                  data-testid="input-edit-addr-line2"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-addr-city">City</Label>
+                <Input
+                  id="edit-addr-city"
+                  value={form.addressCity}
+                  onChange={set("addressCity")}
+                  placeholder="e.g. Lagos"
+                  data-testid="input-edit-addr-city"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-addr-state">State</Label>
+                <Select
+                  value={form.addressState}
+                  onValueChange={(v) => setForm((prev) => ({ ...prev, addressState: v }))}
+                >
+                  <SelectTrigger id="edit-addr-state" data-testid="select-addr-state">
+                    <SelectValue placeholder="Select state" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {NIGERIAN_STATES.map((s) => (
+                      <SelectItem key={s} value={s} data-testid={`option-state-${s}`}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-addr-postal">Postal Code (optional)</Label>
+                <Input
+                  id="edit-addr-postal"
+                  value={form.addressPostalCode}
+                  onChange={set("addressPostalCode")}
+                  placeholder="e.g. 100001"
+                  data-testid="input-edit-addr-postal"
+                />
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-activities">
+              <span className="flex items-center gap-2">
+                <Briefcase className="h-4 w-4" />
+                Business Activities
+              </span>
+            </Label>
+            <Textarea
+              id="edit-activities"
+              value={form.businessActivities}
+              onChange={set("businessActivities")}
+              placeholder="Enter activities separated by commas, e.g. Software development, IT consulting, Data analytics"
+              rows={3}
+              data-testid="input-edit-activities"
+            />
+            <p className="text-xs text-muted-foreground">Separate multiple activities with commas</p>
+          </div>
         </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <p className="text-sm" data-testid={`text-${testIdPrefix}`}>
-            {value || "Not set"}
-          </p>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => onStartEdit(field, value)}
-            data-testid={`button-edit-${testIdPrefix}`}
-          >
-            <Pencil className="h-3.5 w-3.5" />
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose} data-testid="button-cancel-edit">
+            Cancel
           </Button>
-        </div>
-      )}
-    </div>
+          <Button
+            onClick={handleSave}
+            disabled={updateMutation.isPending}
+            data-testid="button-save-company"
+          >
+            {updateMutation.isPending ? <LoadingSpinner size="sm" /> : "Save Changes"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

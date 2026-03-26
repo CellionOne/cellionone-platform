@@ -2066,12 +2066,13 @@ export function registerKycServiceRoutes(app: Express) {
       const adminUserId = getUserId(req);
       if (!adminUserId) return res.status(401).json({ message: "Unauthorized" });
 
+      const ALLOWED_PERMISSIONS = ["verify:identity", "verify:individual", "verify:supplier"] as const;
       const schema = z.object({
         name: z.string().min(2).max(255),
         clientType: z.enum(["organisation", "application"]),
         contactEmail: z.string().email(),
         billingMode: z.enum(["prepaid", "exempt", "invoiced"]).optional(),
-        permissions: z.array(z.string()).min(1),
+        permissions: z.array(z.enum(ALLOWED_PERMISSIONS)).min(1),
         keyName: z.string().min(1).max(255).optional(),
       });
       const data = schema.parse(req.body);

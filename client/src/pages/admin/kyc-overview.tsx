@@ -143,7 +143,8 @@ type ProvisionStep = "select-type" | "fill-details" | "success";
 type ProvisionClientType = "organisation" | "application";
 
 const PROVISION_PERMISSIONS = [
-  { id: "verify:individual", label: "Individual Verification", description: "Full individual KYC with biometrics (includes identity checks)" },
+  { id: "verify:identity", label: "Identity Check", description: "BVN/NIN lookup and AML/sanctions screening only (no biometrics)" },
+  { id: "verify:individual", label: "Individual Verification", description: "Full individual KYC with biometrics and document checks" },
   { id: "verify:supplier", label: "Supplier Verification", description: "Corporate entity + key persons KYC" },
 ] as const;
 
@@ -509,7 +510,7 @@ export default function AdminKycOverview() {
                                   {org.clientType === "application" && (
                                     <Badge className="shrink-0 bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300 border-0 text-xs" data-testid={`badge-client-type-${org.id}`}>
                                       <Zap className="h-3 w-3 mr-1" />
-                                      App
+                                      Application
                                     </Badge>
                                   )}
                                 </div>

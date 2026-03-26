@@ -280,8 +280,8 @@ export default function IdentityVerificationPage() {
                 <div className="flex items-center gap-3 p-3 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800" data-testid="alert-selfie-failed">
                   <XCircle className="h-5 w-5 text-red-600 shrink-0" />
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Liveness not confirmed</p>
-                    <p className="text-xs text-red-600 dark:text-red-500">Please ensure good lighting and retake your selfie below.</p>
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Verification failed — please retake</p>
+                    <p className="text-xs text-red-600 dark:text-red-500">Ensure good lighting with no shadows on your face, then take a new selfie below.</p>
                   </div>
                 </div>
               )}

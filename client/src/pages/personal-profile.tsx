@@ -32,6 +32,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Link } from "wouter";
 import {
   UserCircle,
   Loader2,
@@ -50,6 +51,7 @@ import {
   Video,
   RefreshCw,
   X,
+  ArrowRight,
 } from "lucide-react";
 
 const NIGERIAN_STATES = [
@@ -74,6 +76,7 @@ const profileFormSchema = z.object({
   postalCode: z.string().optional(),
   country: z.string().default("Nigeria"),
   idType: z.string().min(1, "ID type is required"),
+  idNumber: z.string().optional(),
   nin: z.string().optional(),
   bvn: z.string().optional(),
 });
@@ -99,6 +102,7 @@ interface PersonalProfile {
   hasNin: boolean;
   hasBvn: boolean;
   idType: string | null;
+  idNumber: string | null;
   hasIdDocument: boolean;
   hasPassportPhoto: boolean;
   hasSignature: boolean;
@@ -179,6 +183,32 @@ function ProfileHeader() {
           </div>
           <Progress value={completion} className="h-2" data-testid="progress-completion" />
         </div>
+        {completion >= 80 && !profile?.isProfileComplete && (
+          <div className="mt-4 flex items-center justify-between rounded-lg bg-primary/5 border border-primary/20 px-4 py-3" data-testid="cta-identity-verification">
+            <div>
+              <p className="text-sm font-medium">Your profile is nearly complete!</p>
+              <p className="text-xs text-muted-foreground">Proceed to identity verification to unlock company registration and orders.</p>
+            </div>
+            <Link href="/founder/identity">
+              <Button size="sm" className="shrink-0 ml-3" data-testid="button-go-to-identity">
+                Verify Identity <ArrowRight className="h-4 w-4 ml-1" />
+              </Button>
+            </Link>
+          </div>
+        )}
+        {profile?.isProfileComplete && (
+          <div className="mt-4 flex items-center justify-between rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 px-4 py-3" data-testid="cta-profile-complete">
+            <div>
+              <p className="text-sm font-medium text-green-800 dark:text-green-300">Profile complete!</p>
+              <p className="text-xs text-green-700 dark:text-green-400">You're ready to proceed with identity verification and company registration.</p>
+            </div>
+            <Link href="/founder/identity">
+              <Button size="sm" variant="outline" className="shrink-0 ml-3 border-green-300 text-green-700 hover:bg-green-50 dark:border-green-700 dark:text-green-400" data-testid="button-go-to-identity-complete">
+                Go to Identity <ArrowRight className="h-4 w-4 ml-1" />
+              </Button>
+            </Link>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -207,6 +237,7 @@ function ProfileForm() {
       postalCode: "",
       country: "Nigeria",
       idType: "",
+      idNumber: "",
       nin: "",
       bvn: "",
     },
@@ -224,6 +255,7 @@ function ProfileForm() {
       postalCode: profile.postalCode || "",
       country: profile.country || "Nigeria",
       idType: profile.idType || "",
+      idNumber: profile.idNumber || "",
       nin: "",
       bvn: "",
     } : undefined,
@@ -464,30 +496,45 @@ function ProfileForm() {
             <Separator />
 
             <div>
-              <h3 className="text-sm font-medium mb-4">Government ID Type</h3>
-              <FormField
-                control={form.control}
-                name="idType"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>ID Document Type</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+              <h3 className="text-sm font-medium mb-4">Government ID</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="idType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>ID Document Type</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-id-type">
+                            <SelectValue placeholder="Select ID type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="national_id">National ID Card (NIN Slip)</SelectItem>
+                          <SelectItem value="drivers_license">Driver's License</SelectItem>
+                          <SelectItem value="international_passport">International Passport</SelectItem>
+                          <SelectItem value="voters_card">Voter's Card</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="idNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>ID Number</FormLabel>
                       <FormControl>
-                        <SelectTrigger data-testid="select-id-type">
-                          <SelectValue placeholder="Select ID type" />
-                        </SelectTrigger>
+                        <Input placeholder="As printed on your ID" data-testid="input-id-number" {...field} />
                       </FormControl>
-                      <SelectContent>
-                        <SelectItem value="national_id">National ID Card (NIN Slip)</SelectItem>
-                        <SelectItem value="drivers_license">Driver's License</SelectItem>
-                        <SelectItem value="international_passport">International Passport</SelectItem>
-                        <SelectItem value="voters_card">Voter's Card</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
             </div>
 
             <Button type="submit" disabled={updateMutation.isPending} data-testid="button-save-profile">
@@ -671,20 +718,21 @@ function BiometricSection() {
       return res.json();
     },
     onSuccess: (result) => {
-      if (result.resultCode === 'NOT_CONFIGURED') {
+      if (result.verified) {
+        toast({
+          title: "Identity verified",
+          description: `Liveness check passed${result.livenessScore ? ` (confidence: ${Math.round(result.livenessScore)}%)` : ""}. Your identity is now verified.`,
+        });
+      } else if (result.resultCode === 'NOT_CONFIGURED') {
         toast({
           title: "Selfie recorded",
           description: "Your selfie has been captured. Live biometric verification will be activated when the service is configured.",
         });
-      } else if (result.success) {
-        toast({
-          title: "Biometric check passed",
-          description: `Liveness detection passed${result.livenessScore ? ` (confidence: ${result.livenessScore}%)` : ""}.`,
-        });
       } else {
         toast({
-          title: "Check submitted",
-          description: "Your selfie has been submitted for review.",
+          title: "Selfie submitted",
+          description: "Your selfie was submitted but liveness was not confirmed. Please ensure good lighting and retake if needed.",
+          variant: "destructive",
         });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/profile/personal"] });
@@ -850,6 +898,9 @@ function BiometricSection() {
             <p className="text-xs text-muted-foreground text-center">
               Position your face in the centre of the frame, then click "Capture Photo".
             </p>
+            <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
+              If the preview appears black, wait 2–3 seconds for the camera to warm up, or try switching to better lighting.
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -967,24 +1018,19 @@ function DocumentsSection() {
   const handleUpload = async (docType: string, file: File) => {
     setUploading(docType);
     try {
-      const urlRes = await apiRequest("POST", "/api/profile/personal/upload-url", {
-        docType,
-        contentType: file.type,
-        name: file.name,
-        size: file.size,
-      });
-      const { uploadURL, objectPath } = await urlRes.json();
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("docType", docType);
 
-      await fetch(uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type },
+      const res = await fetch("/api/profile/personal/upload", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
       });
-
-      await apiRequest("POST", "/api/profile/personal/upload-complete", {
-        docType,
-        objectPath,
-      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Upload failed");
+      }
 
       queryClient.invalidateQueries({ queryKey: ["/api/profile/personal"] });
       toast({ title: "Document uploaded", description: `Your ${docType.replace(/_/g, " ")} has been uploaded successfully.` });

@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import multer from "multer";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replit_integrations/auth";
@@ -1501,6 +1502,7 @@ export async function registerRoutes(
         hasNin: !!profile.ninEncrypted,
         hasBvn: !!profile.bvnEncrypted,
         idType: profile.idType,
+        idNumber: profile.idNumber,
         hasIdDocument: !!profile.idDocumentPath,
         hasPassportPhoto: !!profile.passportPhotoPath,
         hasSignature: !!profile.signaturePath,
@@ -1519,7 +1521,7 @@ export async function registerRoutes(
       const {
         fullName, phone, dateOfBirth, nationality, gender, occupation,
         addressLine1, addressLine2, city, state, postalCode, country,
-        nin, bvn, idType,
+        nin, bvn, idType, idNumber,
       } = req.body;
 
       const profileData: any = {
@@ -1527,6 +1529,7 @@ export async function registerRoutes(
         fullName, phone, dateOfBirth, nationality, gender, occupation,
         addressLine1, addressLine2, city, state, postalCode, country,
         idType,
+        ...(idNumber !== undefined && { idNumber }),
       };
 
       if (nin && typeof nin === 'string' && nin.length === 11) {
@@ -1648,6 +1651,85 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating personal profile:", error);
       res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  // Server-side upload: receives file via multipart, uploads to object storage, saves path to profile
+  const profileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+  app.post("/api/profile/personal/upload", isAuthenticated, profileUpload.single("file"), async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const docType = req.body?.docType;
+      const file = req.file;
+
+      const validDocTypes = ['passport_photo', 'signature', 'id_document'];
+      if (!docType || !validDocTypes.includes(docType)) {
+        return res.status(400).json({ message: "Invalid document type" });
+      }
+      if (!file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const allowedMime = ["image/jpeg", "image/png", "image/jpg", "application/pdf"];
+      if (!allowedMime.includes(file.mimetype)) {
+        return res.status(400).json({ message: "Only JPEG, PNG, and PDF files are allowed" });
+      }
+
+      // Get a signed GCS URL and upload from the server (avoids browser CORS/internal URL issues)
+      const objectStorage = new ObjectStorageService();
+      const uploadURL = await objectStorage.getObjectEntityUploadURL();
+      const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+
+      const { default: nodeFetch } = await import("node-fetch");
+      const uploadResponse = await nodeFetch(uploadURL, {
+        method: "PUT",
+        body: file.buffer,
+        headers: { "Content-Type": file.mimetype, "Content-Length": String(file.buffer.length) },
+      });
+      if (!uploadResponse.ok) {
+        throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
+      }
+
+      // Save path to founder profile
+      const pathField = docType === 'passport_photo' ? 'passportPhotoPath'
+        : docType === 'signature' ? 'signaturePath'
+        : 'idDocumentPath';
+
+      const existing = await storage.getFounderProfile(userId);
+      const profileData: any = { userId, [pathField]: objectPath };
+
+      if (existing) {
+        const pp = docType === 'passport_photo' ? objectPath : existing.passportPhotoPath;
+        const sig = docType === 'signature' ? objectPath : existing.signaturePath;
+        const idDoc = docType === 'id_document' ? objectPath : existing.idDocumentPath;
+        const hasDocuments = pp && sig && idDoc;
+        const hasIds = existing.ninEncrypted && existing.bvnEncrypted;
+        const completionFields = [
+          existing.fullName, existing.phone, existing.dateOfBirth, existing.nationality,
+          existing.gender, existing.occupation, existing.addressLine1, existing.city,
+          existing.state, existing.country, existing.idType,
+        ];
+        const filled = completionFields.filter(Boolean).length;
+        const total = completionFields.length;
+        profileData.profileCompletion = Math.round((filled / total) * 70) + (hasDocuments ? 15 : 0) + (hasIds ? 15 : 0);
+        profileData.isProfileComplete = profileData.profileCompletion >= 85;
+      }
+
+      await storage.upsertFounderProfile(profileData);
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "document_uploaded",
+        entityType: "founder_profile",
+        entityId: userId,
+        details: { docType },
+        ipAddress: req.ip,
+      });
+
+      res.json({ success: true, objectPath });
+    } catch (error: any) {
+      console.error("Error uploading profile document:", error);
+      res.status(500).json({ message: "Upload failed. Please try again." });
     }
   });
 
@@ -1858,19 +1940,29 @@ export async function registerRoutes(
       const jobId = `selfie_${userId}_${Date.now()}`;
       const result = await smileIdService.submitBiometricSelfie(selfieBase64, userId, jobId);
 
+      // Determine pass/fail: liveness score ≥ 50 or explicit success
+      const passed = result.success === true || (typeof result.livenessScore === 'number' && result.livenessScore >= 50);
+
       const verification = await storage.getIdentityVerification(userId);
-      if (verification) {
-        await storage.upsertIdentityVerification({
-          founderUserId: userId,
-          status: verification.status ?? 'in_progress',
-          method: verification.method ?? 'automated',
-          externalProvider: verification.externalProvider ?? 'smile_id',
-          externalSessionId: result.smileJobId || verification.externalSessionId,
-          livenessScore: result.livenessScore ?? verification.livenessScore,
-          notes: verification.notes,
-          verifiedAt: verification.verifiedAt,
-          expiresAt: verification.expiresAt,
-        });
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year
+      await storage.upsertIdentityVerification({
+        founderUserId: userId,
+        status: passed ? 'completed' : (verification?.status ?? 'in_progress'),
+        method: verification?.method ?? 'automated',
+        externalProvider: verification?.externalProvider ?? 'smile_id',
+        externalSessionId: result.smileJobId || verification?.externalSessionId,
+        livenessScore: result.livenessScore ?? verification?.livenessScore,
+        notes: verification?.notes,
+        verifiedAt: passed ? now : (verification?.verifiedAt ?? null),
+        expiresAt: passed ? expiresAt : (verification?.expiresAt ?? null),
+      });
+
+      // If liveness passed, mark user as identity-verified in the users table
+      if (passed) {
+        await db.update(usersTable)
+          .set({ isIdentityVerified: true, identityVerifiedAt: now, updatedAt: now })
+          .where(eq(usersTable.id, userId));
       }
 
       await storage.logSensitiveDataAccess({
@@ -1882,7 +1974,7 @@ export async function registerRoutes(
         userAgent: req.headers['user-agent'],
       });
 
-      res.json(result);
+      res.json({ ...result, verified: passed, livenessScore: result.livenessScore ?? null });
     } catch (error) {
       console.error("Error submitting biometric selfie:", error);
       res.status(500).json({ message: "Biometric submission failed" });
@@ -1978,7 +2070,7 @@ export async function registerRoutes(
 
       let founderIdentityExpiresAt: string | null = null;
       let founderIdentityDaysUntilExpiry: number | null = null;
-      if (founderUser?.identityVerified) {
+      if (founderUser?.isIdentityVerified) {
         const [founderIV] = await db.select({ expiresAt: identityVerifications.expiresAt })
           .from(identityVerifications)
           .where(eq(identityVerifications.founderUserId, userId))
@@ -1995,7 +2087,7 @@ export async function registerRoutes(
         inviteEmail: founderUser?.email || null,
         role: "founder",
         inviteStatus: "accepted",
-        isVerified: founderUser?.identityVerified ?? false,
+        isVerified: founderUser?.isIdentityVerified ?? false,
         personUserId: userId,
         firstName: founderUser?.firstName || null,
         lastName: founderUser?.lastName || null,
@@ -2483,8 +2575,8 @@ export async function registerRoutes(
         founderVerified,
         people,
         unverifiedCount,
-        verificationFeePerPerson: 500000,
-        totalVerificationFee: unverifiedCount * 500000,
+        verificationFeePerPerson: 1000000,
+        totalVerificationFee: unverifiedCount * 1000000,
         founderVerificationStatus: verificationStatus.status,
         founderExpiresAt: verificationStatus.expiresAt,
         founderDaysUntilExpiry: verificationStatus.daysUntilExpiry,

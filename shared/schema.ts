@@ -25,6 +25,7 @@ export const founderProfiles = pgTable("founder_profiles", {
   ninEncrypted: varchar("nin_encrypted", { length: 500 }),
   bvnEncrypted: varchar("bvn_encrypted", { length: 500 }),
   idType: varchar("id_type", { length: 50 }),
+  idNumber: varchar("id_number", { length: 100 }),
   idDocumentPath: varchar("id_document_path", { length: 500 }),
   passportPhotoPath: varchar("passport_photo_path", { length: 500 }),
   signaturePath: varchar("signature_path", { length: 500 }),

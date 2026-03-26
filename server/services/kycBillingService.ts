@@ -4,6 +4,7 @@ import {
   kycBillingAccounts, kycBillingRequests, kycCreditTransactions,
   kycInvoices, kycOrganisations,
   type KycBillingAccount, type KycBillingRequest, type KycCreditTransaction, type KycInvoice,
+  type KycBillingMode,
 } from "@shared/schema";
 import crypto from "crypto";
 

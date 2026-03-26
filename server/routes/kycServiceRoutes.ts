@@ -13,6 +13,7 @@ import {
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
   type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
   type KycDocumentRequirement, type KycVerificationTemplate,
+  KYC_BILLING_MODES,
 } from "@shared/schema";
 import * as kycApiKeyService from "../services/kycApiKeyService";
 import * as billingService from "../services/kycBillingService";
@@ -2485,7 +2486,7 @@ export function registerKycServiceRoutes(app: Express) {
         creditAdjustment: z.number().int().optional(),
         adjustmentReason: z.string().optional(),
         isActive: z.boolean().optional(),
-        billingMode: z.enum(["prepaid", "invoiced", "exempt"]).optional(),
+        billingMode: z.enum(KYC_BILLING_MODES).optional(),
       });
       const data = schema.parse(req.body);
 

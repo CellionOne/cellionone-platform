@@ -1376,6 +1376,9 @@ export const kycBillingAccounts = pgTable("kyc_billing_accounts", {
   index("idx_kyc_ba_org").on(table.organisationId),
 ]);
 
+export const KYC_BILLING_MODES = ["prepaid", "invoiced", "exempt"] as const;
+export type KycBillingMode = typeof KYC_BILLING_MODES[number];
+
 export const insertKycBillingAccountSchema = createInsertSchema(kycBillingAccounts).omit({ id: true, createdAt: true, updatedAt: true });
 export type KycBillingAccount = typeof kycBillingAccounts.$inferSelect;
 export type InsertKycBillingAccount = z.infer<typeof insertKycBillingAccountSchema>;

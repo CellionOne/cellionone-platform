@@ -415,41 +415,43 @@ export async function registerRoutes(
       if (user && !user.primaryIntent) {
         const isExemptRole = ["admin", "lawyer", "building_manager"].some(r => roles.includes(r));
         if (!isExemptRole) {
-          const inferredIntent = await (async () => {
-            const [kycMember] = await db
-              .select({ id: kycOrgMembers.id })
-              .from(kycOrgMembers)
-              .where(and(eq(kycOrgMembers.userId, userId), eq(kycOrgMembers.inviteStatus, "accepted")))
-              .limit(1);
-            if (kycMember) return "kyc_service";
+          try {
+            const inferredIntent = await (async () => {
+              // Check KYC org membership (accepted invites only)
+              const kycMembers = await db
+                .select({ id: kycOrgMembers.id, status: kycOrgMembers.inviteStatus })
+                .from(kycOrgMembers)
+                .where(eq(kycOrgMembers.userId, userId))
+                .limit(5);
+              if (kycMembers.some(m => m.status === "accepted")) return "kyc_service";
 
-            const [existingProfile] = await db
-              .select({ id: companyProfiles.id })
-              .from(companyProfiles)
-              .where(and(eq(companyProfiles.userId, userId), eq(companyProfiles.isExistingCompany, true)))
-              .limit(1);
-            if (existingProfile) return "founder_existing_co";
+              // Check for company applications
+              const [app] = await db
+                .select({ id: companyApplicationsTable.id })
+                .from(companyApplicationsTable)
+                .where(eq(companyApplicationsTable.userId, userId))
+                .limit(1);
+              if (app) return "founder_new_co";
 
-            const [app] = await db
-              .select({ id: companyApplicationsTable.id })
-              .from(companyApplicationsTable)
-              .where(eq(companyApplicationsTable.userId, userId))
-              .limit(1);
-            if (app) return "founder_new_co";
+              // Check for company profiles (existing or new)
+              const profiles = await db
+                .select({ id: companyProfiles.id, isExisting: companyProfiles.isExistingCompany })
+                .from(companyProfiles)
+                .where(eq(companyProfiles.userId, userId))
+                .limit(5);
+              if (profiles.some(p => p.isExisting)) return "founder_existing_co";
+              if (profiles.length > 0) return "founder_new_co";
 
-            const [profile] = await db
-              .select({ id: companyProfiles.id })
-              .from(companyProfiles)
-              .where(eq(companyProfiles.userId, userId))
-              .limit(1);
-            if (profile) return "founder_new_co";
+              return null;
+            })();
 
-            return null;
-          })();
-
-          if (inferredIntent) {
-            await storage.updateUser(userId, { primaryIntent: inferredIntent });
-            resolvedUser = { ...user, primaryIntent: inferredIntent };
+            if (inferredIntent) {
+              await storage.updateUser(userId, { primaryIntent: inferredIntent });
+              resolvedUser = { ...user, primaryIntent: inferredIntent };
+            }
+          } catch (inferErr) {
+            console.warn("[Auth] Could not infer primaryIntent for user", userId, inferErr);
+            // Non-fatal: user continues without intent set, will see /welcome
           }
         }
       }

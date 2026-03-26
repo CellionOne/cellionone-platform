@@ -125,18 +125,19 @@ export async function seedDatabase() {
     // Seed demo users if in development
     if (process.env.NODE_ENV !== "production") {
       // Insert demo users (always sync)
-      const demoUsers = [
+      type DemoUser = { id: string; username: string; email: string; firstName: string; lastName: string; primaryIntent?: string };
+      const demoUsers: DemoUser[] = [
         { id: "demo-admin-001", username: "admin@celion.ng", email: "admin@celion.ng", firstName: "Admin", lastName: "User" },
         { id: "demo-lawyer-001", username: "lawyer@celion.ng", email: "lawyer@celion.ng", firstName: "Chinedu", lastName: "Okonkwo" },
         { id: "demo-lawyer-002", username: "lawyer2@celion.ng", email: "lawyer2@celion.ng", firstName: "Amaka", lastName: "Nwachukwu" },
-        { id: "demo-founder-001", username: "founder@celion.ng", email: "founder@celion.ng", firstName: "Emeka", lastName: "Okoro", primaryIntent: "founder_new_co" as const },
-        { id: "demo-founder-002", username: "founder2@celion.ng", email: "founder2@celion.ng", firstName: "Ngozi", lastName: "Adeyemi", primaryIntent: "founder_new_co" as const },
+        { id: "demo-founder-001", username: "founder@celion.ng", email: "founder@celion.ng", firstName: "Emeka", lastName: "Okoro", primaryIntent: "founder_new_co" },
+        { id: "demo-founder-002", username: "founder2@celion.ng", email: "founder2@celion.ng", firstName: "Ngozi", lastName: "Adeyemi", primaryIntent: "founder_new_co" },
       ];
       
       for (const user of demoUsers) {
         await db.insert(users).values(user).onConflictDoUpdate({
           target: users.id,
-          set: { primaryIntent: (user as any).primaryIntent ?? null },
+          set: { primaryIntent: user.primaryIntent ?? null },
         });
       }
       console.log("Synced demo users");

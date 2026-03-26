@@ -9,15 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Building2, ArrowLeft, Info } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Building2, ArrowLeft, Info } from "lucide-react";
 
 const schema = z.object({
   companyName: z.string().min(2, "Company name is required"),
-  companyType: z.string().min(1, "Company type is required"),
   rcNumber: z.string().min(2, "RC number is required"),
-  incorporationDate: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -28,12 +25,7 @@ export default function ExistingCompanyPage() {
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      companyName: "",
-      companyType: "",
-      rcNumber: "",
-      incorporationDate: "",
-    },
+    defaultValues: { companyName: "", rcNumber: "" },
   });
 
   const mutation = useMutation({
@@ -41,9 +33,8 @@ export default function ExistingCompanyPage() {
       return apiRequest("POST", "/api/founder/company-profiles/existing", data);
     },
     onSuccess: () => {
-      toast({ title: "Company registered", description: "Your existing company has been added and is pending admin review." });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles"] });
-      navigate("/founder/company-profile");
+      navigate("/founder/dashboard");
     },
     onError: (error: any) => {
       toast({
@@ -76,7 +67,7 @@ export default function ExistingCompanyPage() {
         <Alert>
           <Info className="h-4 w-4" />
           <AlertDescription>
-            After submission, our team will verify your company details against the CAC registry. This typically takes 1–2 business days.
+            After submission, our team will verify your company details against the CAC registry. This typically takes 1–2 business days. You can continue using Cellion One while we review your application.
           </AlertDescription>
         </Alert>
 
@@ -104,51 +95,12 @@ export default function ExistingCompanyPage() {
 
                 <FormField
                   control={form.control}
-                  name="companyType"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Company Type</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-company-type">
-                            <SelectValue placeholder="Select company type" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="LTD">Private Limited Company (LTD)</SelectItem>
-                          <SelectItem value="PLC">Public Limited Company (PLC)</SelectItem>
-                          <SelectItem value="LLP">Limited Liability Partnership (LLP)</SelectItem>
-                          <SelectItem value="BN">Business Name</SelectItem>
-                          <SelectItem value="NGO">Non-Governmental Organisation</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
                   name="rcNumber"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>CAC RC Number</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. RC1234567" {...field} data-testid="input-rc-number" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="incorporationDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Date of Incorporation (optional)</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} data-testid="input-incorporation-date" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

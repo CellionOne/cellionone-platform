@@ -181,8 +181,11 @@ function RoleBasedRedirect() {
     if (!user?.primaryIntent) {
       return <Redirect to="/welcome" />;
     }
-    if (user.primaryIntent === "kyc_service" || user.primaryIntent === "procurement") {
+    if (user.primaryIntent === "kyc_service") {
       return <Redirect to="/kyc/orgs" />;
+    }
+    if (user.primaryIntent === "procurement") {
+      return <Redirect to="/procurement/marketplace" />;
     }
     return <Redirect to="/founder/dashboard" />;
   } else {

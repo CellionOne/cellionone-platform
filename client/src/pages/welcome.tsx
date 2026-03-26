@@ -57,7 +57,7 @@ export default function WelcomePage() {
       } else if (intent === "kyc_service") {
         navigate("/kyc/orgs");
       } else if (intent === "procurement") {
-        navigate("/kyc/orgs");
+        navigate("/procurement/marketplace");
       }
     },
     onError: () => {

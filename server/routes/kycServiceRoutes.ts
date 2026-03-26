@@ -2030,6 +2030,52 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
+  // Admin review endpoint — action-based contract: POST /api/admin/kyc-orgs/:id/review
+  app.post("/api/admin/kyc-orgs/:id/review", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      if (isNaN(orgId)) return res.status(400).json({ message: "Invalid org ID" });
+
+      const { action, notes } = z.object({
+        action: z.enum(["approve", "reject"]),
+        notes: z.string().optional(),
+      }).parse(req.body);
+
+      const newStatus = action === "approve" ? "active" : "suspended";
+
+      const [updated] = await db.update(kycOrganisations)
+        .set({ status: newStatus, updatedAt: new Date() })
+        .where(eq(kycOrganisations.id, orgId))
+        .returning();
+
+      if (!updated) return res.status(404).json({ message: "Organisation not found" });
+
+      // Send decision email to org creator
+      try {
+        const { client: emailClient, fromEmail } = await getResendClient();
+        const isApproved = action === "approve";
+        await emailClient.emails.send({
+          from: fromEmail,
+          to: updated.contactEmail,
+          subject: isApproved
+            ? "Your KYC Organisation Has Been Approved"
+            : "Update on Your KYC Organisation Application",
+          html: isApproved
+            ? `<p>Your organisation <strong>${updated.name}</strong> has been approved on Cellion One. You can now access all KYC Service features.</p><p><a href="https://cellionone.com/kyc/orgs">Open your KYC dashboard</a></p>`
+            : `<p>Your organisation <strong>${updated.name}</strong> application was not approved. ${notes ? `<br>Reason: ${notes}` : ""}</p><p>Please contact <a href="mailto:service@cellionone.com">service@cellionone.com</a> for assistance.</p>`,
+        });
+      } catch (emailErr) {
+        console.error("[KYC Admin] Failed to send review decision email:", emailErr);
+      }
+
+      res.json({ ...updated, action, notes });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC Admin] Review error:", error);
+      res.status(500).json({ message: "Failed to review organisation" });
+    }
+  });
+
   // ==================== API KEY MANAGEMENT ====================
 
   app.post("/api/kyc-service/organisations/:id/api-keys", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {

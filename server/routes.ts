@@ -6659,7 +6659,7 @@ Important guidelines:
       const userId = getUserId(req);
       const data = z.object({
         companyName: z.string().min(2),
-        companyType: z.string().min(2),
+        companyType: z.string().optional(),
         rcNumber: z.string().min(2),
         incorporationDate: z.string().optional(),
         registeredAddress: z.any().optional(),
@@ -6671,7 +6671,7 @@ Important guidelines:
           applicationId: null,
           founderId: userId,
           companyName: data.companyName,
-          companyType: data.companyType,
+          companyType: data.companyType || "LTD",
           rcNumber: data.rcNumber,
           incorporationDate: data.incorporationDate ? new Date(data.incorporationDate) : new Date(),
           registeredAddress: data.registeredAddress || {},

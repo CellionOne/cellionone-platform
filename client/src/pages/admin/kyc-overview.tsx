@@ -193,8 +193,13 @@ export default function AdminKycOverview() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: async ({ orgId, status }: { orgId: number; status: string }) => {
-      await apiRequest("PATCH", `/api/admin/kyc/organisations/${orgId}/status`, { status });
+    mutationFn: async ({ orgId, status, fromStatus }: { orgId: number; status: string; fromStatus?: string }) => {
+      if (fromStatus === "pending_review") {
+        const action = status === "active" ? "approve" : "reject";
+        await apiRequest("POST", `/api/admin/kyc-orgs/${orgId}/review`, { action });
+      } else {
+        await apiRequest("PATCH", `/api/admin/kyc/organisations/${orgId}/status`, { status });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/kyc/organisations"] });
@@ -865,7 +870,7 @@ export default function AdminKycOverview() {
               variant={confirmAction?.action === "suspended" ? "destructive" : "default"}
               onClick={() => {
                 if (confirmAction) {
-                  statusMutation.mutate({ orgId: confirmAction.orgId, status: confirmAction.action });
+                  statusMutation.mutate({ orgId: confirmAction.orgId, status: confirmAction.action, fromStatus: confirmAction.fromStatus });
                 }
               }}
               disabled={statusMutation.isPending}

@@ -181,6 +181,9 @@ function RoleBasedRedirect() {
     if (!user?.primaryIntent) {
       return <Redirect to="/welcome" />;
     }
+    if (user.primaryIntent === "kyc_service" || user.primaryIntent === "procurement") {
+      return <Redirect to="/kyc/orgs" />;
+    }
     return <Redirect to="/founder/dashboard" />;
   } else {
     // Unknown role - log error and redirect to login

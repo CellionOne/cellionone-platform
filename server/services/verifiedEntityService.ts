@@ -54,6 +54,67 @@ interface UpsertVerifiedEntityData {
   amlScreeningStatus?: string | null;
 }
 
+interface UpsertVerifiedCompanyDirectData {
+  companyName: string;
+  rcNumber?: string | null;
+  tinNumber?: string | null;
+  email?: string | null;
+  country?: string;
+}
+
+export async function upsertVerifiedCompanyDirect(data: UpsertVerifiedCompanyDirectData): Promise<void> {
+  try {
+    const { companyName, rcNumber, tinNumber, email, country } = data;
+    const now = new Date();
+
+    let existing = null;
+    if (rcNumber) {
+      const [found] = await db
+        .select()
+        .from(verifiedEntities)
+        .where(and(eq(verifiedEntities.entityType, "company"), eq(verifiedEntities.rcNumber, rcNumber)));
+      existing = found;
+    }
+
+    if (!existing && email) {
+      const [foundByEmail] = await db
+        .select()
+        .from(verifiedEntities)
+        .where(and(eq(verifiedEntities.entityType, "company"), eq(verifiedEntities.email, email)));
+      existing = foundByEmail;
+    }
+
+    if (existing) {
+      await db
+        .update(verifiedEntities)
+        .set({
+          verificationCount: sql`${verifiedEntities.verificationCount} + 1`,
+          lastVerifiedAt: now,
+          fullName: companyName,
+          email: email || existing.email,
+          rcNumber: rcNumber || existing.rcNumber,
+          tinNumber: tinNumber || existing.tinNumber,
+          updatedAt: now,
+        })
+        .where(eq(verifiedEntities.id, existing.id));
+    } else {
+      await db.insert(verifiedEntities).values({
+        entityType: "company",
+        fullName: companyName,
+        email: email || "",
+        rcNumber: rcNumber || undefined,
+        tinNumber: tinNumber || undefined,
+        country: country || "NG",
+        verificationCount: 1,
+        lastVerifiedAt: now,
+        firstVerifiedAt: now,
+      });
+    }
+  } catch (error) {
+    console.error("[VerifiedEntityService] Error upserting company from application:", error);
+  }
+}
+
 export async function upsertVerifiedEntity(data: UpsertVerifiedEntityData): Promise<void> {
   try {
     const { request, orgId, riskScore, amlScreeningStatus } = data;

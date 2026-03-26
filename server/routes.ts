@@ -13,6 +13,7 @@ import * as services from "./services";
 import { registeredOfficeService } from "./services/registeredOfficeService";
 import { mailroomService } from "./services/mailroomService";
 import * as verificationService from "./services/verificationService";
+import { upsertVerifiedCompanyDirect } from "./services/verifiedEntityService";
 import { registerKycServiceRoutes } from "./routes/kycServiceRoutes";
 import { registerKycApiRoutes } from "./routes/kycApiRoutes";
 import { registerProcurementRoutes } from "./routes/procurementRoutes";
@@ -4098,38 +4099,22 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
   async function addCompanyToVerifiedRegistry(application: any): Promise<void> {
     if (!application) return;
-    const { or, sql: sqlHelper } = await import("drizzle-orm");
-    const now = new Date();
     const companyName = application.companyName1 || "Unnamed Company";
     const rcNumber = application.rcNumber || null;
 
-    const conditions: any[] = [
-      eq(verifiedEntities.entityType, "company"),
-    ];
-    if (rcNumber) conditions.push(eq(verifiedEntities.rcNumber, rcNumber));
-    const [existing] = rcNumber
-      ? await db.select().from(verifiedEntities).where(and(...conditions)).limit(1)
-      : [];
-
-    if (existing) {
-      await db.update(verifiedEntities).set({
-        verificationCount: sqlHelper`${verifiedEntities.verificationCount} + 1`,
-        lastVerifiedAt: now,
-        fullName: companyName,
-        updatedAt: now,
-      }).where(eq(verifiedEntities.id, existing.id));
-    } else {
-      await db.insert(verifiedEntities).values({
-        entityType: "company",
-        fullName: companyName,
-        email: "",
-        rcNumber: rcNumber || undefined,
-        country: "NG",
-        verificationCount: 1,
-        lastVerifiedAt: now,
-        firstVerifiedAt: now,
-      });
+    // Look up the founder email to store alongside the company
+    let founderEmail: string | undefined;
+    if (application.founderUserId) {
+      const founder = await storage.getUser(application.founderUserId);
+      founderEmail = founder?.email || undefined;
     }
+
+    await upsertVerifiedCompanyDirect({
+      companyName,
+      rcNumber,
+      email: founderEmail,
+      country: "NG",
+    });
     console.log(`[Routes] Company "${companyName}" added to Verified Entities Registry`);
   }
 

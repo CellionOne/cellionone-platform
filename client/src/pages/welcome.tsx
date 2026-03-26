@@ -55,9 +55,9 @@ export default function WelcomePage() {
       } else if (intent === "founder_existing_co") {
         navigate("/founder/existing-company");
       } else if (intent === "kyc_service") {
-        navigate("/kyc");
+        navigate("/kyc/orgs");
       } else if (intent === "procurement") {
-        navigate("/kyc");
+        navigate("/kyc/orgs");
       }
     },
     onError: () => {

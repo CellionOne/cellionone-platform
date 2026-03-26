@@ -94,6 +94,8 @@ export function registerProcurementRoutes(app: Express) {
       const member = await getUserOrgMembership(userId, data.buyerOrgId);
       if (!member) return res.status(403).json({ message: "Not a member of this organisation" });
 
+      if (!await requireActiveOrg(data.buyerOrgId, res)) return;
+
       const { items, ...rfqData } = data;
       const rfq = await storage.createRfq({
         ...rfqData,

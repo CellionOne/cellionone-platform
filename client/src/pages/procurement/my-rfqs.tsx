@@ -5,6 +5,7 @@ import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
@@ -17,6 +18,8 @@ import {
   Send,
   XCircle,
   BarChart3,
+  AlertTriangle,
+  ShieldAlert,
 } from "lucide-react";
 import type { Rfq } from "@shared/schema";
 
@@ -60,6 +63,14 @@ export default function MyRfqsPage() {
     queryKey: ["/api/procurement/rfqs"],
   });
 
+  const { data: orgs } = useQuery<any[]>({
+    queryKey: ["/api/kyc-service/organisations"],
+  });
+
+  const primaryOrg = orgs?.[0];
+  const orgStatus = primaryOrg?.status;
+  const orgBlocked = orgStatus === "pending_review" || orgStatus === "suspended";
+
   const filteredRfqs = rfqs?.filter((rfq) => {
     if (statusFilter !== "all" && rfq.status !== statusFilter) return false;
     return true;
@@ -75,16 +86,36 @@ export default function MyRfqsPage() {
   return (
     <DashboardLayout role="founder" breadcrumbs={[{ label: "Procurement" }, { label: "My RFQs" }]}>
       <div className="space-y-6">
+        {orgStatus === "pending_review" && (
+          <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20" data-testid="alert-org-pending">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <AlertDescription className="text-amber-800 dark:text-amber-200">
+              Your organisation is pending admin review. Creating and publishing RFQs is disabled until your account is approved.
+            </AlertDescription>
+          </Alert>
+        )}
+        {orgStatus === "suspended" && (
+          <Alert className="border-red-200 bg-red-50 dark:bg-red-950/20" data-testid="alert-org-suspended">
+            <ShieldAlert className="h-4 w-4 text-red-600" />
+            <AlertDescription className="text-red-800 dark:text-red-200">
+              Your organisation has been suspended. Please contact <a href="mailto:service@cellionone.com" className="underline">service@cellionone.com</a> to resolve this.
+            </AlertDescription>
+          </Alert>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold" data-testid="text-my-rfqs-title">My RFQs</h1>
             <p className="text-muted-foreground text-sm mt-1">Manage your requests for quotation</p>
           </div>
-          <Button asChild data-testid="button-create-rfq">
-            <Link href="/procurement/rfqs/new">
-              <Plus className="h-4 w-4 mr-2" />
-              Create RFQ
-            </Link>
+          <Button asChild={!orgBlocked} disabled={orgBlocked} data-testid="button-create-rfq">
+            {orgBlocked ? (
+              <span><Plus className="h-4 w-4 mr-2" />Create RFQ</span>
+            ) : (
+              <Link href="/procurement/rfqs/new">
+                <Plus className="h-4 w-4 mr-2" />
+                Create RFQ
+              </Link>
+            )}
           </Button>
         </div>
 

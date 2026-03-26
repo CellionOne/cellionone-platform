@@ -173,9 +173,9 @@ export function registerKycServiceRoutes(app: Express) {
 
       // Notify admin that a new KYC org is awaiting review
       try {
-        const resend = getResendClient();
-        await resend.emails.send({
-          from: "Cellion One <service@cellionone.com>",
+        const { client: emailClient, fromEmail } = await getResendClient();
+        await emailClient.emails.send({
+          from: fromEmail,
           to: "service@cellionone.com",
           subject: `[KYC] New Organisation Awaiting Review: ${data.name}`,
           html: `<p>A new KYC Service organisation has been created and is pending review.</p>
@@ -2005,10 +2005,10 @@ export function registerKycServiceRoutes(app: Express) {
       // Notify the org creator of the review decision
       if (data.status === "active" || data.status === "suspended") {
         try {
-          const resend = getResendClient();
+          const { client: emailClient, fromEmail } = await getResendClient();
           const isApproved = data.status === "active";
-          await resend.emails.send({
-            from: "Cellion One <service@cellionone.com>",
+          await emailClient.emails.send({
+            from: fromEmail,
             to: updated.contactEmail,
             subject: isApproved
               ? "Your KYC Organisation Has Been Approved"

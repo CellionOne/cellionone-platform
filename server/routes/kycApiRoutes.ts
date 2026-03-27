@@ -242,7 +242,10 @@ export function registerKycApiRoutes(app: Express) {
       }
 
       const ref = `aml_${orgId}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-      const result = await smileId.performAmlCheck(body.fullName, ref);
+      const result = await smileId.performAmlCheck(body.fullName, ref, {
+        dateOfBirth: body.dateOfBirth,
+        nationality: body.nationality,
+      });
 
       const [insertedRow] = await db.insert(kycVerificationRequests).values({
         orgId,

@@ -3099,10 +3099,12 @@ export function registerKycServiceRoutes(app: Express) {
         returnUrlWithParams = `${returnUrlWithParams}${separator}session_id=${session.id}&status=${finalStatus}`;
       }
 
-      // Compute clean face check result fields for webhook
+      // Compute clean face check result fields for webhook.
+      // documentVerified reflects whether a document was supplied and used in the comparison attempt,
+      // independent of the face-match outcome (faceMatch captures that separately).
       const typedFaceResult = faceMatchResult as smileIdService.PhotoCompareResult | null;
       const webhookFaceMatch = typedFaceResult ? typedFaceResult.matched : null;
-      const webhookDocumentVerified = !!(selfieRequired && selfieBase64 && effectiveDocumentPath && typedFaceResult?.matched);
+      const webhookDocumentVerified = !!(selfieRequired && selfieBase64 && effectiveDocumentPath);
 
       // Fire webhook — "verification.completed" with outcome (NO third-party branding)
       await webhookService.deliverWebhook(session.orgId, "verification.completed", {

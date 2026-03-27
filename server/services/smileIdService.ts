@@ -509,6 +509,7 @@ interface SmileIdAmlResponse {
 export async function performAmlCheck(
   fullName: string,
   userId: string,
+  options?: { dateOfBirth?: string; nationality?: string },
 ): Promise<AmlCheckResult> {
   if (!isSmileIdConfigured()) {
     console.log(`[SmileID] Not configured — skipping AML check for ${fullName}`);
@@ -523,16 +524,19 @@ export async function performAmlCheck(
       ? 'https://api.smileidentity.com/v1'
       : 'https://testapi.smileidentity.com/v1';
 
+    const requestBody: Record<string, any> = {
+      partner_id: PARTNER_ID,
+      signature,
+      timestamp,
+      full_name: fullName,
+      countries: options?.nationality ? [options.nationality.toUpperCase()] : ['NG'],
+    };
+    if (options?.dateOfBirth) requestBody.dob = options.dateOfBirth;
+
     const response = await fetch(`${apiBase}/aml`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        partner_id: PARTNER_ID,
-        signature,
-        timestamp,
-        full_name: fullName,
-        countries: ['NG'],
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const data: SmileIdAmlResponse = await response.json();

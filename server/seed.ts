@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
-import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories } from "@shared/schema";
+import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts } from "@shared/schema";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
@@ -119,6 +119,20 @@ export async function seedDatabase() {
       if (existingRole.length === 0) {
         await db.insert(userRoles).values({ userId: adminUser.id, role: "admin" });
         console.log("Super admin role assigned to existing user: " + SUPER_ADMIN_EMAIL);
+      }
+      // One-time admin password bootstrap — runs when ADMIN_BOOTSTRAP_PASSWORD is set
+      const bootstrapPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD;
+      if (bootstrapPassword) {
+        const newHash = await bcrypt.hash(bootstrapPassword, 12);
+        await db.update(users).set({ passwordHash: newHash, emailVerified: true }).where(eq(users.email, SUPER_ADMIN_EMAIL));
+        // Also clear any lockout so the admin can log in immediately
+        await db.delete(loginAttempts).where(eq(loginAttempts.identifier, SUPER_ADMIN_EMAIL));
+        console.log("==========================================================");
+        console.log("SUPER ADMIN PASSWORD BOOTSTRAPPED");
+        console.log(`Email: ${SUPER_ADMIN_EMAIL}`);
+        console.log("Password set from ADMIN_BOOTSTRAP_PASSWORD env var");
+        console.log("Lockout cleared.");
+        console.log("==========================================================");
       }
     }
 

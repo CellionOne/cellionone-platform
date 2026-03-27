@@ -7,10 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LoadingSpinner } from "@/components/loading-spinner";
-import { LiveCaptureWidget } from "@/components/live-capture-widget";
 import {
   Shield, CheckCircle2, XCircle, Clock, ChevronRight,
-  User, FileText, Camera, AlertTriangle, ExternalLink, Mail,
+  User, FileText, Camera, AlertTriangle, ExternalLink, Mail, Upload, RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -120,7 +119,7 @@ function ConsentStep({ session, requiredSteps, onAccept, isPending }: {
   const allCollect = [
     { id: "identity", icon: User, text: "Your personal details (name, date of birth)" },
     { id: "documents", icon: FileText, text: "Government-issued ID document" },
-    { id: "selfie", icon: Camera, text: "A liveness selfie for biometric matching" },
+    { id: "selfie", icon: Camera, text: "A selfie photo for biometric matching" },
   ];
   const collectItems = requiredSteps
     ? allCollect.filter(c => requiredSteps.includes(c.id))
@@ -483,15 +482,121 @@ function DocumentsStep({ token, onNext }: { token: string; onNext: (result: Docu
 }
 
 function SelfieStep({ onCapture }: { onCapture: (base64: string) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) {
+      setError("Photo must be under 5MB");
+      return;
+    }
+    if (!f.type.startsWith("image/")) {
+      setError("Only image files are accepted");
+      return;
+    }
+    setError("");
+    setFile(f);
+    const reader = new FileReader();
+    reader.onload = (ev) => setPreview(ev.target?.result as string);
+    reader.readAsDataURL(f);
+  }
+
+  function handleReset() {
+    setFile(null);
+    setPreview(null);
+    setError("");
+  }
+
+  function handleContinue() {
+    if (preview) onCapture(preview);
+  }
+
   return (
     <div className="space-y-5" data-testid="step-selfie">
       <div className="space-y-1">
-        <h2 className="text-xl font-bold">Liveness Selfie</h2>
+        <h2 className="text-xl font-bold">Upload Your Selfie</h2>
         <p className="text-sm text-muted-foreground">
-          Take a clear selfie to verify your identity against your document
+          Upload a clear photo of your face to verify your identity against your document
         </p>
       </div>
-      <LiveCaptureWidget onCapture={onCapture} />
+
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="pt-4 space-y-1.5 text-xs text-primary">
+          <p className="font-semibold">Tips for a good selfie photo</p>
+          <ul className="space-y-0.5 text-primary/80">
+            <li>• Face the camera directly with good lighting</li>
+            <li>• No hats, sunglasses or face coverings</li>
+            <li>• Only your face in the frame — no other people</li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      {!preview ? (
+        <div
+          className={cn(
+            "border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer",
+            "border-muted-foreground/30 hover:border-primary/40"
+          )}
+          onClick={() => document.getElementById("selfie-upload")?.click()}
+          data-testid="selfie-upload-area"
+        >
+          <input
+            id="selfie-upload"
+            type="file"
+            accept="image/*"
+            capture="user"
+            className="hidden"
+            onChange={handleFile}
+            data-testid="input-selfie-file"
+          />
+          <div className="space-y-2">
+            <Camera className="h-10 w-10 text-muted-foreground mx-auto" />
+            <p className="text-sm font-medium">Tap to take or upload a selfie</p>
+            <p className="text-xs text-muted-foreground">JPG or PNG · Max 5MB</p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="relative rounded-xl overflow-hidden border border-border aspect-square max-h-64 mx-auto">
+            <img
+              src={preview}
+              alt="Selfie preview"
+              className="w-full h-full object-cover"
+              data-testid="img-selfie-preview"
+            />
+            <div className="absolute top-3 right-3">
+              <Badge className="text-xs bg-green-500 text-white border-0">
+                <CheckCircle2 className="h-3 w-3 mr-1" />
+                Ready
+              </Badge>
+            </div>
+          </div>
+          <Button variant="outline" className="w-full" onClick={handleReset} data-testid="button-retake-selfie">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Choose a different photo
+          </Button>
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-2 text-red-500 text-sm">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      <Button
+        className="w-full"
+        onClick={handleContinue}
+        disabled={!preview}
+        data-testid="button-next-selfie"
+      >
+        Continue
+        <ChevronRight className="h-4 w-4 ml-1" />
+      </Button>
     </div>
   );
 }

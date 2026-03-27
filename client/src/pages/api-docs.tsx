@@ -27,6 +27,9 @@ import {
   AlertCircle,
   Timer,
   ExternalLink,
+  Download,
+  Zap,
+  GitCompare,
 } from "lucide-react";
 
 function CodeBlock({ code, language = "bash" }: { code: string; language?: string }) {
@@ -113,6 +116,7 @@ const sidebarSections = [
   { id: "getting-started", label: "Getting Started" },
   { id: "authentication", label: "Authentication" },
   { id: "billing", label: "Billing" },
+  { id: "which-approach", label: "Which Approach?" },
   {
     id: "endpoints",
     label: "Endpoints",
@@ -122,6 +126,7 @@ const sidebarSections = [
       { id: "endpoints-templates", label: "Templates" },
     ],
   },
+  { id: "instant-lookups", label: "Instant ID Lookups" },
   { id: "hosted-sessions", label: "Hosted Sessions" },
   { id: "status-lifecycle", label: "Status Lifecycle" },
   { id: "webhooks", label: "Webhooks" },
@@ -256,10 +261,22 @@ export default function ApiDocsPage() {
       <div className="container mx-auto px-4 pt-24 pb-8 lg:grid lg:grid-cols-[220px_1fr] lg:gap-8">
         <DocsSidebar activeSection={activeSection} />
 
-        <div className="space-y-8 min-w-0">
+        <div className="space-y-8 min-w-0 api-docs-print-content">
           <div className="flex items-center justify-between">
             <h1 className="text-3xl font-bold" data-testid="heading-api-docs">API Documentation</h1>
-            <Badge variant="secondary" className="border-0">v1.0</Badge>
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary" className="border-0">v1.0</Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.print()}
+                data-testid="button-download-docs"
+                className="print:hidden"
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                Download
+              </Button>
+            </div>
           </div>
 
           <section id="getting-started" className="space-y-4 scroll-mt-24">
@@ -488,6 +505,105 @@ export default function ApiDocsPage() {
                 />
               </CardContent>
             </Card>
+          </section>
+
+          <Separator />
+
+          <section id="which-approach" className="space-y-4 scroll-mt-24">
+            <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-which-approach">
+              <GitCompare className="h-5 w-5" />
+              Which Approach is Right for You?
+            </h2>
+            <p className="text-muted-foreground leading-relaxed">
+              Cellion One offers two verification styles. Choose based on what you need to check and how quickly you need the result.
+            </p>
+            <div className="grid gap-4 md:grid-cols-3">
+              {[
+                {
+                  title: "Instant ID Lookup",
+                  icon: Zap,
+                  color: "border-violet-200 dark:border-violet-800 bg-violet-50/60 dark:bg-violet-950/20",
+                  iconColor: "text-violet-600 dark:text-violet-400",
+                  timing: "Instant · ~1 second",
+                  price: "₦5,000 / credit",
+                  permission: "verify:identity",
+                  points: [
+                    "You already hold BVN, NIN, passport or licence numbers",
+                    "You need a quick background check",
+                    "No biometric matching required",
+                    "Synchronous — result in the API response",
+                  ],
+                  example: "POST /api/v1/kyc/lookup/bvn",
+                },
+                {
+                  title: "Hosted Session (Photo KYC)",
+                  icon: FileCheck,
+                  color: "border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/20",
+                  iconColor: "text-amber-600 dark:text-amber-400",
+                  timing: "~2–5 min via webhook",
+                  price: "₦15,000 / credit",
+                  permission: "verify:individual",
+                  points: [
+                    "You need the subject to submit their own documents",
+                    "You want biometric photo matching (selfie vs ID)",
+                    "Zero-friction — no Cellion account needed",
+                    "Result delivered via webhook",
+                  ],
+                  example: "POST /api/v1/kyc/sessions",
+                },
+                {
+                  title: "Corporate / Supplier KYC",
+                  icon: Shield,
+                  color: "border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-950/20",
+                  iconColor: "text-blue-600 dark:text-blue-400",
+                  timing: "~1 business day",
+                  price: "₦75,000 / credit",
+                  permission: "verify:supplier",
+                  points: [
+                    "Verifying a company as a supplier or counterparty",
+                    "Need full entity + director verification",
+                    "Compliance due-diligence",
+                    "Result delivered via webhook",
+                  ],
+                  example: "POST /api/v1/kyc/verify/supplier",
+                },
+              ].map((card) => (
+                <Card key={card.title} className={card.color}>
+                  <CardContent className="pt-5 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <card.icon className={`h-5 w-5 ${card.iconColor}`} />
+                      <p className="font-semibold text-sm">{card.title}</p>
+                    </div>
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-medium text-muted-foreground">Best when…</p>
+                      <ul className="space-y-1">
+                        {card.points.map((p) => (
+                          <li key={p} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                            <CheckCircle2 className="h-3 w-3 text-primary mt-0.5 shrink-0" />
+                            {p}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="border-t pt-2 space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">Timing</span>
+                        <span className={`font-medium ${card.iconColor}`}>{card.timing}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">Price</span>
+                        <span className="font-medium">{card.price}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">Permission</span>
+                        <code className="bg-muted px-1 rounded text-[10px]">{card.permission}</code>
+                      </div>
+                    </div>
+                    <code className="block text-[10px] text-muted-foreground bg-muted/60 rounded px-2 py-1 font-mono">{card.example}</code>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </section>
 
           <Separator />
@@ -833,6 +949,146 @@ export default function ApiDocsPage() {
                 </EndpointSection>
               </TabsContent>
             </Tabs>
+          </section>
+
+          <Separator />
+
+          <section id="instant-lookups" className="space-y-4 scroll-mt-24">
+            <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-instant-lookups">
+              <Zap className="h-5 w-5" />
+              Instant ID Lookups
+            </h2>
+            <p className="text-muted-foreground leading-relaxed">
+              Synchronous endpoints that look up a Nigerian identity number and return the result immediately in the API response.
+              No webhook required. 1 <strong>Identity Check</strong> credit (₦5,000) is deducted per call.
+              All endpoints require the <code className="bg-muted px-1 rounded">verify:identity</code> permission.
+            </p>
+
+            <Card className="border-violet-200 dark:border-violet-800 bg-violet-50/40 dark:bg-violet-950/10">
+              <CardContent className="pt-5 text-sm text-muted-foreground space-y-1">
+                <p className="font-medium text-foreground">Request format — all lookup endpoints</p>
+                <p>Send a <code className="bg-muted px-1 rounded">POST</code> request with <code className="bg-muted px-1 rounded">idNumber</code> in the body. The response is synchronous (HTTP 200) with a <code className="bg-muted px-1 rounded">verified</code> boolean.</p>
+                <p>A <code className="bg-muted px-1 rounded">verified: false</code> response is <em>not</em> an error — it means the ID was not matched. HTTP errors (4xx/5xx) indicate request problems.</p>
+              </CardContent>
+            </Card>
+
+            <EndpointSection method="POST" path="/api/v1/kyc/lookup/bvn" description="Verify a Bank Verification Number (BVN)">
+              <ParamTable title="Request Body" params={[
+                { field: "idNumber", type: "string", required: "Yes", description: "11-digit BVN" },
+              ]} />
+              <CodeBlock language="json" code={`// Request
+{ "idNumber": "22345678901" }
+
+// Response (match)
+{
+  "verified": true,
+  "idType": "BVN",
+  "fullName": "ADEBAYO OGUNLESI",
+  "dob": "1990-01-15",
+  "gender": "Male",
+  "referenceId": "id_lookup_7_1711977600000_a1b2c3d4",
+  "requestId": 215
+}
+
+// Response (no match)
+{
+  "verified": false,
+  "idType": "BVN",
+  "reason": "ID could not be verified",
+  "referenceId": "id_lookup_7_1711977600001_e5f6g7h8",
+  "requestId": 216
+}`} />
+            </EndpointSection>
+
+            <EndpointSection method="POST" path="/api/v1/kyc/lookup/nin" description="Verify a National Identity Number (NIN)">
+              <ParamTable title="Request Body" params={[
+                { field: "idNumber", type: "string", required: "Yes", description: "11-digit NIN" },
+              ]} />
+              <CodeBlock language="json" code={`{ "idNumber": "12345678901" }`} />
+            </EndpointSection>
+
+            <EndpointSection method="POST" path="/api/v1/kyc/lookup/drivers-licence" description="Verify a Nigerian driver's licence number">
+              <ParamTable title="Request Body" params={[
+                { field: "idNumber", type: "string", required: "Yes", description: "Driver's licence number (3–30 characters)" },
+              ]} />
+              <CodeBlock language="json" code={`{ "idNumber": "LAG-AB-1234567" }`} />
+            </EndpointSection>
+
+            <EndpointSection method="POST" path="/api/v1/kyc/lookup/voter-id" description="Verify a Voter Identification Number (VIN)">
+              <ParamTable title="Request Body" params={[
+                { field: "idNumber", type: "string", required: "Yes", description: "Voter ID number (3–30 characters)" },
+              ]} />
+              <CodeBlock language="json" code={`{ "idNumber": "71A1B234567" }`} />
+            </EndpointSection>
+
+            <EndpointSection method="POST" path="/api/v1/kyc/lookup/passport" description="Verify an international passport number">
+              <ParamTable title="Request Body" params={[
+                { field: "idNumber", type: "string", required: "Yes", description: "Passport number (3–20 characters)" },
+              ]} />
+              <CodeBlock language="json" code={`{ "idNumber": "A12345678" }`} />
+            </EndpointSection>
+
+            <EndpointSection method="POST" path="/api/v1/kyc/lookup/aml" description="Name-based AML & sanctions screening">
+              <p className="text-sm text-muted-foreground">
+                Screens a full name against PEP lists, sanctions lists, and adverse media databases.
+                Returns <code className="bg-muted px-1 rounded">isHit: false</code> when no matches are found (good outcome).
+              </p>
+              <ParamTable title="Request Body" params={[
+                { field: "fullName", type: "string", required: "Yes", description: "Full legal name to screen (2–255 characters)" },
+              ]} />
+              <CodeBlock language="json" code={`// Request
+{ "fullName": "Adebayo Ogunlesi" }
+
+// Response (clean — no AML hits)
+{
+  "isHit": false,
+  "hitTypes": [],
+  "matchCount": 0,
+  "referenceId": "aml_7_1711977600000_i9j0k1l2",
+  "requestId": 220
+}
+
+// Response (flagged)
+{
+  "isHit": true,
+  "hitTypes": ["PEP", "Sanction"],
+  "matchCount": 2,
+  "referenceId": "aml_7_1711977600001_m3n4o5p6",
+  "requestId": 221
+}`} />
+            </EndpointSection>
+
+            <Card>
+              <CardContent className="pt-5">
+                <table className="w-full text-sm border rounded-md overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-2 font-medium">Endpoint</th>
+                      <th className="text-left p-2 font-medium">ID Type</th>
+                      <th className="text-left p-2 font-medium">Format</th>
+                      <th className="text-left p-2 font-medium">Credit Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { path: "/lookup/bvn", id: "BVN", format: "11 digits", cost: "1 Identity" },
+                      { path: "/lookup/nin", id: "NIN", format: "11 digits", cost: "1 Identity" },
+                      { path: "/lookup/drivers-licence", id: "Driver's Licence", format: "3–30 chars", cost: "1 Identity" },
+                      { path: "/lookup/voter-id", id: "Voter ID", format: "3–30 chars", cost: "1 Identity" },
+                      { path: "/lookup/passport", id: "Passport", format: "3–20 chars", cost: "1 Identity" },
+                      { path: "/lookup/aml", id: "AML Screen", format: "Full name", cost: "1 Identity" },
+                    ].map((row) => (
+                      <tr key={row.path} className="border-t">
+                        <td className="p-2 font-mono text-xs text-violet-600 dark:text-violet-400">/api/v1/kyc{row.path}</td>
+                        <td className="p-2 text-xs">{row.id}</td>
+                        <td className="p-2 text-xs text-muted-foreground">{row.format}</td>
+                        <td className="p-2 text-xs text-muted-foreground">{row.cost} (₦5,000)</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
           </section>
 
           <Separator />

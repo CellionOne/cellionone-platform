@@ -143,9 +143,9 @@ type ProvisionStep = "select-type" | "fill-details" | "success";
 type ProvisionClientType = "organisation" | "application";
 
 const PROVISION_PERMISSIONS = [
-  { id: "verify:identity", label: "Identity Check", description: "BVN/NIN lookup and AML/sanctions screening only (no biometrics)" },
-  { id: "verify:individual", label: "Individual Verification", description: "Full individual KYC with biometrics and document checks" },
-  { id: "verify:supplier", label: "Supplier Verification", description: "Corporate entity + key persons KYC" },
+  { id: "verify:identity", label: "Instant ID Lookups", description: "BVN, NIN, Driver's Licence, Voter ID, Passport & AML — synchronous, instant results (₦5,000/credit)" },
+  { id: "verify:individual", label: "Individual Verification", description: "Full individual KYC with photo selfie and document checks — result via webhook (₦15,000/credit)" },
+  { id: "verify:supplier", label: "Supplier Verification", description: "Corporate entity + key persons KYC — result in ~1 business day (₦75,000/credit)" },
 ] as const;
 
 interface KycInvoice {
@@ -1543,8 +1543,26 @@ export default function AdminKycOverview() {
                     </Button>
                   </div>
                 </div>
+                <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">
+                  <p className="font-medium text-sm">Next steps</p>
+                  <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+                    <li>Hand the API key to the client to include in all requests as <code className="bg-muted px-1 rounded">X-API-Key</code></li>
+                    <li>Ask the client to purchase credits from their billing dashboard before making calls</li>
+                    <li>Share the API docs link below so they can integrate quickly</li>
+                  </ul>
+                </div>
               </div>
-              <DialogFooter>
+              <DialogFooter className="flex-col sm:flex-row gap-2">
+                <Button
+                  variant="outline"
+                  asChild
+                  data-testid="button-view-api-docs"
+                >
+                  <a href="/api-docs" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5">
+                    <KeyRound className="h-3.5 w-3.5" />
+                    View API Documentation →
+                  </a>
+                </Button>
                 <Button
                   onClick={() => { setProvisionOpen(false); resetProvisionDialog(); }}
                   data-testid="button-provision-done"

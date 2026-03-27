@@ -301,6 +301,17 @@
     top: 0;
     width: 100%;
   }
+  .api-docs-print-content,
+  .api-docs-print-content * {
+    visibility: visible !important;
+  }
+  .api-docs-print-content {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 32px;
+  }
   .print-hide-controls,
   [data-sidebar],
   header,

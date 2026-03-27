@@ -14,6 +14,7 @@ import {
 import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth";
 import * as billingService from "../services/kycBillingService";
 import * as webhookService from "../services/kycWebhookService";
+import * as smileId from "../services/smileIdService";
 
 function generateToken(): string {
   return crypto.randomBytes(48).toString("hex");
@@ -37,7 +38,177 @@ function calculateRiskScore(docs: KycSubmittedDocument[], requirements: KycDocum
   return "green";
 }
 
+// ─── Shared helper for sync ID lookups ────────────────────────────────────────
+
+async function handleIdLookup(
+  req: ApiKeyRequest,
+  res: Response,
+  idType: string,
+  idNumber: string,
+  lookupFn: (id: string, ref: string) => Promise<smileId.IdLookupResult>,
+) {
+  const orgId = req.apiKeyContext!.orgId;
+
+  const hasCred = await billingService.hasCredits(orgId, "identity_only");
+  if (!hasCred) {
+    return res.status(402).json({
+      error: "Insufficient credits. Please purchase identity_only credits to use instant lookups.",
+      code: "INSUFFICIENT_CREDITS",
+      verificationType: "identity_only",
+    });
+  }
+
+  const ref = `id_lookup_${orgId}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+
+  const result = await lookupFn(idNumber, ref);
+
+  const [insertedRow] = await db.insert(kycVerificationRequests).values({
+    orgId,
+    templateId: null,
+    requestedByUserId: null,
+    type: "individual",
+    status: result.verified ? "verified" : "rejected",
+    subjectEmail: `lookup_${ref}@cellionone.internal`,
+    subjectName: result.fullName || idNumber,
+    notes: `Instant ${idType} lookup`,
+    paymentResponsibility: "organisation",
+    paymentStatus: "not_required",
+    inviteToken: ref,
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    reviewedAt: new Date(),
+  }).returning();
+
+  await billingService.deductCredit(orgId, "identity_only", insertedRow.id);
+
+  const responseBody: Record<string, unknown> = {
+    verified: result.verified,
+    idType,
+    referenceId: ref,
+    requestId: insertedRow.id,
+  };
+  if (result.fullName) responseBody.fullName = result.fullName;
+  if (result.dob) responseBody.dob = result.dob;
+  if (result.gender) responseBody.gender = result.gender;
+  if (result.address) responseBody.address = result.address;
+  if (!result.verified && result.reason) responseBody.reason = result.reason;
+
+  return res.json(responseBody);
+}
+
 export function registerKycApiRoutes(app: Express) {
+
+  // ─── Synchronous ID Lookup Endpoints ─────────────────────────────────────
+
+  // POST /api/v1/kyc/lookup/bvn
+  app.post("/api/v1/kyc/lookup/bvn", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
+    try {
+      const { idNumber } = z.object({ idNumber: z.string().length(11).regex(/^\d+$/, "BVN must be 11 digits") }).parse(req.body);
+      return handleIdLookup(req, res, "BVN", idNumber, smileId.lookupBvn);
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
+      console.error("[KYC API] BVN lookup error:", err);
+      res.status(500).json({ error: "BVN lookup failed" });
+    }
+  });
+
+  // POST /api/v1/kyc/lookup/nin
+  app.post("/api/v1/kyc/lookup/nin", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
+    try {
+      const { idNumber } = z.object({ idNumber: z.string().length(11).regex(/^\d+$/, "NIN must be 11 digits") }).parse(req.body);
+      return handleIdLookup(req, res, "NIN", idNumber, smileId.lookupNin);
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
+      console.error("[KYC API] NIN lookup error:", err);
+      res.status(500).json({ error: "NIN lookup failed" });
+    }
+  });
+
+  // POST /api/v1/kyc/lookup/drivers-licence
+  app.post("/api/v1/kyc/lookup/drivers-licence", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
+    try {
+      const { idNumber } = z.object({ idNumber: z.string().min(3).max(30) }).parse(req.body);
+      return handleIdLookup(req, res, "DRIVERS_LICENSE", idNumber, smileId.lookupDriversLicence);
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
+      console.error("[KYC API] Driver's licence lookup error:", err);
+      res.status(500).json({ error: "Driver's licence lookup failed" });
+    }
+  });
+
+  // POST /api/v1/kyc/lookup/voter-id
+  app.post("/api/v1/kyc/lookup/voter-id", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
+    try {
+      const { idNumber } = z.object({ idNumber: z.string().min(3).max(30) }).parse(req.body);
+      return handleIdLookup(req, res, "VOTER_ID", idNumber, smileId.lookupVoterId);
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
+      console.error("[KYC API] Voter ID lookup error:", err);
+      res.status(500).json({ error: "Voter ID lookup failed" });
+    }
+  });
+
+  // POST /api/v1/kyc/lookup/passport
+  app.post("/api/v1/kyc/lookup/passport", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
+    try {
+      const { idNumber } = z.object({ idNumber: z.string().min(3).max(20) }).parse(req.body);
+      return handleIdLookup(req, res, "INTERNATIONAL_PASSPORT", idNumber, smileId.lookupPassport);
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
+      console.error("[KYC API] Passport lookup error:", err);
+      res.status(500).json({ error: "Passport lookup failed" });
+    }
+  });
+
+  // POST /api/v1/kyc/lookup/aml
+  app.post("/api/v1/kyc/lookup/aml", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
+    try {
+      const { fullName } = z.object({ fullName: z.string().min(2).max(255) }).parse(req.body);
+      const orgId = req.apiKeyContext!.orgId;
+
+      const hasCred = await billingService.hasCredits(orgId, "identity_only");
+      if (!hasCred) {
+        return res.status(402).json({
+          error: "Insufficient credits. Please purchase identity_only credits to use instant lookups.",
+          code: "INSUFFICIENT_CREDITS",
+          verificationType: "identity_only",
+        });
+      }
+
+      const ref = `aml_${orgId}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+      const result = await smileId.performAmlCheck(fullName, ref);
+
+      const [insertedRow] = await db.insert(kycVerificationRequests).values({
+        orgId,
+        templateId: null,
+        requestedByUserId: null,
+        type: "individual",
+        status: "verified",
+        subjectEmail: `aml_${ref}@cellionone.internal`,
+        subjectName: fullName,
+        notes: "Instant AML lookup",
+        paymentResponsibility: "organisation",
+        paymentStatus: "not_required",
+        inviteToken: ref,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        reviewedAt: new Date(),
+      }).returning();
+
+      await billingService.deductCredit(orgId, "identity_only", insertedRow.id);
+
+      return res.json({
+        isHit: result.isHit,
+        hitTypes: result.hitTypes,
+        matchCount: result.matchDetails?.length ?? 0,
+        referenceId: ref,
+        requestId: insertedRow.id,
+        ...(result.error ? { warning: "AML service returned an error — results may be incomplete." } : {}),
+      });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
+      console.error("[KYC API] AML lookup error:", err);
+      res.status(500).json({ error: "AML lookup failed" });
+    }
+  });
 
   // POST /api/v1/kyc/verify/individual
   app.post("/api/v1/kyc/verify/individual", authenticateApiKey("verify:individual"), async (req: ApiKeyRequest, res: Response) => {

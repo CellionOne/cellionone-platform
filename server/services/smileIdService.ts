@@ -299,6 +299,155 @@ export async function getVerificationStatus(): Promise<{
   };
 }
 
+// ─── Generic ID Lookup (job type 5) ──────────────────────────────────────────
+
+export interface IdLookupResult {
+  verified: boolean;
+  fullName?: string;
+  dob?: string;
+  photo?: string;
+  gender?: string;
+  address?: string;
+  reason?: string;
+  referenceId?: string;
+}
+
+async function runIdLookup(
+  idType: string,
+  idNumber: string,
+  lookupRef: string,
+): Promise<IdLookupResult> {
+  if (!isSmileIdConfigured()) {
+    return {
+      verified: false,
+      reason: 'Identity verification service not configured. Contact support.',
+    };
+  }
+
+  try {
+    const smileIdentityCore = require('smile-identity-core');
+    const IDApi = smileIdentityCore.IDApi;
+    const connection = new IDApi(PARTNER_ID, API_KEY, SID_SERVER);
+
+    const partnerParams = {
+      job_id: lookupRef,
+      user_id: lookupRef,
+      job_type: 5,
+    };
+
+    const idInfo = {
+      country: 'NG',
+      id_type: idType,
+      id_number: idNumber,
+      entered: true,
+    };
+
+    const result = await connection.submit_job(partnerParams, idInfo);
+    const verified = result?.Actions?.Verify_ID_Number === 'Verified';
+
+    return {
+      verified,
+      fullName: result?.FullName ?? undefined,
+      dob: result?.DOB ?? undefined,
+      photo: result?.Photo ?? undefined,
+      gender: result?.Gender ?? undefined,
+      address: result?.Address ?? undefined,
+      referenceId: result?.SmileJobID ?? undefined,
+      reason: verified ? undefined : (result?.ResultText || 'ID could not be verified'),
+    };
+  } catch (error: any) {
+    console.error(`[SmileID] ${idType} lookup error:`, error.message);
+    return {
+      verified: false,
+      reason: 'Lookup service temporarily unavailable. Please try again.',
+    };
+  }
+}
+
+export async function lookupBvn(bvnNumber: string, ref: string): Promise<IdLookupResult> {
+  return runIdLookup('BVN', bvnNumber, ref);
+}
+
+export async function lookupNin(ninNumber: string, ref: string): Promise<IdLookupResult> {
+  return runIdLookup('NIN_V2', ninNumber, ref);
+}
+
+export async function lookupDriversLicence(licenceNumber: string, ref: string): Promise<IdLookupResult> {
+  return runIdLookup('DRIVERS_LICENSE', licenceNumber, ref);
+}
+
+export async function lookupVoterId(voterIdNumber: string, ref: string): Promise<IdLookupResult> {
+  return runIdLookup('VOTER_ID', voterIdNumber, ref);
+}
+
+export async function lookupPassport(passportNumber: string, ref: string): Promise<IdLookupResult> {
+  return runIdLookup('INTERNATIONAL_PASSPORT', passportNumber, ref);
+}
+
+// ─── Photo comparison (job type 6: doc + portrait) ───────────────────────────
+
+export interface PhotoCompareResult {
+  matched: boolean;
+  confidence?: number;
+  reason?: string;
+  referenceId?: string;
+}
+
+export async function compareDocumentToPortrait(
+  documentBase64: string,
+  selfieBase64: string,
+  ref: string,
+): Promise<PhotoCompareResult> {
+  if (!isSmileIdConfigured()) {
+    return {
+      matched: false,
+      reason: 'Identity verification service not configured.',
+    };
+  }
+
+  try {
+    const smileIdentityCore = require('smile-identity-core');
+    const WebApi = smileIdentityCore.WebApi;
+    const connection = new WebApi(PARTNER_ID, null, API_KEY, SID_SERVER);
+
+    const partnerParams = {
+      job_id: ref,
+      user_id: ref,
+      job_type: 6,
+    };
+
+    const imageDetails = [
+      { image_type_id: 1, image: documentBase64 },
+      { image_type_id: 0, image: selfieBase64 },
+    ];
+
+    const options = { return_job_status: true };
+    const result = await connection.submit_job(partnerParams, imageDetails, {}, options);
+
+    const actions = result?.job_complete_response?.Actions || result?.Actions || {};
+    const matched =
+      actions?.Face_Comparison === 'Passed' ||
+      actions?.Selfie_Provided === 'Passed' ||
+      false;
+    const confidence = result?.job_complete_response?.ConfidenceValue
+      ? Math.round(Number(result.job_complete_response.ConfidenceValue))
+      : undefined;
+
+    return {
+      matched,
+      confidence,
+      referenceId: result?.SmileJobID ?? undefined,
+      reason: matched ? undefined : 'Photo does not match the document',
+    };
+  } catch (error: any) {
+    console.error('[SmileID] Photo comparison error:', error.message);
+    return {
+      matched: false,
+      reason: 'Photo comparison service temporarily unavailable.',
+    };
+  }
+}
+
 export interface AmlCheckResult {
   isHit: boolean;
   hitTypes: string[];

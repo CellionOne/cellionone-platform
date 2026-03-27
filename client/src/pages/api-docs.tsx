@@ -1008,7 +1008,10 @@ export default function ApiDocsPage() {
   "reason": "ID could not be verified",
   "referenceId": "id_lookup_7_1711977600001_e5f6g7h8",
   "requestId": 216
-}`} />
+}
+
+// 402 — insufficient credits
+{ "error": "Insufficient credits", "required": "identity_only", "available": 0 }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/nin" description="Verify a National Identity Number (NIN)">
@@ -1018,44 +1021,59 @@ export default function ApiDocsPage() {
                 { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
                 { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
               ]} />
-              <CodeBlock language="json" code={`{ "idNumber": "12345678901", "firstName": "Amaka", "lastName": "Nwosu" }`} />
+              <CodeBlock language="json" code={`{ "idNumber": "12345678901", "firstName": "Amaka", "lastName": "Nwosu" }
+
+// 402 — insufficient credits
+{ "error": "Insufficient credits", "required": "identity_only", "available": 0 }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/drivers-licence" description="Verify a Nigerian driver's licence number">
               <ParamTable title="Request Body" params={[
                 { field: "idNumber", type: "string", required: "Yes", description: "Driver's licence number (3–30 characters)" },
-                { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
-                { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
-                { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
+                { field: "firstName", type: "string", required: "Yes", description: "Subject's first name — used for name-matching against registry record" },
+                { field: "lastName", type: "string", required: "Yes", description: "Subject's last name — used for name-matching against registry record" },
+                { field: "dateOfBirth", type: "string", required: "Yes", description: "Date of birth in YYYY-MM-DD format — required by FRSC registry" },
               ]} />
-              <CodeBlock language="json" code={`{ "idNumber": "LAG-AB-1234567", "firstName": "Chukwuemeka", "lastName": "Obi", "dateOfBirth": "1985-03-22" }`} />
+              <CodeBlock language="json" code={`// Request
+{ "idNumber": "LAG-AB-1234567", "firstName": "Chukwuemeka", "lastName": "Obi", "dateOfBirth": "1985-03-22" }
+
+// 402 — insufficient credits
+{ "error": "Insufficient credits", "required": "identity_only", "available": 0 }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/voter-id" description="Verify a Voter Identification Number (VIN)">
               <ParamTable title="Request Body" params={[
                 { field: "idNumber", type: "string", required: "Yes", description: "Voter ID number (3–30 characters)" },
-                { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
-                { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
-                { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
+                { field: "firstName", type: "string", required: "Yes", description: "Subject's first name — used for name-matching against INEC records" },
+                { field: "lastName", type: "string", required: "Yes", description: "Subject's last name — used for name-matching against INEC records" },
+                { field: "dateOfBirth", type: "string", required: "Yes", description: "Date of birth in YYYY-MM-DD format — required by INEC registry" },
               ]} />
-              <CodeBlock language="json" code={`{ "idNumber": "71A1B234567", "firstName": "Ngozi", "lastName": "Eze" }`} />
+              <CodeBlock language="json" code={`// Request
+{ "idNumber": "71A1B234567", "firstName": "Ngozi", "lastName": "Eze", "dateOfBirth": "1980-11-04" }
+
+// 402 — insufficient credits
+{ "error": "Insufficient credits", "required": "identity_only", "available": 0 }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/passport" description="Verify an international passport number">
               <ParamTable title="Request Body" params={[
                 { field: "idNumber", type: "string", required: "Yes", description: "Passport number (3–20 characters)" },
-                { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
-                { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
-                { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
-                { field: "expiryDate", type: "string", required: "No", description: "Passport expiry date in YYYY-MM-DD format — required by some registry checks" },
+                { field: "firstName", type: "string", required: "Yes", description: "Subject's first name — used for name-matching against NIS records" },
+                { field: "lastName", type: "string", required: "Yes", description: "Subject's last name — used for name-matching against NIS records" },
+                { field: "dateOfBirth", type: "string", required: "Yes", description: "Date of birth in YYYY-MM-DD format — required by NIS registry" },
+                { field: "expiryDate", type: "string", required: "Yes", description: "Passport expiry date in YYYY-MM-DD format — required by NIS registry" },
               ]} />
-              <CodeBlock language="json" code={`{
+              <CodeBlock language="json" code={`// Request
+{
   "idNumber": "A12345678",
   "firstName": "Babatunde",
   "lastName": "Fashola",
   "dateOfBirth": "1963-09-28",
   "expiryDate": "2029-06-30"
-}`} />
+}
+
+// 402 — insufficient credits
+{ "error": "Insufficient credits", "required": "identity_only", "available": 0 }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/aml" description="Name-based AML & sanctions screening">
@@ -1089,7 +1107,10 @@ export default function ApiDocsPage() {
   ],
   "referenceId": "aml_7_1711977600001_m3n4o5p6",
   "requestId": 221
-}`} />
+}
+
+// 402 — insufficient credits
+{ "error": "Insufficient credits", "required": "identity_only", "available": 0 }`} />
             </EndpointSection>
 
             <Card>

@@ -143,7 +143,7 @@ type ProvisionStep = "select-type" | "fill-details" | "success";
 type ProvisionClientType = "organisation" | "application";
 
 const PROVISION_PERMISSIONS = [
-  { id: "verify:identity", label: "Instant ID Lookups", description: "BVN, NIN, Driver's Licence, Voter ID, Passport & AML — synchronous, instant results (₦5,000/credit)" },
+  { id: "verify:identity", label: "Instant ID Lookups (BVN, NIN, Licence, Voter ID, Passport, AML)", description: "Synchronous, instant results — 1 credit (₦5,000) per call" },
   { id: "verify:individual", label: "Individual Verification", description: "Full individual KYC with photo selfie and document checks — result via webhook (₦15,000/credit)" },
   { id: "verify:supplier", label: "Supplier Verification", description: "Corporate entity + key persons KYC — result in ~1 business day (₦75,000/credit)" },
 ] as const;

@@ -2990,8 +2990,7 @@ export function registerKycServiceRoutes(app: Express) {
         const normalizedSelfieBase64 = selfieBase64.replace(/^data:image\/\w+;base64,/, "");
 
         if (documentBase64ForComparison) {
-          // Preferred path: compare selfie against ID document photo (Job Type 6)
-          // Both document and selfie are passed as raw base64 (no data URI prefix)
+          // Compare selfie against ID document photo (Job Type 6 — document + portrait)
           const normalizedDocBase64 = documentBase64ForComparison.replace(/^data:image\/\w+;base64,/, "");
           verificationChecks.push(
             smileIdService.compareDocumentToPortrait(normalizedDocBase64, normalizedSelfieBase64, smileRef)
@@ -3002,22 +3001,10 @@ export function registerKycServiceRoutes(app: Express) {
               })
           );
         } else {
-          // Fallback: selfie-only verification when document could not be retrieved
-          verificationChecks.push(
-            smileIdService.submitBiometricSelfie(normalizedSelfieBase64, session.subjectEmail || `session_${session.id}`, smileRef)
-              .then(r => {
-                // Normalise BiometricResult into PhotoCompareResult shape
-                faceMatchResult = {
-                  matched: r.success && (r.biometricMatch ?? false),
-                  confidence: r.livenessScore,
-                  reason: r.success ? undefined : r.resultText,
-                };
-              })
-              .catch(err => {
-                console.error("[KYC Session] Selfie check error:", err);
-                faceMatchResult = { matched: false, reason: String(err?.message || err) };
-              })
-          );
+          // Document retrieval failed — cannot perform face comparison.
+          // Mark as a service error so the session goes to in_review for manual processing.
+          console.warn(`[KYC Session] Document not available for face comparison (session ${session.id}) — will require manual review`);
+          faceMatchResult = { matched: false, reason: "ID document unavailable for face comparison — manual review required" };
         }
       }
 

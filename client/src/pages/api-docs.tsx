@@ -966,18 +966,29 @@ export default function ApiDocsPage() {
 
             <Card className="border-violet-200 dark:border-violet-800 bg-violet-50/40 dark:bg-violet-950/10">
               <CardContent className="pt-5 text-sm text-muted-foreground space-y-1">
-                <p className="font-medium text-foreground">Request format — all lookup endpoints</p>
-                <p>Send a <code className="bg-muted px-1 rounded">POST</code> request with <code className="bg-muted px-1 rounded">idNumber</code> in the body. The response is synchronous (HTTP 200) with a <code className="bg-muted px-1 rounded">verified</code> boolean.</p>
-                <p>A <code className="bg-muted px-1 rounded">verified: false</code> response is <em>not</em> an error — it means the ID was not matched. HTTP errors (4xx/5xx) indicate request problems.</p>
+                <p className="font-medium text-foreground">How instant lookups work</p>
+                <p>Send a <code className="bg-muted px-1 rounded">POST</code> request with <code className="bg-muted px-1 rounded">idNumber</code> (and any optional enrichment fields) in the JSON body. The response is synchronous (HTTP 200) with a <code className="bg-muted px-1 rounded">verified</code> boolean.</p>
+                <p>A <code className="bg-muted px-1 rounded">verified: false</code> response is <em>not</em> an error — it means the ID was not matched. HTTP 4xx/5xx indicate request problems. Full ID numbers are never stored; only the last 4 digits are retained in audit records.</p>
               </CardContent>
             </Card>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/bvn" description="Verify a Bank Verification Number (BVN)">
               <ParamTable title="Request Body" params={[
-                { field: "idNumber", type: "string", required: "Yes", description: "11-digit BVN" },
+                { field: "idNumber", type: "string", required: "Yes", description: "11-digit BVN (numeric)" },
+                { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy when provided" },
+                { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy when provided" },
+                { field: "dob", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format — improves match accuracy" },
               ]} />
-              <CodeBlock language="json" code={`// Request
+              <CodeBlock language="json" code={`// Minimal request
 { "idNumber": "22345678901" }
+
+// Enriched request (recommended — higher accuracy)
+{
+  "idNumber": "22345678901",
+  "firstName": "Adebayo",
+  "lastName": "Ogunlesi",
+  "dob": "1990-01-15"
+}
 
 // Response (match)
 {
@@ -1002,21 +1013,28 @@ export default function ApiDocsPage() {
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/nin" description="Verify a National Identity Number (NIN)">
               <ParamTable title="Request Body" params={[
-                { field: "idNumber", type: "string", required: "Yes", description: "11-digit NIN" },
+                { field: "idNumber", type: "string", required: "Yes", description: "11-digit NIN (numeric)" },
+                { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
+                { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
+                { field: "dob", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
               ]} />
-              <CodeBlock language="json" code={`{ "idNumber": "12345678901" }`} />
+              <CodeBlock language="json" code={`{ "idNumber": "12345678901", "firstName": "Amaka", "lastName": "Nwosu" }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/drivers-licence" description="Verify a Nigerian driver's licence number">
               <ParamTable title="Request Body" params={[
                 { field: "idNumber", type: "string", required: "Yes", description: "Driver's licence number (3–30 characters)" },
+                { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
+                { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
               ]} />
-              <CodeBlock language="json" code={`{ "idNumber": "LAG-AB-1234567" }`} />
+              <CodeBlock language="json" code={`{ "idNumber": "LAG-AB-1234567", "firstName": "Chukwuemeka", "lastName": "Obi" }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/voter-id" description="Verify a Voter Identification Number (VIN)">
               <ParamTable title="Request Body" params={[
                 { field: "idNumber", type: "string", required: "Yes", description: "Voter ID number (3–30 characters)" },
+                { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
+                { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
               ]} />
               <CodeBlock language="json" code={`{ "idNumber": "71A1B234567" }`} />
             </EndpointSection>
@@ -1024,8 +1042,13 @@ export default function ApiDocsPage() {
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/passport" description="Verify an international passport number">
               <ParamTable title="Request Body" params={[
                 { field: "idNumber", type: "string", required: "Yes", description: "Passport number (3–20 characters)" },
+                { field: "expiryDate", type: "string", required: "No", description: "Passport expiry date in YYYY-MM-DD format — required by some verification checks" },
               ]} />
-              <CodeBlock language="json" code={`{ "idNumber": "A12345678" }`} />
+              <CodeBlock language="json" code={`// Without expiry date
+{ "idNumber": "A12345678" }
+
+// With expiry date (recommended)
+{ "idNumber": "A12345678", "expiryDate": "2029-06-30" }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/aml" description="Name-based AML & sanctions screening">
@@ -1035,9 +1058,11 @@ export default function ApiDocsPage() {
               </p>
               <ParamTable title="Request Body" params={[
                 { field: "fullName", type: "string", required: "Yes", description: "Full legal name to screen (2–255 characters)" },
+                { field: "dob", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format — reduces false positives" },
+                { field: "nationality", type: "string", required: "No", description: "ISO 3166-1 alpha-2 or alpha-3 country code (e.g. \"NG\") — narrows the search" },
               ]} />
               <CodeBlock language="json" code={`// Request
-{ "fullName": "Adebayo Ogunlesi" }
+{ "fullName": "Adebayo Ogunlesi", "dob": "1953-07-02", "nationality": "NG" }
 
 // Response (clean — no AML hits)
 {

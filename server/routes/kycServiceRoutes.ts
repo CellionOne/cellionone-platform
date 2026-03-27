@@ -2957,32 +2957,69 @@ export function registerKycServiceRoutes(app: Express) {
         }
       }
 
-      // ── Run Smile ID verification pipeline ────────────────────────────────
+      // ── Run verification pipeline ──────────────────────────────────────────
       // These checks run in parallel where possible. Results determine final status.
-      const smileUserId = session.subjectEmail || `session_${session.id}`;
-      const smileJobId = `session_${session.id}_${Date.now()}`;
+      const smileRef = `session_${session.id}_${Date.now()}`;
 
-      let biometricResult: smileIdService.BiometricResult | null = null;
+      let faceMatchResult: smileIdService.PhotoCompareResult | null = null;
       let amlResult: smileIdService.AmlCheckResult | null = null;
 
-      const smileChecks: Promise<void>[] = [];
+      const verificationChecks: Promise<void>[] = [];
 
-      // Biometric selfie check — only when selfie was submitted and required
+      // Photo verification — when both a selfie and ID document are available,
+      // run document+portrait face comparison (Job Type 6). This is preferred over
+      // a selfie-only liveness check because it validates the selfie matches the ID.
       if (selfieRequired && selfieBase64) {
-        smileChecks.push(
-          smileIdService.submitBiometricSelfie(selfieBase64, smileUserId, smileJobId)
-            .then(r => { biometricResult = r; })
-            .catch(err => {
-              console.error("[KYC Session] Biometric check error:", err);
-              biometricResult = { success: false, resultCode: "ERROR", resultText: String(err?.message || err), error: String(err?.message || err) };
-            })
-        );
+        let documentBase64ForComparison: string | null = null;
+
+        // Attempt to fetch ID document from storage for face comparison
+        if (effectiveDocumentPath) {
+          try {
+            const downloadURL = await objectStorageService.getObjectEntityDownloadURL(effectiveDocumentPath);
+            const docResponse = await fetch(downloadURL);
+            if (docResponse.ok) {
+              const docBuffer = Buffer.from(await docResponse.arrayBuffer());
+              documentBase64ForComparison = docBuffer.toString("base64");
+            }
+          } catch (fetchErr) {
+            console.warn("[KYC Session] Could not fetch document for face comparison:", fetchErr);
+          }
+        }
+
+        if (documentBase64ForComparison) {
+          // Preferred path: compare selfie against ID document photo (Job Type 6)
+          verificationChecks.push(
+            smileIdService.compareDocumentToPortrait(documentBase64ForComparison, selfieBase64, smileRef)
+              .then(r => { faceMatchResult = r; })
+              .catch(err => {
+                console.error("[KYC Session] Face comparison error:", err);
+                faceMatchResult = { matched: false, reason: String(err?.message || err) };
+              })
+          );
+        } else {
+          // Fallback: selfie-only verification when document could not be retrieved
+          verificationChecks.push(
+            smileIdService.submitBiometricSelfie(selfieBase64, session.subjectEmail || `session_${session.id}`, smileRef)
+              .then(r => {
+                // Normalise BiometricResult into PhotoCompareResult shape
+                faceMatchResult = {
+                  matched: r.success && (r.biometricMatch ?? false),
+                  confidence: r.livenessScore,
+                  reason: r.success ? undefined : r.resultText,
+                };
+              })
+              .catch(err => {
+                console.error("[KYC Session] Selfie check error:", err);
+                faceMatchResult = { matched: false, reason: String(err?.message || err) };
+              })
+          );
+        }
       }
 
       // AML/sanctions screening — always run when we have a full name
       if (subjectName && subjectName.trim().split(" ").length >= 2) {
-        smileChecks.push(
-          smileIdService.performAmlCheck(subjectName, smileUserId)
+        verificationChecks.push(
+          smileIdService.performAmlCheck(subjectName, smileRef)
             .then(r => { amlResult = r; })
             .catch(err => {
               console.error("[KYC Session] AML check error:", err);
@@ -2992,41 +3029,39 @@ export function registerKycServiceRoutes(app: Express) {
       }
 
       // Wait for all checks to complete
-      await Promise.all(smileChecks);
+      await Promise.all(verificationChecks);
 
       // ── Determine final verification status ───────────────────────────────
-      // AML hit → rejected immediately. Biometric failure → flagged for review.
-      // All clear → verified.
+      // AML hit → rejected immediately. Face mismatch → in_review. All clear → verified.
       let finalStatus: "verified" | "rejected" | "in_review" = "verified";
       let outcomeNote = "All checks passed";
 
-      if (amlResult && amlResult.isHit && !amlResult.error) {
+      if (amlResult && (amlResult as smileIdService.AmlCheckResult).isHit && !(amlResult as smileIdService.AmlCheckResult).error) {
         finalStatus = "rejected";
-        outcomeNote = `AML/sanctions match — hit types: ${amlResult.hitTypes.join(", ") || "unspecified"}`;
-      } else if (biometricResult && !biometricResult.success && !biometricResult.error) {
-        // Definitive biometric failure (not a config/network error) → flag for review
+        outcomeNote = `AML/sanctions match — hit types: ${(amlResult as smileIdService.AmlCheckResult).hitTypes.join(", ") || "unspecified"}`;
+      } else if (faceMatchResult && !(faceMatchResult as smileIdService.PhotoCompareResult).matched && !(faceMatchResult as smileIdService.PhotoCompareResult).reason?.includes("unavailable")) {
+        // Definitive face mismatch (not a config/network error) → flag for review
         finalStatus = "in_review";
-        outcomeNote = `Biometric match failed — ${biometricResult.resultText}`;
-      } else if (biometricResult?.error || amlResult?.error) {
+        outcomeNote = `Photo verification failed — ${(faceMatchResult as smileIdService.PhotoCompareResult).reason || "face did not match document"}`;
+      } else if ((faceMatchResult as smileIdService.PhotoCompareResult)?.reason?.includes("unavailable") || (amlResult as smileIdService.AmlCheckResult)?.error) {
         // Infrastructure error during checks → keep in_review for manual processing
         finalStatus = "in_review";
         outcomeNote = "Verification checks encountered an error — manual review required";
       }
 
-      // Augment notes with Smile ID outcome (never expose Smile ID branding externally)
+      // Augment notes with outcome (never expose third-party provider branding externally)
       const updatedNotes: Record<string, any> = { ...notesData, outcome: outcomeNote, status: finalStatus };
-      if (biometricResult) {
-        updatedNotes.biometric = {
-          passed: biometricResult.success,
-          livenessScore: biometricResult.livenessScore,
-          biometricMatch: biometricResult.biometricMatch,
-          resultCode: biometricResult.resultCode,
+      if (faceMatchResult) {
+        updatedNotes.faceVerification = {
+          matched: (faceMatchResult as smileIdService.PhotoCompareResult).matched,
+          confidence: (faceMatchResult as smileIdService.PhotoCompareResult).confidence,
+          documentVerified: effectiveDocumentPath ? true : false,
         };
       }
       if (amlResult) {
         updatedNotes.aml = {
-          isHit: amlResult.isHit,
-          hitTypes: amlResult.hitTypes,
+          isHit: (amlResult as smileIdService.AmlCheckResult).isHit,
+          hitTypes: (amlResult as smileIdService.AmlCheckResult).hitTypes,
         };
       }
 
@@ -3072,7 +3107,7 @@ export function registerKycServiceRoutes(app: Express) {
         returnUrlWithParams = `${returnUrlWithParams}${separator}session_id=${session.id}&status=${finalStatus}`;
       }
 
-      // Fire webhook — "verification.completed" with outcome (NO Smile ID branding)
+      // Fire webhook — "verification.completed" with outcome (NO third-party branding)
       await webhookService.deliverWebhook(session.orgId, "verification.completed", {
         sessionId: session.id,
         sessionToken: token,
@@ -3083,9 +3118,14 @@ export function registerKycServiceRoutes(app: Express) {
         status: finalStatus,
         outcome: outcomeNote,
         checksPerformed: {
-          biometric: selfieRequired && selfieBase64 ? true : false,
+          faceMatch: !!(selfieRequired && selfieBase64),
+          documentVerified: !!(selfieRequired && selfieBase64 && effectiveDocumentPath),
           aml: !!(subjectName && subjectName.trim().split(" ").length >= 2),
         },
+        ...(faceMatchResult ? {
+          faceMatchConfidence: (faceMatchResult as smileIdService.PhotoCompareResult).confidence ?? null,
+          faceMatched: (faceMatchResult as smileIdService.PhotoCompareResult).matched,
+        } : {}),
         metadata: session.metadata,
       });
 

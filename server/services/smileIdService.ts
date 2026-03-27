@@ -316,6 +316,7 @@ async function runIdLookup(
   idType: string,
   idNumber: string,
   lookupRef: string,
+  extraFields?: Record<string, string>,
 ): Promise<IdLookupResult> {
   if (!isSmileIdConfigured()) {
     return {
@@ -335,11 +336,12 @@ async function runIdLookup(
       job_type: 5,
     };
 
-    const idInfo = {
+    const idInfo: Record<string, unknown> = {
       country: 'NG',
       id_type: idType,
       id_number: idNumber,
       entered: true,
+      ...extraFields,
     };
 
     const result = await connection.submit_job(partnerParams, idInfo);
@@ -364,24 +366,41 @@ async function runIdLookup(
   }
 }
 
-export async function lookupBvn(bvnNumber: string, ref: string): Promise<IdLookupResult> {
-  return runIdLookup('BVN', bvnNumber, ref);
+export async function lookupBvn(bvnNumber: string, ref: string, enrichment?: { firstName?: string; lastName?: string; dob?: string }): Promise<IdLookupResult> {
+  const extra: Record<string, string> = {};
+  if (enrichment?.firstName) extra.first_name = enrichment.firstName;
+  if (enrichment?.lastName) extra.last_name = enrichment.lastName;
+  if (enrichment?.dob) extra.dob = enrichment.dob;
+  return runIdLookup('BVN', bvnNumber, ref, Object.keys(extra).length ? extra : undefined);
 }
 
-export async function lookupNin(ninNumber: string, ref: string): Promise<IdLookupResult> {
-  return runIdLookup('NIN_V2', ninNumber, ref);
+export async function lookupNin(ninNumber: string, ref: string, enrichment?: { firstName?: string; lastName?: string; dob?: string }): Promise<IdLookupResult> {
+  const extra: Record<string, string> = {};
+  if (enrichment?.firstName) extra.first_name = enrichment.firstName;
+  if (enrichment?.lastName) extra.last_name = enrichment.lastName;
+  if (enrichment?.dob) extra.dob = enrichment.dob;
+  return runIdLookup('NIN_V2', ninNumber, ref, Object.keys(extra).length ? extra : undefined);
 }
 
-export async function lookupDriversLicence(licenceNumber: string, ref: string): Promise<IdLookupResult> {
-  return runIdLookup('DRIVERS_LICENSE', licenceNumber, ref);
+export async function lookupDriversLicence(licenceNumber: string, ref: string, enrichment?: { firstName?: string; lastName?: string }): Promise<IdLookupResult> {
+  const extra: Record<string, string> = {};
+  if (enrichment?.firstName) extra.first_name = enrichment.firstName;
+  if (enrichment?.lastName) extra.last_name = enrichment.lastName;
+  return runIdLookup('DRIVERS_LICENSE', licenceNumber, ref, Object.keys(extra).length ? extra : undefined);
 }
 
-export async function lookupVoterId(voterIdNumber: string, ref: string): Promise<IdLookupResult> {
-  return runIdLookup('VOTER_ID', voterIdNumber, ref);
+export async function lookupVoterId(voterIdNumber: string, ref: string, enrichment?: { firstName?: string; lastName?: string }): Promise<IdLookupResult> {
+  const extra: Record<string, string> = {};
+  if (enrichment?.firstName) extra.first_name = enrichment.firstName;
+  if (enrichment?.lastName) extra.last_name = enrichment.lastName;
+  return runIdLookup('VOTER_ID', voterIdNumber, ref, Object.keys(extra).length ? extra : undefined);
 }
 
-export async function lookupPassport(passportNumber: string, ref: string): Promise<IdLookupResult> {
-  return runIdLookup('INTERNATIONAL_PASSPORT', passportNumber, ref);
+/** expiryDate must be in YYYY-MM-DD format */
+export async function lookupPassport(passportNumber: string, ref: string, expiryDate?: string): Promise<IdLookupResult> {
+  const extra: Record<string, string> = {};
+  if (expiryDate) extra.expiration_date = expiryDate;
+  return runIdLookup('INTERNATIONAL_PASSPORT', passportNumber, ref, Object.keys(extra).length ? extra : undefined);
 }
 
 // ─── Photo comparison (job type 6: doc + portrait) ───────────────────────────

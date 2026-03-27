@@ -15,6 +15,7 @@ import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth
 import * as billingService from "../services/kycBillingService";
 import * as webhookService from "../services/kycWebhookService";
 import * as smileId from "../services/smileIdService";
+import { storage } from "../storage";
 
 function generateToken(): string {
   return crypto.randomBytes(48).toString("hex");
@@ -40,6 +41,12 @@ function calculateRiskScore(docs: KycSubmittedDocument[], requirements: KycDocum
 
 // ─── Shared helper for sync ID lookups ────────────────────────────────────────
 
+/** Returns a masked identifier string showing only the last 4 characters */
+function maskId(id: string): string {
+  if (id.length <= 4) return "****";
+  return `****${id.slice(-4)}`;
+}
+
 async function handleIdLookup(
   req: ApiKeyRequest,
   res: Response,
@@ -59,9 +66,11 @@ async function handleIdLookup(
   }
 
   const ref = `id_lookup_${orgId}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+  const maskedId = maskId(idNumber);
 
   const result = await lookupFn(idNumber, ref);
 
+  // Store only the masked ID — never persist the full identifier in our records
   const [insertedRow] = await db.insert(kycVerificationRequests).values({
     orgId,
     templateId: null,
@@ -69,8 +78,8 @@ async function handleIdLookup(
     type: "individual",
     status: result.verified ? "verified" : "rejected",
     subjectEmail: `lookup_${ref}@cellionone.internal`,
-    subjectName: result.fullName || idNumber,
-    notes: `Instant ${idType} lookup`,
+    subjectName: result.fullName || `${idType} ${maskedId}`,
+    notes: `Instant ${idType} lookup (${maskedId})`,
     paymentResponsibility: "organisation",
     paymentStatus: "not_required",
     inviteToken: ref,
@@ -79,6 +88,26 @@ async function handleIdLookup(
   }).returning();
 
   await billingService.deductCredit(orgId, "identity_only", insertedRow.id);
+
+  // Explicit audit log — ID stored masked only
+  try {
+    await storage.createAuditLog({
+      actorUserId: null,
+      action: "kyc_api_instant_id_lookup",
+      entityType: "kyc_verification_request",
+      entityId: String(insertedRow.id),
+      details: {
+        orgId,
+        idType,
+        maskedId,
+        verified: result.verified,
+        referenceId: ref,
+        apiKeyId: req.apiKeyContext!.apiKeyId,
+      },
+    });
+  } catch (auditErr) {
+    console.error("[KYC API] Audit log error (non-blocking):", auditErr);
+  }
 
   const responseBody: Record<string, unknown> = {
     verified: result.verified,
@@ -102,8 +131,16 @@ export function registerKycApiRoutes(app: Express) {
   // POST /api/v1/kyc/lookup/bvn
   app.post("/api/v1/kyc/lookup/bvn", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const { idNumber } = z.object({ idNumber: z.string().length(11).regex(/^\d+$/, "BVN must be 11 digits") }).parse(req.body);
-      return handleIdLookup(req, res, "BVN", idNumber, smileId.lookupBvn);
+      const body = z.object({
+        idNumber: z.string().length(11).regex(/^\d+$/, "BVN must be 11 digits"),
+        firstName: z.string().max(100).optional(),
+        lastName: z.string().max(100).optional(),
+        dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dob must be YYYY-MM-DD").optional(),
+      }).parse(req.body);
+      const enrichment = body.firstName || body.lastName || body.dob
+        ? { firstName: body.firstName, lastName: body.lastName, dob: body.dob }
+        : undefined;
+      return handleIdLookup(req, res, "BVN", body.idNumber, (id, ref) => smileId.lookupBvn(id, ref, enrichment));
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
       console.error("[KYC API] BVN lookup error:", err);
@@ -114,8 +151,16 @@ export function registerKycApiRoutes(app: Express) {
   // POST /api/v1/kyc/lookup/nin
   app.post("/api/v1/kyc/lookup/nin", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const { idNumber } = z.object({ idNumber: z.string().length(11).regex(/^\d+$/, "NIN must be 11 digits") }).parse(req.body);
-      return handleIdLookup(req, res, "NIN", idNumber, smileId.lookupNin);
+      const body = z.object({
+        idNumber: z.string().length(11).regex(/^\d+$/, "NIN must be 11 digits"),
+        firstName: z.string().max(100).optional(),
+        lastName: z.string().max(100).optional(),
+        dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dob must be YYYY-MM-DD").optional(),
+      }).parse(req.body);
+      const enrichment = body.firstName || body.lastName || body.dob
+        ? { firstName: body.firstName, lastName: body.lastName, dob: body.dob }
+        : undefined;
+      return handleIdLookup(req, res, "NIN", body.idNumber, (id, ref) => smileId.lookupNin(id, ref, enrichment));
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
       console.error("[KYC API] NIN lookup error:", err);
@@ -126,8 +171,15 @@ export function registerKycApiRoutes(app: Express) {
   // POST /api/v1/kyc/lookup/drivers-licence
   app.post("/api/v1/kyc/lookup/drivers-licence", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const { idNumber } = z.object({ idNumber: z.string().min(3).max(30) }).parse(req.body);
-      return handleIdLookup(req, res, "DRIVERS_LICENSE", idNumber, smileId.lookupDriversLicence);
+      const body = z.object({
+        idNumber: z.string().min(3).max(30, "Licence number must not exceed 30 characters"),
+        firstName: z.string().max(100).optional(),
+        lastName: z.string().max(100).optional(),
+      }).parse(req.body);
+      const enrichment = body.firstName || body.lastName
+        ? { firstName: body.firstName, lastName: body.lastName }
+        : undefined;
+      return handleIdLookup(req, res, "DRIVERS_LICENSE", body.idNumber, (id, ref) => smileId.lookupDriversLicence(id, ref, enrichment));
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
       console.error("[KYC API] Driver's licence lookup error:", err);
@@ -138,8 +190,15 @@ export function registerKycApiRoutes(app: Express) {
   // POST /api/v1/kyc/lookup/voter-id
   app.post("/api/v1/kyc/lookup/voter-id", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const { idNumber } = z.object({ idNumber: z.string().min(3).max(30) }).parse(req.body);
-      return handleIdLookup(req, res, "VOTER_ID", idNumber, smileId.lookupVoterId);
+      const body = z.object({
+        idNumber: z.string().min(3).max(30, "Voter ID must not exceed 30 characters"),
+        firstName: z.string().max(100).optional(),
+        lastName: z.string().max(100).optional(),
+      }).parse(req.body);
+      const enrichment = body.firstName || body.lastName
+        ? { firstName: body.firstName, lastName: body.lastName }
+        : undefined;
+      return handleIdLookup(req, res, "VOTER_ID", body.idNumber, (id, ref) => smileId.lookupVoterId(id, ref, enrichment));
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
       console.error("[KYC API] Voter ID lookup error:", err);
@@ -150,8 +209,11 @@ export function registerKycApiRoutes(app: Express) {
   // POST /api/v1/kyc/lookup/passport
   app.post("/api/v1/kyc/lookup/passport", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const { idNumber } = z.object({ idNumber: z.string().min(3).max(20) }).parse(req.body);
-      return handleIdLookup(req, res, "INTERNATIONAL_PASSPORT", idNumber, smileId.lookupPassport);
+      const body = z.object({
+        idNumber: z.string().min(3).max(20, "Passport number must not exceed 20 characters"),
+        expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expiryDate must be YYYY-MM-DD").optional(),
+      }).parse(req.body);
+      return handleIdLookup(req, res, "INTERNATIONAL_PASSPORT", body.idNumber, (id, ref) => smileId.lookupPassport(id, ref, body.expiryDate));
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
       console.error("[KYC API] Passport lookup error:", err);
@@ -162,7 +224,11 @@ export function registerKycApiRoutes(app: Express) {
   // POST /api/v1/kyc/lookup/aml
   app.post("/api/v1/kyc/lookup/aml", authenticateApiKey("verify:identity"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const { fullName } = z.object({ fullName: z.string().min(2).max(255) }).parse(req.body);
+      const body = z.object({
+        fullName: z.string().min(2).max(255),
+        dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dob must be YYYY-MM-DD").optional(),
+        nationality: z.string().max(3).optional(),
+      }).parse(req.body);
       const orgId = req.apiKeyContext!.orgId;
 
       const hasCred = await billingService.hasCredits(orgId, "identity_only");
@@ -175,17 +241,17 @@ export function registerKycApiRoutes(app: Express) {
       }
 
       const ref = `aml_${orgId}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-      const result = await smileId.performAmlCheck(fullName, ref);
+      const result = await smileId.performAmlCheck(body.fullName, ref);
 
       const [insertedRow] = await db.insert(kycVerificationRequests).values({
         orgId,
         templateId: null,
         requestedByUserId: null,
         type: "individual",
-        status: "verified",
+        status: result.isHit ? "rejected" : "verified",
         subjectEmail: `aml_${ref}@cellionone.internal`,
-        subjectName: fullName,
-        notes: "Instant AML lookup",
+        subjectName: body.fullName,
+        notes: `Instant AML lookup${result.isHit ? " — HIT" : " — clear"}`,
         paymentResponsibility: "organisation",
         paymentStatus: "not_required",
         inviteToken: ref,
@@ -194,6 +260,25 @@ export function registerKycApiRoutes(app: Express) {
       }).returning();
 
       await billingService.deductCredit(orgId, "identity_only", insertedRow.id);
+
+      // Explicit audit log for AML checks
+      try {
+        await storage.createAuditLog({
+          actorUserId: null,
+          action: "kyc_api_aml_lookup",
+          entityType: "kyc_verification_request",
+          entityId: String(insertedRow.id),
+          details: {
+            orgId,
+            isHit: result.isHit,
+            hitTypes: result.hitTypes,
+            referenceId: ref,
+            apiKeyId: req.apiKeyContext!.apiKeyId,
+          },
+        });
+      } catch (auditErr) {
+        console.error("[KYC API] AML audit log error (non-blocking):", auditErr);
+      }
 
       return res.json({
         isHit: result.isHit,

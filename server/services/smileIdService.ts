@@ -382,24 +382,34 @@ export async function lookupNin(ninNumber: string, ref: string, enrichment?: { f
   return runIdLookup('NIN_V2', ninNumber, ref, Object.keys(extra).length ? extra : undefined);
 }
 
-export async function lookupDriversLicence(licenceNumber: string, ref: string, enrichment?: { firstName?: string; lastName?: string }): Promise<IdLookupResult> {
+export async function lookupDriversLicence(licenceNumber: string, ref: string, enrichment?: { firstName?: string; lastName?: string; dob?: string }): Promise<IdLookupResult> {
   const extra: Record<string, string> = {};
   if (enrichment?.firstName) extra.first_name = enrichment.firstName;
   if (enrichment?.lastName) extra.last_name = enrichment.lastName;
+  if (enrichment?.dob) extra.dob = enrichment.dob;
   return runIdLookup('DRIVERS_LICENSE', licenceNumber, ref, Object.keys(extra).length ? extra : undefined);
 }
 
-export async function lookupVoterId(voterIdNumber: string, ref: string, enrichment?: { firstName?: string; lastName?: string }): Promise<IdLookupResult> {
+export async function lookupVoterId(voterIdNumber: string, ref: string, enrichment?: { firstName?: string; lastName?: string; dob?: string }): Promise<IdLookupResult> {
   const extra: Record<string, string> = {};
   if (enrichment?.firstName) extra.first_name = enrichment.firstName;
   if (enrichment?.lastName) extra.last_name = enrichment.lastName;
+  if (enrichment?.dob) extra.dob = enrichment.dob;
   return runIdLookup('VOTER_ID', voterIdNumber, ref, Object.keys(extra).length ? extra : undefined);
 }
 
 /** expiryDate must be in YYYY-MM-DD format */
-export async function lookupPassport(passportNumber: string, ref: string, expiryDate?: string): Promise<IdLookupResult> {
+export async function lookupPassport(
+  passportNumber: string,
+  ref: string,
+  expiryDate?: string,
+  enrichment?: { firstName?: string; lastName?: string; dob?: string },
+): Promise<IdLookupResult> {
   const extra: Record<string, string> = {};
   if (expiryDate) extra.expiration_date = expiryDate;
+  if (enrichment?.firstName) extra.first_name = enrichment.firstName;
+  if (enrichment?.lastName) extra.last_name = enrichment.lastName;
+  if (enrichment?.dob) extra.dob = enrichment.dob;
   return runIdLookup('INTERNATIONAL_PASSPORT', passportNumber, ref, Object.keys(extra).length ? extra : undefined);
 }
 

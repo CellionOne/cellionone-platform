@@ -135,10 +135,10 @@ export function registerKycApiRoutes(app: Express) {
         idNumber: z.string().length(11).regex(/^\d+$/, "BVN must be 11 digits"),
         firstName: z.string().max(100).optional(),
         lastName: z.string().max(100).optional(),
-        dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dob must be YYYY-MM-DD").optional(),
+        dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateOfBirth must be YYYY-MM-DD").optional(),
       }).parse(req.body);
-      const enrichment = body.firstName || body.lastName || body.dob
-        ? { firstName: body.firstName, lastName: body.lastName, dob: body.dob }
+      const enrichment = body.firstName || body.lastName || body.dateOfBirth
+        ? { firstName: body.firstName, lastName: body.lastName, dob: body.dateOfBirth }
         : undefined;
       return handleIdLookup(req, res, "BVN", body.idNumber, (id, ref) => smileId.lookupBvn(id, ref, enrichment));
     } catch (err: any) {
@@ -155,10 +155,10 @@ export function registerKycApiRoutes(app: Express) {
         idNumber: z.string().length(11).regex(/^\d+$/, "NIN must be 11 digits"),
         firstName: z.string().max(100).optional(),
         lastName: z.string().max(100).optional(),
-        dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dob must be YYYY-MM-DD").optional(),
+        dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateOfBirth must be YYYY-MM-DD").optional(),
       }).parse(req.body);
-      const enrichment = body.firstName || body.lastName || body.dob
-        ? { firstName: body.firstName, lastName: body.lastName, dob: body.dob }
+      const enrichment = body.firstName || body.lastName || body.dateOfBirth
+        ? { firstName: body.firstName, lastName: body.lastName, dob: body.dateOfBirth }
         : undefined;
       return handleIdLookup(req, res, "NIN", body.idNumber, (id, ref) => smileId.lookupNin(id, ref, enrichment));
     } catch (err: any) {
@@ -175,9 +175,10 @@ export function registerKycApiRoutes(app: Express) {
         idNumber: z.string().min(3).max(30, "Licence number must not exceed 30 characters"),
         firstName: z.string().max(100).optional(),
         lastName: z.string().max(100).optional(),
+        dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateOfBirth must be YYYY-MM-DD").optional(),
       }).parse(req.body);
-      const enrichment = body.firstName || body.lastName
-        ? { firstName: body.firstName, lastName: body.lastName }
+      const enrichment = body.firstName || body.lastName || body.dateOfBirth
+        ? { firstName: body.firstName, lastName: body.lastName, dob: body.dateOfBirth }
         : undefined;
       return handleIdLookup(req, res, "DRIVERS_LICENSE", body.idNumber, (id, ref) => smileId.lookupDriversLicence(id, ref, enrichment));
     } catch (err: any) {
@@ -194,9 +195,10 @@ export function registerKycApiRoutes(app: Express) {
         idNumber: z.string().min(3).max(30, "Voter ID must not exceed 30 characters"),
         firstName: z.string().max(100).optional(),
         lastName: z.string().max(100).optional(),
+        dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateOfBirth must be YYYY-MM-DD").optional(),
       }).parse(req.body);
-      const enrichment = body.firstName || body.lastName
-        ? { firstName: body.firstName, lastName: body.lastName }
+      const enrichment = body.firstName || body.lastName || body.dateOfBirth
+        ? { firstName: body.firstName, lastName: body.lastName, dob: body.dateOfBirth }
         : undefined;
       return handleIdLookup(req, res, "VOTER_ID", body.idNumber, (id, ref) => smileId.lookupVoterId(id, ref, enrichment));
     } catch (err: any) {
@@ -211,9 +213,12 @@ export function registerKycApiRoutes(app: Express) {
     try {
       const body = z.object({
         idNumber: z.string().min(3).max(20, "Passport number must not exceed 20 characters"),
+        firstName: z.string().max(100).optional(),
+        lastName: z.string().max(100).optional(),
+        dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateOfBirth must be YYYY-MM-DD").optional(),
         expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expiryDate must be YYYY-MM-DD").optional(),
       }).parse(req.body);
-      return handleIdLookup(req, res, "INTERNATIONAL_PASSPORT", body.idNumber, (id, ref) => smileId.lookupPassport(id, ref, body.expiryDate));
+      return handleIdLookup(req, res, "INTERNATIONAL_PASSPORT", body.idNumber, (id, ref) => smileId.lookupPassport(id, ref, body.expiryDate, { firstName: body.firstName, lastName: body.lastName, dob: body.dateOfBirth }));
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
       console.error("[KYC API] Passport lookup error:", err);
@@ -226,7 +231,7 @@ export function registerKycApiRoutes(app: Express) {
     try {
       const body = z.object({
         fullName: z.string().min(2).max(255),
-        dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dob must be YYYY-MM-DD").optional(),
+        dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateOfBirth must be YYYY-MM-DD").optional(),
         nationality: z.string().max(3).optional(),
       }).parse(req.body);
       const orgId = req.apiKeyContext!.orgId;
@@ -283,7 +288,7 @@ export function registerKycApiRoutes(app: Express) {
       return res.json({
         isHit: result.isHit,
         hitTypes: result.hitTypes,
-        matchCount: result.matchDetails?.length ?? 0,
+        details: result.matchDetails ?? [],
         referenceId: ref,
         requestId: insertedRow.id,
         ...(result.error ? { warning: "AML service returned an error — results may be incomplete." } : {}),

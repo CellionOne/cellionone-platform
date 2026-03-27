@@ -2986,10 +2986,15 @@ export function registerKycServiceRoutes(app: Express) {
           }
         }
 
+        // Normalize selfie: strip Data URL prefix if present, keep only raw base64
+        const normalizedSelfieBase64 = selfieBase64.replace(/^data:image\/\w+;base64,/, "");
+
         if (documentBase64ForComparison) {
           // Preferred path: compare selfie against ID document photo (Job Type 6)
+          // Both document and selfie are passed as raw base64 (no data URI prefix)
+          const normalizedDocBase64 = documentBase64ForComparison.replace(/^data:image\/\w+;base64,/, "");
           verificationChecks.push(
-            smileIdService.compareDocumentToPortrait(documentBase64ForComparison, selfieBase64, smileRef)
+            smileIdService.compareDocumentToPortrait(normalizedDocBase64, normalizedSelfieBase64, smileRef)
               .then(r => { faceMatchResult = r; })
               .catch(err => {
                 console.error("[KYC Session] Face comparison error:", err);
@@ -2999,7 +3004,7 @@ export function registerKycServiceRoutes(app: Express) {
         } else {
           // Fallback: selfie-only verification when document could not be retrieved
           verificationChecks.push(
-            smileIdService.submitBiometricSelfie(selfieBase64, session.subjectEmail || `session_${session.id}`, smileRef)
+            smileIdService.submitBiometricSelfie(normalizedSelfieBase64, session.subjectEmail || `session_${session.id}`, smileRef)
               .then(r => {
                 // Normalise BiometricResult into PhotoCompareResult shape
                 faceMatchResult = {
@@ -3107,6 +3112,11 @@ export function registerKycServiceRoutes(app: Express) {
         returnUrlWithParams = `${returnUrlWithParams}${separator}session_id=${session.id}&status=${finalStatus}`;
       }
 
+      // Compute clean face check result fields for webhook
+      const typedFaceResult = faceMatchResult as smileIdService.PhotoCompareResult | null;
+      const webhookFaceMatch = typedFaceResult ? typedFaceResult.matched : null;
+      const webhookDocumentVerified = !!(selfieRequired && selfieBase64 && effectiveDocumentPath && typedFaceResult?.matched);
+
       // Fire webhook — "verification.completed" with outcome (NO third-party branding)
       await webhookService.deliverWebhook(session.orgId, "verification.completed", {
         sessionId: session.id,
@@ -3117,15 +3127,10 @@ export function registerKycServiceRoutes(app: Express) {
         verificationType,
         status: finalStatus,
         outcome: outcomeNote,
-        checksPerformed: {
-          faceMatch: !!(selfieRequired && selfieBase64),
-          documentVerified: !!(selfieRequired && selfieBase64 && effectiveDocumentPath),
-          aml: !!(subjectName && subjectName.trim().split(" ").length >= 2),
-        },
-        ...(faceMatchResult ? {
-          faceMatchConfidence: (faceMatchResult as smileIdService.PhotoCompareResult).confidence ?? null,
-          faceMatched: (faceMatchResult as smileIdService.PhotoCompareResult).matched,
-        } : {}),
+        faceMatch: webhookFaceMatch,
+        documentVerified: webhookDocumentVerified,
+        faceMatchConfidence: typedFaceResult?.confidence ?? null,
+        amlScreened: !!(subjectName && subjectName.trim().split(" ").length >= 2),
         metadata: session.metadata,
       });
 

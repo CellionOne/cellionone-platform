@@ -977,7 +977,7 @@ export default function ApiDocsPage() {
                 { field: "idNumber", type: "string", required: "Yes", description: "11-digit BVN (numeric)" },
                 { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy when provided" },
                 { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy when provided" },
-                { field: "dob", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format — improves match accuracy" },
+                { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format — improves match accuracy" },
               ]} />
               <CodeBlock language="json" code={`// Minimal request
 { "idNumber": "22345678901" }
@@ -987,7 +987,7 @@ export default function ApiDocsPage() {
   "idNumber": "22345678901",
   "firstName": "Adebayo",
   "lastName": "Ogunlesi",
-  "dob": "1990-01-15"
+  "dateOfBirth": "1990-01-15"
 }
 
 // Response (match)
@@ -1016,7 +1016,7 @@ export default function ApiDocsPage() {
                 { field: "idNumber", type: "string", required: "Yes", description: "11-digit NIN (numeric)" },
                 { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
                 { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
-                { field: "dob", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
+                { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
               ]} />
               <CodeBlock language="json" code={`{ "idNumber": "12345678901", "firstName": "Amaka", "lastName": "Nwosu" }`} />
             </EndpointSection>
@@ -1026,8 +1026,9 @@ export default function ApiDocsPage() {
                 { field: "idNumber", type: "string", required: "Yes", description: "Driver's licence number (3–30 characters)" },
                 { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
                 { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
+                { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
               ]} />
-              <CodeBlock language="json" code={`{ "idNumber": "LAG-AB-1234567", "firstName": "Chukwuemeka", "lastName": "Obi" }`} />
+              <CodeBlock language="json" code={`{ "idNumber": "LAG-AB-1234567", "firstName": "Chukwuemeka", "lastName": "Obi", "dateOfBirth": "1985-03-22" }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/voter-id" description="Verify a Voter Identification Number (VIN)">
@@ -1035,20 +1036,26 @@ export default function ApiDocsPage() {
                 { field: "idNumber", type: "string", required: "Yes", description: "Voter ID number (3–30 characters)" },
                 { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
                 { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
+                { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
               ]} />
-              <CodeBlock language="json" code={`{ "idNumber": "71A1B234567" }`} />
+              <CodeBlock language="json" code={`{ "idNumber": "71A1B234567", "firstName": "Ngozi", "lastName": "Eze" }`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/passport" description="Verify an international passport number">
               <ParamTable title="Request Body" params={[
                 { field: "idNumber", type: "string", required: "Yes", description: "Passport number (3–20 characters)" },
-                { field: "expiryDate", type: "string", required: "No", description: "Passport expiry date in YYYY-MM-DD format — required by some verification checks" },
+                { field: "firstName", type: "string", required: "No", description: "Subject's first name — improves match accuracy" },
+                { field: "lastName", type: "string", required: "No", description: "Subject's last name — improves match accuracy" },
+                { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format" },
+                { field: "expiryDate", type: "string", required: "No", description: "Passport expiry date in YYYY-MM-DD format — required by some registry checks" },
               ]} />
-              <CodeBlock language="json" code={`// Without expiry date
-{ "idNumber": "A12345678" }
-
-// With expiry date (recommended)
-{ "idNumber": "A12345678", "expiryDate": "2029-06-30" }`} />
+              <CodeBlock language="json" code={`{
+  "idNumber": "A12345678",
+  "firstName": "Babatunde",
+  "lastName": "Fashola",
+  "dateOfBirth": "1963-09-28",
+  "expiryDate": "2029-06-30"
+}`} />
             </EndpointSection>
 
             <EndpointSection method="POST" path="/api/v1/kyc/lookup/aml" description="Name-based AML & sanctions screening">
@@ -1058,17 +1065,17 @@ export default function ApiDocsPage() {
               </p>
               <ParamTable title="Request Body" params={[
                 { field: "fullName", type: "string", required: "Yes", description: "Full legal name to screen (2–255 characters)" },
-                { field: "dob", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format — reduces false positives" },
+                { field: "dateOfBirth", type: "string", required: "No", description: "Date of birth in YYYY-MM-DD format — reduces false positives" },
                 { field: "nationality", type: "string", required: "No", description: "ISO 3166-1 alpha-2 or alpha-3 country code (e.g. \"NG\") — narrows the search" },
               ]} />
               <CodeBlock language="json" code={`// Request
-{ "fullName": "Adebayo Ogunlesi", "dob": "1953-07-02", "nationality": "NG" }
+{ "fullName": "Adebayo Ogunlesi", "dateOfBirth": "1953-07-02", "nationality": "NG" }
 
 // Response (clean — no AML hits)
 {
   "isHit": false,
   "hitTypes": [],
-  "matchCount": 0,
+  "details": [],
   "referenceId": "aml_7_1711977600000_i9j0k1l2",
   "requestId": 220
 }
@@ -1077,7 +1084,9 @@ export default function ApiDocsPage() {
 {
   "isHit": true,
   "hitTypes": ["PEP", "Sanction"],
-  "matchCount": 2,
+  "details": [
+    { "name": "Adebayo Ogunlesi", "listType": "PEP", "matchScore": 0.92 }
+  ],
   "referenceId": "aml_7_1711977600001_m3n4o5p6",
   "requestId": 221
 }`} />

@@ -1130,6 +1130,7 @@ function WebhooksTab({ orgId }: { orgId: string }) {
       return res.json();
     },
     onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"] });
       if (data?.secret) {
         setRevealSecret(data.secret);
         setSecretCopied(false);
@@ -1239,8 +1240,9 @@ function WebhooksTab({ orgId }: { orgId: string }) {
                       <Badge variant="secondary" className={`border-0 ${wh.isActive ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
                         {wh.isActive ? "Active" : "Inactive"}
                       </Badge>
-                      <Button variant="ghost" size="icon" title="Rotate signing secret" onClick={() => rotateMutation.mutate(wh.id)} disabled={rotateMutation.isPending} data-testid={`button-rotate-secret-${wh.id}`}>
-                        <RefreshCw className="h-4 w-4" />
+                      <Button variant="outline" size="sm" onClick={() => rotateMutation.mutate(wh.id)} disabled={rotateMutation.isPending} data-testid={`button-rotate-secret-${wh.id}`}>
+                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                        Rotate Secret
                       </Button>
                       <Button variant="ghost" size="icon" title="Send test event" onClick={() => testMutation.mutate(wh.id)} disabled={testMutation.isPending} data-testid={`button-test-webhook-${wh.id}`}>
                         <Send className="h-4 w-4" />

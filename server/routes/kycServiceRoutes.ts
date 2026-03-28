@@ -2361,6 +2361,25 @@ export function registerKycServiceRoutes(app: Express) {
     }
   });
 
+  app.post("/api/kyc-service/organisations/:id/webhooks/:whId/rotate-secret", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const whId = parseInt(req.params.whId);
+
+      const { getWebhook, rotateWebhookSecret } = await import("../services/kycWebhookService");
+      const existing = await getWebhook(whId);
+      if (!existing || existing.organisationId !== orgId) {
+        return res.status(404).json({ message: "Webhook not found" });
+      }
+
+      const updated = await rotateWebhookSecret(whId);
+      res.json({ id: updated!.id, secret: updated!.secret });
+    } catch (error: any) {
+      console.error("[KYC] Rotate webhook secret error:", error);
+      res.status(500).json({ message: "Failed to rotate webhook secret" });
+    }
+  });
+
   app.delete("/api/kyc-service/organisations/:id/webhooks/:whId", isAuthenticated, requireOrgMember(["org_admin"]), async (req: any, res: Response) => {
     try {
       const orgId = parseInt(req.params.id);

@@ -61,6 +61,15 @@ export async function getWebhook(id: number): Promise<KycWebhookConfig | null> {
   return webhook || null;
 }
 
+export async function rotateWebhookSecret(id: number): Promise<KycWebhookConfig | null> {
+  const newSecret = generateSecret();
+  const [updated] = await db.update(kycWebhookConfigs)
+    .set({ secret: newSecret })
+    .where(eq(kycWebhookConfigs.id, id))
+    .returning();
+  return updated || null;
+}
+
 export async function getDeliveryLogs(
   webhookConfigId: number,
   limit = 50

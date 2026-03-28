@@ -46,6 +46,8 @@ import {
   CheckCircle2,
   Timer,
   ShieldCheck,
+  Check,
+  RefreshCw,
 } from "lucide-react";
 import type {
   KycOrganisation, KycOrgMember, KycDocumentRequirement, KycVerificationTemplate,
@@ -1086,6 +1088,9 @@ function WebhooksTab({ orgId }: { orgId: string }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteWebhookId, setDeleteWebhookId] = useState<number | null>(null);
   const [viewLogsId, setViewLogsId] = useState<number | null>(null);
+  const [revealSecret, setRevealSecret] = useState<string | null>(null);
+  const [secretRevealOpen, setSecretRevealOpen] = useState(false);
+  const [secretCopied, setSecretCopied] = useState(false);
 
   const { data: webhooks, isLoading } = useQuery<Array<Omit<KycWebhookConfig, "secret"> & { secret?: string }>>({
     queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"],
@@ -1101,15 +1106,38 @@ function WebhooksTab({ orgId }: { orgId: string }) {
       const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/webhooks`, data);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"] });
       setAddDialogOpen(false);
       setNewWebhookUrl("");
       setNewWebhookEvents([]);
-      toast({ title: "Webhook registered" });
+      if (data?.secret) {
+        setRevealSecret(data.secret);
+        setSecretCopied(false);
+        setSecretRevealOpen(true);
+      } else {
+        toast({ title: "Webhook registered" });
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Failed to register webhook", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const rotateMutation = useMutation({
+    mutationFn: async (whId: number) => {
+      const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/webhooks/${whId}/rotate-secret`);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      if (data?.secret) {
+        setRevealSecret(data.secret);
+        setSecretCopied(false);
+        setSecretRevealOpen(true);
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to rotate secret", description: error.message, variant: "destructive" });
     },
   });
 
@@ -1211,16 +1239,19 @@ function WebhooksTab({ orgId }: { orgId: string }) {
                       <Badge variant="secondary" className={`border-0 ${wh.isActive ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
                         {wh.isActive ? "Active" : "Inactive"}
                       </Badge>
-                      <Button variant="ghost" size="icon" onClick={() => testMutation.mutate(wh.id)} disabled={testMutation.isPending} data-testid={`button-test-webhook-${wh.id}`}>
+                      <Button variant="ghost" size="icon" title="Rotate signing secret" onClick={() => rotateMutation.mutate(wh.id)} disabled={rotateMutation.isPending} data-testid={`button-rotate-secret-${wh.id}`}>
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" title="Send test event" onClick={() => testMutation.mutate(wh.id)} disabled={testMutation.isPending} data-testid={`button-test-webhook-${wh.id}`}>
                         <Send className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => openEditDialog(wh)} data-testid={`button-edit-webhook-${wh.id}`}>
+                      <Button variant="ghost" size="icon" title="Edit webhook" onClick={() => openEditDialog(wh)} data-testid={`button-edit-webhook-${wh.id}`}>
                         <FileText className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => setViewLogsId(viewLogsId === wh.id ? null : wh.id)} data-testid={`button-logs-webhook-${wh.id}`}>
+                      <Button variant="ghost" size="icon" title="View delivery logs" onClick={() => setViewLogsId(viewLogsId === wh.id ? null : wh.id)} data-testid={`button-logs-webhook-${wh.id}`}>
                         <Clock className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => { setDeleteWebhookId(wh.id); setDeleteDialogOpen(true); }} data-testid={`button-delete-webhook-${wh.id}`}>
+                      <Button variant="ghost" size="icon" title="Delete webhook" onClick={() => { setDeleteWebhookId(wh.id); setDeleteDialogOpen(true); }} data-testid={`button-delete-webhook-${wh.id}`}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
@@ -1371,6 +1402,57 @@ function WebhooksTab({ orgId }: { orgId: string }) {
               data-testid="button-confirm-delete-webhook"
             >
               {deleteMutation.isPending ? "Deleting..." : "Delete Webhook"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={secretRevealOpen} onOpenChange={(open) => { if (!open) { setSecretRevealOpen(false); setRevealSecret(null); setSecretCopied(false); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              Your Webhook Signing Secret
+            </DialogTitle>
+            <DialogDescription>
+              Copy this secret now — it will not be shown again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 p-3 text-sm text-amber-800 dark:text-amber-300 flex gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>Store this secret securely. Once you close this dialog, you will only see a masked version and will need to rotate it to get a new one.</span>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Signing Secret</Label>
+              <div className="flex gap-2">
+                <code className="flex-1 rounded-md border bg-muted px-3 py-2 text-xs font-mono break-all" data-testid="text-webhook-secret">{revealSecret}</code>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => {
+                    if (revealSecret) {
+                      navigator.clipboard.writeText(revealSecret);
+                      setSecretCopied(true);
+                      setTimeout(() => setSecretCopied(false), 2000);
+                    }
+                  }}
+                  data-testid="button-copy-webhook-secret"
+                >
+                  {secretCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+            <div className="rounded-md border bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
+              <p className="font-medium text-foreground">How to verify incoming webhooks</p>
+              <p>Cellion signs every webhook request with the header:</p>
+              <code className="block bg-background rounded px-2 py-1 border text-xs font-mono">X-Cellion-Signature: &lt;hmac-sha256-hex&gt;</code>
+              <p className="pt-1">Compute <code className="font-mono bg-background rounded px-1">HMAC-SHA256(requestBody, secret)</code> and compare to the header value to confirm authenticity.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => { setSecretRevealOpen(false); setRevealSecret(null); setSecretCopied(false); }} data-testid="button-close-secret-reveal">
+              I've saved my secret
             </Button>
           </DialogFooter>
         </DialogContent>

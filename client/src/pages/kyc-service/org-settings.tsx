@@ -1084,6 +1084,7 @@ function WebhooksTab({ orgId }: { orgId: string }) {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editWebhook, setEditWebhook] = useState<any>(null);
   const [newWebhookUrl, setNewWebhookUrl] = useState("");
+  const [newWebhookSecret, setNewWebhookSecret] = useState("");
   const [newWebhookEvents, setNewWebhookEvents] = useState<string[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteWebhookId, setDeleteWebhookId] = useState<number | null>(null);
@@ -1102,7 +1103,7 @@ function WebhooksTab({ orgId }: { orgId: string }) {
   });
 
   const addMutation = useMutation({
-    mutationFn: async (data: { url: string; events: string[] }) => {
+    mutationFn: async (data: { url: string; events: string[]; secret?: string }) => {
       const res = await apiRequest("POST", `/api/kyc-service/organisations/${orgId}/webhooks`, data);
       return res.json();
     },
@@ -1110,6 +1111,7 @@ function WebhooksTab({ orgId }: { orgId: string }) {
       queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/organisations", orgId, "webhooks"] });
       setAddDialogOpen(false);
       setNewWebhookUrl("");
+      setNewWebhookSecret("");
       setNewWebhookEvents([]);
       if (data?.secret) {
         setRevealSecret(data.secret);
@@ -1303,7 +1305,7 @@ function WebhooksTab({ orgId }: { orgId: string }) {
         </CardContent>
       </Card>
 
-      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+      <Dialog open={addDialogOpen} onOpenChange={(open) => { setAddDialogOpen(open); if (!open) { setNewWebhookUrl(""); setNewWebhookSecret(""); setNewWebhookEvents([]); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Webhook</DialogTitle>
@@ -1313,6 +1315,18 @@ function WebhooksTab({ orgId }: { orgId: string }) {
             <div className="space-y-2">
               <Label>Callback URL</Label>
               <Input value={newWebhookUrl} onChange={(e) => setNewWebhookUrl(e.target.value)} placeholder="https://your-app.com/webhooks/kyc" data-testid="input-webhook-url" />
+            </div>
+            <div className="space-y-2">
+              <Label>Webhook Secret</Label>
+              <Input
+                value={newWebhookSecret}
+                onChange={(e) => setNewWebhookSecret(e.target.value)}
+                placeholder="Paste your secret here, or leave blank to auto-generate"
+                data-testid="input-webhook-secret"
+              />
+              <p className="text-xs text-muted-foreground">
+                This should match the <code className="text-xs font-mono">CELLION_WEBHOOK_SECRET</code> in your app. Leave blank and Cellion will generate one for you.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Events</Label>
@@ -1333,7 +1347,7 @@ function WebhooksTab({ orgId }: { orgId: string }) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddDialogOpen(false)}>Cancel</Button>
             <Button
-              onClick={() => addMutation.mutate({ url: newWebhookUrl, events: newWebhookEvents })}
+              onClick={() => addMutation.mutate({ url: newWebhookUrl, events: newWebhookEvents, secret: newWebhookSecret || undefined })}
               disabled={!newWebhookUrl || newWebhookEvents.length === 0 || addMutation.isPending}
               data-testid="button-confirm-add-webhook"
             >

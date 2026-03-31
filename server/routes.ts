@@ -576,6 +576,18 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/proposals/banking-partner-integrated-services/html", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateBankingPartnerIntegratedServicesProposalHTML } = await import("./templates/banking-partner-integrated-services-proposal");
+      const html = generateBankingPartnerIntegratedServicesProposalHTML();
+      res.setHeader("Content-Type", "text/html");
+      res.send(html);
+    } catch (error: any) {
+      console.error("Error generating banking partner integrated services proposal HTML:", error);
+      res.status(500).json({ message: "Failed to generate proposal HTML", error: error.message });
+    }
+  });
+
   app.get("/api/admin/proposals/bank-partnership", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const { generateBankPartnershipProposalHTML } = await import("./templates/bank-partnership-proposal");

@@ -3,7 +3,7 @@ import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/loading-spinner";
-import { FileText, Printer, ArrowLeft, Building2, ShieldCheck, Truck } from "lucide-react";
+import { FileText, Printer, ArrowLeft, Building2, ShieldCheck, Truck, Landmark } from "lucide-react";
 
 interface Proposal {
   id: string;
@@ -34,6 +34,13 @@ const proposals: Proposal[] = [
     description: "A proposal for organisations that need to vet their vendors and supply chain before onboarding — covering CAC checks, director identity, AML screening, compliance status, and the Verified Procurement Marketplace.",
     icon: Truck,
     htmlEndpoint: "/api/admin/proposals/supplier-verification/html",
+  },
+  {
+    id: "banking-partner-integrated-services",
+    title: "Banking Partner — Integrated Services Proposal",
+    description: "A three-pillar proposal for Nigerian banks: streamlined account opening for verified Cellion users, outsourced KYC/KYB verification for the bank's customers and suppliers, and licensed escrow services for Cellion's marketplace.",
+    icon: Landmark,
+    htmlEndpoint: "/api/admin/proposals/banking-partner-integrated-services/html",
   },
 ];
 

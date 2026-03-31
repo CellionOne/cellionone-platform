@@ -588,6 +588,66 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/proposals/bank-partnership/word", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateBankPartnershipProposalHTML } = await import("./templates/bank-partnership-proposal");
+      const { generateDocx } = await import("./services/docxService");
+      const html = generateBankPartnershipProposalHTML();
+      const docxBuffer = await generateDocx(html, "Cellion One — Bank Partnership Proposal");
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", 'attachment; filename="Cellion_One_Bank_Partnership_Proposal.docx"');
+      res.send(docxBuffer);
+    } catch (error: any) {
+      console.error("Error generating bank partnership proposal DOCX:", error);
+      res.status(500).json({ message: "Failed to generate Word document", error: error.message });
+    }
+  });
+
+  app.get("/api/admin/proposals/verification-partner/word", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateVerificationPartnerProposalHTML } = await import("./templates/verification-partner-proposal");
+      const { generateDocx } = await import("./services/docxService");
+      const html = generateVerificationPartnerProposalHTML();
+      const docxBuffer = await generateDocx(html, "Cellion One — Verification Partner Proposal");
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", 'attachment; filename="Cellion_One_Verification_Partner_Proposal.docx"');
+      res.send(docxBuffer);
+    } catch (error: any) {
+      console.error("Error generating verification partner proposal DOCX:", error);
+      res.status(500).json({ message: "Failed to generate Word document", error: error.message });
+    }
+  });
+
+  app.get("/api/admin/proposals/supplier-verification/word", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateSupplierVerificationProposalHTML } = await import("./templates/supplier-verification-proposal");
+      const { generateDocx } = await import("./services/docxService");
+      const html = generateSupplierVerificationProposalHTML();
+      const docxBuffer = await generateDocx(html, "Cellion One — Supplier Verification Proposal");
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", 'attachment; filename="Cellion_One_Supplier_Verification_Proposal.docx"');
+      res.send(docxBuffer);
+    } catch (error: any) {
+      console.error("Error generating supplier verification proposal DOCX:", error);
+      res.status(500).json({ message: "Failed to generate Word document", error: error.message });
+    }
+  });
+
+  app.get("/api/admin/proposals/banking-partner-integrated-services/word", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { generateBankingPartnerIntegratedServicesProposalHTML } = await import("./templates/banking-partner-integrated-services-proposal");
+      const { generateDocx } = await import("./services/docxService");
+      const html = generateBankingPartnerIntegratedServicesProposalHTML();
+      const docxBuffer = await generateDocx(html, "Cellion One — Banking Partner Integrated Services Proposal");
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", 'attachment; filename="Cellion_One_Banking_Partner_Integrated_Services_Proposal.docx"');
+      res.send(docxBuffer);
+    } catch (error: any) {
+      console.error("Error generating banking partner integrated services proposal DOCX:", error);
+      res.status(500).json({ message: "Failed to generate Word document", error: error.message });
+    }
+  });
+
   app.get("/api/admin/proposals/bank-partnership", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const { generateBankPartnershipProposalHTML } = await import("./templates/bank-partnership-proposal");

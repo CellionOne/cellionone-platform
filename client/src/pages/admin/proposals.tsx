@@ -3,7 +3,7 @@ import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/loading-spinner";
-import { FileText, Printer, ArrowLeft, Building2, ShieldCheck, Truck, Landmark } from "lucide-react";
+import { FileText, Printer, ArrowLeft, Building2, ShieldCheck, Truck, Landmark, FileDown } from "lucide-react";
 
 interface Proposal {
   id: string;
@@ -11,6 +11,8 @@ interface Proposal {
   description: string;
   icon: React.ElementType;
   htmlEndpoint: string;
+  wordEndpoint: string;
+  wordFilename: string;
 }
 
 const proposals: Proposal[] = [
@@ -20,6 +22,8 @@ const proposals: Proposal[] = [
     description: "A comprehensive partnership proposal for banking institutions, outlining Cellion's services and collaboration opportunities.",
     icon: Building2,
     htmlEndpoint: "/api/admin/proposals/bank-partnership/html",
+    wordEndpoint: "/api/admin/proposals/bank-partnership/word",
+    wordFilename: "Cellion_One_Bank_Partnership_Proposal.docx",
   },
   {
     id: "verification-partner",
@@ -27,6 +31,8 @@ const proposals: Proposal[] = [
     description: "A proposal for organisations seeking identity and corporate verification services — HR firms, fintechs, insurance companies, and procurement teams.",
     icon: ShieldCheck,
     htmlEndpoint: "/api/admin/proposals/verification-partner/html",
+    wordEndpoint: "/api/admin/proposals/verification-partner/word",
+    wordFilename: "Cellion_One_Verification_Partner_Proposal.docx",
   },
   {
     id: "supplier-verification",
@@ -34,6 +40,8 @@ const proposals: Proposal[] = [
     description: "A proposal for organisations that need to vet their vendors and supply chain before onboarding — covering CAC checks, director identity, AML screening, compliance status, and the Verified Procurement Marketplace.",
     icon: Truck,
     htmlEndpoint: "/api/admin/proposals/supplier-verification/html",
+    wordEndpoint: "/api/admin/proposals/supplier-verification/word",
+    wordFilename: "Cellion_One_Supplier_Verification_Proposal.docx",
   },
   {
     id: "banking-partner-integrated-services",
@@ -41,6 +49,8 @@ const proposals: Proposal[] = [
     description: "A three-pillar proposal for Nigerian banks: streamlined account opening for verified Cellion users, outsourced KYC/KYB verification for the bank's customers and suppliers, and licensed escrow services for Cellion's marketplace.",
     icon: Landmark,
     htmlEndpoint: "/api/admin/proposals/banking-partner-integrated-services/html",
+    wordEndpoint: "/api/admin/proposals/banking-partner-integrated-services/word",
+    wordFilename: "Cellion_One_Banking_Partner_Integrated_Services_Proposal.docx",
   },
 ];
 
@@ -48,6 +58,7 @@ export default function AdminProposals() {
   const [activeProposal, setActiveProposal] = useState<Proposal | null>(null);
   const [proposalHtml, setProposalHtml] = useState<string>("");
   const [isLoadingHtml, setIsLoadingHtml] = useState(false);
+  const [isDownloadingWord, setIsDownloadingWord] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const handleViewProposal = async (proposal: Proposal) => {
@@ -79,6 +90,28 @@ export default function AdminProposals() {
     }
   };
 
+  const handleWordDownload = async () => {
+    if (!activeProposal) return;
+    setIsDownloadingWord(true);
+    try {
+      const res = await fetch(activeProposal.wordEndpoint, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to generate Word document");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = activeProposal.wordFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : "Failed to download Word document");
+    } finally {
+      setIsDownloadingWord(false);
+    }
+  };
+
   const handleBack = () => {
     setActiveProposal(null);
     setProposalHtml("");
@@ -105,7 +138,19 @@ export default function AdminProposals() {
               <Printer className="h-4 w-4 mr-2" />
               Print / Save as PDF
             </Button>
+            <Button
+              variant="outline"
+              onClick={handleWordDownload}
+              disabled={isDownloadingWord}
+              data-testid="button-download-word-proposal"
+            >
+              <FileDown className="h-4 w-4 mr-2" />
+              {isDownloadingWord ? "Generating..." : "Download as Word"}
+            </Button>
           </div>
+          {loadError && (
+            <p className="text-sm text-destructive" data-testid="text-word-download-error">{loadError}</p>
+          )}
         </div>
         <div
           className="mt-4 proposal-content"

@@ -328,3 +328,203 @@ export async function getBillingStats(orgId: number) {
     totalCreditsUsed: totalUsage?.used || 0,
   };
 }
+
+// ─── Invoiced Billing Request Flow ────────────────────────────────────────────
+
+export async function requestInvoicedBilling(
+  orgId: number,
+  userId: string,
+  companyName: string,
+  companyEmail: string,
+  estimatedMonthlyVolume: string,
+  message: string
+): Promise<KycBillingRequest> {
+  const account = await getBillingAccount(orgId);
+  if (!account) throw new Error("No billing account found. Create one first.");
+
+  const [existing] = await db.select().from(kycBillingRequests)
+    .where(and(
+      eq(kycBillingRequests.organisationId, orgId),
+      eq(kycBillingRequests.status, "pending")
+    ));
+  if (existing) throw new Error("A pending invoiced billing request already exists.");
+
+  const [request] = await db.insert(kycBillingRequests).values({
+    organisationId: orgId,
+    requestedBy: userId,
+    companyName,
+    companyEmail,
+    estimatedMonthlyVolume,
+    message: message || null,
+    status: "pending",
+  }).returning();
+
+  return request;
+}
+
+export async function approveInvoicedBilling(
+  reqId: number,
+  userId: string,
+  creditLimit: number
+): Promise<KycBillingRequest> {
+  const [request] = await db.select().from(kycBillingRequests)
+    .where(eq(kycBillingRequests.id, reqId));
+  if (!request) throw new Error("Billing request not found");
+  if (request.status !== "pending") throw new Error("Request is not pending");
+
+  const now = new Date();
+
+  await db.update(kycBillingRequests)
+    .set({ status: "approved", reviewedBy: userId, reviewedAt: now })
+    .where(eq(kycBillingRequests.id, reqId));
+
+  await db.update(kycBillingAccounts)
+    .set({
+      billingMode: "invoiced",
+      creditLimit,
+      approvedAt: now,
+      approvedBy: userId,
+      updatedAt: now,
+    })
+    .where(eq(kycBillingAccounts.organisationId, request.organisationId));
+
+  const [updated] = await db.select().from(kycBillingRequests)
+    .where(eq(kycBillingRequests.id, reqId));
+  return updated;
+}
+
+export async function rejectInvoicedBilling(
+  reqId: number,
+  userId: string,
+  notes: string
+): Promise<KycBillingRequest> {
+  const [request] = await db.select().from(kycBillingRequests)
+    .where(eq(kycBillingRequests.id, reqId));
+  if (!request) throw new Error("Billing request not found");
+  if (request.status !== "pending") throw new Error("Request is not pending");
+
+  await db.update(kycBillingRequests)
+    .set({ status: "rejected", adminNotes: notes, reviewedBy: userId, reviewedAt: new Date() })
+    .where(eq(kycBillingRequests.id, reqId));
+
+  const [updated] = await db.select().from(kycBillingRequests)
+    .where(eq(kycBillingRequests.id, reqId));
+  return updated;
+}
+
+// ─── Credit Adjustments ───────────────────────────────────────────────────────
+
+export async function adjustCredits(
+  orgId: number,
+  adjustment: number,
+  reason: string,
+  adminUserId: string
+): Promise<KycCreditTransaction> {
+  const account = await getBillingAccount(orgId);
+  if (!account) throw new Error("No billing account found");
+
+  const newBalance = account.creditBalance + adjustment;
+
+  await db.update(kycBillingAccounts)
+    .set({ creditBalance: newBalance, updatedAt: new Date() })
+    .where(eq(kycBillingAccounts.id, account.id));
+
+  const [transaction] = await db.insert(kycCreditTransactions).values({
+    billingAccountId: account.id,
+    type: "adjustment",
+    verificationType: null,
+    amount: adjustment,
+    balance: newBalance,
+    description: `Manual adjustment by admin (${adminUserId}): ${reason}`,
+  }).returning();
+
+  return transaction;
+}
+
+// ─── Invoice Management ────────────────────────────────────────────────────────
+
+export async function markInvoicePaid(
+  invoiceId: number,
+  paystackReference?: string
+): Promise<KycInvoice> {
+  const [invoice] = await db.select().from(kycInvoices)
+    .where(eq(kycInvoices.id, invoiceId));
+  if (!invoice) throw new Error("Invoice not found");
+  if (invoice.status === "paid") throw new Error("Invoice is already marked as paid");
+
+  await db.update(kycInvoices)
+    .set({
+      status: "paid",
+      paidAt: new Date(),
+      paystackReference: paystackReference || null,
+    })
+    .where(eq(kycInvoices.id, invoiceId));
+
+  const [updated] = await db.select().from(kycInvoices)
+    .where(eq(kycInvoices.id, invoiceId));
+  return updated;
+}
+
+export async function generateInvoice(
+  orgId: number,
+  periodStart: Date,
+  periodEnd: Date
+): Promise<KycInvoice | null> {
+  const account = await getBillingAccount(orgId);
+  if (!account) return null;
+  if (account.billingMode !== "invoiced") return null;
+
+  const usageRows = await db.select().from(kycCreditTransactions)
+    .where(and(
+      eq(kycCreditTransactions.billingAccountId, account.id),
+      eq(kycCreditTransactions.type, "usage"),
+      gte(kycCreditTransactions.createdAt, periodStart),
+      lte(kycCreditTransactions.createdAt, periodEnd)
+    ));
+
+  if (usageRows.length === 0) return null;
+
+  const grouped: Record<string, { label: string; quantity: number; unitPriceKobo: number }> = {};
+  for (const row of usageRows) {
+    const vType = row.verificationType || "individual";
+    if (!grouped[vType]) {
+      const tier = getPricingTier(vType);
+      grouped[vType] = { label: tier.label, quantity: 0, unitPriceKobo: tier.priceKobo };
+    }
+    grouped[vType].quantity += Math.abs(row.amount);
+  }
+
+  const lineItems = Object.entries(grouped).map(([vType, data]) => ({
+    verificationType: vType,
+    description: data.label,
+    quantity: data.quantity,
+    unitPriceKobo: data.unitPriceKobo,
+    totalKobo: data.quantity * data.unitPriceKobo,
+  }));
+
+  const subtotal = lineItems.reduce((sum, li) => sum + li.totalKobo, 0);
+  const total = subtotal;
+
+  const year = periodEnd.getFullYear();
+  const [countResult] = await db.select({ cnt: count() }).from(kycInvoices);
+  const seq = String((countResult?.cnt || 0) + 1).padStart(5, "0");
+  const invoiceNumber = `KYC-${year}-${seq}`;
+
+  const dueDate = new Date(periodEnd);
+  dueDate.setDate(dueDate.getDate() + (account.paymentTermsDays || 30));
+
+  const [invoice] = await db.insert(kycInvoices).values({
+    billingAccountId: account.id,
+    invoiceNumber,
+    periodStart,
+    periodEnd,
+    lineItems,
+    subtotal,
+    total,
+    currency: "NGN",
+    status: "draft",
+    dueDate,
+  }).returning();
+
+  return invoice;
+}

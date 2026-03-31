@@ -67,7 +67,16 @@ export default function AdminProposals() {
   };
 
   const handlePrint = () => {
-    window.print();
+    if (!proposalHtml) return;
+    const blob = new Blob([proposalHtml], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const printWindow = window.open(url, "_blank");
+    if (printWindow) {
+      printWindow.addEventListener("load", () => {
+        printWindow.print();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      });
+    }
   };
 
   const handleBack = () => {

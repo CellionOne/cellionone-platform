@@ -47,6 +47,7 @@ import {
   contracts, type Contract, type InsertContract,
   contractMilestones, type ContractMilestone, type InsertContractMilestone,
   escrowTransactions, type EscrowTransaction, type InsertEscrowTransaction,
+  escrowApiTransactions, type EscrowApiTransaction, type InsertEscrowApiTransaction,
   procurementInvoices, type ProcurementInvoice, type InsertProcurementInvoice,
   procurementInvoiceItems, type ProcurementInvoiceItem, type InsertProcurementInvoiceItem,
 } from "@shared/schema";
@@ -1651,11 +1652,82 @@ export class DatabaseStorage implements IStorage {
     const updateData: any = { status, updatedAt: new Date() };
     if (status === "funded") updateData.fundedAt = new Date();
     if (status === "released") updateData.releasedAt = new Date();
+    if (status === "refunded") updateData.refundedAt = new Date();
     const [escrow] = await db.update(escrowTransactions)
       .set(updateData)
       .where(eq(escrowTransactions.id, id))
       .returning();
     return escrow;
+  }
+
+  async updateEscrowPaymentUrl(id: number, paymentUrl: string): Promise<void> {
+    await db.update(escrowTransactions)
+      .set({ paystackPaymentUrl: paymentUrl, updatedAt: new Date() })
+      .where(eq(escrowTransactions.id, id));
+  }
+
+  async updateEscrowFunded(id: number, paystackReference: string): Promise<EscrowTransaction | undefined> {
+    const [escrow] = await db.update(escrowTransactions)
+      .set({ status: "funded", fundedAt: new Date(), paymentReference: paystackReference, updatedAt: new Date() })
+      .where(eq(escrowTransactions.id, id))
+      .returning();
+    return escrow;
+  }
+
+  async updateEscrowDisputed(id: number, reason: string): Promise<EscrowTransaction | undefined> {
+    const [escrow] = await db.update(escrowTransactions)
+      .set({ status: "disputed", disputeReason: reason, disputedAt: new Date(), updatedAt: new Date() })
+      .where(eq(escrowTransactions.id, id))
+      .returning();
+    return escrow;
+  }
+
+  async getEscrowTransactionById(id: number): Promise<EscrowTransaction | undefined> {
+    const [escrow] = await db.select().from(escrowTransactions).where(eq(escrowTransactions.id, id));
+    return escrow;
+  }
+
+  // Escrow API Transactions
+  async createEscrowApiTransaction(data: InsertEscrowApiTransaction): Promise<EscrowApiTransaction> {
+    const [tx] = await db.insert(escrowApiTransactions).values(data).returning();
+    return tx;
+  }
+
+  async getEscrowApiTransaction(reference: string): Promise<EscrowApiTransaction | undefined> {
+    const [tx] = await db.select().from(escrowApiTransactions)
+      .where(eq(escrowApiTransactions.reference, reference));
+    return tx;
+  }
+
+  async getEscrowApiTransactionById(id: number): Promise<EscrowApiTransaction | undefined> {
+    const [tx] = await db.select().from(escrowApiTransactions)
+      .where(eq(escrowApiTransactions.id, id));
+    return tx;
+  }
+
+  async listEscrowApiTransactions(orgId: number, status?: string): Promise<EscrowApiTransaction[]> {
+    if (status) {
+      return db.select().from(escrowApiTransactions)
+        .where(and(eq(escrowApiTransactions.orgId, orgId), eq(escrowApiTransactions.status, status)))
+        .orderBy(desc(escrowApiTransactions.createdAt));
+    }
+    return db.select().from(escrowApiTransactions)
+      .where(eq(escrowApiTransactions.orgId, orgId))
+      .orderBy(desc(escrowApiTransactions.createdAt));
+  }
+
+  async listAllEscrowApiTransactions(limit = 100): Promise<EscrowApiTransaction[]> {
+    return db.select().from(escrowApiTransactions)
+      .orderBy(desc(escrowApiTransactions.createdAt))
+      .limit(limit);
+  }
+
+  async updateEscrowApiTransaction(id: number, data: Partial<EscrowApiTransaction>): Promise<EscrowApiTransaction | undefined> {
+    const [tx] = await db.update(escrowApiTransactions)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(escrowApiTransactions.id, id))
+      .returning();
+    return tx;
   }
 
   // Procurement Invoices

@@ -1742,12 +1742,18 @@ export const escrowTransactions = pgTable("escrow_transactions", {
   milestoneId: integer("milestone_id"),
   amount: integer("amount").notNull(),
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
-  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  status: varchar("status", { length: 30 }).notNull().default("pending"),
+  // pending | funded | released | disputed | refunded
   buyerOrgId: integer("buyer_org_id").notNull(),
   supplierOrgId: integer("supplier_org_id").notNull(),
+  paystackReference: varchar("paystack_reference", { length: 255 }),
+  paystackPaymentUrl: varchar("paystack_payment_url", { length: 512 }),
+  paymentReference: varchar("payment_reference", { length: 255 }),
   fundedAt: timestamp("funded_at"),
   releasedAt: timestamp("released_at"),
-  paymentReference: varchar("payment_reference", { length: 255 }),
+  disputedAt: timestamp("disputed_at"),
+  disputeReason: text("dispute_reason"),
+  refundedAt: timestamp("refunded_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -1757,6 +1763,44 @@ export const escrowTransactions = pgTable("escrow_transactions", {
 export const insertEscrowTransactionSchema = createInsertSchema(escrowTransactions).omit({ id: true, createdAt: true, updatedAt: true });
 export type EscrowTransaction = typeof escrowTransactions.$inferSelect;
 export type InsertEscrowTransaction = z.infer<typeof insertEscrowTransactionSchema>;
+
+// Escrow-as-a-Service: third-party API escrow transactions
+export const escrowApiTransactions = pgTable("escrow_api_transactions", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull(),
+  reference: varchar("reference", { length: 40 }).notNull().unique(),
+  // CO-ESC-YYYY-XXXXXXXX
+  description: text("description").notNull(),
+  amount: integer("amount").notNull(), // kobo
+  currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
+  status: varchar("status", { length: 30 }).notNull().default("pending_payment"),
+  // pending_payment | funded | released | disputed | refunded | expired
+  buyerName: varchar("buyer_name", { length: 255 }).notNull(),
+  buyerEmail: varchar("buyer_email", { length: 255 }).notNull(),
+  beneficiaryName: varchar("beneficiary_name", { length: 255 }).notNull(),
+  beneficiaryEmail: varchar("beneficiary_email", { length: 255 }).notNull(),
+  paystackReference: varchar("paystack_reference", { length: 255 }),
+  paystackPaymentUrl: varchar("paystack_payment_url", { length: 512 }),
+  releaseConditions: text("release_conditions"),
+  releasedTo: varchar("released_to", { length: 255 }),
+  disputeReason: text("dispute_reason"),
+  disputedAt: timestamp("disputed_at"),
+  fundedAt: timestamp("funded_at"),
+  releasedAt: timestamp("released_at"),
+  refundedAt: timestamp("refunded_at"),
+  expiresAt: timestamp("expires_at"),
+  metadata: jsonb("metadata").$type<Record<string, any>>(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_escrow_api_org").on(table.orgId),
+  index("idx_escrow_api_ref").on(table.reference),
+  index("idx_escrow_api_status").on(table.status),
+]);
+
+export const insertEscrowApiTransactionSchema = createInsertSchema(escrowApiTransactions).omit({ id: true, createdAt: true, updatedAt: true });
+export type EscrowApiTransaction = typeof escrowApiTransactions.$inferSelect;
+export type InsertEscrowApiTransaction = z.infer<typeof insertEscrowApiTransactionSchema>;
 
 export const procurementInvoices = pgTable("procurement_invoices", {
   id: serial("id").primaryKey(),

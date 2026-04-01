@@ -65,12 +65,14 @@ function EndpointSection({
   method,
   path,
   description,
+  badge,
   children,
 }: {
   method: string;
   path: string;
   description: string;
-  children: React.ReactNode;
+  badge?: string;
+  children?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const methodColor =
@@ -100,6 +102,11 @@ function EndpointSection({
           {method}
         </Badge>
         <code className="text-sm font-mono font-medium">{path}</code>
+        {badge && (
+          <Badge variant="outline" className="border-0 bg-muted font-mono text-xs hidden sm:inline-flex">
+            {badge}
+          </Badge>
+        )}
         <span className="text-sm text-muted-foreground ml-auto hidden sm:inline">{description}</span>
       </button>
       {open && (
@@ -130,6 +137,7 @@ const sidebarSections = [
   { id: "hosted-sessions", label: "Hosted Sessions" },
   { id: "status-lifecycle", label: "Status Lifecycle" },
   { id: "attestation", label: "Verification Attestation" },
+  { id: "escrow-api", label: "Escrow-as-a-Service" },
   { id: "webhooks", label: "Webhooks" },
   { id: "errors", label: "Error Codes" },
   { id: "examples", label: "Code Examples" },
@@ -1702,6 +1710,227 @@ export default function ApiDocsPage() {
                 />
               </CardContent>
             </Card>
+          </section>
+
+          <Separator />
+
+          {/* ── Escrow-as-a-Service ── */}
+          <section id="escrow-api" className="space-y-6 scroll-mt-24">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-escrow-api">
+                <Shield className="h-5 w-5" />
+                Escrow-as-a-Service
+              </h2>
+              <p className="text-muted-foreground mt-2">
+                The Escrow API lets your platform hold buyer funds securely in a Cellion-managed escrow until
+                both parties confirm fulfilment — no bank integrations required. Funds are collected via
+                Paystack and released to your beneficiary only when you call the release endpoint.
+              </p>
+            </div>
+
+            {/* Pricing + Limits */}
+            <Card className="border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20">
+              <CardContent className="pt-5 grid md:grid-cols-3 gap-6 text-sm">
+                <div>
+                  <p className="font-semibold text-emerald-700 dark:text-emerald-400 mb-1">Service Fee</p>
+                  <p className="text-muted-foreground">1.5% of escrow amount (min ₦1,500 · max ₦50,000) charged to the buyer at payment time.</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-emerald-700 dark:text-emerald-400 mb-1">Expiry</p>
+                  <p className="text-muted-foreground">Transactions auto-expire after 30 days if not funded. Funded transactions never expire until you release or dispute.</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-emerald-700 dark:text-emerald-400 mb-1">Permission Required</p>
+                  <p className="text-muted-foreground"><code className="bg-muted px-1 rounded">escrow:write</code> to create &amp; release. <code className="bg-muted px-1 rounded">escrow:read</code> to list/get.</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Reference format */}
+            <div className="p-4 rounded-md border bg-muted/30 text-sm space-y-1">
+              <p className="font-medium">Reference Format</p>
+              <p className="text-muted-foreground font-mono">CO-ESC-YYYY-XXXXXXXX &nbsp;(e.g. CO-ESC-2026-A3F7D2B1)</p>
+              <p className="text-muted-foreground">All references are unique and generated server-side on creation. Use this reference for all subsequent calls.</p>
+            </div>
+
+            {/* Lifecycle */}
+            <div>
+              <h3 className="text-base font-semibold mb-3">Transaction Lifecycle</h3>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                {(["pending → funded", "funded → released", "funded → disputed", "pending/funded → refunded"] as const).map((step) => (
+                  <span key={step} className="px-3 py-1 rounded-full border bg-muted font-mono text-xs">{step}</span>
+                ))}
+              </div>
+              <ul className="mt-3 space-y-1 text-sm text-muted-foreground list-disc list-inside">
+                <li><strong>pending</strong> — created, awaiting buyer payment via Paystack</li>
+                <li><strong>funded</strong> — Paystack confirmed payment, funds held in escrow</li>
+                <li><strong>released</strong> — you confirmed fulfilment; funds sent to beneficiary</li>
+                <li><strong>disputed</strong> — a party raised a dispute; Cellion admin reviews</li>
+                <li><strong>refunded</strong> — funds returned to buyer after dispute resolution or expiry</li>
+              </ul>
+            </div>
+
+            {/* Endpoints */}
+            <EndpointSection
+              method="POST"
+              path="/api/v1/escrow/transactions"
+              badge="escrow:write"
+              description="Create a new escrow transaction and receive a Paystack payment link to send to your buyer."
+            >
+              <ParamTable
+                title="Request Body"
+                params={[
+                  { field: "amount", type: "number", required: "Yes", description: "Amount in NGN (kobo conversion handled server-side)" },
+                  { field: "buyerName", type: "string", required: "Yes", description: "Full name of the paying party" },
+                  { field: "buyerEmail", type: "string", required: "Yes", description: "Buyer email — Paystack sends the receipt here" },
+                  { field: "beneficiaryName", type: "string", required: "Yes", description: "Full name of the receiving party" },
+                  { field: "beneficiaryEmail", type: "string", required: "Yes", description: "Beneficiary email for payout notifications" },
+                  { field: "description", type: "string", required: "Yes", description: "Short description of the transaction (shown on payment page)" },
+                  { field: "metadata", type: "object", required: "No", description: "Any custom key/value pairs to attach to this transaction" },
+                ]}
+              />
+              <h4 className="text-sm font-semibold mt-4 mb-2">Response</h4>
+              <CodeBlock
+                language="json"
+                code={`{
+  "reference": "CO-ESC-2026-A3F7D2B1",
+  "status": "pending",
+  "amount": 500000,
+  "currency": "NGN",
+  "buyerName": "Emeka Obi",
+  "buyerEmail": "emeka@example.com",
+  "beneficiaryName": "TechBuild Ltd",
+  "beneficiaryEmail": "finance@techbuild.ng",
+  "description": "Website design project milestone 1",
+  "paystackPaymentUrl": "https://checkout.paystack.com/xxxxx",
+  "expiresAt": "2026-05-01T00:00:00.000Z",
+  "createdAt": "2026-04-01T10:00:00.000Z"
+}`}
+              />
+            </EndpointSection>
+
+            <EndpointSection
+              method="GET"
+              path="/api/v1/escrow/transactions"
+              badge="escrow:read"
+              description="List all escrow transactions for your organisation. Supports optional ?status= filter."
+            >
+              <ParamTable
+                title="Query Parameters"
+                params={[
+                  { field: "status", type: "string", required: "No", description: "Filter by status: pending | funded | released | disputed | refunded" },
+                  { field: "page", type: "number", required: "No", description: "Page number (default: 1)" },
+                  { field: "limit", type: "number", required: "No", description: "Results per page (default: 20, max: 100)" },
+                ]}
+              />
+            </EndpointSection>
+
+            <EndpointSection
+              method="GET"
+              path="/api/v1/escrow/transactions/:reference"
+              badge="escrow:read"
+              description="Fetch a single transaction by its CO-ESC-… reference."
+            >
+              <h4 className="text-sm font-semibold mt-4 mb-2">Response</h4>
+              <CodeBlock
+                language="json"
+                code={`{
+  "reference": "CO-ESC-2026-A3F7D2B1",
+  "status": "funded",
+  "amount": 500000,
+  "currency": "NGN",
+  "fundedAt": "2026-04-02T09:15:00.000Z",
+  "paystackReference": "pstk_live_abc123",
+  "metadata": { "orderId": "ORD-9087" }
+}`}
+              />
+            </EndpointSection>
+
+            <EndpointSection
+              method="POST"
+              path="/api/v1/escrow/transactions/:reference/release"
+              badge="escrow:write"
+              description="Confirm fulfilment and release held funds to the beneficiary. Transaction must be in funded state."
+            >
+              <ParamTable
+                title="Request Body"
+                params={[
+                  { field: "notes", type: "string", required: "No", description: "Optional release notes (stored for audit)" },
+                ]}
+              />
+              <h4 className="text-sm font-semibold mt-4 mb-2">Response</h4>
+              <CodeBlock
+                language="json"
+                code={`{
+  "reference": "CO-ESC-2026-A3F7D2B1",
+  "status": "released",
+  "releasedAt": "2026-04-05T14:00:00.000Z",
+  "message": "Funds released to beneficiary"
+}`}
+              />
+            </EndpointSection>
+
+            <EndpointSection
+              method="POST"
+              path="/api/v1/escrow/transactions/:reference/dispute"
+              badge="escrow:write"
+              description="Raise a dispute on a funded transaction. Cellion admin will review within 2 business days."
+            >
+              <ParamTable
+                title="Request Body"
+                params={[
+                  { field: "reason", type: "string", required: "Yes", description: "Detailed description of the dispute (min 10 characters)" },
+                ]}
+              />
+            </EndpointSection>
+
+            {/* Webhook */}
+            <div>
+              <h3 className="text-base font-semibold mb-3">Escrow Webhook Events</h3>
+              <p className="text-sm text-muted-foreground mb-3">
+                Cellion delivers signed webhook events to your configured webhook URL when escrow transaction status changes.
+                All events are signed with <code className="bg-muted px-1 rounded">X-Cellion-Signature</code> (HMAC-SHA256).
+              </p>
+              <CodeBlock
+                language="json"
+                code={`// escrow.funded — buyer payment confirmed
+{
+  "event": "escrow.funded",
+  "timestamp": "2026-04-02T09:15:00.000Z",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "status": "funded",
+    "amount": 500000,
+    "currency": "NGN",
+    "buyerName": "Emeka Obi",
+    "buyerEmail": "emeka@example.com",
+    "beneficiaryName": "TechBuild Ltd",
+    "fundedAt": "2026-04-02T09:15:00.000Z"
+  }
+}
+
+// escrow.released — funds disbursed to beneficiary
+{
+  "event": "escrow.released",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "status": "released",
+    "releasedAt": "2026-04-05T14:00:00.000Z"
+  }
+}
+
+// escrow.disputed — dispute raised, under review
+{
+  "event": "escrow.disputed",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "status": "disputed",
+    "disputeReason": "Goods not delivered as described",
+    "disputedAt": "2026-04-04T11:00:00.000Z"
+  }
+}`}
+              />
+            </div>
           </section>
 
           <Separator />

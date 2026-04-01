@@ -109,6 +109,8 @@ export default function ContractDetailPage() {
   const [evidenceText, setEvidenceText] = useState("");
   const [addMilestoneDialog, setAddMilestoneDialog] = useState(false);
   const [newMilestone, setNewMilestone] = useState({ title: "", description: "", amount: "", dueDate: "" });
+  const [disputeDialog, setDisputeDialog] = useState<{ open: boolean; escrowId: number | null }>({ open: false, escrowId: null });
+  const [disputeReason, setDisputeReason] = useState("");
 
   const { data: contract, isLoading } = useQuery<ContractDetail>({
     queryKey: ["/api/procurement/contracts", contractId],
@@ -162,6 +164,60 @@ export default function ContractDetailPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Failed to add milestone", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const fundEscrowMutation = useMutation({
+    mutationFn: async ({ amount, milestoneId }: { amount: number; milestoneId?: number }) => {
+      const res = await apiRequest("POST", `/api/procurement/contracts/${contractId}/escrow/fund`, { amount, milestoneId });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to initialize payment");
+      return data;
+    },
+    onSuccess: (data) => {
+      if (data.paystackPaymentUrl) {
+        window.location.href = data.paystackPaymentUrl;
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["/api/procurement/contracts", contractId, "escrow"] });
+        toast({ title: "Escrow created", description: "Fund the escrow to hold the payment securely." });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to fund escrow", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const releaseEscrowMutation = useMutation({
+    mutationFn: async (escrowId: number) => {
+      const res = await apiRequest("POST", `/api/procurement/contracts/${contractId}/escrow/release`, { escrowId });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Release failed");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/procurement/contracts", contractId, "escrow"] });
+      toast({ title: "Escrow released", description: "Funds have been released to the supplier." });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to release", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const disputeEscrowMutation = useMutation({
+    mutationFn: async ({ escrowId, reason }: { escrowId: number; reason: string }) => {
+      const res = await apiRequest("POST", `/api/procurement/contracts/${contractId}/escrow/dispute`, { escrowId, reason });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Dispute failed");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/procurement/contracts", contractId, "escrow"] });
+      toast({ title: "Dispute raised", description: "Our team will review your dispute within 2 business days." });
+      setDisputeDialog({ open: false, escrowId: null });
+      setDisputeReason("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to raise dispute", description: error.message, variant: "destructive" });
     },
   });
 
@@ -473,25 +529,90 @@ export default function ContractDetailPage() {
             {escrowData?.enabled ? (
               <div className="space-y-4">
                 {escrowData.transactions && escrowData.transactions.length > 0 ? (
-                  <div className="space-y-2">
-                    {escrowData.transactions.map((tx: any, i: number) => (
-                      <div key={tx.id || i} className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-md border" data-testid={`escrow-tx-${tx.id || i}`}>
-                        <div>
-                          <p className="text-sm font-medium">{formatAmount(tx.amount, tx.currency)}</p>
-                          <p className="text-xs text-muted-foreground">Status: {tx.status}</p>
+                  <div className="space-y-3">
+                    {escrowData.transactions.map((tx: any, i: number) => {
+                      const statusColors: Record<string, string> = {
+                        pending: "bg-muted text-muted-foreground",
+                        funded: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                        released: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+                        disputed: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+                        refunded: "bg-muted text-muted-foreground",
+                      };
+                      return (
+                        <div key={tx.id || i} className="p-3 rounded-md border space-y-2" data-testid={`escrow-tx-${tx.id || i}`}>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-semibold">{formatAmount(tx.amount, tx.currency)}</p>
+                            <Badge className={`border-0 ${statusColors[tx.status] || ""}`}>{tx.status}</Badge>
+                          </div>
+                          {tx.paystackPaymentUrl && tx.status === "pending" && (
+                            <a
+                              href={tx.paystackPaymentUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block"
+                              data-testid={`link-pay-escrow-${tx.id}`}
+                            >
+                              <Button size="sm" className="w-full" variant="default">
+                                <DollarSign className="h-4 w-4 mr-1" />
+                                Complete Payment via Paystack
+                              </Button>
+                            </a>
+                          )}
+                          {tx.fundedAt && (
+                            <p className="text-xs text-muted-foreground">Funded: {new Date(tx.fundedAt).toLocaleDateString()}</p>
+                          )}
+                          {tx.status === "funded" && (isBuyer || isSupplier) && (
+                            <div className="flex gap-2 flex-wrap">
+                              {isBuyer && (
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  onClick={() => releaseEscrowMutation.mutate(tx.id)}
+                                  disabled={releaseEscrowMutation.isPending}
+                                  data-testid={`button-release-escrow-${tx.id}`}
+                                >
+                                  Release Funds
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setDisputeDialog({ open: true, escrowId: tx.id })}
+                                data-testid={`button-dispute-escrow-${tx.id}`}
+                              >
+                                <AlertTriangle className="h-3.5 w-3.5 mr-1" />
+                                Raise Dispute
+                              </Button>
+                            </div>
+                          )}
+                          {tx.disputeReason && (
+                            <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                              Dispute: {tx.disputeReason}
+                            </p>
+                          )}
                         </div>
-                        <Badge variant="secondary" className="border-0">{tx.status}</Badge>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground" data-testid="text-no-escrow-transactions">No escrow transactions yet.</p>
                 )}
                 {isBuyer && contract.status !== "completed" && contract.status !== "cancelled" && (
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" data-testid="button-fund-escrow" disabled>
-                      <DollarSign className="h-4 w-4 mr-1" />
-                      Fund Escrow
+                    <Button
+                      variant="default"
+                      data-testid="button-fund-escrow"
+                      disabled={fundEscrowMutation.isPending}
+                      onClick={() => fundEscrowMutation.mutate({ amount: contract.totalAmount })}
+                    >
+                      {fundEscrowMutation.isPending ? (
+                        <LoadingSpinner />
+                      ) : (
+                        <>
+                          <DollarSign className="h-4 w-4 mr-1" />
+                          Fund Full Contract Escrow
+                        </>
+                      )}
                     </Button>
                   </div>
                 )}
@@ -601,6 +722,48 @@ export default function ContractDetailPage() {
               data-testid="button-submit-milestone"
             >
               {addMilestoneMutation.isPending ? "Adding..." : "Add Milestone"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dispute Escrow Dialog */}
+      <Dialog
+        open={disputeDialog.open}
+        onOpenChange={(open) => setDisputeDialog({ open, escrowId: open ? disputeDialog.escrowId : null })}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Raise Escrow Dispute</DialogTitle>
+            <DialogDescription>
+              Describe the issue with this escrow transaction. Our team will review within 2 business days.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label>Reason for dispute</Label>
+            <Textarea
+              value={disputeReason}
+              onChange={(e) => setDisputeReason(e.target.value)}
+              placeholder="Describe the issue in detail..."
+              rows={4}
+              data-testid="input-dispute-reason"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDisputeDialog({ open: false, escrowId: null })}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={disputeReason.trim().length < 10 || disputeEscrowMutation.isPending}
+              onClick={() => {
+                if (disputeDialog.escrowId && disputeReason.trim()) {
+                  disputeEscrowMutation.mutate({ escrowId: disputeDialog.escrowId, reason: disputeReason.trim() });
+                }
+              }}
+              data-testid="button-submit-dispute"
+            >
+              {disputeEscrowMutation.isPending ? "Submitting..." : "Submit Dispute"}
             </Button>
           </DialogFooter>
         </DialogContent>

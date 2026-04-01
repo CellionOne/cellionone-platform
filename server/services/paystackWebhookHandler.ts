@@ -95,8 +95,13 @@ export async function processWebhook(
 
 async function handleChargeSuccess(data: PaystackWebhookEvent['data'], rawPayload: string): Promise<void> {
   const reference = data.reference;
+  const metaType = (data.metadata as any)?.type;
 
-  if (reference.startsWith('kyc_credit_')) {
+  if (metaType === 'procurement_escrow') {
+    await handleProcurementEscrowSuccess(data);
+  } else if (metaType === 'api_escrow') {
+    await handleApiEscrowSuccess(data);
+  } else if (reference.startsWith('kyc_credit_')) {
     await handleKycCreditPurchaseSuccess(data);
   } else if (reference.startsWith('kyc_')) {
     await handleKycPaymentSuccess(data);
@@ -105,6 +110,48 @@ async function handleChargeSuccess(data: PaystackWebhookEvent['data'], rawPayloa
   } else {
     await handleLegacyPaymentSuccess(data);
   }
+}
+
+async function handleProcurementEscrowSuccess(data: PaystackWebhookEvent['data']): Promise<void> {
+  const meta = data.metadata as any;
+  const escrowId = parseInt(meta?.escrowId);
+  if (!escrowId) {
+    console.error('[Paystack Webhook] Procurement escrow missing escrowId in metadata');
+    return;
+  }
+
+  const existing = await storage.getEscrowTransactionById(escrowId);
+  if (!existing) {
+    console.error(`[Paystack Webhook] Procurement escrow ${escrowId} not found`);
+    return;
+  }
+  if (existing.status === 'funded') {
+    console.log(`[Paystack Webhook] Procurement escrow ${escrowId} already funded, skipping`);
+    return;
+  }
+
+  await storage.updateEscrowFunded(escrowId, data.reference);
+
+  await storage.createAuditLog({
+    actorUserId: 'system',
+    action: 'procurement_escrow_funded',
+    entityType: 'escrow_transaction',
+    entityId: String(escrowId),
+    details: { reference: data.reference, amount: data.amount, contractId: meta?.contractId },
+  });
+
+  console.log(`[Paystack Webhook] Procurement escrow ${escrowId} funded, ref: ${data.reference}`);
+}
+
+async function handleApiEscrowSuccess(data: PaystackWebhookEvent['data']): Promise<void> {
+  const meta = data.metadata as any;
+  const reference = meta?.reference;
+  if (!reference) {
+    console.error('[Paystack Webhook] API escrow missing reference in metadata');
+    return;
+  }
+  const { handleApiEscrowFunded } = await import('../routes/escrowApiRoutes');
+  await handleApiEscrowFunded(reference, data.reference, data.amount);
 }
 
 async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPayload: string): Promise<void> {

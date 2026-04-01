@@ -1153,7 +1153,7 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
       if (!flag?.isEnabled) {
         return res.status(200).json({
           enabled: false,
-          message: "Secure escrow payments coming soon. Currently, payment arrangements are made directly between buyer and supplier.",
+          message: "Secure escrow payments coming soon.",
         });
       }
 
@@ -1167,20 +1167,63 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
 
       const { milestoneId, amount } = z.object({
         milestoneId: z.number().optional(),
-        amount: z.number(),
+        amount: z.number().positive(),
       }).parse(req.body);
 
+      // Generate Paystack reference
+      const crypto = await import("crypto");
+      const paystackRef = `co_esc_proc_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+
+      // Create escrow record
       const escrow = await storage.createEscrowTransaction({
         contractId,
         milestoneId,
         amount,
-        currency: contract.currency,
+        currency: contract.currency || "NGN",
         status: "pending",
         buyerOrgId: contract.buyerOrgId,
         supplierOrgId: contract.supplierOrgId,
+        paystackReference: paystackRef,
       });
 
-      res.status(201).json(escrow);
+      // Initialize Paystack payment
+      const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_TEST_SECRET_KEY;
+      if (!PAYSTACK_SECRET) throw new Error("Paystack key not configured");
+
+      const user = await storage.getUser(userId);
+      if (!user?.email) throw new Error("User email required for payment");
+
+      const baseUrl = req.headers.origin || `https://${process.env.REPLIT_DEV_DOMAIN || req.hostname}`;
+      const paystackRes = await fetch("https://api.paystack.co/transaction/initialize", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: user.email,
+          amount, // already in kobo
+          reference: paystackRef,
+          callback_url: `${baseUrl}/procurement/contracts/${contractId}?escrow_funded=1`,
+          metadata: {
+            type: "procurement_escrow",
+            escrowId: escrow.id,
+            contractId,
+          },
+        }),
+      });
+
+      const paystackData = await paystackRes.json() as any;
+      if (!paystackData.status) {
+        throw new Error(paystackData.message || "Paystack initialization failed");
+      }
+
+      const paymentUrl = paystackData.data.authorization_url;
+
+      // Store payment URL
+      await storage.updateEscrowPaymentUrl(escrow.id, paymentUrl);
+
+      res.status(201).json({ ...escrow, paystackPaymentUrl: paymentUrl, paystackReference: paystackRef });
     } catch (e: any) {
       if (e instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: e.errors });
       res.status(500).json({ message: e.message });
@@ -1201,8 +1244,8 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
       }
 
       const flag = await storage.getFeatureFlag("enable_escrow_payments");
-      const escrow = await storage.getEscrowByContract(contractId);
-      res.json({ enabled: flag?.isEnabled || false, transactions: escrow });
+      const escrowTxs = await storage.getEscrowByContract(contractId);
+      res.json({ enabled: flag?.isEnabled || false, transactions: escrowTxs });
     } catch (e: any) {
       res.status(500).json({ message: e.message });
     }
@@ -1224,11 +1267,50 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
       if (!isBuyer) return res.status(403).json({ message: "Only the buyer can release escrow" });
 
       const { escrowId } = z.object({ escrowId: z.number() }).parse(req.body);
-      const escrowTransactions = await storage.getEscrowByContract(contractId);
-      const escrowTx = escrowTransactions.find(e => e.id === escrowId);
+      const escrowTxs = await storage.getEscrowByContract(contractId);
+      const escrowTx = escrowTxs.find(e => e.id === escrowId);
       if (!escrowTx) return res.status(404).json({ message: "Escrow transaction not found for this contract" });
+      if (escrowTx.status !== "funded") return res.status(400).json({ message: "Only funded escrow can be released" });
 
       const updated = await storage.updateEscrowStatus(escrowId, "released");
+      res.json(updated);
+    } catch (e: any) {
+      if (e instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: e.errors });
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  app.post("/api/procurement/contracts/:id/escrow/dispute", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      const flag = await storage.getFeatureFlag("enable_escrow_payments");
+      if (!flag?.isEnabled) {
+        return res.status(200).json({ enabled: false, message: "Escrow payments not yet enabled" });
+      }
+
+      const userId = getUserId(req);
+      const contractId = parseInt(req.params.id);
+      const contract = await storage.getContractById(contractId);
+      if (!contract) return res.status(404).json({ message: "Contract not found" });
+
+      const memberships = await getUserOrgs(userId);
+      const orgIds = new Set(memberships.map(m => m.orgId));
+      if (!orgIds.has(contract.buyerOrgId) && !orgIds.has(contract.supplierOrgId)) {
+        return res.status(403).json({ message: "Not authorized to dispute this escrow" });
+      }
+
+      const { escrowId, reason } = z.object({
+        escrowId: z.number(),
+        reason: z.string().min(10, "Please provide a detailed reason (at least 10 characters)"),
+      }).parse(req.body);
+
+      const escrowTxs = await storage.getEscrowByContract(contractId);
+      const escrowTx = escrowTxs.find(e => e.id === escrowId);
+      if (!escrowTx) return res.status(404).json({ message: "Escrow transaction not found" });
+      if (!["funded", "pending"].includes(escrowTx.status)) {
+        return res.status(400).json({ message: "Only funded or pending escrow can be disputed" });
+      }
+
+      const updated = await storage.updateEscrowDisputed(escrowId, reason);
       res.json(updated);
     } catch (e: any) {
       if (e instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: e.errors });

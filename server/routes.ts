@@ -18,6 +18,7 @@ import { upsertVerifiedCompanyDirect } from "./services/verifiedEntityService";
 import { registerKycServiceRoutes } from "./routes/kycServiceRoutes";
 import { registerKycApiRoutes } from "./routes/kycApiRoutes";
 import { registerProcurementRoutes } from "./routes/procurementRoutes";
+import { registerEscrowApiRoutes } from "./routes/escrowApiRoutes";
 
 // Validation schemas
 const createApplicationSchema = insertCompanyApplicationSchema.pick({
@@ -8724,6 +8725,9 @@ For questions, contact: service@cellionone.com
 
   // ============== PROCUREMENT ROUTES ==============
   registerProcurementRoutes(app);
+
+  // ============== ESCROW-AS-A-SERVICE API ROUTES (v1) ==============
+  registerEscrowApiRoutes(app);
 
   return httpServer;
 }

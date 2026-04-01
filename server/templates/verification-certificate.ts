@@ -13,7 +13,7 @@ interface CertificateData {
     biometricMatch: boolean;
     amlScreening: boolean;
   };
-  smileIdJobId: string | null;
+  verificationReference?: string | null;
   livenessScore: number | null;
   company?: {
     name: string;
@@ -105,8 +105,7 @@ export function generateVerificationCertificateHTML(data: CertificateData): stri
           <div style="font-size: 10pt; color: #52525b;">${data.subjectEmail}</div>
         </div>
         <div style="text-align: center; font-size: 10pt; color: #374151;">
-          has successfully completed comprehensive identity verification through the Cellion One platform,
-          powered by Smile ID.
+          has successfully completed comprehensive identity verification through the Cellion One platform.
         </div>
       </div>
 
@@ -140,10 +139,10 @@ export function generateVerificationCertificateHTML(data: CertificateData): stri
           <div style="font-size: 9pt; color: #71717a;">Valid Until</div>
           <div style="font-weight: 600; font-size: 10pt;">${data.expiryDate}</div>
         </div>
-        ${data.smileIdJobId ? `
+        ${data.verificationReference ? `
         <div style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px;">
-          <div style="font-size: 9pt; color: #71717a;">Smile ID Reference</div>
-          <div style="font-weight: 600; font-size: 10pt; font-family: monospace;">${data.smileIdJobId}</div>
+          <div style="font-size: 9pt; color: #71717a;">Verification Reference</div>
+          <div style="font-weight: 600; font-size: 10pt; font-family: monospace;">${data.verificationReference}</div>
         </div>
         ` : ''}
         ${data.livenessScore !== null ? `
@@ -160,9 +159,9 @@ export function generateVerificationCertificateHTML(data: CertificateData): stri
         <h3 style="font-size: 11pt; color: #0f7a4d; font-weight: 600; margin-bottom: 8px;">Attestation</h3>
         <p style="font-size: 9pt; color: #374151; line-height: 1.6;">
           Cellion Platforms Nigeria Limited hereby attests that the individual named above has undergone
-          comprehensive identity verification through our platform. The verification was conducted using
-          Smile ID's identity verification services, including BVN/NIN database validation, government-issued
-          ID document verification, biometric selfie matching with liveness detection, and AML/sanctions screening.
+          comprehensive identity verification through the Cellion One platform. The verification included
+          BVN/NIN database validation, government-issued ID document verification, biometric selfie
+          matching with liveness detection, and AML/sanctions screening.
         </p>
         <p style="font-size: 9pt; color: #374151; line-height: 1.6; margin-top: 8px;">
           This data was shared with the consent of ${data.subjectName}, granted on ${data.consentDate},

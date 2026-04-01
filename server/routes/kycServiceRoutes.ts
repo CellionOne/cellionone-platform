@@ -1868,17 +1868,18 @@ export function registerKycServiceRoutes(app: Express) {
 
       let individualData: any = undefined;
       if (request.type === "individual") {
+        const auditSnapshot = request.verifiedDataSnapshot as import("@shared/schema").KycVerifiedSnapshot | null;
         individualData = {
           subjectName: request.subjectName,
           subjectEmail: request.subjectEmail,
-          smileIdChecks: {
-            bvnValidation: true,
-            ninValidation: true,
-            documentVerification: true,
-            biometricMatch: true,
-            amlScreening: true,
+          verificationChecks: {
+            bvnValidation: hasAcceptedDocs,
+            ninValidation: hasAcceptedDocs,
+            documentVerification: hasAcceptedDocs,
+            biometricMatch: auditSnapshot?.biometricVerified ?? false,
+            amlScreening: auditSnapshot?.amlScreened ?? hasAcceptedDocs,
           },
-          smileIdJobId: null,
+          verificationReference: request.certificateRef || null,
           livenessScore: null,
         };
       }

@@ -727,7 +727,7 @@ export function registerKycApiRoutes(app: Express) {
           ...(snapshot.amlClear !== undefined ? { amlClear: snapshot.amlClear } : {}),
           verifiedAt: snapshot.verifiedAt,
         } : null,
-        smileIdJobId: null,
+        verificationReference: request.certificateRef || null,
         livenessScore: null,
         company: supplierProfile ? {
           name: supplierProfile.companyName,

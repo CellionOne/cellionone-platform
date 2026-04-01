@@ -10,14 +10,14 @@ interface KycAuditCertificateData {
   individual?: {
     subjectName: string;
     subjectEmail: string;
-    smileIdChecks?: {
+    verificationChecks?: {
       bvnValidation: boolean;
       ninValidation: boolean;
       documentVerification: boolean;
       biometricMatch: boolean;
       amlScreening: boolean;
     };
-    smileIdJobId?: string | null;
+    verificationReference?: string | null;
     livenessScore?: number | null;
   };
 
@@ -119,10 +119,10 @@ export function generateKycAuditCertificateHTML(data: KycAuditCertificateData): 
     </tr>
   `;
 
-  const smileIdSection = isIndividual && data.individual?.smileIdChecks ? `
+  const verificationChecksSection = isIndividual && data.individual?.verificationChecks ? `
     <div style="margin-top:24px;">
       <h3 style="font-size:13pt;color:#0f7a4d;font-weight:600;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #d1fae5;">
-        Identity Verification Results (Smile ID)
+        Identity Verification Results
       </h3>
       <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
         <thead>
@@ -133,18 +133,18 @@ export function generateKycAuditCertificateHTML(data: KycAuditCertificateData): 
           </tr>
         </thead>
         <tbody>
-          ${checkRow("Bank Verification Number (BVN) Validation", data.individual.smileIdChecks.bvnValidation)}
-          ${checkRow("National Identification Number (NIN) Validation", data.individual.smileIdChecks.ninValidation)}
-          ${checkRow("Government ID Document Verification", data.individual.smileIdChecks.documentVerification)}
-          ${checkRow("Biometric Selfie & Liveness Detection", data.individual.smileIdChecks.biometricMatch)}
-          ${checkRow("AML & Sanctions Screening", data.individual.smileIdChecks.amlScreening)}
+          ${checkRow("Bank Verification Number (BVN) Validation", data.individual.verificationChecks.bvnValidation)}
+          ${checkRow("National Identification Number (NIN) Validation", data.individual.verificationChecks.ninValidation)}
+          ${checkRow("Government ID Document Verification", data.individual.verificationChecks.documentVerification)}
+          ${checkRow("Biometric Selfie & Liveness Detection", data.individual.verificationChecks.biometricMatch)}
+          ${checkRow("AML & Sanctions Screening", data.individual.verificationChecks.amlScreening)}
         </tbody>
       </table>
-      ${data.individual.smileIdJobId ? `
+      ${data.individual.verificationReference ? `
         <div style="display:flex;gap:16px;margin-bottom:16px;">
           <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;">
-            <div style="font-size:9pt;color:#71717a;">Smile ID Reference</div>
-            <div style="font-weight:600;font-size:10pt;font-family:monospace;">${data.individual.smileIdJobId}</div>
+            <div style="font-size:9pt;color:#71717a;">Verification Reference</div>
+            <div style="font-weight:600;font-size:10pt;font-family:monospace;">${data.individual.verificationReference}</div>
           </div>
           ${data.individual.livenessScore !== null && data.individual.livenessScore !== undefined ? `
           <div style="flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;">
@@ -295,7 +295,7 @@ export function generateKycAuditCertificateHTML(data: KycAuditCertificateData): 
         </div>
       </div>
 
-      ${smileIdSection}
+      ${verificationChecksSection}
       ${supplierProfileSection}
       ${documentsSection}
       ${directorsSection}
@@ -316,13 +316,12 @@ export function generateKycAuditCertificateHTML(data: KycAuditCertificateData): 
         <p style="font-size:9pt;color:#374151;line-height:1.6;">
           ${isIndividual
             ? `Cellion Platforms Nigeria Limited hereby attests that the individual named above has undergone
-              comprehensive identity verification through our platform, as requested by ${data.orgName}.
-              The verification was conducted using Smile ID's identity verification services, including
-              BVN/NIN database validation, government-issued ID document verification, biometric selfie
-              matching with liveness detection, and AML/sanctions screening. All submitted documents have
-              been reviewed and assessed by the requesting organisation's verification team.`
+              comprehensive identity verification through the Cellion One platform, as requested by ${data.orgName}.
+              The verification included BVN/NIN database validation, government-issued ID document verification,
+              biometric selfie matching with liveness detection, and AML/sanctions screening. All submitted
+              documents have been reviewed and assessed by the requesting organisation's verification team.`
             : `Cellion Platforms Nigeria Limited hereby attests that the company named above has undergone
-              comprehensive supplier due diligence verification through our platform, as requested by
+              comprehensive supplier due diligence verification through the Cellion One platform, as requested by
               ${data.orgName}. The verification included review of corporate registration documents,
               tax compliance certificates, financial documents, and identity verification of directors
               and significant persons where required. All submitted documents have been reviewed and

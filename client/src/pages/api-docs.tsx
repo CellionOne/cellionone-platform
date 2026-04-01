@@ -1794,18 +1794,24 @@ export default function ApiDocsPage() {
                 language="json"
                 code={`{
   "reference": "CO-ESC-2026-A3F7D2B1",
-  "status": "pending",
+  "status": "pending_payment",
   "amount": 500000,
+  "serviceFee": 150000,
+  "totalCharged": 650000,
   "currency": "NGN",
   "buyerName": "Emeka Obi",
   "buyerEmail": "emeka@example.com",
   "beneficiaryName": "TechBuild Ltd",
   "beneficiaryEmail": "finance@techbuild.ng",
   "description": "Website design project milestone 1",
-  "paystackPaymentUrl": "https://checkout.paystack.com/xxxxx",
+  "paymentUrl": "https://checkout.paystack.com/xxxxx",
   "expiresAt": "2026-05-01T00:00:00.000Z",
   "createdAt": "2026-04-01T10:00:00.000Z"
-}`}
+}
+
+// amount       = principal held in escrow (₦5,000)
+// serviceFee   = Cellion 1.5% fee collected at payment (₦1,500 minimum applies here)
+// totalCharged = what the buyer pays via Paystack (₦6,500)`}
               />
             </EndpointSection>
 

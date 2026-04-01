@@ -5,6 +5,7 @@ import { isAuthenticated } from "../replit_integrations/auth";
 import { db } from "../db";
 import { eq, and } from "drizzle-orm";
 import { kycOrgMembers, kycOrganisations } from "@shared/schema";
+import { calculateEscrowFee } from "./escrowApiRoutes";
 
 async function requireActiveOrg(orgId: number, res: Response): Promise<boolean> {
   const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId)).limit(1);
@@ -1174,11 +1175,16 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
       const crypto = await import("crypto");
       const paystackRef = `co_esc_proc_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 
-      // Create escrow record
+      // Calculate Cellion service fee: 1.5% of principal (min ₦1,500 / max ₦50,000)
+      const { serviceFee, totalCharged } = calculateEscrowFee(amount);
+
+      // Create escrow record — store principal, fee, and total buyer charge
       const escrow = await storage.createEscrowTransaction({
         contractId,
         milestoneId,
         amount,
+        serviceFee,
+        totalCharged,
         currency: contract.currency || "NGN",
         status: "pending",
         buyerOrgId: contract.buyerOrgId,
@@ -1186,7 +1192,7 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
         paystackReference: paystackRef,
       });
 
-      // Initialize Paystack payment
+      // Initialize Paystack payment — buyer pays principal + service fee
       const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_TEST_SECRET_KEY;
       if (!PAYSTACK_SECRET) throw new Error("Paystack key not configured");
 
@@ -1202,13 +1208,15 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
         },
         body: JSON.stringify({
           email: user.email,
-          amount, // already in kobo
+          amount: totalCharged, // principal + Cellion service fee
           reference: paystackRef,
           callback_url: `${baseUrl}/procurement/contracts/${contractId}?escrow_funded=1`,
           metadata: {
             type: "procurement_escrow",
             escrowId: escrow.id,
             contractId,
+            principalAmount: amount,
+            serviceFee,
           },
         }),
       });
@@ -1223,7 +1231,13 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
       // Store payment URL
       await storage.updateEscrowPaymentUrl(escrow.id, paymentUrl);
 
-      res.status(201).json({ ...escrow, paystackPaymentUrl: paymentUrl, paystackReference: paystackRef });
+      res.status(201).json({
+        ...escrow,
+        serviceFee,
+        totalCharged,
+        paystackPaymentUrl: paymentUrl,
+        paystackReference: paystackRef,
+      });
     } catch (e: any) {
       if (e instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: e.errors });
       res.status(500).json({ message: e.message });

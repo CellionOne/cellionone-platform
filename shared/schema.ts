@@ -1740,7 +1740,9 @@ export const escrowTransactions = pgTable("escrow_transactions", {
   id: serial("id").primaryKey(),
   contractId: integer("contract_id").notNull(),
   milestoneId: integer("milestone_id"),
-  amount: integer("amount").notNull(),
+  amount: integer("amount").notNull(),       // principal in kobo
+  serviceFee: integer("service_fee"),        // Cellion 1.5% fee in kobo (min 150000, max 5000000)
+  totalCharged: integer("total_charged"),   // amount + serviceFee — what buyer actually pays
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
   status: varchar("status", { length: 30 }).notNull().default("pending"),
   // pending | funded | released | disputed | refunded
@@ -1771,7 +1773,9 @@ export const escrowApiTransactions = pgTable("escrow_api_transactions", {
   reference: varchar("reference", { length: 40 }).notNull().unique(),
   // CO-ESC-YYYY-XXXXXXXX
   description: text("description").notNull(),
-  amount: integer("amount").notNull(), // kobo
+  amount: integer("amount").notNull(),       // principal in kobo
+  serviceFee: integer("service_fee"),        // Cellion 1.5% fee in kobo (min 150000, max 5000000)
+  totalCharged: integer("total_charged"),   // amount + serviceFee — what buyer actually pays
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
   status: varchar("status", { length: 30 }).notNull().default("pending_payment"),
   // pending_payment | funded | released | disputed | refunded | expired

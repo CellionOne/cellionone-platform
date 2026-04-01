@@ -29,6 +29,17 @@ function generateEscrowReference(): string {
   return `CO-ESC-${year}-${rand}`;
 }
 
+/**
+ * Cellion escrow service fee: 1.5% of principal
+ * Minimum: ₦1,500 (150,000 kobo)  |  Maximum: ₦50,000 (5,000,000 kobo)
+ * Returns { serviceFee, totalCharged } both in kobo.
+ */
+export function calculateEscrowFee(principalKobo: number): { serviceFee: number; totalCharged: number } {
+  const raw = Math.round(principalKobo * 0.015);
+  const serviceFee = Math.min(Math.max(raw, 150_000), 5_000_000);
+  return { serviceFee, totalCharged: principalKobo + serviceFee };
+}
+
 async function deliverEscrowWebhook(
   orgId: number,
   event: string,
@@ -137,7 +148,10 @@ export function registerEscrowApiRoutes(app: Express): void {
         ? new Date(Date.now() + body.expiresIn * 86400000)
         : null;
 
-      // Initialize Paystack payment
+      // Calculate service fee: 1.5% of principal (min ₦1,500 / max ₦50,000)
+      const { serviceFee, totalCharged } = calculateEscrowFee(body.amount);
+
+      // Initialize Paystack payment — buyer pays principal + Cellion's service fee
       const paystackRes = await fetch(`${PAYSTACK_API_BASE}/transaction/initialize`, {
         method: "POST",
         headers: {
@@ -146,12 +160,14 @@ export function registerEscrowApiRoutes(app: Express): void {
         },
         body: JSON.stringify({
           email: body.buyerEmail,
-          amount: body.amount,
+          amount: totalCharged, // includes Cellion service fee
           reference: paystackRef,
           metadata: {
             type: "api_escrow",
             reference,
             orgId,
+            principalAmount: body.amount,
+            serviceFee,
           },
         }),
       });
@@ -168,6 +184,8 @@ export function registerEscrowApiRoutes(app: Express): void {
         reference,
         description: body.description,
         amount: body.amount,
+        serviceFee,
+        totalCharged,
         currency: "NGN",
         status: "pending_payment",
         buyerName: body.buyerName,
@@ -184,7 +202,9 @@ export function registerEscrowApiRoutes(app: Express): void {
       res.status(201).json({
         reference: tx.reference,
         status: tx.status,
-        amount: tx.amount,
+        amount: tx.amount,             // principal only
+        serviceFee: tx.serviceFee,     // Cellion fee
+        totalCharged: tx.totalCharged, // what buyer pays
         currency: tx.currency,
         description: tx.description,
         buyerName: tx.buyerName,

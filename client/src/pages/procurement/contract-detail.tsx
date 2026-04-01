@@ -541,7 +541,15 @@ export default function ContractDetailPage() {
                       return (
                         <div key={tx.id || i} className="p-3 rounded-md border space-y-2" data-testid={`escrow-tx-${tx.id || i}`}>
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-sm font-semibold">{formatAmount(tx.amount, tx.currency)}</p>
+                            <div>
+                              <p className="text-sm font-semibold">{formatAmount(tx.amount, tx.currency)}</p>
+                              {tx.serviceFee != null && (
+                                <p className="text-xs text-muted-foreground">
+                                  + {formatAmount(tx.serviceFee, tx.currency)} Cellion fee &nbsp;→&nbsp;
+                                  <span className="font-medium text-foreground">{formatAmount(tx.totalCharged ?? (tx.amount + tx.serviceFee), tx.currency)} total</span>
+                                </p>
+                              )}
+                            </div>
                             <Badge className={`border-0 ${statusColors[tx.status] || ""}`}>{tx.status}</Badge>
                           </div>
                           {tx.paystackPaymentUrl && tx.status === "pending" && (
@@ -554,7 +562,7 @@ export default function ContractDetailPage() {
                             >
                               <Button size="sm" className="w-full" variant="default">
                                 <DollarSign className="h-4 w-4 mr-1" />
-                                Complete Payment via Paystack
+                                Pay {tx.totalCharged ? formatAmount(tx.totalCharged, tx.currency) : ""} via Paystack
                               </Button>
                             </a>
                           )}
@@ -598,7 +606,7 @@ export default function ContractDetailPage() {
                   <p className="text-sm text-muted-foreground" data-testid="text-no-escrow-transactions">No escrow transactions yet.</p>
                 )}
                 {isBuyer && contract.status !== "completed" && contract.status !== "cancelled" && (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="space-y-1.5">
                     <Button
                       variant="default"
                       data-testid="button-fund-escrow"
@@ -614,6 +622,15 @@ export default function ContractDetailPage() {
                         </>
                       )}
                     </Button>
+                    {contract.totalAmount > 0 && (() => {
+                      const fee = Math.min(Math.max(Math.round(contract.totalAmount * 0.015), 150_000), 5_000_000);
+                      const total = contract.totalAmount + fee;
+                      return (
+                        <p className="text-xs text-muted-foreground" data-testid="text-escrow-fee-preview">
+                          Buyer pays {formatAmount(total, "NGN")} &nbsp;({formatAmount(contract.totalAmount, "NGN")} principal + {formatAmount(fee, "NGN")} Cellion fee)
+                        </p>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

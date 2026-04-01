@@ -3147,9 +3147,81 @@ export function registerKycServiceRoutes(app: Express) {
         };
       }
 
-      // Update verification request with final status and enriched notes
+      // Generate attestation certificate when session resolves to "verified"
+      let sessionCertificateRef: string | null = null;
+      let sessionVerifiedSnapshot: KycVerifiedSnapshot | null = null;
+
+      if (finalStatus === "verified") {
+        const sessionReviewedAt = new Date();
+        const certYear = sessionReviewedAt.getFullYear();
+        const certSuffix = crypto.randomBytes(4).toString("hex").toUpperCase();
+        sessionCertificateRef = `CO-KYC-${certYear}-${certSuffix}`;
+
+        // Build verified snapshot from session pipeline results
+        const faceVerNotes = updatedNotes.faceVerification as { matched?: boolean; confidence?: number; documentVerified?: boolean } | undefined;
+        const amlNotes = updatedNotes.aml as { isHit?: boolean; hitTypes?: string[] } | undefined;
+
+        const sessionBiometricVerified = faceVerNotes?.matched === true;
+        const sessionFaceMatchConfidence = faceVerNotes?.confidence ?? undefined;
+        const sessionAmlScreened = !!amlNotes;
+        const sessionAmlClear = amlNotes ? !amlNotes.isHit : undefined;
+
+        // Fetch submitted documents for this session's verification request
+        const sessionDocs = await db.select({
+          requirementId: kycSubmittedDocuments.requirementId,
+          detectedDocumentType: kycSubmittedDocuments.detectedDocumentType,
+          extractedData: kycSubmittedDocuments.extractedData,
+          expiryDate: kycSubmittedDocuments.expiryDate,
+          status: kycSubmittedDocuments.status,
+        }).from(kycSubmittedDocuments)
+          .where(eq(kycSubmittedDocuments.verificationRequestId, request.id));
+
+        const acceptedSessionDocs = sessionDocs.filter(d => d.status === "accepted" || d.status === "uploaded");
+        const sessionRequirements = await db.select().from(kycDocumentRequirements)
+          .where(eq(kycDocumentRequirements.isActive, true));
+
+        sessionVerifiedSnapshot = {
+          verificationType: request.type as "individual" | "supplier",
+          riskScore: "green",
+          verificationMethod: sessionBiometricVerified ? "biometric_document_review" : "document_review",
+          dataSource: "cellionone_kyc_review",
+          verifiedAt: sessionReviewedAt.toISOString(),
+          documentsVerified: acceptedSessionDocs.map(d => {
+            const req = sessionRequirements.find(r => r.id === d.requirementId);
+            const extracted = d.extractedData as Record<string, any> | null;
+            const expiryDate = d.expiryDate ? new Date(d.expiryDate) : null;
+            return {
+              documentName: req?.documentName || d.detectedDocumentType || "Government-Issued ID",
+              documentCategory: req?.documentCategory || "identity",
+              documentType: d.detectedDocumentType || "identity_document",
+              status: "accepted" as const,
+              ...(extracted?.name ? { extractedName: String(extracted.name) } : {}),
+              ...(extracted?.dateOfBirth || extracted?.dob ? { extractedDateOfBirth: String(extracted.dateOfBirth || extracted.dob) } : {}),
+              documentValidity: expiryDate
+                ? (expiryDate < new Date() ? "expired" as const : "valid" as const)
+                : ("unknown" as const),
+            };
+          }),
+          documentCount: acceptedSessionDocs.length,
+          biometricVerified: sessionBiometricVerified,
+          livenessConfirmed: sessionBiometricVerified,
+          ...(sessionFaceMatchConfidence !== undefined ? { faceMatchConfidence: sessionFaceMatchConfidence } : {}),
+          amlScreened: sessionAmlScreened,
+          ...(sessionAmlClear !== undefined ? { amlClear: sessionAmlClear } : {}),
+        };
+      }
+
+      // Update verification request with final status, enriched notes, and certificate if issued
+      const sessionUpdatePayload: Record<string, any> = {
+        status: finalStatus,
+        notes: JSON.stringify(updatedNotes),
+        updatedAt: new Date(),
+        ...(finalStatus === "verified" ? { reviewedAt: new Date() } : {}),
+        ...(sessionCertificateRef ? { certificateRef: sessionCertificateRef } : {}),
+        ...(sessionVerifiedSnapshot ? { verifiedDataSnapshot: sessionVerifiedSnapshot } : {}),
+      };
       await db.update(kycVerificationRequests)
-        .set({ status: finalStatus, notes: JSON.stringify(updatedNotes), updatedAt: new Date() })
+        .set(sessionUpdatePayload)
         .where(eq(kycVerificationRequests.id, request.id));
 
       // ── Deduct credit (always — checks were run regardless of outcome) ─────
@@ -3196,6 +3268,14 @@ export function registerKycServiceRoutes(app: Express) {
       const webhookFaceMatch = typedFaceResult ? typedFaceResult.matched : null;
       const webhookDocumentVerified = !!(selfieRequired && selfieBase64 && effectiveDocumentPath);
 
+      // Build attestation URL if certificate was issued
+      const sessionBaseUrl = process.env.NODE_ENV === "production"
+        ? "https://cellionone.com"
+        : `http://localhost:${process.env.PORT || 5000}`;
+      const sessionCertificateUrl = sessionCertificateRef
+        ? `${sessionBaseUrl}/api/v1/kyc/attest/${sessionCertificateRef}`
+        : null;
+
       // Fire webhook — "verification.completed" with outcome (NO third-party branding)
       await webhookService.deliverWebhook(session.orgId, "verification.completed", {
         sessionId: session.id,
@@ -3211,6 +3291,8 @@ export function registerKycServiceRoutes(app: Express) {
         faceMatchConfidence: typedFaceResult?.confidence ?? null,
         amlScreened: !!(subjectName && subjectName.trim().split(" ").length >= 2),
         metadata: session.metadata,
+        ...(sessionCertificateRef ? { certificateRef: sessionCertificateRef } : {}),
+        ...(sessionCertificateUrl ? { certificateUrl: sessionCertificateUrl } : {}),
       });
 
       res.json({

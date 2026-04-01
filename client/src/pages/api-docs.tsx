@@ -1757,7 +1757,9 @@ export default function ApiDocsPage() {
     "riskScore": "green",
     "subjectName": "Adebayo Ogunlesi",
     "subjectEmail": "adebayo@example.com",
-    "reviewedAt": "2026-03-15T10:30:00.000Z"
+    "reviewedAt": "2026-03-15T10:30:00.000Z",
+    "certificateRef": "CO-KYC-2026-A1B2C3D4",
+    "certificateUrl": "https://cellionone.com/api/v1/kyc/attest/CO-KYC-2026-A1B2C3D4"
   }
 }`}
                 />

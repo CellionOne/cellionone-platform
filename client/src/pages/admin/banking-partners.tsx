@@ -392,16 +392,17 @@ function PartnerForm({
           id="fee-bps"
           type="number"
           min={0}
-          max={500}
+          max={150}
           value={form.feeRateBps}
           onChange={e => onChange((f: any) => ({ ...f, feeRateBps: e.target.value }))}
-          placeholder="e.g. 50 = 0.50%"
+          placeholder="e.g. 50 = 0.50% (max 150 = 1.50%)"
           data-testid="input-fee-bps"
         />
         {form.feeRateBps && !isNaN(parseInt(form.feeRateBps)) && (
           <p className="text-xs text-muted-foreground">
             = {feeLabel(parseInt(form.feeRateBps))} of principal &nbsp;·&nbsp;
-            Cellion retains {feeLabel(Math.max(0, 150 - parseInt(form.feeRateBps)))} (from 1.50%)
+            Cellion retains at least {feeLabel(Math.max(0, 150 - Math.min(parseInt(form.feeRateBps), 150)))} (from 1.50%) &nbsp;·&nbsp;
+            Max: 150 bps (1.50%)
           </p>
         )}
       </div>

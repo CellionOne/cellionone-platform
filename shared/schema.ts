@@ -1742,8 +1742,8 @@ export const escrowTransactions = pgTable("escrow_transactions", {
   milestoneId: integer("milestone_id"),
   amount: integer("amount").notNull(),       // principal in kobo
   serviceFee: integer("service_fee"),        // Cellion 1.5% fee in kobo (min 150000, max 5000000)
-  bankCustodyFee: integer("bank_custody_fee").default(0), // bank partner's carved-out share from serviceFee
-  bankPartnerId: integer("bank_partner_id"),              // FK to bankPartners (nullable)
+  bankCustodyFee: integer("bank_custody_fee").default(0), // bank partner's carved-out share from serviceFee (clamped ≤ serviceFee)
+  bankPartnerId: integer("bank_partner_id").references(() => bankPartners.id), // FK to bankPartners (nullable)
   totalCharged: integer("total_charged"),   // amount + serviceFee — what buyer actually pays
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
   status: varchar("status", { length: 30 }).notNull().default("pending"),
@@ -1777,8 +1777,8 @@ export const escrowApiTransactions = pgTable("escrow_api_transactions", {
   description: text("description").notNull(),
   amount: integer("amount").notNull(),       // principal in kobo
   serviceFee: integer("service_fee"),        // Cellion 1.5% fee in kobo (min 150000, max 5000000)
-  bankCustodyFee: integer("bank_custody_fee").default(0), // bank partner's carved-out share from serviceFee
-  bankPartnerId: integer("bank_partner_id"),              // FK to bankPartners (nullable)
+  bankCustodyFee: integer("bank_custody_fee").default(0), // bank partner's carved-out share from serviceFee (clamped ≤ serviceFee)
+  bankPartnerId: integer("bank_partner_id").references(() => bankPartners.id), // FK to bankPartners (nullable)
   totalCharged: integer("total_charged"),   // amount + serviceFee — what buyer actually pays
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
   status: varchar("status", { length: 30 }).notNull().default("pending_payment"),

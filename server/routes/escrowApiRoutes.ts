@@ -50,7 +50,9 @@ export function calculateEscrowFee(
   let bankPartnerId: number | null = null;
 
   if (activeBankPartner && activeBankPartner.feeRateBps > 0) {
-    bankCustodyFee = Math.floor(principalKobo * activeBankPartner.feeRateBps / 10_000);
+    const rawBankFee = Math.floor(principalKobo * activeBankPartner.feeRateBps / 10_000);
+    // Clamp: the custody fee can never exceed Cellion's service fee (no negative Cellion revenue)
+    bankCustodyFee = Math.min(rawBankFee, serviceFee);
     bankPartnerId = activeBankPartner.id;
   }
 
@@ -433,11 +435,17 @@ export function registerEscrowApiRoutes(app: Express): void {
 
       const activeBankPartner = await storage.getActiveBankPartner();
 
-      // Cumulative bank custody fees owed (funded + released transactions with a bank partner)
-      const bankFeeEligible = [...procurementTxs, ...apiTxs].filter(
-        t => ["funded", "released"].includes(t.status) && (t as any).bankCustodyFee > 0
-      );
-      const totalBankCustodyFees = bankFeeEligible.reduce((sum, t) => sum + ((t as any).bankCustodyFee || 0), 0);
+      // Cumulative bank custody fees for the ACTIVE partner only (funded + released)
+      // Scoped to transactions linked to the current active partner via bankPartnerId
+      const totalBankCustodyFees = activeBankPartner
+        ? [...procurementTxs, ...apiTxs]
+            .filter(
+              t => ["funded", "released"].includes(t.status) &&
+                   (t as any).bankPartnerId === activeBankPartner.id &&
+                   (t as any).bankCustodyFee > 0
+            )
+            .reduce((sum, t) => sum + ((t as any).bankCustodyFee || 0), 0)
+        : 0;
 
       res.json({
         procurement: procurementTxs,
@@ -613,7 +621,7 @@ export function registerEscrowApiRoutes(app: Express): void {
       const body = z.object({
         name: z.string().min(1).max(255),
         contactEmail: z.string().email().optional(),
-        feeRateBps: z.number().int().min(0).max(500), // max 5%
+        feeRateBps: z.number().int().min(0).max(150), // max 150 bps (= 1.50%, matching Cellion's service fee cap)
         notes: z.string().optional(),
       }).parse(req.body);
 
@@ -646,7 +654,7 @@ export function registerEscrowApiRoutes(app: Express): void {
       const body = z.object({
         name: z.string().min(1).max(255).optional(),
         contactEmail: z.string().email().optional(),
-        feeRateBps: z.number().int().min(0).max(500).optional(),
+        feeRateBps: z.number().int().min(0).max(150).optional(), // max 150 bps = 1.50%
         notes: z.string().optional(),
       }).parse(req.body);
 

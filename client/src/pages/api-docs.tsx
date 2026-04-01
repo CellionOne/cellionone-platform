@@ -129,6 +129,7 @@ const sidebarSections = [
   { id: "instant-lookups", label: "Instant ID Lookups" },
   { id: "hosted-sessions", label: "Hosted Sessions" },
   { id: "status-lifecycle", label: "Status Lifecycle" },
+  { id: "attestation", label: "Verification Attestation" },
   { id: "webhooks", label: "Webhooks" },
   { id: "errors", label: "Error Codes" },
   { id: "examples", label: "Code Examples" },
@@ -1534,6 +1535,157 @@ export default function ApiDocsPage() {
                     </tbody>
                   </table>
                 </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          <Separator />
+
+          <section id="attestation" className="space-y-4 scroll-mt-24">
+            <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-attestation">
+              <FileCheck className="h-5 w-5" />
+              Verification Attestation
+            </h2>
+            <p className="text-muted-foreground leading-relaxed">
+              Every verified request receives a unique <strong>Certificate Reference</strong> (format:{" "}
+              <code className="bg-muted px-1 rounded">CO-KYC-YYYY-XXXXXXXX</code>). You can use this reference
+              to publicly confirm that a verification was completed — without exposing any personal data.
+              The attestation endpoint is <strong>public and unauthenticated</strong>; it is safe to embed
+              in QR codes, share with counterparties, or use in automated onboarding workflows.
+            </p>
+
+            <Card>
+              <CardContent className="pt-6 space-y-3">
+                <h3 className="font-semibold">How it works</h3>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                  <li>When a verification request is approved, Cellion One generates a <code className="bg-muted px-1 rounded">certificateRef</code></li>
+                  <li>The <code className="bg-muted px-1 rounded">certificateRef</code> and <code className="bg-muted px-1 rounded">attestationUrl</code> are included in the <code className="bg-muted px-1 rounded">verification.completed</code> webhook and the certificate JSON endpoint</li>
+                  <li>Anyone with the certificate reference can call the attestation endpoint to confirm validity — no API key required</li>
+                  <li>The response contains <strong>no PII</strong> — only validity, type, dates, and certification body</li>
+                </ol>
+              </CardContent>
+            </Card>
+
+            <EndpointSection
+              method="GET"
+              path="/api/v1/kyc/attest/:token"
+              description="Publicly verify a certificate reference (no auth required)"
+            >
+              <ParamTable
+                title="Path Parameters"
+                params={[
+                  { field: "token", type: "string", required: "Yes", description: "The certificateRef value (e.g. CO-KYC-2026-A1B2C3D4)" },
+                ]}
+              />
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold">Example Request</h4>
+                <CodeBlock
+                  language="bash"
+                  code={`curl https://cellionone.com/api/v1/kyc/attest/CO-KYC-2026-A1B2C3D4`}
+                />
+              </div>
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold">Success Response (200)</h4>
+                <CodeBlock
+                  language="json"
+                  code={`{
+  "valid": true,
+  "certificateRef": "CO-KYC-2026-A1B2C3D4",
+  "verificationType": "individual",
+  "status": "verified",
+  "issuedAt": "2026-04-01T09:30:00.000Z",
+  "expiresAt": "2027-04-01T09:30:00.000Z",
+  "expired": false,
+  "certificationBody": "Cellion One Limited",
+  "certificationBodyUrl": "https://cellionone.com"
+}`}
+                />
+              </div>
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold">Not Found / Invalid (404 / 400)</h4>
+                <CodeBlock
+                  language="json"
+                  code={`{
+  "valid": false,
+  "error": "Certificate not found"
+}`}
+                />
+              </div>
+            </EndpointSection>
+
+            <EndpointSection
+              method="GET"
+              path="/api/v1/kyc/requests/:requestId/certificate?format=json"
+              description="Retrieve the full certificate data including verifiedData snapshot"
+            >
+              <p className="text-sm text-muted-foreground">
+                This authenticated endpoint returns the enriched certificate including the <code className="bg-muted px-1 rounded">verifiedData</code> snapshot
+                captured at the time of verification approval. Use <code className="bg-muted px-1 rounded">?format=json</code> for the structured response,
+                <code className="bg-muted px-1 rounded">?format=html</code> for the rendered certificate, or{" "}
+                <code className="bg-muted px-1 rounded">?format=pdf</code> for the PDF download.
+              </p>
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold">JSON Response Fields</h4>
+                <CodeBlock
+                  language="json"
+                  code={`{
+  "certificateNumber": "CO-KYC-2026-A1B2C3D4",
+  "certificateRef": "CO-KYC-2026-A1B2C3D4",
+  "attestationUrl": "https://cellionone.com/api/v1/kyc/attest/CO-KYC-2026-A1B2C3D4",
+  "subjectName": "Adaobi Okonkwo",
+  "subjectEmail": "adaobi@example.com",
+  "verificationDate": "2026-04-01T09:30:00.000Z",
+  "expiryDate": "2027-04-01T09:30:00.000Z",
+  "partnerName": "Acme Fintech Ltd",
+  "checks": {
+    "bvnValidation": true,
+    "ninValidation": true,
+    "documentVerification": true,
+    "biometricMatch": false,
+    "amlScreening": true
+  },
+  "verifiedData": {
+    "verificationType": "individual",
+    "subjectName": "Adaobi Okonkwo",
+    "riskScore": "green",
+    "documentsVerified": ["National ID Card", "Utility Bill"],
+    "biometricVerified": false,
+    "amlScreened": true,
+    "verifiedAt": "2026-04-01T09:30:00.000Z"
+  }
+}`}
+                />
+              </div>
+            </EndpointSection>
+
+            <Card>
+              <CardContent className="pt-6 space-y-3">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Webhook className="h-4 w-4" />
+                  Webhook Enrichment
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  When a verification is approved, the <code className="bg-muted px-1 rounded">verification.completed</code> webhook
+                  payload now includes <code className="bg-muted px-1 rounded">certificateRef</code> and <code className="bg-muted px-1 rounded">attestationUrl</code>:
+                </p>
+                <CodeBlock
+                  language="json"
+                  code={`{
+  "event": "verification.completed",
+  "timestamp": "2026-04-01T09:30:00.000Z",
+  "data": {
+    "requestId": 42,
+    "type": "individual",
+    "status": "verified",
+    "riskScore": "green",
+    "subjectName": "Adaobi Okonkwo",
+    "subjectEmail": "adaobi@example.com",
+    "reviewedAt": "2026-04-01T09:30:00.000Z",
+    "certificateRef": "CO-KYC-2026-A1B2C3D4",
+    "attestationUrl": "https://cellionone.com/api/v1/kyc/attest/CO-KYC-2026-A1B2C3D4"
+  }
+}`}
+                />
               </CardContent>
             </Card>
           </section>

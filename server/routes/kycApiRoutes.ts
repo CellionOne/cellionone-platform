@@ -687,8 +687,20 @@ export function registerKycApiRoutes(app: Express) {
 
       const format = req.query.format as string || "html";
 
+      const baseUrl = process.env.NODE_ENV === "production"
+        ? "https://cellionone.com"
+        : `http://localhost:${process.env.PORT || 5000}`;
+
+      const attestationUrl = request.certificateRef
+        ? `${baseUrl}/api/v1/kyc/attest/${request.certificateRef}`
+        : "";
+
+      const snapshot = request.verifiedDataSnapshot as any;
+
       const certificateData = {
-        certificateNumber: `CERT-${requestId}-${Date.now().toString(36).toUpperCase()}`,
+        certificateNumber: request.certificateRef || `CERT-${requestId}-${Date.now().toString(36).toUpperCase()}`,
+        certificateRef: request.certificateRef || null,
+        attestationUrl,
         subjectName: request.subjectName,
         subjectEmail: request.subjectEmail,
         verificationDate: request.reviewedAt ? new Date(request.reviewedAt).toISOString() : new Date().toISOString(),
@@ -699,9 +711,18 @@ export function registerKycApiRoutes(app: Express) {
           bvnValidation: hasAcceptedDocs,
           ninValidation: hasAcceptedDocs,
           documentVerification: hasAcceptedDocs,
-          biometricMatch: false,
-          amlScreening: hasAcceptedDocs,
+          biometricMatch: snapshot?.biometricVerified ?? false,
+          amlScreening: snapshot?.amlScreened ?? hasAcceptedDocs,
         },
+        verifiedData: snapshot ? {
+          verificationType: snapshot.verificationType,
+          subjectName: snapshot.subjectName,
+          riskScore: snapshot.riskScore,
+          documentsVerified: snapshot.documentsVerified,
+          biometricVerified: snapshot.biometricVerified,
+          amlScreened: snapshot.amlScreened,
+          verifiedAt: snapshot.verifiedAt,
+        } : null,
         smileIdJobId: null,
         livenessScore: null,
         company: supplierProfile ? {
@@ -712,7 +733,7 @@ export function registerKycApiRoutes(app: Express) {
           incorporationDate: supplierProfile.yearEstablished ? `${supplierProfile.yearEstablished}-01-01` : null,
           directors: [],
         } : null,
-        verificationUrl: "",
+        verificationUrl: attestationUrl,
       };
 
       if (format === "json") {
@@ -958,6 +979,48 @@ export function registerKycApiRoutes(app: Express) {
     } catch (error: any) {
       console.error("[KYC API] List sessions error:", error);
       res.status(500).json({ error: "Failed to list sessions" });
+    }
+  });
+
+  // ============== PUBLIC ATTESTATION ENDPOINT (no auth required) ==============
+
+  // GET /api/v1/kyc/attest/:token — public, no PII, verifies a certificate reference
+  app.get("/api/v1/kyc/attest/:token", async (req, res: Response) => {
+    try {
+      const token = req.params.token as string;
+      if (!token || !/^CO-KYC-\d{4}-[A-F0-9]{8}$/.test(token)) {
+        return res.status(400).json({
+          valid: false,
+          error: "Invalid certificate reference format",
+        });
+      }
+
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(eq(kycVerificationRequests.certificateRef, token));
+
+      if (!request) {
+        return res.status(404).json({
+          valid: false,
+          error: "Certificate not found",
+        });
+      }
+
+      const isExpired = new Date(request.expiresAt) < new Date();
+
+      return res.json({
+        valid: request.status === "verified" && !isExpired,
+        certificateRef: request.certificateRef,
+        verificationType: request.type,
+        status: request.status,
+        issuedAt: request.reviewedAt ? new Date(request.reviewedAt).toISOString() : null,
+        expiresAt: new Date(request.expiresAt).toISOString(),
+        expired: isExpired,
+        certificationBody: "Cellion One Limited",
+        certificationBodyUrl: "https://cellionone.com",
+      });
+    } catch (error: any) {
+      console.error("[KYC] Attestation error:", error);
+      res.status(500).json({ valid: false, error: "Failed to verify attestation" });
     }
   });
 }

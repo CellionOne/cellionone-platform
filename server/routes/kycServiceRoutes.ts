@@ -881,13 +881,39 @@ export function registerKycServiceRoutes(app: Express) {
 
       const riskScore = calculateRiskScore(documents, requirements, people);
 
+      const reviewedAt = new Date();
+
+      // Generate certificate reference and data snapshot on approval
+      let certificateRef: string | null = null;
+      let verifiedDataSnapshot: any = null;
+      if (newStatus === "verified") {
+        const year = reviewedAt.getFullYear();
+        const suffix = crypto.randomBytes(4).toString("hex").toUpperCase();
+        certificateRef = `CO-KYC-${year}-${suffix}`;
+
+        const acceptedDocs = documents
+          .filter(d => d.status === "accepted")
+          .map(d => d.documentName || d.documentType);
+
+        verifiedDataSnapshot = {
+          verificationType: request.type,
+          subjectName: request.subjectName,
+          riskScore,
+          documentsVerified: acceptedDocs,
+          biometricVerified: false,
+          amlScreened: acceptedDocs.length > 0,
+          verifiedAt: reviewedAt.toISOString(),
+        };
+      }
+
       const [updated] = await db.update(kycVerificationRequests)
         .set({
           status: newStatus,
           reviewedByUserId: userId,
-          reviewedAt: new Date(),
+          reviewedAt,
           reviewNotes: data.reviewNotes || null,
           riskScore,
+          ...(certificateRef ? { certificateRef, verifiedDataSnapshot } : {}),
           updatedAt: new Date(),
         })
         .where(eq(kycVerificationRequests.id, reqId))
@@ -906,17 +932,27 @@ export function registerKycServiceRoutes(app: Express) {
         </div>`
       );
 
+      const baseUrl = process.env.NODE_ENV === "production"
+        ? "https://cellionone.com"
+        : `http://localhost:${process.env.PORT || 5000}`;
+
+      const webhookPayload: Record<string, any> = {
+        requestId: reqId,
+        type: request.type,
+        status: newStatus,
+        riskScore,
+        subjectName: request.subjectName,
+        subjectEmail: request.subjectEmail,
+        reviewedAt: reviewedAt.toISOString(),
+      };
+      if (certificateRef) {
+        webhookPayload.certificateRef = certificateRef;
+        webhookPayload.attestationUrl = `${baseUrl}/api/v1/kyc/attest/${certificateRef}`;
+      }
+
       webhookService.deliverWebhook(orgId,
         newStatus === "verified" ? "verification.completed" : "verification.failed",
-        {
-          requestId: reqId,
-          type: request.type,
-          status: newStatus,
-          riskScore,
-          subjectName: request.subjectName,
-          subjectEmail: request.subjectEmail,
-          reviewedAt: new Date().toISOString(),
-        }
+        webhookPayload
       ).catch(err => console.error("[KYC Webhook] Delivery error:", err));
 
       if (newStatus === "verified") {

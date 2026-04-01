@@ -1192,6 +1192,16 @@ export const kycVerificationRequests = pgTable("kyc_verification_requests", {
   termsVersion: varchar("terms_version", { length: 20 }),
   termsAcceptedIp: varchar("terms_accepted_ip", { length: 45 }),
   expiresAt: timestamp("expires_at").notNull(),
+  certificateRef: varchar("certificate_ref", { length: 40 }).unique(),
+  verifiedDataSnapshot: jsonb("verified_data_snapshot").$type<{
+    verificationType: string;
+    subjectName: string;
+    riskScore: string;
+    documentsVerified: string[];
+    biometricVerified: boolean;
+    amlScreened: boolean;
+    verifiedAt: string;
+  }>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -1199,6 +1209,7 @@ export const kycVerificationRequests = pgTable("kyc_verification_requests", {
   index("idx_kyc_vr_token").on(table.inviteToken),
   index("idx_kyc_vr_status").on(table.status),
   index("idx_kyc_vr_subject").on(table.subjectUserId),
+  index("idx_kyc_vr_cert_ref").on(table.certificateRef),
 ]);
 
 export const insertKycVerificationRequestSchema = createInsertSchema(kycVerificationRequests).omit({ id: true, createdAt: true, updatedAt: true });

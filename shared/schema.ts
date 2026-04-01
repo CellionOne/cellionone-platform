@@ -1170,7 +1170,6 @@ export type KycDocumentRequirement = typeof kycDocumentRequirements.$inferSelect
 
 export interface KycVerifiedSnapshot {
   verificationType: "individual" | "supplier";
-  subjectName: string;
   riskScore: "green" | "amber" | "red";
   verificationMethod: string;
   dataSource: string;
@@ -1180,10 +1179,15 @@ export interface KycVerifiedSnapshot {
     documentCategory: string;
     documentType: string;
     status: "accepted";
+    extractedName?: string;
+    extractedDateOfBirth?: string;
+    documentValidity?: "valid" | "expired" | "unknown";
   }[];
   documentCount: number;
-  amlScreened: boolean;
   biometricVerified: boolean;
+  faceMatchConfidence?: number;
+  amlScreened: boolean;
+  amlClear?: boolean;
 }
 
 export const kycVerificationRequests = pgTable("kyc_verification_requests", {

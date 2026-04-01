@@ -1590,14 +1590,11 @@ export default function ApiDocsPage() {
                   language="json"
                   code={`{
   "valid": true,
-  "certificateRef": "CO-KYC-2026-A1B2C3D4",
   "verificationType": "individual",
   "status": "verified",
   "issuedAt": "2026-04-01T09:30:00.000Z",
   "expiresAt": "2027-04-01T09:30:00.000Z",
-  "expired": false,
-  "certificationBody": "Cellion One Limited",
-  "certificationBodyUrl": "https://cellionone.com"
+  "certificationBody": "Cellion One Limited"
 }`}
                 />
               </div>
@@ -1646,17 +1643,32 @@ export default function ApiDocsPage() {
   },
   "verifiedData": {
     "verificationType": "individual",
-    "subjectName": "Adaobi Okonkwo",
     "riskScore": "green",
-    "verificationMethod": "document_review",
+    "verificationMethod": "biometric_document_review",
     "dataSource": "cellionone_kyc_review",
     "documentsVerified": [
-      { "documentName": "National ID Card", "documentCategory": "identity", "documentType": "national_id", "status": "accepted" },
-      { "documentName": "Utility Bill", "documentCategory": "address", "documentType": "utility_bill", "status": "accepted" }
+      {
+        "documentName": "National ID Card",
+        "documentCategory": "identity",
+        "documentType": "national_id",
+        "status": "accepted",
+        "extractedName": "ADAOBI OKONKWO",
+        "extractedDateOfBirth": "1992-05-14",
+        "documentValidity": "valid"
+      },
+      {
+        "documentName": "Utility Bill",
+        "documentCategory": "address",
+        "documentType": "utility_bill",
+        "status": "accepted",
+        "documentValidity": "valid"
+      }
     ],
     "documentCount": 2,
-    "biometricVerified": false,
+    "biometricVerified": true,
+    "faceMatchConfidence": 0.97,
     "amlScreened": true,
+    "amlClear": true,
     "verifiedAt": "2026-04-01T09:30:00.000Z"
   }
 }`}

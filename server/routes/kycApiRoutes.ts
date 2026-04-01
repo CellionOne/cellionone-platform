@@ -716,14 +716,15 @@ export function registerKycApiRoutes(app: Express) {
         },
         verifiedData: snapshot ? {
           verificationType: snapshot.verificationType,
-          subjectName: snapshot.subjectName,
           riskScore: snapshot.riskScore,
           verificationMethod: snapshot.verificationMethod,
           dataSource: snapshot.dataSource,
           documentsVerified: snapshot.documentsVerified,
           documentCount: snapshot.documentCount,
           biometricVerified: snapshot.biometricVerified,
+          ...(snapshot.faceMatchConfidence !== undefined ? { faceMatchConfidence: snapshot.faceMatchConfidence } : {}),
           amlScreened: snapshot.amlScreened,
+          ...(snapshot.amlClear !== undefined ? { amlClear: snapshot.amlClear } : {}),
           verifiedAt: snapshot.verifiedAt,
         } : null,
         smileIdJobId: null,
@@ -1012,14 +1013,11 @@ export function registerKycApiRoutes(app: Express) {
 
       return res.json({
         valid: request.status === "verified" && !isExpired,
-        certificateRef: request.certificateRef,
         verificationType: request.type,
         status: request.status,
         issuedAt: request.reviewedAt ? new Date(request.reviewedAt).toISOString() : null,
         expiresAt: new Date(request.expiresAt).toISOString(),
-        expired: isExpired,
         certificationBody: "Cellion One Limited",
-        certificationBodyUrl: "https://cellionone.com",
       });
     } catch (error: any) {
       console.error("[KYC] Attestation error:", error);

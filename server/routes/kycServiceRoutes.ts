@@ -894,25 +894,49 @@ export function registerKycServiceRoutes(app: Express) {
 
         const acceptedDocObjs = documents.filter(d => d.status === "accepted");
 
+        // Parse Smile ID / session pipeline results stored in request notes
+        let parsedNotes: Record<string, any> = {};
+        try {
+          if (request.notes) {
+            parsedNotes = typeof request.notes === "string" ? JSON.parse(request.notes) : (request.notes as any);
+          }
+        } catch { /* ignore parse errors */ }
+
+        const faceVerification = parsedNotes.faceVerification as { matched?: boolean; confidence?: number; documentVerified?: boolean } | undefined;
+        const amlNotes = parsedNotes.aml as { isHit?: boolean; hitTypes?: string[] } | undefined;
+
+        const biometricVerified = faceVerification?.matched === true;
+        const faceMatchConfidence = faceVerification?.confidence ?? undefined;
+        const amlScreened = !!amlNotes;
+        const amlClear = amlNotes ? !amlNotes.isHit : undefined;
+
         verifiedDataSnapshot = {
           verificationType: request.type as "individual" | "supplier",
-          subjectName: request.subjectName,
           riskScore: riskScore as "green" | "amber" | "red",
-          verificationMethod: "document_review",
+          verificationMethod: biometricVerified ? "biometric_document_review" : "document_review",
           dataSource: "cellionone_kyc_review",
           verifiedAt: reviewedAt.toISOString(),
           documentsVerified: acceptedDocObjs.map(d => {
             const req = requirements.find(r => r.id === d.requirementId);
+            const extracted = d.extractedData as Record<string, any> | null;
+            const expiryDate = d.expiryDate ? new Date(d.expiryDate) : null;
             return {
               documentName: req?.documentName || d.detectedDocumentType || "Unknown Document",
               documentCategory: req?.documentCategory || "identity",
               documentType: d.detectedDocumentType || req?.documentCategory || "unknown",
               status: "accepted" as const,
+              ...(extracted?.name ? { extractedName: String(extracted.name) } : {}),
+              ...(extracted?.dateOfBirth || extracted?.dob ? { extractedDateOfBirth: String(extracted.dateOfBirth || extracted.dob) } : {}),
+              documentValidity: expiryDate
+                ? (expiryDate < new Date() ? "expired" as const : "valid" as const)
+                : ("unknown" as const),
             };
           }),
           documentCount: acceptedDocObjs.length,
-          amlScreened: acceptedDocObjs.length > 0,
-          biometricVerified: false,
+          biometricVerified,
+          ...(faceMatchConfidence !== undefined ? { faceMatchConfidence } : {}),
+          amlScreened,
+          ...(amlClear !== undefined ? { amlClear } : {}),
         };
       }
 

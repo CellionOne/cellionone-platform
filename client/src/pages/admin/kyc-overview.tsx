@@ -143,10 +143,24 @@ type ProvisionStep = "select-type" | "fill-details" | "success";
 type ProvisionClientType = "organisation" | "application";
 
 const PROVISION_PERMISSIONS = [
-  { id: "verify:identity", label: "Instant ID Lookups (BVN, NIN, Licence, Voter ID, Passport, AML)", description: "Synchronous, instant results — 1 credit (₦5,000) per call" },
-  { id: "verify:individual", label: "Individual Verification", description: "Full individual KYC with photo selfie and document checks — result via webhook (₦15,000/credit)" },
-  { id: "verify:supplier", label: "Supplier Verification", description: "Corporate entity + key persons KYC — result in ~1 business day (₦75,000/credit)" },
-] as const;
+  {
+    group: "KYC Verification API",
+    description: "Credit-based billing — client buys credits upfront",
+    perms: [
+      { id: "verify:identity", label: "Instant ID Lookups", description: "BVN, NIN, Licence, Voter ID, Passport, AML — synchronous, 1 credit (₦5,000) per call" },
+      { id: "verify:individual", label: "Individual Verification", description: "Full individual KYC with selfie + document checks — result via webhook (₦15,000/credit)" },
+      { id: "verify:supplier", label: "Supplier / Corporate Verification", description: "Entity + director KYC — result in ~1 business day (₦75,000/credit)" },
+    ],
+  },
+  {
+    group: "Escrow-as-a-Service API",
+    description: "No credits needed — Cellion's 1.5% fee is collected automatically at payment time",
+    perms: [
+      { id: "escrow:read", label: "Escrow Read", description: "List and retrieve escrow transactions (GET endpoints)" },
+      { id: "escrow:write", label: "Escrow Write", description: "Create transactions, release funds, raise disputes (POST endpoints)" },
+    ],
+  },
+];
 
 interface KycInvoice {
   id: number;
@@ -1449,35 +1463,41 @@ export default function AdminKycOverview() {
                       ))}
                     </div>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <Label>Permissions *</Label>
-                    <div className="space-y-2">
-                      {PROVISION_PERMISSIONS.map((perm) => (
-                        <label
-                          key={perm.id}
-                          className="flex items-start gap-3 rounded-md border p-2.5 cursor-pointer hover:bg-muted/50"
-                          data-testid={`label-permission-${perm.id}`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={provisionPermissions.includes(perm.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setProvisionPermissions((prev) => [...prev, perm.id]);
-                              } else {
-                                setProvisionPermissions((prev) => prev.filter((p) => p !== perm.id));
-                              }
-                            }}
-                            className="mt-0.5"
-                            data-testid={`checkbox-permission-${perm.id}`}
-                          />
-                          <div>
-                            <p className="text-sm font-medium">{perm.label}</p>
-                            <p className="text-xs text-muted-foreground">{perm.description}</p>
-                          </div>
-                        </label>
-                      ))}
-                    </div>
+                    {PROVISION_PERMISSIONS.map((group) => (
+                      <div key={group.group} className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.group}</p>
+                          <span className="text-xs text-muted-foreground">— {group.description}</span>
+                        </div>
+                        {group.perms.map((perm) => (
+                          <label
+                            key={perm.id}
+                            className="flex items-start gap-3 rounded-md border p-2.5 cursor-pointer hover:bg-muted/50"
+                            data-testid={`label-permission-${perm.id}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={provisionPermissions.includes(perm.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setProvisionPermissions((prev) => [...prev, perm.id]);
+                                } else {
+                                  setProvisionPermissions((prev) => prev.filter((p) => p !== perm.id));
+                                }
+                              }}
+                              className="mt-0.5"
+                              data-testid={`checkbox-permission-${perm.id}`}
+                            />
+                            <div>
+                              <p className="text-sm font-medium">{perm.label}</p>
+                              <p className="text-xs text-muted-foreground">{perm.description}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>

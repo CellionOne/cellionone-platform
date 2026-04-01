@@ -840,8 +840,23 @@ function ApiKeysTab({ orgId, integrationProfile }: { orgId: string; integrationP
   });
 
   const availablePermissions = [
-    { value: "verify:individual", label: "Individual Verification" },
-    { value: "verify:supplier", label: "Supplier Verification" },
+    {
+      group: "KYC Verification API",
+      note: "Credit-based — buy credits from the Billing tab",
+      perms: [
+        { value: "verify:identity", label: "Instant ID Lookups", description: "BVN, NIN, Passport, Licence, Voter ID, AML screening" },
+        { value: "verify:individual", label: "Individual Verification", description: "Full KYC with selfie + document checks" },
+        { value: "verify:supplier", label: "Supplier / Corporate Verification", description: "Entity + director due-diligence" },
+      ],
+    },
+    {
+      group: "Escrow-as-a-Service API",
+      note: "No credits needed — 1.5% fee collected automatically at payment time",
+      perms: [
+        { value: "escrow:read", label: "Escrow Read", description: "List and retrieve your escrow transactions" },
+        { value: "escrow:write", label: "Escrow Write", description: "Create transactions, release funds, raise disputes" },
+      ],
+    },
   ];
 
   function handleTogglePermission(perm: string) {
@@ -896,7 +911,7 @@ function ApiKeysTab({ orgId, integrationProfile }: { orgId: string; integrationP
               <Key className="h-4 w-4" />
               API Keys
             </CardTitle>
-            <CardDescription>Manage API keys for programmatic access to KYC verification.</CardDescription>
+            <CardDescription>Manage API keys for programmatic access to the KYC Verification and Escrow APIs.</CardDescription>
           </div>
           <Button onClick={() => setGenerateDialogOpen(true)} disabled={!integrationProfile} data-testid="button-generate-api-key">
             <Plus className="h-4 w-4 mr-2" />
@@ -928,14 +943,15 @@ function ApiKeysTab({ orgId, integrationProfile }: { orgId: string; integrationP
           {isLoading ? (
             <div className="flex justify-center py-8"><LoadingSpinner /></div>
           ) : !apiKeys?.length ? (
-            <EmptyState icon={Key} title="No API keys" description="Generate an API key to start using the KYC verification API." />
+            <EmptyState icon={Key} title="No API keys" description="Generate an API key to start using the KYC Verification or Escrow APIs." />
           ) : (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Key Prefix</TableHead>
+                    <TableHead>Permissions</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Last Used</TableHead>
                     <TableHead>Status</TableHead>
@@ -947,6 +963,25 @@ function ApiKeysTab({ orgId, integrationProfile }: { orgId: string; integrationP
                     <TableRow key={key.id} data-testid={`row-api-key-${key.id}`}>
                       <TableCell className="text-sm font-medium">{key.name}</TableCell>
                       <TableCell className="text-sm font-mono text-muted-foreground">{key.keyPrefix}...</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {(key.permissions as string[] || []).map((p) => {
+                            const permLabels: Record<string, { label: string; color: string }> = {
+                              "verify:identity": { label: "ID Lookup", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
+                              "verify:individual": { label: "Individual KYC", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+                              "verify:supplier": { label: "Supplier KYC", color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400" },
+                              "escrow:read": { label: "Escrow Read", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+                              "escrow:write": { label: "Escrow Write", color: "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400" },
+                            };
+                            const meta = permLabels[p] || { label: p, color: "" };
+                            return (
+                              <Badge key={p} variant="secondary" className={`border-0 text-xs ${meta.color}`} data-testid={`badge-perm-${p}-${key.id}`}>
+                                {meta.label}
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{formatDate(key.createdAt)}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{key.lastUsedAt ? formatDate(key.lastUsedAt) : "Never"}</TableCell>
                       <TableCell>
@@ -1011,20 +1046,34 @@ function ApiKeysTab({ orgId, integrationProfile }: { orgId: string; integrationP
                 <Label>Key Name</Label>
                 <Input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="e.g. Production API" data-testid="input-api-key-name" />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Permissions</Label>
-                <div className="space-y-2">
-                  {availablePermissions.map((perm) => (
-                    <div key={perm.value} className="flex items-center gap-2">
-                      <Checkbox
-                        checked={newKeyPermissions.includes(perm.value)}
-                        onCheckedChange={() => handleTogglePermission(perm.value)}
-                        data-testid={`checkbox-perm-${perm.value}`}
-                      />
-                      <Label className="text-sm font-normal">{perm.label}</Label>
+                {availablePermissions.map((group) => (
+                  <div key={group.group} className="space-y-1.5">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.group}</p>
+                      <p className="text-xs text-muted-foreground">{group.note}</p>
                     </div>
-                  ))}
-                </div>
+                    {group.perms.map((perm) => (
+                      <label
+                        key={perm.value}
+                        className="flex items-start gap-3 rounded-md border p-2.5 cursor-pointer hover:bg-muted/50"
+                        data-testid={`label-perm-${perm.value}`}
+                      >
+                        <Checkbox
+                          checked={newKeyPermissions.includes(perm.value)}
+                          onCheckedChange={() => handleTogglePermission(perm.value)}
+                          className="mt-0.5"
+                          data-testid={`checkbox-perm-${perm.value}`}
+                        />
+                        <div>
+                          <p className="text-sm font-medium">{perm.label}</p>
+                          <p className="text-xs text-muted-foreground">{perm.description}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                ))}
               </div>
             </div>
           )}

@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "eiKOfH72sYrdlTSoFxXuN"
+uri = "file://docs/api-migration-v2-attestation.md"
+type = "text"
+title = "API Migration Notice — Verification Attestation"

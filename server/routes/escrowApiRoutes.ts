@@ -436,14 +436,23 @@ export function registerEscrowApiRoutes(app: Express): void {
       const activeBankPartner = await storage.getActiveBankPartner();
 
       // Cumulative bank custody fees for the ACTIVE partner only (funded + released)
-      // Scoped to transactions linked to the current active partner via bankPartnerId
+      // Scoped to:
+      //   1. Transactions linked to the current active partner via bankPartnerId
+      //   2. Transactions created at or after the partner was most recently activated
+      //      (prevents historical fees from prior activation periods being double-counted)
+      const activatedSince = activeBankPartner?.activatedAt
+        ? new Date(activeBankPartner.activatedAt)
+        : null;
+
       const totalBankCustodyFees = activeBankPartner
         ? [...procurementTxs, ...apiTxs]
-            .filter(
-              t => ["funded", "released"].includes(t.status) &&
-                   (t as any).bankPartnerId === activeBankPartner.id &&
-                   (t as any).bankCustodyFee > 0
-            )
+            .filter(t => {
+              if (!["funded", "released"].includes(t.status)) return false;
+              if ((t as any).bankPartnerId !== activeBankPartner.id) return false;
+              if (!((t as any).bankCustodyFee > 0)) return false;
+              if (activatedSince && new Date((t as any).createdAt) < activatedSince) return false;
+              return true;
+            })
             .reduce((sum, t) => sum + ((t as any).bankCustodyFee || 0), 0)
         : 0;
 

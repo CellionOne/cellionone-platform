@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,7 +59,14 @@ function feeLabel(bps: number) {
   return `${(bps / 100).toFixed(2)}%`;
 }
 
-const EMPTY_FORM = { name: "", contactEmail: "", feeRateBps: "", notes: "" };
+type PartnerFormState = {
+  name: string;
+  contactEmail: string;
+  feeRateBps: string;
+  notes: string;
+};
+
+const EMPTY_FORM: PartnerFormState = { name: "", contactEmail: "", feeRateBps: "", notes: "" };
 
 export default function AdminBankingPartnersPage() {
   const { toast } = useToast();
@@ -73,7 +80,7 @@ export default function AdminBankingPartnersPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: typeof form) => {
+    mutationFn: async (data: PartnerFormState) => {
       const res = await apiRequest("POST", "/api/admin/banking-partners", {
         name: data.name.trim(),
         contactEmail: data.contactEmail.trim() || undefined,
@@ -96,7 +103,7 @@ export default function AdminBankingPartnersPage() {
   });
 
   const editMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: typeof form }) => {
+    mutationFn: async ({ id, data }: { id: number; data: PartnerFormState }) => {
       const res = await apiRequest("PATCH", `/api/admin/banking-partners/${id}`, {
         name: data.name.trim(),
         contactEmail: data.contactEmail.trim() || undefined,
@@ -371,8 +378,8 @@ function PartnerForm({
   form,
   onChange,
 }: {
-  form: { name: string; contactEmail: string; feeRateBps: string; notes: string };
-  onChange: (v: any) => void;
+  form: PartnerFormState;
+  onChange: Dispatch<SetStateAction<PartnerFormState>>;
 }) {
   return (
     <div className="space-y-4">
@@ -381,7 +388,7 @@ function PartnerForm({
         <Input
           id="partner-name"
           value={form.name}
-          onChange={e => onChange((f: any) => ({ ...f, name: e.target.value }))}
+          onChange={e => onChange(f => ({ ...f, name: e.target.value }))}
           placeholder="e.g. First Bank of Nigeria"
           data-testid="input-partner-name"
         />
@@ -394,7 +401,7 @@ function PartnerForm({
           min={0}
           max={150}
           value={form.feeRateBps}
-          onChange={e => onChange((f: any) => ({ ...f, feeRateBps: e.target.value }))}
+          onChange={e => onChange(f => ({ ...f, feeRateBps: e.target.value }))}
           placeholder="e.g. 50 = 0.50% (max 150 = 1.50%)"
           data-testid="input-fee-bps"
         />
@@ -412,7 +419,7 @@ function PartnerForm({
           id="contact-email"
           type="email"
           value={form.contactEmail}
-          onChange={e => onChange((f: any) => ({ ...f, contactEmail: e.target.value }))}
+          onChange={e => onChange(f => ({ ...f, contactEmail: e.target.value }))}
           placeholder="settlement@bank.ng"
           data-testid="input-contact-email"
         />
@@ -422,7 +429,7 @@ function PartnerForm({
         <Textarea
           id="notes"
           value={form.notes}
-          onChange={e => onChange((f: any) => ({ ...f, notes: e.target.value }))}
+          onChange={e => onChange(f => ({ ...f, notes: e.target.value }))}
           placeholder="Agreement number, settlement frequency, etc."
           rows={3}
           data-testid="input-notes"

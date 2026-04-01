@@ -50,6 +50,7 @@ import {
   escrowApiTransactions, type EscrowApiTransaction, type InsertEscrowApiTransaction,
   procurementInvoices, type ProcurementInvoice, type InsertProcurementInvoice,
   procurementInvoiceItems, type ProcurementInvoiceItem, type InsertProcurementInvoiceItem,
+  bankPartners, type BankPartner, type InsertBankPartner,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -367,6 +368,15 @@ export interface IStorage {
   // Procurement Invoice Items
   createProcurementInvoiceItem(data: InsertProcurementInvoiceItem): Promise<ProcurementInvoiceItem>;
   getProcurementInvoiceItems(invoiceId: number): Promise<ProcurementInvoiceItem[]>;
+
+  // Banking Partners
+  createBankPartner(data: InsertBankPartner): Promise<BankPartner>;
+  listBankPartners(): Promise<BankPartner[]>;
+  getBankPartner(id: number): Promise<BankPartner | undefined>;
+  getActiveBankPartner(): Promise<BankPartner | undefined>;
+  updateBankPartner(id: number, data: Partial<InsertBankPartner>): Promise<BankPartner | undefined>;
+  activateBankPartner(id: number): Promise<BankPartner | undefined>;
+  deactivateBankPartner(id: number): Promise<BankPartner | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1795,6 +1805,49 @@ export class DatabaseStorage implements IStorage {
   async getProcurementInvoiceItems(invoiceId: number): Promise<ProcurementInvoiceItem[]> {
     return db.select().from(procurementInvoiceItems)
       .where(eq(procurementInvoiceItems.invoiceId, invoiceId));
+  }
+
+  // Banking Partners
+  async createBankPartner(data: InsertBankPartner): Promise<BankPartner> {
+    const [partner] = await db.insert(bankPartners).values(data).returning();
+    return partner;
+  }
+
+  async listBankPartners(): Promise<BankPartner[]> {
+    return db.select().from(bankPartners).orderBy(desc(bankPartners.createdAt));
+  }
+
+  async getBankPartner(id: number): Promise<BankPartner | undefined> {
+    const [partner] = await db.select().from(bankPartners).where(eq(bankPartners.id, id));
+    return partner;
+  }
+
+  async getActiveBankPartner(): Promise<BankPartner | undefined> {
+    const [partner] = await db.select().from(bankPartners).where(eq(bankPartners.isActive, true)).limit(1);
+    return partner;
+  }
+
+  async updateBankPartner(id: number, data: Partial<InsertBankPartner>): Promise<BankPartner | undefined> {
+    const [partner] = await db.update(bankPartners).set(data).where(eq(bankPartners.id, id)).returning();
+    return partner;
+  }
+
+  async activateBankPartner(id: number): Promise<BankPartner | undefined> {
+    // Deactivate all partners first (only one active at a time)
+    await db.update(bankPartners).set({ isActive: false, deactivatedAt: new Date() }).where(eq(bankPartners.isActive, true));
+    const [partner] = await db.update(bankPartners)
+      .set({ isActive: true, activatedAt: new Date(), deactivatedAt: null })
+      .where(eq(bankPartners.id, id))
+      .returning();
+    return partner;
+  }
+
+  async deactivateBankPartner(id: number): Promise<BankPartner | undefined> {
+    const [partner] = await db.update(bankPartners)
+      .set({ isActive: false, deactivatedAt: new Date() })
+      .where(eq(bankPartners.id, id))
+      .returning();
+    return partner;
   }
 }
 

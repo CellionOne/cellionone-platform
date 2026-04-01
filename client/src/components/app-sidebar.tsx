@@ -46,6 +46,7 @@ import {
   Gavel,
   FileSignature,
   Vault,
+  Banknote,
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
 
@@ -127,6 +128,7 @@ const adminItems: NavItem[] = [
   { title: "KYC Oversight", url: "/admin/kyc", icon: ShieldCheck },
   { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
   { title: "Escrow Dashboard", url: "/admin/escrow-dashboard", icon: Vault },
+  { title: "Banking Partners", url: "/admin/banking-partners", icon: Banknote },
   { title: "Security", url: "/admin/security", icon: ShieldAlert },
   { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },
   { title: "Settings", url: "/settings", icon: Settings },

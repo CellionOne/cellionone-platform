@@ -19,6 +19,7 @@ Key architectural decisions and features include:
 - **Structured Backend:** Clear separation of API routes, database operations, and shared schema definitions.
 - **Progressive Web Application (PWA):** Supports offline functionality.
 - **Paystack-Only Payment System:** All payments processed via Paystack in NGN, supporting split payments with Cellion taking a fixed cut and auto-settlement to lawyer subaccounts.
+- **Banking Partner Fee Layer:** Admin can register custody banking partners with a basis-point fee carve-out (max 500 bps = 5%). Only one partner active at a time. Their fee is carved from Cellion's 1.5% escrow service fee — buyers see no price change. Admin UI at `/admin/banking-partners`. `bankCustodyFee` and `bankPartnerId` stored on both escrow tables. Escrow dashboard shows per-transaction fee breakdown (service fee, bank custody cut, Cellion net) and a cumulative custody fees card.
 - **Registered Office Service:** Tiered virtual registered address services with mail handling, configurable limits, and automated subscription management. Includes a proof-of-address workflow and supports multiple locations.
 - **Admin Role Security:** Super admin controls admin role assignments; other admins manage lawyer roles.
 - **Feature Flags:** Dynamic control over feature availability.

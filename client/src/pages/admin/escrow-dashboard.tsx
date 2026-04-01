@@ -20,6 +20,8 @@ import {
   RefreshCw,
   Unlock,
   RotateCcw,
+  Banknote,
+  Link2,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -35,11 +37,14 @@ import {
 interface EscrowAdminData {
   procurement: any[];
   api: any[];
+  activeBankPartner: { id: number; name: string; feeRateBps: number } | null;
   summary: {
     procurementTotal: number;
     apiTotal: number;
     totalFunded: number;
     totalDisputed: number;
+    totalBankCustodyFees: number;
+    bankPartnerName: string | null;
   };
 }
 
@@ -172,6 +177,44 @@ export default function AdminEscrowDashboard() {
           </Card>
         </div>
 
+        {/* Bank Custody Fees Card */}
+        {(summary?.totalBankCustodyFees ?? 0) > 0 || data?.activeBankPartner ? (
+          <Card className={data?.activeBankPartner ? "border-blue-500/30 bg-blue-50/50 dark:bg-blue-950/10" : ""}>
+            <CardContent className="pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <Banknote className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+                      {data?.activeBankPartner
+                        ? `Active custody partner: ${data.activeBankPartner.name}`
+                        : `Cumulative custody fees — ${summary?.bankPartnerName || "former partner"}`}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {data?.activeBankPartner
+                        ? `Fee carve-out: ${(data.activeBankPartner.feeRateBps / 100).toFixed(2)}% of principal on all new transactions. Cellion retains the remainder of the 1.5% service fee.`
+                        : "These fees are carved from Cellion's service fee. Buyers were not charged extra."}
+                    </p>
+                    {(summary?.totalBankCustodyFees ?? 0) > 0 && (
+                      <p className="text-sm font-bold mt-1 text-blue-700 dark:text-blue-400" data-testid="text-total-custody-fees">
+                        Total custody fees recorded: {formatAmount(summary!.totalBankCustodyFees)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <a
+                  href="/admin/banking-partners"
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 shrink-0"
+                  data-testid="link-manage-bank-partners"
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  Manage Partners
+                </a>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         {/* Filter */}
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">Filter by status:</span>
@@ -235,6 +278,21 @@ export default function AdminEscrowDashboard() {
                             <span>Org ID: {tx.orgId}</span>
                             <span>Created: {formatDate(tx.createdAt)}</span>
                             {tx.fundedAt && <span>Funded: {formatDate(tx.fundedAt)}</span>}
+                            {tx.serviceFee > 0 && (
+                              <span>
+                                Service fee: <span className="text-foreground">{formatAmount(tx.serviceFee, tx.currency)}</span>
+                              </span>
+                            )}
+                            {tx.bankCustodyFee > 0 && (
+                              <span className="text-blue-600 dark:text-blue-400" data-testid={`text-bank-fee-api-${tx.id}`}>
+                                Bank custody cut: {formatAmount(tx.bankCustodyFee, tx.currency)}
+                              </span>
+                            )}
+                            {tx.bankCustodyFee > 0 && tx.serviceFee > 0 && (
+                              <span className="col-span-2 text-green-600 dark:text-green-400">
+                                Cellion net: {formatAmount(tx.serviceFee - tx.bankCustodyFee, tx.currency)} of {formatAmount(tx.serviceFee, tx.currency)} fee
+                              </span>
+                            )}
                             {tx.disputeReason && (
                               <span className="col-span-2 text-yellow-600 dark:text-yellow-400">
                                 Dispute: {tx.disputeReason}
@@ -309,6 +367,21 @@ export default function AdminEscrowDashboard() {
                             <span>Supplier Org: {tx.supplierOrgId}</span>
                             <span>Created: {formatDate(tx.createdAt)}</span>
                             {tx.fundedAt && <span>Funded: {formatDate(tx.fundedAt)}</span>}
+                            {tx.serviceFee > 0 && (
+                              <span>
+                                Service fee: <span className="text-foreground">{formatAmount(tx.serviceFee, tx.currency)}</span>
+                              </span>
+                            )}
+                            {tx.bankCustodyFee > 0 && (
+                              <span className="text-blue-600 dark:text-blue-400" data-testid={`text-bank-fee-proc-${tx.id}`}>
+                                Bank custody cut: {formatAmount(tx.bankCustodyFee, tx.currency)}
+                              </span>
+                            )}
+                            {tx.bankCustodyFee > 0 && tx.serviceFee > 0 && (
+                              <span className="col-span-2 text-green-600 dark:text-green-400">
+                                Cellion net: {formatAmount(tx.serviceFee - tx.bankCustodyFee, tx.currency)} of {formatAmount(tx.serviceFee, tx.currency)} fee
+                              </span>
+                            )}
                             {tx.paystackReference && (
                               <span className="col-span-2 font-mono">Ref: {tx.paystackReference}</span>
                             )}

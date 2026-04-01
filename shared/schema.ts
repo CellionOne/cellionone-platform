@@ -1742,6 +1742,8 @@ export const escrowTransactions = pgTable("escrow_transactions", {
   milestoneId: integer("milestone_id"),
   amount: integer("amount").notNull(),       // principal in kobo
   serviceFee: integer("service_fee"),        // Cellion 1.5% fee in kobo (min 150000, max 5000000)
+  bankCustodyFee: integer("bank_custody_fee").default(0), // bank partner's carved-out share from serviceFee
+  bankPartnerId: integer("bank_partner_id"),              // FK to bankPartners (nullable)
   totalCharged: integer("total_charged"),   // amount + serviceFee — what buyer actually pays
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
   status: varchar("status", { length: 30 }).notNull().default("pending"),
@@ -1775,6 +1777,8 @@ export const escrowApiTransactions = pgTable("escrow_api_transactions", {
   description: text("description").notNull(),
   amount: integer("amount").notNull(),       // principal in kobo
   serviceFee: integer("service_fee"),        // Cellion 1.5% fee in kobo (min 150000, max 5000000)
+  bankCustodyFee: integer("bank_custody_fee").default(0), // bank partner's carved-out share from serviceFee
+  bankPartnerId: integer("bank_partner_id"),              // FK to bankPartners (nullable)
   totalCharged: integer("total_charged"),   // amount + serviceFee — what buyer actually pays
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
   status: varchar("status", { length: 30 }).notNull().default("pending_payment"),
@@ -1930,3 +1934,23 @@ export const kycSanctionsLogs = pgTable("kyc_sanctions_logs", {
 export const insertKycSanctionsLogSchema = createInsertSchema(kycSanctionsLogs).omit({ id: true, createdAt: true });
 export type KycSanctionsLog = typeof kycSanctionsLogs.$inferSelect;
 export type InsertKycSanctionsLog = z.infer<typeof insertKycSanctionsLogSchema>;
+
+// ============== BANKING PARTNERS ==============
+// Escrow custody partners. Only one may be isActive at a time.
+// feeRateBps = basis points charged by the bank (e.g. 50 = 0.50%)
+// This fee is carved out from Cellion's service fee — the buyer sees no change.
+export const bankPartners = pgTable("bank_partners", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  contactEmail: varchar("contact_email", { length: 255 }),
+  feeRateBps: integer("fee_rate_bps").notNull().default(0), // basis points, e.g. 50 = 0.50%
+  isActive: boolean("is_active").notNull().default(false),
+  notes: text("notes"),
+  activatedAt: timestamp("activated_at"),
+  deactivatedAt: timestamp("deactivated_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertBankPartnerSchema = createInsertSchema(bankPartners).omit({ id: true, createdAt: true });
+export type BankPartner = typeof bankPartners.$inferSelect;
+export type InsertBankPartner = z.infer<typeof insertBankPartnerSchema>;

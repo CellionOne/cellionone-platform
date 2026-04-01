@@ -1175,15 +1175,18 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
       const crypto = await import("crypto");
       const paystackRef = `co_esc_proc_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 
-      // Calculate Cellion service fee: 1.5% of principal (min ₦1,500 / max ₦50,000)
-      const { serviceFee, totalCharged } = calculateEscrowFee(amount);
+      // Calculate Cellion service fee (with bank custody fee carve-out if a partner is active)
+      const activeBankPartner = await storage.getActiveBankPartner();
+      const { serviceFee, bankCustodyFee, bankPartnerId, totalCharged } = calculateEscrowFee(amount, activeBankPartner);
 
-      // Create escrow record — store principal, fee, and total buyer charge
+      // Create escrow record — store principal, fee breakdown, and total buyer charge
       const escrow = await storage.createEscrowTransaction({
         contractId,
         milestoneId,
         amount,
         serviceFee,
+        bankCustodyFee,
+        bankPartnerId,
         totalCharged,
         currency: contract.currency || "NGN",
         status: "pending",
@@ -1192,7 +1195,7 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
         paystackReference: paystackRef,
       });
 
-      // Initialize Paystack payment — buyer pays principal + service fee
+      // Initialize Paystack payment — buyer pays principal + service fee (unchanged regardless of bank partner)
       const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_TEST_SECRET_KEY;
       if (!PAYSTACK_SECRET) throw new Error("Paystack key not configured");
 
@@ -1217,6 +1220,8 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
             contractId,
             principalAmount: amount,
             serviceFee,
+            bankCustodyFee,
+            bankPartnerId,
           },
         }),
       });
@@ -1234,6 +1239,8 @@ ${invoice.notes ? `<div class="notes"><strong>Notes:</strong> ${invoice.notes}</
       res.status(201).json({
         ...escrow,
         serviceFee,
+        bankCustodyFee,
+        bankPartnerId,
         totalCharged,
         paystackPaymentUrl: paymentUrl,
         paystackReference: paystackRef,

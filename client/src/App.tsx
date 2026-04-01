@@ -47,6 +47,7 @@ import AdminProposals from "@/pages/admin/proposals";
 import AdminRegisteredOffices from "@/pages/admin/registered-offices";
 import AdminSecurity from "@/pages/admin/security";
 import AdminEscrowDashboard from "@/pages/admin/escrow-dashboard";
+import AdminBankingPartners from "@/pages/admin/banking-partners";
 import PlatformOverview from "@/pages/platform-overview";
 import WhyCellionOne from "@/pages/why-cellion-one";
 import ApiDocsPage from "@/pages/api-docs";
@@ -340,6 +341,9 @@ function Router() {
       </Route>
       <Route path="/admin/escrow-dashboard">
         <ProtectedRoute component={AdminEscrowDashboard} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/banking-partners">
+        <ProtectedRoute component={AdminBankingPartners} roles={["admin"]} />
       </Route>
       
       <Route path="/building-manager/dashboard">

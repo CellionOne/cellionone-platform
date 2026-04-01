@@ -32,12 +32,29 @@ function generateEscrowReference(): string {
 /**
  * Cellion escrow service fee: 1.5% of principal
  * Minimum: ₦1,500 (150,000 kobo)  |  Maximum: ₦50,000 (5,000,000 kobo)
- * Returns { serviceFee, totalCharged } both in kobo.
+ *
+ * When an activeBankPartner is present, a portion of the service fee is
+ * carved out as bankCustodyFee (based on the partner's feeRateBps).
+ * The buyer-facing totalCharged does NOT change — this is internal accounting.
+ *
+ * Returns { serviceFee, bankCustodyFee, totalCharged } all in kobo.
  */
-export function calculateEscrowFee(principalKobo: number): { serviceFee: number; totalCharged: number } {
+export function calculateEscrowFee(
+  principalKobo: number,
+  activeBankPartner?: { id: number; feeRateBps: number } | null
+): { serviceFee: number; bankCustodyFee: number; bankPartnerId: number | null; totalCharged: number } {
   const raw = Math.round(principalKobo * 0.015);
   const serviceFee = Math.min(Math.max(raw, 150_000), 5_000_000);
-  return { serviceFee, totalCharged: principalKobo + serviceFee };
+
+  let bankCustodyFee = 0;
+  let bankPartnerId: number | null = null;
+
+  if (activeBankPartner && activeBankPartner.feeRateBps > 0) {
+    bankCustodyFee = Math.floor(principalKobo * activeBankPartner.feeRateBps / 10_000);
+    bankPartnerId = activeBankPartner.id;
+  }
+
+  return { serviceFee, bankCustodyFee, bankPartnerId, totalCharged: principalKobo + serviceFee };
 }
 
 async function deliverEscrowWebhook(
@@ -148,10 +165,11 @@ export function registerEscrowApiRoutes(app: Express): void {
         ? new Date(Date.now() + body.expiresIn * 86400000)
         : null;
 
-      // Calculate service fee: 1.5% of principal (min ₦1,500 / max ₦50,000)
-      const { serviceFee, totalCharged } = calculateEscrowFee(body.amount);
+      // Calculate service fee (includes bank custody fee carve-out if a partner is active)
+      const activeBankPartner = await storage.getActiveBankPartner();
+      const { serviceFee, bankCustodyFee, bankPartnerId, totalCharged } = calculateEscrowFee(body.amount, activeBankPartner);
 
-      // Initialize Paystack payment — buyer pays principal + Cellion's service fee
+      // Initialize Paystack payment — buyer pays principal + Cellion's service fee (unchanged regardless of bank partner)
       const paystackRes = await fetch(`${PAYSTACK_API_BASE}/transaction/initialize`, {
         method: "POST",
         headers: {
@@ -160,7 +178,7 @@ export function registerEscrowApiRoutes(app: Express): void {
         },
         body: JSON.stringify({
           email: body.buyerEmail,
-          amount: totalCharged, // includes Cellion service fee
+          amount: totalCharged, // principal + Cellion service fee
           reference: paystackRef,
           metadata: {
             type: "api_escrow",
@@ -168,6 +186,8 @@ export function registerEscrowApiRoutes(app: Express): void {
             orgId,
             principalAmount: body.amount,
             serviceFee,
+            bankCustodyFee,
+            bankPartnerId,
           },
         }),
       });
@@ -185,6 +205,8 @@ export function registerEscrowApiRoutes(app: Express): void {
         description: body.description,
         amount: body.amount,
         serviceFee,
+        bankCustodyFee,
+        bankPartnerId,
         totalCharged,
         currency: "NGN",
         status: "pending_payment",
@@ -409,9 +431,18 @@ export function registerEscrowApiRoutes(app: Express): void {
         storage.listAllEscrowApiTransactions(200),
       ]);
 
+      const activeBankPartner = await storage.getActiveBankPartner();
+
+      // Cumulative bank custody fees owed (funded + released transactions with a bank partner)
+      const bankFeeEligible = [...procurementTxs, ...apiTxs].filter(
+        t => ["funded", "released"].includes(t.status) && (t as any).bankCustodyFee > 0
+      );
+      const totalBankCustodyFees = bankFeeEligible.reduce((sum, t) => sum + ((t as any).bankCustodyFee || 0), 0);
+
       res.json({
         procurement: procurementTxs,
         api: apiTxs,
+        activeBankPartner: activeBankPartner || null,
         summary: {
           procurementTotal: procurementTxs.length,
           apiTotal: apiTxs.length,
@@ -423,6 +454,8 @@ export function registerEscrowApiRoutes(app: Express): void {
             ...procurementTxs.filter(t => t.status === "disputed"),
             ...apiTxs.filter(t => t.status === "disputed"),
           ].length,
+          totalBankCustodyFees,
+          bankPartnerName: activeBankPartner?.name || null,
         },
       });
     } catch (e: any) {
@@ -548,6 +581,132 @@ export function registerEscrowApiRoutes(app: Express): void {
       });
 
       res.json({ success: true, transaction: updated });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Admin: Banking Partners ─────────────────────────────────────────────────
+
+  /**
+   * GET /api/admin/banking-partners
+   * List all banking partners.
+   */
+  app.get("/api/admin/banking-partners", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const partners = await storage.listBankPartners();
+      res.json(partners);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/admin/banking-partners
+   * Create a new banking partner.
+   */
+  app.post("/api/admin/banking-partners", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const body = z.object({
+        name: z.string().min(1).max(255),
+        contactEmail: z.string().email().optional(),
+        feeRateBps: z.number().int().min(0).max(500), // max 5%
+        notes: z.string().optional(),
+      }).parse(req.body);
+
+      const partner = await storage.createBankPartner({ ...body, isActive: false });
+
+      await storage.createAuditLog({
+        actorUserId: (req as any).user?.claims?.sub,
+        action: "admin_bank_partner_created",
+        entityType: "bank_partner",
+        entityId: String(partner.id),
+        details: { name: partner.name, feeRateBps: partner.feeRateBps },
+      });
+
+      res.status(201).json(partner);
+    } catch (e: any) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", errors: e.errors });
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * PATCH /api/admin/banking-partners/:id
+   * Update a banking partner's details (not activation status).
+   */
+  app.patch("/api/admin/banking-partners/:id", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const id = parseInt(req.params.id);
+      const body = z.object({
+        name: z.string().min(1).max(255).optional(),
+        contactEmail: z.string().email().optional(),
+        feeRateBps: z.number().int().min(0).max(500).optional(),
+        notes: z.string().optional(),
+      }).parse(req.body);
+
+      const partner = await storage.updateBankPartner(id, body);
+      if (!partner) return res.status(404).json({ error: "Partner not found" });
+
+      res.json(partner);
+    } catch (e: any) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", errors: e.errors });
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/admin/banking-partners/:id/activate
+   * Activate a banking partner (deactivates all others).
+   */
+  app.post("/api/admin/banking-partners/:id/activate", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const id = parseInt(req.params.id);
+      const partner = await storage.activateBankPartner(id);
+      if (!partner) return res.status(404).json({ error: "Partner not found" });
+
+      await storage.createAuditLog({
+        actorUserId: (req as any).user?.claims?.sub,
+        action: "admin_bank_partner_activated",
+        entityType: "bank_partner",
+        entityId: String(id),
+        details: { name: partner.name, feeRateBps: partner.feeRateBps },
+      });
+
+      res.json(partner);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/admin/banking-partners/:id/deactivate
+   * Deactivate a banking partner.
+   */
+  app.post("/api/admin/banking-partners/:id/deactivate", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const id = parseInt(req.params.id);
+      const partner = await storage.deactivateBankPartner(id);
+      if (!partner) return res.status(404).json({ error: "Partner not found" });
+
+      await storage.createAuditLog({
+        actorUserId: (req as any).user?.claims?.sub,
+        action: "admin_bank_partner_deactivated",
+        entityType: "bank_partner",
+        entityId: String(id),
+        details: { name: partner.name },
+      });
+
+      res.json(partner);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

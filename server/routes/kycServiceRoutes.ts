@@ -13,6 +13,7 @@ import {
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
   type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
   type KycDocumentRequirement, type KycVerificationTemplate,
+  type KycVerifiedSnapshot,
   KYC_BILLING_MODES,
 } from "@shared/schema";
 import * as kycApiKeyService from "../services/kycApiKeyService";
@@ -885,24 +886,33 @@ export function registerKycServiceRoutes(app: Express) {
 
       // Generate certificate reference and data snapshot on approval
       let certificateRef: string | null = null;
-      let verifiedDataSnapshot: any = null;
+      let verifiedDataSnapshot: KycVerifiedSnapshot | null = null;
       if (newStatus === "verified") {
         const year = reviewedAt.getFullYear();
         const suffix = crypto.randomBytes(4).toString("hex").toUpperCase();
         certificateRef = `CO-KYC-${year}-${suffix}`;
 
-        const acceptedDocs = documents
-          .filter(d => d.status === "accepted")
-          .map(d => d.documentName || d.documentType);
+        const acceptedDocObjs = documents.filter(d => d.status === "accepted");
 
         verifiedDataSnapshot = {
-          verificationType: request.type,
+          verificationType: request.type as "individual" | "supplier",
           subjectName: request.subjectName,
-          riskScore,
-          documentsVerified: acceptedDocs,
-          biometricVerified: false,
-          amlScreened: acceptedDocs.length > 0,
+          riskScore: riskScore as "green" | "amber" | "red",
+          verificationMethod: "document_review",
+          dataSource: "cellionone_kyc_review",
           verifiedAt: reviewedAt.toISOString(),
+          documentsVerified: acceptedDocObjs.map(d => {
+            const req = requirements.find(r => r.id === d.requirementId);
+            return {
+              documentName: req?.documentName || d.detectedDocumentType || "Unknown Document",
+              documentCategory: req?.documentCategory || "identity",
+              documentType: d.detectedDocumentType || req?.documentCategory || "unknown",
+              status: "accepted" as const,
+            };
+          }),
+          documentCount: acceptedDocObjs.length,
+          amlScreened: acceptedDocObjs.length > 0,
+          biometricVerified: false,
         };
       }
 
@@ -947,7 +957,7 @@ export function registerKycServiceRoutes(app: Express) {
       };
       if (certificateRef) {
         webhookPayload.certificateRef = certificateRef;
-        webhookPayload.attestationUrl = `${baseUrl}/api/v1/kyc/attest/${certificateRef}`;
+        webhookPayload.certificateUrl = `${baseUrl}/api/v1/kyc/attest/${certificateRef}`;
       }
 
       webhookService.deliverWebhook(orgId,

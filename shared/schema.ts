@@ -1168,6 +1168,24 @@ export const kycDocumentRequirements = pgTable("kyc_document_requirements", {
 export const insertKycDocumentRequirementSchema = createInsertSchema(kycDocumentRequirements).omit({ id: true, createdAt: true });
 export type KycDocumentRequirement = typeof kycDocumentRequirements.$inferSelect;
 
+export interface KycVerifiedSnapshot {
+  verificationType: "individual" | "supplier";
+  subjectName: string;
+  riskScore: "green" | "amber" | "red";
+  verificationMethod: string;
+  dataSource: string;
+  verifiedAt: string;
+  documentsVerified: {
+    documentName: string;
+    documentCategory: string;
+    documentType: string;
+    status: "accepted";
+  }[];
+  documentCount: number;
+  amlScreened: boolean;
+  biometricVerified: boolean;
+}
+
 export const kycVerificationRequests = pgTable("kyc_verification_requests", {
   id: serial("id").primaryKey(),
   orgId: integer("org_id").notNull(),
@@ -1193,15 +1211,7 @@ export const kycVerificationRequests = pgTable("kyc_verification_requests", {
   termsAcceptedIp: varchar("terms_accepted_ip", { length: 45 }),
   expiresAt: timestamp("expires_at").notNull(),
   certificateRef: varchar("certificate_ref", { length: 40 }).unique(),
-  verifiedDataSnapshot: jsonb("verified_data_snapshot").$type<{
-    verificationType: string;
-    subjectName: string;
-    riskScore: string;
-    documentsVerified: string[];
-    biometricVerified: boolean;
-    amlScreened: boolean;
-    verifiedAt: string;
-  }>(),
+  verifiedDataSnapshot: jsonb("verified_data_snapshot").$type<KycVerifiedSnapshot>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

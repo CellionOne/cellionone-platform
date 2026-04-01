@@ -1648,7 +1648,13 @@ export default function ApiDocsPage() {
     "verificationType": "individual",
     "subjectName": "Adaobi Okonkwo",
     "riskScore": "green",
-    "documentsVerified": ["National ID Card", "Utility Bill"],
+    "verificationMethod": "document_review",
+    "dataSource": "cellionone_kyc_review",
+    "documentsVerified": [
+      { "documentName": "National ID Card", "documentCategory": "identity", "documentType": "national_id", "status": "accepted" },
+      { "documentName": "Utility Bill", "documentCategory": "address", "documentType": "utility_bill", "status": "accepted" }
+    ],
+    "documentCount": 2,
     "biometricVerified": false,
     "amlScreened": true,
     "verifiedAt": "2026-04-01T09:30:00.000Z"
@@ -1666,7 +1672,7 @@ export default function ApiDocsPage() {
                 </h3>
                 <p className="text-sm text-muted-foreground">
                   When a verification is approved, the <code className="bg-muted px-1 rounded">verification.completed</code> webhook
-                  payload now includes <code className="bg-muted px-1 rounded">certificateRef</code> and <code className="bg-muted px-1 rounded">attestationUrl</code>:
+                  payload now includes <code className="bg-muted px-1 rounded">certificateRef</code> and <code className="bg-muted px-1 rounded">certificateUrl</code>:
                 </p>
                 <CodeBlock
                   language="json"
@@ -1682,7 +1688,7 @@ export default function ApiDocsPage() {
     "subjectEmail": "adaobi@example.com",
     "reviewedAt": "2026-04-01T09:30:00.000Z",
     "certificateRef": "CO-KYC-2026-A1B2C3D4",
-    "attestationUrl": "https://cellionone.com/api/v1/kyc/attest/CO-KYC-2026-A1B2C3D4"
+    "certificateUrl": "https://cellionone.com/api/v1/kyc/attest/CO-KYC-2026-A1B2C3D4"
   }
 }`}
                 />

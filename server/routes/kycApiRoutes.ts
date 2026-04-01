@@ -9,7 +9,7 @@ import {
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
   kycSessions,
   type KycVerificationRequest, type KycSupplierProfile, type KycSupplierPerson,
-  type KycDocumentRequirement, type KycSubmittedDocument,
+  type KycDocumentRequirement, type KycSubmittedDocument, type KycVerifiedSnapshot,
 } from "@shared/schema";
 import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth";
 import * as billingService from "../services/kycBillingService";
@@ -695,7 +695,7 @@ export function registerKycApiRoutes(app: Express) {
         ? `${baseUrl}/api/v1/kyc/attest/${request.certificateRef}`
         : "";
 
-      const snapshot = request.verifiedDataSnapshot as any;
+      const snapshot = request.verifiedDataSnapshot as KycVerifiedSnapshot | null;
 
       const certificateData = {
         certificateNumber: request.certificateRef || `CERT-${requestId}-${Date.now().toString(36).toUpperCase()}`,
@@ -718,7 +718,10 @@ export function registerKycApiRoutes(app: Express) {
           verificationType: snapshot.verificationType,
           subjectName: snapshot.subjectName,
           riskScore: snapshot.riskScore,
+          verificationMethod: snapshot.verificationMethod,
+          dataSource: snapshot.dataSource,
           documentsVerified: snapshot.documentsVerified,
+          documentCount: snapshot.documentCount,
           biometricVerified: snapshot.biometricVerified,
           amlScreened: snapshot.amlScreened,
           verifiedAt: snapshot.verifiedAt,

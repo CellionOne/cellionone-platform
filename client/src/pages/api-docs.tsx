@@ -1559,7 +1559,7 @@ export default function ApiDocsPage() {
                 <h3 className="font-semibold">How it works</h3>
                 <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
                   <li>When a verification request is approved, Cellion One generates a <code className="bg-muted px-1 rounded">certificateRef</code></li>
-                  <li>The <code className="bg-muted px-1 rounded">certificateRef</code> and <code className="bg-muted px-1 rounded">attestationUrl</code> are included in the <code className="bg-muted px-1 rounded">verification.completed</code> webhook and the certificate JSON endpoint</li>
+                  <li>The <code className="bg-muted px-1 rounded">certificateRef</code> and <code className="bg-muted px-1 rounded">certificateUrl</code> are included in the <code className="bg-muted px-1 rounded">verification.completed</code> webhook; the certificate JSON endpoint also returns <code className="bg-muted px-1 rounded">attestationUrl</code> for machine-readable use</li>
                   <li>Anyone with the certificate reference can call the attestation endpoint to confirm validity — no API key required</li>
                   <li>The response contains <strong>no PII</strong> — only validity, type, dates, and certification body</li>
                 </ol>

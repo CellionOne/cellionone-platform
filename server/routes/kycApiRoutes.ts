@@ -741,7 +741,44 @@ export function registerKycApiRoutes(app: Express) {
       };
 
       if (format === "json") {
-        return res.json(certificateData);
+        // Return a structured attestation JSON — sourced strictly from independently-verified data
+        const attestationJson: Record<string, any> = {
+          certificateRef: request.certificateRef || null,
+          verificationId: request.id,
+          verificationType: request.type,
+          issuedAt: request.reviewedAt ? new Date(request.reviewedAt).toISOString() : null,
+          expiresAt: new Date(request.expiresAt).toISOString(),
+          status: request.status,
+          attestationUrl,
+          issuedBy: {
+            name: org?.name || "Unknown Organisation",
+            certificationBody: "Cellion One",
+          },
+          verifiedData: snapshot ? {
+            riskScore: snapshot.riskScore,
+            verificationMethod: snapshot.verificationMethod,
+            dataSource: snapshot.dataSource,
+            documentsVerified: snapshot.documentsVerified,
+            documentCount: snapshot.documentCount,
+            biometricVerified: snapshot.biometricVerified,
+            livenessConfirmed: snapshot.livenessConfirmed,
+            ...(snapshot.faceMatchConfidence !== undefined ? { faceMatchConfidence: snapshot.faceMatchConfidence } : {}),
+            amlScreened: snapshot.amlScreened,
+            ...(snapshot.amlClear !== undefined ? { amlClear: snapshot.amlClear } : {}),
+            verifiedAt: snapshot.verifiedAt,
+          } : null,
+        };
+
+        if (supplierProfile) {
+          attestationJson.company = {
+            name: supplierProfile.companyName,
+            rcNumber: supplierProfile.rcNumber,
+            type: supplierProfile.industryCategory,
+            incorporationDate: supplierProfile.yearEstablished ? `${supplierProfile.yearEstablished}-01-01` : null,
+          };
+        }
+
+        return res.json(attestationJson);
       }
 
       const { generateVerificationCertificateHTML } = await import("../templates/verification-certificate");
@@ -1017,7 +1054,7 @@ export function registerKycApiRoutes(app: Express) {
         status: request.status,
         issuedAt: request.reviewedAt ? new Date(request.reviewedAt).toISOString() : null,
         expiresAt: new Date(request.expiresAt).toISOString(),
-        certificationBody: "Cellion One Limited",
+        certificationBody: "Cellion One",
       });
     } catch (error: any) {
       console.error("[KYC] Attestation error:", error);

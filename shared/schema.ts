@@ -1185,6 +1185,7 @@ export interface KycVerifiedSnapshot {
   }[];
   documentCount: number;
   biometricVerified: boolean;
+  livenessConfirmed: boolean;
   faceMatchConfidence?: number;
   amlScreened: boolean;
   amlClear?: boolean;

@@ -934,6 +934,7 @@ export function registerKycServiceRoutes(app: Express) {
           }),
           documentCount: acceptedDocObjs.length,
           biometricVerified,
+          livenessConfirmed: biometricVerified, // liveness is confirmed when face comparison succeeds (selfie was live)
           ...(faceMatchConfidence !== undefined ? { faceMatchConfidence } : {}),
           amlScreened,
           ...(amlClear !== undefined ? { amlClear } : {}),

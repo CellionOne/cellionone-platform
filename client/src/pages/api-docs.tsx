@@ -1594,7 +1594,7 @@ export default function ApiDocsPage() {
   "status": "verified",
   "issuedAt": "2026-04-01T09:30:00.000Z",
   "expiresAt": "2027-04-01T09:30:00.000Z",
-  "certificationBody": "Cellion One Limited"
+  "certificationBody": "Cellion One"
 }`}
                 />
               </div>
@@ -1626,23 +1626,18 @@ export default function ApiDocsPage() {
                 <CodeBlock
                   language="json"
                   code={`{
-  "certificateNumber": "CO-KYC-2026-A1B2C3D4",
   "certificateRef": "CO-KYC-2026-A1B2C3D4",
+  "verificationId": 42,
+  "verificationType": "individual",
+  "issuedAt": "2026-04-01T09:30:00.000Z",
+  "expiresAt": "2027-04-01T09:30:00.000Z",
+  "status": "verified",
   "attestationUrl": "https://cellionone.com/api/v1/kyc/attest/CO-KYC-2026-A1B2C3D4",
-  "subjectName": "Adaobi Okonkwo",
-  "subjectEmail": "adaobi@example.com",
-  "verificationDate": "2026-04-01T09:30:00.000Z",
-  "expiryDate": "2027-04-01T09:30:00.000Z",
-  "partnerName": "Acme Fintech Ltd",
-  "checks": {
-    "bvnValidation": true,
-    "ninValidation": true,
-    "documentVerification": true,
-    "biometricMatch": false,
-    "amlScreening": true
+  "issuedBy": {
+    "name": "Acme Fintech Ltd",
+    "certificationBody": "Cellion One"
   },
   "verifiedData": {
-    "verificationType": "individual",
     "riskScore": "green",
     "verificationMethod": "biometric_document_review",
     "dataSource": "cellionone_kyc_review",
@@ -1666,6 +1661,7 @@ export default function ApiDocsPage() {
     ],
     "documentCount": 2,
     "biometricVerified": true,
+    "livenessConfirmed": true,
     "faceMatchConfidence": 0.97,
     "amlScreened": true,
     "amlClear": true,

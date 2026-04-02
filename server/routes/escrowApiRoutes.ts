@@ -440,20 +440,42 @@ export function registerEscrowApiRoutes(app: Express): void {
       //   1. Transactions linked to the current active partner via bankPartnerId
       //   2. Transactions created at or after the partner was most recently activated
       //      (prevents historical fees from prior activation periods being double-counted)
+      type EscrowFeeRow = {
+        status: string;
+        bankPartnerId: number | null;
+        bankCustodyFee: number | null;
+        createdAt: Date | string | null;
+      };
+
+      const feeRows: EscrowFeeRow[] = [
+        ...procurementTxs.map(t => ({
+          status: t.status,
+          bankPartnerId: t.bankPartnerId ?? null,
+          bankCustodyFee: t.bankCustodyFee ?? null,
+          createdAt: t.createdAt ?? null,
+        })),
+        ...apiTxs.map(t => ({
+          status: t.status,
+          bankPartnerId: t.bankPartnerId ?? null,
+          bankCustodyFee: t.bankCustodyFee ?? null,
+          createdAt: t.createdAt ?? null,
+        })),
+      ];
+
       const activatedSince = activeBankPartner?.activatedAt
         ? new Date(activeBankPartner.activatedAt)
         : null;
 
       const totalBankCustodyFees = activeBankPartner
-        ? [...procurementTxs, ...apiTxs]
+        ? feeRows
             .filter(t => {
               if (!["funded", "released"].includes(t.status)) return false;
-              if ((t as any).bankPartnerId !== activeBankPartner.id) return false;
-              if (!((t as any).bankCustodyFee > 0)) return false;
-              if (activatedSince && new Date((t as any).createdAt) < activatedSince) return false;
+              if (t.bankPartnerId !== activeBankPartner.id) return false;
+              if (!(t.bankCustodyFee !== null && t.bankCustodyFee > 0)) return false;
+              if (activatedSince && t.createdAt !== null && new Date(t.createdAt) < activatedSince) return false;
               return true;
             })
-            .reduce((sum, t) => sum + ((t as any).bankCustodyFee || 0), 0)
+            .reduce((sum, t) => sum + (t.bankCustodyFee ?? 0), 0)
         : 0;
 
       res.json({

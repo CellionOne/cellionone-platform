@@ -1736,6 +1736,27 @@ export const insertContractMilestoneSchema = createInsertSchema(contractMileston
 export type ContractMilestone = typeof contractMilestones.$inferSelect;
 export type InsertContractMilestone = z.infer<typeof insertContractMilestoneSchema>;
 
+// ============== BANKING PARTNERS ==============
+// Escrow custody partners. Only one may be isActive at a time.
+// feeRateBps = basis points carved from Cellion's 1.5% service fee (e.g. 50 = 0.50%).
+// Max: 150 bps (1.50%), matching Cellion's service fee ceiling.
+// The buyer-facing total is never changed — this is internal revenue accounting.
+export const bankPartners = pgTable("bank_partners", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  contactEmail: varchar("contact_email", { length: 255 }),
+  feeRateBps: integer("fee_rate_bps").notNull().default(0), // basis points, e.g. 50 = 0.50%
+  isActive: boolean("is_active").notNull().default(false),
+  notes: text("notes"),
+  activatedAt: timestamp("activated_at"),
+  deactivatedAt: timestamp("deactivated_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertBankPartnerSchema = createInsertSchema(bankPartners).omit({ id: true, createdAt: true });
+export type BankPartner = typeof bankPartners.$inferSelect;
+export type InsertBankPartner = z.infer<typeof insertBankPartnerSchema>;
+
 export const escrowTransactions = pgTable("escrow_transactions", {
   id: serial("id").primaryKey(),
   contractId: integer("contract_id").notNull(),
@@ -1935,22 +1956,3 @@ export const insertKycSanctionsLogSchema = createInsertSchema(kycSanctionsLogs).
 export type KycSanctionsLog = typeof kycSanctionsLogs.$inferSelect;
 export type InsertKycSanctionsLog = z.infer<typeof insertKycSanctionsLogSchema>;
 
-// ============== BANKING PARTNERS ==============
-// Escrow custody partners. Only one may be isActive at a time.
-// feeRateBps = basis points charged by the bank (e.g. 50 = 0.50%)
-// This fee is carved out from Cellion's service fee — the buyer sees no change.
-export const bankPartners = pgTable("bank_partners", {
-  id: serial("id").primaryKey(),
-  name: varchar("name", { length: 255 }).notNull(),
-  contactEmail: varchar("contact_email", { length: 255 }),
-  feeRateBps: integer("fee_rate_bps").notNull().default(0), // basis points, e.g. 50 = 0.50%
-  isActive: boolean("is_active").notNull().default(false),
-  notes: text("notes"),
-  activatedAt: timestamp("activated_at"),
-  deactivatedAt: timestamp("deactivated_at"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-export const insertBankPartnerSchema = createInsertSchema(bankPartners).omit({ id: true, createdAt: true });
-export type BankPartner = typeof bankPartners.$inferSelect;
-export type InsertBankPartner = z.infer<typeof insertBankPartnerSchema>;

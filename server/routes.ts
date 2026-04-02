@@ -234,9 +234,20 @@ export async function registerRoutes(
   console.log("[Security] Session timeout middleware enabled (30 min idle, 8 hour absolute)");
   
   // CSRF token endpoint (must be before CSRF protection middleware)
+  // Reuse an existing session CSRF token when present so that concurrent
+  // calls from the same session always receive the same token and cannot
+  // overwrite each other in the session store.
   app.get("/api/csrf-token", (req: any, res) => {
+    const session = req.session;
+    if (session?.csrfToken) {
+      return res.json({ csrfToken: session.csrfToken });
+    }
     const token = generateCsrfToken(req);
-    res.json({ csrfToken: token });
+    if (session && typeof session.save === "function") {
+      session.save(() => res.json({ csrfToken: token }));
+    } else {
+      res.json({ csrfToken: token });
+    }
   });
 
   // CSP violation report endpoint

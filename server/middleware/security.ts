@@ -332,7 +332,12 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction):
   const sessionToken = session.csrfToken as string | undefined;
 
   if (!sessionToken || !tokenFromHeader || tokenFromHeader !== sessionToken) {
-    console.warn(`[Security] CSRF token mismatch: ${req.method} ${req.path} from ${req.ip}`);
+    const cause = !sessionToken
+      ? "no session token (session not set)"
+      : !tokenFromHeader
+        ? "no X-CSRF-Token header"
+        : "token mismatch";
+    console.warn(`[Security] CSRF rejected: ${req.method} ${req.path} — ${cause} — sid:${(req as any).sessionID?.slice(0, 8)}`);
     res.status(403).json({ error: "Invalid or missing CSRF token" });
     return;
   }

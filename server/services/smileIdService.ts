@@ -308,6 +308,7 @@ export interface IdLookupResult {
   photo?: string;
   gender?: string;
   address?: string;
+  phone?: string;
   reason?: string;
   referenceId?: string;
 }
@@ -354,6 +355,7 @@ async function runIdLookup(
       photo: result?.Photo ?? undefined,
       gender: result?.Gender ?? undefined,
       address: result?.Address ?? undefined,
+      phone: result?.PhoneNumber ?? undefined,
       referenceId: result?.SmileJobID ?? undefined,
       reason: verified ? undefined : (result?.ResultText || 'ID could not be verified'),
     };

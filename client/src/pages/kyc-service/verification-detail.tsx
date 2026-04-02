@@ -122,6 +122,20 @@ export default function VerificationDetailPage() {
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests", reqId],
   });
 
+  // Fetch government photo as a blob URL when available — access is audit-logged server-side
+  const { data: governmentPhotoBlobUrl } = useQuery<string | null>({
+    queryKey: ["/api/kyc-service/identity-data", reqId, "photo"],
+    queryFn: async () => {
+      if (!detail?.verifiedIdentity?.hasGovernmentPhoto) return null;
+      const res = await fetch(`/api/kyc-service/identity-data/${reqId}/photo`, { credentials: "include" });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
+    },
+    enabled: !!detail?.verifiedIdentity?.hasGovernmentPhoto,
+    staleTime: 4 * 60 * 1000,
+  });
+
   const reviewMutation = useMutation({
     mutationFn: async (data: { status: string; reviewNotes?: string; documentReviews?: any[] }) => {
       const res = await apiRequest("PATCH", `/api/kyc-service/organisations/${orgId}/verification-requests/${reqId}/review`, data);
@@ -499,12 +513,20 @@ export default function VerificationDetailPage() {
                   </div>
                 )}
                 {detail.verifiedIdentity.hasGovernmentPhoto && (
-                  <div className="flex items-start gap-2">
-                    <Camera className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                    <div>
-                      <span className="text-xs text-muted-foreground block">Government Photo</span>
-                      <p className="text-xs text-green-600 dark:text-green-400 font-medium" data-testid="text-photo-available">Available (access logged)</p>
-                    </div>
+                  <div className="col-span-2">
+                    <span className="text-xs text-muted-foreground block mb-1 flex items-center gap-1"><Camera className="h-3 w-3" /> Government Photo <span className="text-green-600 dark:text-green-400">(access logged)</span></span>
+                    {governmentPhotoBlobUrl ? (
+                      <img
+                        src={governmentPhotoBlobUrl}
+                        alt="Government ID photo"
+                        className="rounded border max-h-40 max-w-full object-contain bg-muted"
+                        data-testid="img-government-photo"
+                      />
+                    ) : (
+                      <div className="h-24 w-32 rounded border bg-muted flex items-center justify-center" data-testid="img-government-photo-loading">
+                        <Camera className="h-6 w-6 text-muted-foreground" />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

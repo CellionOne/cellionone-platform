@@ -8,7 +8,8 @@ import {
   kycDocumentRequirements, kycVerificationRequests,
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
   kycApiKeys, kycApiUsageLogs, kycBillingAccounts, kycBillingRequests, kycCreditTransactions, kycInvoices,
-  kycSessions, kycSanctionsLogs, kycStrReports,
+  kycSessions, kycSanctionsLogs, kycStrReports, kycVerifiedIdentityData,
+  sensitiveDataAccessLogs,
   users, userRoles,
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
   type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
@@ -992,9 +993,12 @@ export function registerKycServiceRoutes(app: Express) {
         ? "https://cellionone.com"
         : `http://localhost:${process.env.PORT || 5000}`;
 
-      // Build identity summary for webhook (extracted from accepted documents before firing)
+      // Build identity summary from accepted documents and notes
       let capturedFullName: string | null = null;
       let capturedDob: string | null = null;
+      let capturedPhone: string | null = null;
+      let capturedGender: string | null = null;
+      let capturedAddress: string | null = null;
       const idTypesVerified: string[] = [];
 
       if (newStatus === "verified") {
@@ -1004,11 +1008,37 @@ export function registerKycServiceRoutes(app: Express) {
           if (ext) {
             if (!capturedFullName && (ext.name || ext.fullName)) capturedFullName = String(ext.name || ext.fullName);
             if (!capturedDob && (ext.dateOfBirth || ext.dob || ext.DOB)) capturedDob = String(ext.dateOfBirth || ext.dob || ext.DOB);
+            if (!capturedPhone && (ext.phone || ext.phoneNumber || ext.PhoneNumber)) capturedPhone = String(ext.phone || ext.phoneNumber || ext.PhoneNumber);
+            if (!capturedGender && (ext.gender || ext.Gender)) capturedGender = String(ext.gender || ext.Gender);
+            if (!capturedAddress && (ext.address || ext.Address)) capturedAddress = String(ext.address || ext.Address);
           }
           if (doc.detectedDocumentType) idTypesVerified.push(doc.detectedDocumentType);
         }
         if (!capturedFullName) capturedFullName = request.subjectName || null;
         if (!capturedDob && parsedNotes.dateOfBirth) capturedDob = String(parsedNotes.dateOfBirth);
+        if (!capturedPhone && parsedNotes.phoneNumber) capturedPhone = String(parsedNotes.phoneNumber);
+        if (!capturedGender && parsedNotes.gender) capturedGender = String(parsedNotes.gender);
+        if (!capturedAddress && parsedNotes.address) capturedAddress = String(parsedNotes.address);
+      }
+
+      // Capture identity profile BEFORE firing webhook so hasGovernmentPhoto is available
+      let capturedIdentityProfile: typeof kycVerifiedIdentityData.$inferSelect | null = null;
+      if (newStatus === "verified") {
+        await captureVerifiedIdentityProfile({
+          verificationRequestId: reqId,
+          orgId,
+          fullName: capturedFullName,
+          dateOfBirth: capturedDob,
+          phone: capturedPhone,
+          gender: capturedGender,
+          address: capturedAddress,
+          idTypesVerified: idTypesVerified.length ? idTypesVerified : undefined,
+          dataSource: "document_review",
+        }).catch(err => console.error("[IdentityProfile] Capture error:", err));
+        // Fetch back for hasGovernmentPhoto / capturedAt
+        const [idp] = await db.select().from(kycVerifiedIdentityData)
+          .where(eq(kycVerifiedIdentityData.verificationRequestId, reqId));
+        capturedIdentityProfile = idp || null;
       }
 
       const webhookPayload: Record<string, any> = {
@@ -1028,8 +1058,13 @@ export function registerKycServiceRoutes(app: Express) {
         webhookPayload.verifiedIdentity = {
           fullName: capturedFullName,
           dateOfBirth: capturedDob || null,
+          phone: capturedPhone || null,
+          gender: capturedGender || null,
+          address: capturedAddress || null,
           idTypesVerified: idTypesVerified.length ? idTypesVerified : [],
           dataSource: "document_review",
+          hasGovernmentPhoto: !!capturedIdentityProfile?.governmentPhotoPath,
+          capturedAt: capturedIdentityProfile?.capturedAt?.toISOString() || null,
         };
       }
 
@@ -1045,15 +1080,6 @@ export function registerKycServiceRoutes(app: Express) {
           riskScore,
           amlScreeningStatus: null,
         }).catch(err => console.error("[VerifiedEntity] Upsert error:", err));
-
-        captureVerifiedIdentityProfile({
-          verificationRequestId: reqId,
-          orgId,
-          fullName: capturedFullName,
-          dateOfBirth: capturedDob,
-          idTypesVerified: idTypesVerified.length ? idTypesVerified : undefined,
-          dataSource: "document_review",
-        }).catch(err => console.error("[IdentityProfile] Capture error:", err));
       }
 
       res.json(updated);
@@ -1985,19 +2011,27 @@ export function registerKycServiceRoutes(app: Express) {
 
   // ==================== UPLOAD URL ENDPOINT ====================
 
-  // ── Government ID Photo endpoint (access-logged, org-scoped) ──────────────
-  app.get("/api/kyc-service/organisations/:id/verification-requests/:reqId/identity-photo", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+  // ── Government ID Photo endpoint (access-logged, streams bytes) ──────────────
+  // Route: /api/kyc-service/identity-data/:verificationRequestId/photo
+  // Auth: authenticated + must be an org member of the request's organisation
+  app.get("/api/kyc-service/identity-data/:verificationRequestId/photo", isAuthenticated, async (req: any, res: Response) => {
     try {
-      const orgId = parseInt(req.params.id);
-      const reqId = parseInt(req.params.reqId);
+      const verificationRequestId = parseInt(req.params.verificationRequestId);
       const userId = getUserId(req);
 
       const [request] = await db.select().from(kycVerificationRequests)
-        .where(and(eq(kycVerificationRequests.id, reqId), eq(kycVerificationRequests.orgId, orgId)));
+        .where(eq(kycVerificationRequests.id, verificationRequestId));
       if (!request) return res.status(404).json({ message: "Request not found" });
       if (request.status !== "verified") return res.status(403).json({ message: "Photo only available for verified requests" });
 
-      const identityProfile = await getIdentityProfile(reqId);
+      // Verify the caller is a member of the request's org
+      const orgId = request.orgId;
+      const [membership] = await db.select().from(kycOrgMembers)
+        .where(and(eq(kycOrgMembers.orgId, orgId), eq(kycOrgMembers.userId, userId)));
+      if (!membership) return res.status(403).json({ message: "Access denied" });
+
+      const [identityProfile] = await db.select().from(kycVerifiedIdentityData)
+        .where(eq(kycVerifiedIdentityData.verificationRequestId, verificationRequestId));
       if (!identityProfile?.governmentPhotoPath) {
         return res.status(404).json({ message: "No government photo available for this verification" });
       }
@@ -2005,9 +2039,29 @@ export function registerKycServiceRoutes(app: Express) {
       const photoUrl = await getGovernmentPhotoUrl(identityProfile.governmentPhotoPath);
       if (!photoUrl) return res.status(404).json({ message: "Photo file could not be retrieved" });
 
-      console.log(`[IdentityPhoto] Access by user ${userId} to government photo for request ${reqId} in org ${orgId} at ${new Date().toISOString()}`);
+      // Durable audit log — persisted to DB, not just console
+      await db.insert(sensitiveDataAccessLogs).values({
+        accessorUserId: userId,
+        targetUserId: request.subjectExternalId || userId,
+        dataType: "government_id_photo",
+        action: "view",
+        entityType: "kyc_verification_request",
+        entityId: String(verificationRequestId),
+        ipAddress: req.ip || null,
+        userAgent: req.get("User-Agent") || null,
+      }).catch(err => console.error("[IdentityPhoto] Audit log write error:", err));
 
-      res.json({ photoUrl, expiresIn: 300 });
+      // Stream actual photo bytes to caller (no redirect to signed URL)
+      const upstream = await fetch(photoUrl);
+      if (!upstream.ok || !upstream.body) {
+        return res.status(502).json({ message: "Could not fetch photo from storage" });
+      }
+      const photoBuffer = await upstream.arrayBuffer();
+      res.setHeader("Content-Type", upstream.headers.get("content-type") || "image/jpeg");
+      res.setHeader("Content-Length", photoBuffer.byteLength);
+      res.setHeader("Content-Disposition", "inline; filename=\"identity-photo.jpg\"");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.end(Buffer.from(photoBuffer));
     } catch (error: any) {
       console.error("[KYC] Identity photo error:", error);
       res.status(500).json({ message: "Failed to retrieve identity photo" });
@@ -3327,6 +3381,15 @@ export function registerKycServiceRoutes(app: Express) {
         updatedAt: new Date(),
       }).where(eq(kycSessions.id, session.id));
 
+      // Session identity capture variables — declared here so they're in scope for webhook
+      let sessionCapturedName: string | null = null;
+      let sessionCapturedDob: string | null = null;
+      let sessionCapturedPhone: string | null = null;
+      let sessionCapturedGender: string | null = null;
+      let sessionCapturedAddress: string | null = null;
+      const sessionIdTypesForProfile: string[] = [];
+      let sessionIdentityProfile: typeof kycVerifiedIdentityData.$inferSelect | null = null;
+
       // Upsert verified entity registry if the subject was approved
       if (finalStatus === "verified") {
         try {
@@ -3340,33 +3403,46 @@ export function registerKycServiceRoutes(app: Express) {
           console.error("[KYC Session] Registry upsert error (non-blocking):", registryErr);
         }
 
-        // Capture identity profile from session submission data
+        // Extract identity fields from session submission data
         const sessionDobForProfile = notesData.dateOfBirth as string | undefined;
-        const sessionIdTypesForProfile: string[] = [];
+        sessionCapturedDob = sessionDobForProfile || null;
         const sessionDocRows = await db.select({
           detectedDocumentType: kycSubmittedDocuments.detectedDocumentType,
           extractedData: kycSubmittedDocuments.extractedData,
         }).from(kycSubmittedDocuments).where(eq(kycSubmittedDocuments.verificationRequestId, request.id));
-        let sessionCapturedName: string | null = null;
-        let sessionCapturedDob: string | null = sessionDobForProfile || null;
         for (const doc of sessionDocRows) {
           const ext = doc.extractedData as Record<string, any> | null;
           if (ext) {
             if (!sessionCapturedName && (ext.name || ext.fullName)) sessionCapturedName = String(ext.name || ext.fullName);
             if (!sessionCapturedDob && (ext.dateOfBirth || ext.dob)) sessionCapturedDob = String(ext.dateOfBirth || ext.dob);
+            if (!sessionCapturedPhone && (ext.phone || ext.phoneNumber || ext.PhoneNumber)) sessionCapturedPhone = String(ext.phone || ext.phoneNumber || ext.PhoneNumber);
+            if (!sessionCapturedGender && (ext.gender || ext.Gender)) sessionCapturedGender = String(ext.gender || ext.Gender);
+            if (!sessionCapturedAddress && (ext.address || ext.Address)) sessionCapturedAddress = String(ext.address || ext.Address);
           }
           if (doc.detectedDocumentType) sessionIdTypesForProfile.push(doc.detectedDocumentType);
         }
         if (!sessionCapturedName) sessionCapturedName = subjectName || null;
+        if (!sessionCapturedPhone && notesData.phoneNumber) sessionCapturedPhone = String(notesData.phoneNumber);
+        if (!sessionCapturedGender && notesData.gender) sessionCapturedGender = String(notesData.gender);
+        if (!sessionCapturedAddress && notesData.address) sessionCapturedAddress = String(notesData.address);
 
-        captureVerifiedIdentityProfile({
+        // Await capture so hasGovernmentPhoto is known before firing webhook
+        await captureVerifiedIdentityProfile({
           verificationRequestId: request.id,
           orgId: session.orgId,
           fullName: sessionCapturedName,
           dateOfBirth: sessionCapturedDob,
+          phone: sessionCapturedPhone,
+          gender: sessionCapturedGender,
+          address: sessionCapturedAddress,
           idTypesVerified: sessionIdTypesForProfile.length ? sessionIdTypesForProfile : undefined,
           dataSource: "hosted_session",
         }).catch(err => console.error("[IdentityProfile] Session capture error:", err));
+
+        // Fetch back to get hasGovernmentPhoto / capturedAt for webhook
+        const [idp] = await db.select().from(kycVerifiedIdentityData)
+          .where(eq(kycVerifiedIdentityData.verificationRequestId, request.id));
+        sessionIdentityProfile = idp || null;
       }
 
       // Build return URL with session params appended
@@ -3413,8 +3489,13 @@ export function registerKycServiceRoutes(app: Express) {
         sessionWebhookBody.verifiedIdentity = {
           fullName: sessionCapturedName,
           dateOfBirth: sessionCapturedDob || null,
+          phone: sessionCapturedPhone || null,
+          gender: sessionCapturedGender || null,
+          address: sessionCapturedAddress || null,
           idTypesVerified: sessionIdTypesForProfile.length ? sessionIdTypesForProfile : [],
           dataSource: "hosted_session",
+          hasGovernmentPhoto: !!sessionIdentityProfile?.governmentPhotoPath,
+          capturedAt: sessionIdentityProfile?.capturedAt?.toISOString() || null,
         };
       }
       await webhookService.deliverWebhook(session.orgId, "verification.completed", sessionWebhookBody);

@@ -48,7 +48,11 @@ import {
   Zap,
   Copy,
   KeyRound,
+  AlertTriangle,
+  ShieldAlert,
+  ScrollText,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface KycStats {
   totalOrgs: number;
@@ -244,6 +248,21 @@ export default function AdminKycOverview() {
 
   const { data: invoices, isLoading: invoicesLoading } = useQuery<KycInvoice[]>({
     queryKey: ["/api/admin/kyc/invoices"],
+  });
+
+  const { data: sanctionsOverview, isLoading: sanctionsLoading } = useQuery<{ orgs: any[] }>({
+    queryKey: ["/api/kyc-service/admin/sanctions-overview"],
+    queryFn: () => fetch("/api/kyc-service/admin/sanctions-overview", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const [strStatusFilter, setStrStatusFilter] = useState("");
+  const [strOrgFilter, setStrOrgFilter] = useState("");
+  const strQuery = new URLSearchParams();
+  if (strStatusFilter) strQuery.set("status", strStatusFilter);
+  if (strOrgFilter) strQuery.set("orgId", strOrgFilter);
+  const { data: adminStrReports, isLoading: strLoading } = useQuery<{ reports: any[] }>({
+    queryKey: ["/api/kyc-service/admin/str-reports", strStatusFilter, strOrgFilter],
+    queryFn: () => fetch(`/api/kyc-service/admin/str-reports?${strQuery}`, { credentials: "include" }).then(r => r.json()),
   });
 
   const statusMutation = useMutation({
@@ -474,6 +493,13 @@ export default function AdminKycOverview() {
                 </TabsTrigger>
                 <TabsTrigger value="billing-accounts" data-testid="tab-billing-accounts">Billing Accounts</TabsTrigger>
                 <TabsTrigger value="invoices" data-testid="tab-invoices">Invoices</TabsTrigger>
+                <TabsTrigger value="sanctions" data-testid="tab-sanctions">
+                  Sanctions
+                  {sanctionsOverview && sanctionsOverview.orgs.length > 0 && (
+                    <Badge variant="destructive" className="ml-2">{sanctionsOverview.orgs.length}</Badge>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="str-reports" data-testid="tab-str-reports">STR Reports</TabsTrigger>
               </TabsList>
 
               <TabsContent value="organisations">
@@ -908,6 +934,155 @@ export default function AdminKycOverview() {
                   </Card>
                 )}
               </TabsContent>
+
+              {/* ── Sanctions Overview Tab ─────────────────────────────────── */}
+              <TabsContent value="sanctions">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <ShieldAlert className="h-4 w-4 text-primary" />
+                      Organisations with Open Sanctions Hits
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {sanctionsLoading ? (
+                      <div className="flex justify-center py-8"><LoadingSpinner /></div>
+                    ) : !sanctionsOverview || sanctionsOverview.orgs.length === 0 ? (
+                      <div className="flex flex-col items-center gap-3 py-10 text-center">
+                        <ShieldAlert className="h-8 w-8 text-green-500" />
+                        <p className="text-sm font-medium text-green-700 dark:text-green-400">No open hits across any organisation</p>
+                        <p className="text-xs text-muted-foreground">All flagged entries have been reviewed or no alerts have been raised.</p>
+                      </div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Organisation</TableHead>
+                            <TableHead>Open Hits</TableHead>
+                            <TableHead>Most Recent Alert</TableHead>
+                            <TableHead>Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {sanctionsOverview.orgs.map((org: any) => (
+                            <TableRow key={org.orgId} data-testid={`row-sanctions-org-${org.orgId}`}>
+                              <TableCell className="font-medium">{org.orgName}</TableCell>
+                              <TableCell>
+                                <Badge variant="destructive" className="border-0" data-testid={`badge-open-hits-${org.orgId}`}>
+                                  {org.openCount} open
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {org.mostRecentAt ? new Date(org.mostRecentAt).toLocaleDateString() : "—"}
+                              </TableCell>
+                              <TableCell>
+                                <Link href={`/kyc/org/${org.orgId}?section=monitoring`}>
+                                  <Button variant="outline" size="sm" className="h-7 text-xs" data-testid={`button-view-org-monitoring-${org.orgId}`}>
+                                    <Eye className="h-3.5 w-3.5 mr-1" />View Monitoring
+                                  </Button>
+                                </Link>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* ── STR Reports Admin Tab ──────────────────────────────────── */}
+              <TabsContent value="str-reports">
+                <Card>
+                  <CardHeader className="space-y-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <ScrollText className="h-4 w-4 text-primary" />
+                      STR Reports — All Organisations
+                    </CardTitle>
+                    <div className="flex flex-wrap gap-3">
+                      <select
+                        className="border rounded-md px-3 py-1.5 text-sm bg-background"
+                        value={strStatusFilter}
+                        onChange={e => setStrStatusFilter(e.target.value)}
+                        data-testid="select-str-status-filter"
+                      >
+                        <option value="">All statuses</option>
+                        <option value="draft">Draft</option>
+                        <option value="internally_reviewed">Internally Reviewed</option>
+                        <option value="filed">Filed</option>
+                      </select>
+                      <select
+                        className="border rounded-md px-3 py-1.5 text-sm bg-background"
+                        value={strOrgFilter}
+                        onChange={e => setStrOrgFilter(e.target.value)}
+                        data-testid="select-str-org-filter"
+                      >
+                        <option value="">All organisations</option>
+                        {(orgs || []).map((org: any) => (
+                          <option key={org.id} value={String(org.id)}>{org.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {strLoading ? (
+                      <div className="flex justify-center py-8"><LoadingSpinner /></div>
+                    ) : !adminStrReports || adminStrReports.reports.length === 0 ? (
+                      <div className="flex flex-col items-center gap-2 py-10 text-center">
+                        <ScrollText className="h-8 w-8 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">No STR reports found matching your filters.</p>
+                      </div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Organisation</TableHead>
+                            <TableHead>Subject</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Reporter</TableHead>
+                            <TableHead>NFIU Ref</TableHead>
+                            <TableHead>Created</TableHead>
+                            <TableHead>Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {adminStrReports.reports.map((r: any) => (
+                            <TableRow key={r.id} data-testid={`row-admin-str-${r.id}`}>
+                              <TableCell className="text-sm">{r.orgName}</TableCell>
+                              <TableCell>
+                                <p className="text-sm font-medium">{r.subjectName}</p>
+                                {r.subjectCertificateRef && <p className="text-xs text-muted-foreground font-mono">{r.subjectCertificateRef}</p>}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="secondary" className={cn("border-0 text-xs",
+                                  r.status === "draft" ? "bg-muted text-muted-foreground" :
+                                  r.status === "internally_reviewed" ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" :
+                                  "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                )} data-testid={`badge-admin-str-status-${r.id}`}>
+                                  {r.status === "draft" ? "Draft" : r.status === "internally_reviewed" ? "Internally Reviewed" : "Filed"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-sm">{r.reporterName}</TableCell>
+                              <TableCell className="text-xs font-mono">{r.nfiuReference || "—"}</TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—"}
+                              </TableCell>
+                              <TableCell>
+                                <Link href={`/kyc/org/${r.orgId}?section=reports`}>
+                                  <Button variant="outline" size="sm" className="h-7 text-xs" data-testid={`button-view-str-org-${r.id}`}>
+                                    <Eye className="h-3.5 w-3.5 mr-1" />View
+                                  </Button>
+                                </Link>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
             </Tabs>
           </>
         )}

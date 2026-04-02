@@ -1500,6 +1500,8 @@ export const verifiedEntities = pgTable("verified_entities", {
   riskScore: varchar("risk_score", { length: 10 }),
   amlScreeningStatus: varchar("aml_screening_status", { length: 20 }),
   firstVerifiedAt: timestamp("first_verified_at").notNull(),
+  dateOfBirth: varchar("date_of_birth", { length: 20 }),
+  governmentPhotoPath: varchar("government_photo_path", { length: 500 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -1514,6 +1516,30 @@ export const verifiedEntities = pgTable("verified_entities", {
 export const insertVerifiedEntitySchema = createInsertSchema(verifiedEntities).omit({ id: true, createdAt: true, updatedAt: true });
 export type VerifiedEntity = typeof verifiedEntities.$inferSelect;
 export type InsertVerifiedEntity = z.infer<typeof insertVerifiedEntitySchema>;
+
+// ============== KYC VERIFIED IDENTITY PROFILE STORE ==============
+export const kycVerifiedIdentityData = pgTable("kyc_verified_identity_data", {
+  id: serial("id").primaryKey(),
+  verificationRequestId: integer("verification_request_id").notNull().references(() => kycVerificationRequests.id),
+  orgId: integer("org_id").notNull().references(() => kycOrganisations.id),
+  fullName: varchar("full_name", { length: 255 }),
+  dateOfBirth: varchar("date_of_birth", { length: 20 }),
+  phone: varchar("phone", { length: 30 }),
+  gender: varchar("gender", { length: 20 }),
+  address: text("address"),
+  idTypesVerified: jsonb("id_types_verified"),
+  dataSource: varchar("data_source", { length: 50 }).notNull().default("document_review"),
+  governmentPhotoPath: varchar("government_photo_path", { length: 500 }),
+  capturedAt: timestamp("captured_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kvid_request").on(table.verificationRequestId),
+  index("idx_kvid_org").on(table.orgId),
+]);
+
+export const insertKycVerifiedIdentityDataSchema = createInsertSchema(kycVerifiedIdentityData).omit({ id: true, createdAt: true });
+export type KycVerifiedIdentityData = typeof kycVerifiedIdentityData.$inferSelect;
+export type InsertKycVerifiedIdentityData = z.infer<typeof insertKycVerifiedIdentityDataSchema>;
 
 // ============== SECURITY: LOGIN ATTEMPTS (persistent account lockout) ==============
 export const loginAttempts = pgTable("login_attempts", {
@@ -1945,14 +1971,53 @@ export const kycSanctionsLogs = pgTable("kyc_sanctions_logs", {
   screeningResult: varchar("screening_result", { length: 30 }).notNull(), // clear, alert, error
   matchDetails: jsonb("match_details"),
   alertSentAt: timestamp("alert_sent_at"),
+  // Hit review fields
+  reviewStatus: varchar("review_status", { length: 20 }).default("open"), // open, cleared, escalated
+  reviewNote: text("review_note"),
+  reviewedByUserId: integer("reviewed_by_user_id"),
+  reviewedAt: timestamp("reviewed_at"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   index("idx_kyc_sl_vr").on(table.verificationRequestId),
   index("idx_kyc_sl_org").on(table.orgId),
   index("idx_kyc_sl_created").on(table.createdAt),
+  index("idx_kyc_sl_review_status").on(table.reviewStatus),
 ]);
 
 export const insertKycSanctionsLogSchema = createInsertSchema(kycSanctionsLogs).omit({ id: true, createdAt: true });
 export type KycSanctionsLog = typeof kycSanctionsLogs.$inferSelect;
 export type InsertKycSanctionsLog = z.infer<typeof insertKycSanctionsLogSchema>;
+
+// ============== KYC STR REPORTS ==============
+export const kycStrReports = pgTable("kyc_str_reports", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull().references(() => kycOrganisations.id),
+  verificationRequestId: integer("verification_request_id").references(() => kycVerificationRequests.id),
+  subjectName: varchar("subject_name", { length: 255 }).notNull(),
+  subjectCertificateRef: varchar("subject_certificate_ref", { length: 50 }),
+  status: varchar("status", { length: 30 }).notNull().default("draft"), // draft, internally_reviewed, filed
+  suspiciousActivityDescription: text("suspicious_activity_description").notNull(),
+  transactionAmountKobo: integer("transaction_amount_kobo"),
+  activityDateFrom: varchar("activity_date_from", { length: 20 }),
+  activityDateTo: varchar("activity_date_to", { length: 20 }),
+  reporterName: varchar("reporter_name", { length: 255 }).notNull(),
+  reporterRole: varchar("reporter_role", { length: 100 }).notNull(),
+  notes: text("notes"),
+  nfiuReference: varchar("nfiu_reference", { length: 100 }),
+  createdByUserId: integer("created_by_user_id").notNull(),
+  reviewedByUserId: integer("reviewed_by_user_id"),
+  reviewedAt: timestamp("reviewed_at"),
+  filedAt: timestamp("filed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_str_org").on(table.orgId),
+  index("idx_kyc_str_status").on(table.status),
+  index("idx_kyc_str_vr").on(table.verificationRequestId),
+  index("idx_kyc_str_created").on(table.createdAt),
+]);
+
+export const insertKycStrReportSchema = createInsertSchema(kycStrReports).omit({ id: true, createdAt: true, updatedAt: true });
+export type KycStrReport = typeof kycStrReports.$inferSelect;
+export type InsertKycStrReport = z.infer<typeof insertKycStrReportSchema>;
 

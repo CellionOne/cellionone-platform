@@ -34,8 +34,26 @@ import {
   Copy,
   Search,
   AlertTriangle,
+  Fingerprint,
+  Camera,
+  MapPin,
+  Phone,
+  Calendar,
+  Layers,
 } from "lucide-react";
 import type { KycVerificationRequest, KycSupplierProfile, KycSubmittedDocument, KycSupplierPerson, KycDocumentRequirement } from "@shared/schema";
+
+interface VerifiedIdentityProfile {
+  fullName?: string | null;
+  dateOfBirth?: string | null;
+  phone?: string | null;
+  gender?: string | null;
+  address?: string | null;
+  idTypesVerified?: string[] | null;
+  dataSource?: string | null;
+  hasGovernmentPhoto?: boolean;
+  capturedAt?: string | null;
+}
 
 interface VerificationDetail extends KycVerificationRequest {
   documents: KycSubmittedDocument[];
@@ -43,6 +61,7 @@ interface VerificationDetail extends KycVerificationRequest {
   people: KycSupplierPerson[];
   requirements: KycDocumentRequirement[];
   orgName: string;
+  verifiedIdentity?: VerifiedIdentityProfile | null;
 }
 
 const statusLabels: Record<string, string> = {
@@ -409,6 +428,97 @@ export default function VerificationDetailPage() {
             </Card>
           )}
         </div>
+
+        {/* ── Verified Identity Profile ──────────────────────────────────────── */}
+        {detail.verifiedIdentity && (
+          <Card className="border-green-200 dark:border-green-800" data-testid="card-verified-identity">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2 text-green-700 dark:text-green-400">
+                <Fingerprint className="h-4 w-4" />
+                Verified Identity Profile
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {detail.verifiedIdentity.fullName && (
+                  <div className="flex items-start gap-2">
+                    <User className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div>
+                      <span className="text-xs text-muted-foreground block">Verified Name</span>
+                      <p className="text-sm font-medium" data-testid="text-verified-name">{detail.verifiedIdentity.fullName}</p>
+                    </div>
+                  </div>
+                )}
+                {detail.verifiedIdentity.dateOfBirth && (
+                  <div className="flex items-start gap-2">
+                    <Calendar className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div>
+                      <span className="text-xs text-muted-foreground block">Date of Birth</span>
+                      <p className="text-sm" data-testid="text-verified-dob">{detail.verifiedIdentity.dateOfBirth}</p>
+                    </div>
+                  </div>
+                )}
+                {detail.verifiedIdentity.gender && (
+                  <div className="flex items-start gap-2">
+                    <User className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div>
+                      <span className="text-xs text-muted-foreground block">Gender</span>
+                      <p className="text-sm capitalize" data-testid="text-verified-gender">{detail.verifiedIdentity.gender}</p>
+                    </div>
+                  </div>
+                )}
+                {detail.verifiedIdentity.phone && (
+                  <div className="flex items-start gap-2">
+                    <Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div>
+                      <span className="text-xs text-muted-foreground block">Phone</span>
+                      <p className="text-sm" data-testid="text-verified-phone">{detail.verifiedIdentity.phone}</p>
+                    </div>
+                  </div>
+                )}
+                {detail.verifiedIdentity.address && (
+                  <div className="flex items-start gap-2 sm:col-span-2">
+                    <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div>
+                      <span className="text-xs text-muted-foreground block">Address</span>
+                      <p className="text-sm" data-testid="text-verified-address">{detail.verifiedIdentity.address}</p>
+                    </div>
+                  </div>
+                )}
+                {detail.verifiedIdentity.idTypesVerified && (detail.verifiedIdentity.idTypesVerified as string[]).length > 0 && (
+                  <div className="flex items-start gap-2">
+                    <Layers className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div>
+                      <span className="text-xs text-muted-foreground block">ID Types Verified</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {(detail.verifiedIdentity.idTypesVerified as string[]).map((t: string) => (
+                          <span key={t} className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-0.5 rounded-full" data-testid={`badge-id-type-${t}`}>{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {detail.verifiedIdentity.hasGovernmentPhoto && (
+                  <div className="flex items-start gap-2">
+                    <Camera className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <div>
+                      <span className="text-xs text-muted-foreground block">Government Photo</span>
+                      <p className="text-xs text-green-600 dark:text-green-400 font-medium" data-testid="text-photo-available">Available (access logged)</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="mt-3 pt-3 border-t flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Source: <span className="capitalize">{(detail.verifiedIdentity.dataSource || "").replace(/_/g, " ")}</span>
+                  {detail.verifiedIdentity.capturedAt && (
+                    <> &bull; Captured {new Date(detail.verifiedIdentity.capturedAt).toLocaleDateString()}</>
+                  )}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-4 md:grid-cols-2">
           <Card data-testid="card-hosted-link">

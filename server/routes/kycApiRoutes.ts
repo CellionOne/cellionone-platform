@@ -16,6 +16,7 @@ import * as billingService from "../services/kycBillingService";
 import * as webhookService from "../services/kycWebhookService";
 import * as smileId from "../services/smileIdService";
 import { storage } from "../storage";
+import { captureVerifiedIdentityProfile, getIdentityProfile } from "../services/identityProfileService";
 
 function generateToken(): string {
   return crypto.randomBytes(48).toString("hex");
@@ -107,6 +108,21 @@ async function handleIdLookup(
     });
   } catch (auditErr) {
     console.error("[KYC API] Audit log error (non-blocking):", auditErr);
+  }
+
+  // Capture verified identity profile (including government photo if available)
+  if (result.verified) {
+    captureVerifiedIdentityProfile({
+      verificationRequestId: insertedRow.id,
+      orgId,
+      fullName: result.fullName || null,
+      dateOfBirth: result.dob || null,
+      gender: result.gender || null,
+      address: result.address || null,
+      idTypesVerified: [idType],
+      dataSource: "instant_id_lookup",
+      governmentPhotoBase64: result.photo || null,
+    }).catch(err => console.error("[KYC API] Identity profile capture error:", err));
   }
 
   const responseBody: Record<string, unknown> = {
@@ -572,6 +588,22 @@ export function registerKycApiRoutes(app: Express) {
         uploadedAt: d.uploadedAt,
       }));
 
+      // Include verified identity profile if captured (no photo URL — use dedicated endpoint)
+      const identityProfile = await getIdentityProfile(requestId);
+      const verifiedIdentity = identityProfile
+        ? {
+            fullName: identityProfile.fullName,
+            dateOfBirth: identityProfile.dateOfBirth,
+            phone: identityProfile.phone,
+            gender: identityProfile.gender,
+            address: identityProfile.address,
+            idTypesVerified: identityProfile.idTypesVerified,
+            dataSource: identityProfile.dataSource,
+            hasGovernmentPhoto: !!identityProfile.governmentPhotoPath,
+            capturedAt: identityProfile.capturedAt,
+          }
+        : null;
+
       res.json({
         id: request.id,
         type: request.type,
@@ -598,6 +630,7 @@ export function registerKycApiRoutes(app: Express) {
           role: p.role,
           verificationStatus: p.verificationStatus,
         })) : undefined,
+        verifiedIdentity,
       });
     } catch (error: any) {
       console.error("[KYC API] Get request error:", error);

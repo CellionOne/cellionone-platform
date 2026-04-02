@@ -29,6 +29,7 @@ import {
   Shield, Menu, X, ShieldCheck, ShieldX, Clock, Search,
   RefreshCw, Download, ChevronRight, Zap, Terminal, Activity,
   Upload, Layers, FileText, Camera, ScanFace, Timer,
+  Send, Pencil, CheckCheck, ScrollText, Filter, TrendingUp, Percent,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -47,7 +48,7 @@ interface OrgWithStats extends KycOrganisation {
   };
 }
 
-type Section = "dashboard" | "verifications" | "sessions" | "users" | "monitoring" | "analytics" | "developers" | "billing" | "team" | "settings";
+type Section = "dashboard" | "verifications" | "sessions" | "users" | "monitoring" | "reports" | "analytics" | "developers" | "billing" | "team" | "settings";
 
 const STATUS_LABELS: Record<string, string> = {
   pending_invite: "Pending Invite", pending_payment: "Pending Payment",
@@ -77,6 +78,7 @@ const NAV_GROUPS = [
       { id: "sessions" as Section, label: "Sessions", icon: Link2 },
       { id: "users" as Section, label: "Users", icon: Users },
       { id: "monitoring" as Section, label: "Monitoring", icon: ShieldAlert },
+      { id: "reports" as Section, label: "STR Reports", icon: ScrollText },
       { id: "analytics" as Section, label: "Analytics", icon: BarChart3 },
     ],
   },
@@ -924,6 +926,11 @@ function UsersSection({ orgId }: { orgId: string }) {
 // ─── Monitoring Section ───────────────────────────────────────────────────────
 
 function MonitoringSection({ orgId }: { orgId: string }) {
+  const { toast } = useToast();
+  const [reviewDialog, setReviewDialog] = useState<{ logId: number; subjectName: string } | null>(null);
+  const [reviewAction, setReviewAction] = useState<"cleared" | "escalated">("cleared");
+  const [reviewNote, setReviewNote] = useState("");
+
   const { data: expiryData, isLoading: expiryLoading } = useQuery<{ alerts: any[]; count: number }>({
     queryKey: ["/api/kyc-service/orgs", orgId, "expiry-alerts"],
     queryFn: () => fetch(`/api/kyc-service/orgs/${orgId}/expiry-alerts`, { credentials: "include" }).then(r => r.json()),
@@ -933,15 +940,156 @@ function MonitoringSection({ orgId }: { orgId: string }) {
     queryFn: () => fetch(`/api/kyc-service/orgs/${orgId}/sanctions-logs`, { credentials: "include" }).then(r => r.json()),
   });
 
+  const reviewMutation = useMutation({
+    mutationFn: async (data: { logId: number; reviewStatus: string; reviewNote: string }) => {
+      const res = await apiRequest("PATCH", `/api/kyc-service/orgs/${orgId}/sanctions-logs/${data.logId}/review`, { reviewStatus: data.reviewStatus, reviewNote: data.reviewNote });
+      if (!res.ok) { const body = await res.json(); throw new Error(body.message || "Review failed"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/orgs", orgId, "sanctions-logs"] });
+      setReviewDialog(null);
+      setReviewNote("");
+      toast({ title: "Review saved" });
+    },
+    onError: (err: Error) => toast({ title: "Review failed", description: err.message, variant: "destructive" }),
+  });
+
+  // Compliance readiness metrics
+  const logs = sanctionsData?.logs || [];
+  const now = Date.now();
+  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+  const totalScreened = new Set(logs.map((l: any) => l.verificationRequestId)).size;
+  const screenedLast30 = logs.filter((l: any) => new Date(l.createdAt).getTime() > thirtyDaysAgo);
+  const screenedLast30Count = new Set(screenedLast30.map((l: any) => l.verificationRequestId)).size;
+  const openHits = logs.filter((l: any) => l.screeningResult === "alert" && (!l.reviewStatus || l.reviewStatus === "open"));
+  const mostRecentScreening = logs.length > 0 ? logs[0].createdAt : null;
+
+  const pctCoverage = totalScreened > 0 ? Math.round((screenedLast30Count / totalScreened) * 100) : 0;
+
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-xl font-bold">Monitoring</h2>
-        <p className="text-sm text-muted-foreground">Document expiry alerts and sanctions/AML screening</p>
+        <p className="text-sm text-muted-foreground">Compliance readiness, sanctions/AML screening, and document expiry alerts</p>
       </div>
 
+      {/* Compliance Readiness Card */}
+      <Card data-testid="card-compliance-readiness">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" />
+            Compliance Readiness
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {sanctionsLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{[1,2,3,4].map(i => <Skeleton key={i} className="h-16" />)}</div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><Users className="h-3 w-3" /> Total Screened</p>
+                <p className="text-2xl font-bold" data-testid="text-total-screened">{totalScreened}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><Percent className="h-3 w-3" /> Screened (30 days)</p>
+                <p className={cn("text-2xl font-bold", pctCoverage >= 80 ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400")} data-testid="text-screening-coverage">{pctCoverage}%</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Open Hits</p>
+                <p className={cn("text-2xl font-bold", openHits.length > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400")} data-testid="text-open-hits">{openHits.length}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="h-3 w-3" /> Last Screening</p>
+                <p className="text-sm font-medium" data-testid="text-last-screening">
+                  {mostRecentScreening ? new Date(mostRecentScreening).toLocaleDateString() : "Never"}
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Sanctions Log Table */}
       <Card>
-        <CardHeader>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-primary" />
+            Sanctions &amp; AML Screening Log
+            {openHits.length > 0 && (
+              <Badge variant="destructive" className="ml-1 border-0" data-testid="badge-open-hits">{openHits.length} open</Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {sanctionsLoading ? (
+            <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
+          ) : logs.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-center">
+              <Shield className="h-8 w-8 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">No screening runs recorded yet.</p>
+              <p className="text-xs text-muted-foreground max-w-md">
+                Automated weekly AML re-screening is enabled for your organisation. Logs will appear here after the first run.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Subject</TableHead>
+                    <TableHead>Result</TableHead>
+                    <TableHead>Risk</TableHead>
+                    <TableHead>Review Status</TableHead>
+                    <TableHead>Screened</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {logs.slice(0, 50).map((log: any) => (
+                    <TableRow key={log.id} data-testid={`row-sanctions-${log.id}`}>
+                      <TableCell className="text-sm font-medium">{log.subjectName}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className={cn("border-0 text-xs", log.screeningResult === "alert" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400")} data-testid={`badge-screening-result-${log.id}`}>
+                          {log.screeningResult === "alert" ? "Alert" : "Clear"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className={cn("text-xs font-medium capitalize", log.newRiskScore === "red" ? "text-red-500" : log.newRiskScore === "amber" ? "text-amber-500" : "text-green-600")}>
+                        {log.newRiskScore || "—"}
+                      </TableCell>
+                      <TableCell>
+                        {log.screeningResult !== "alert" ? (
+                          <span className="text-xs text-muted-foreground">N/A</span>
+                        ) : !log.reviewStatus || log.reviewStatus === "open" ? (
+                          <Badge variant="outline" className="border-amber-300 text-amber-700 dark:text-amber-400 text-xs">Open</Badge>
+                        ) : log.reviewStatus === "cleared" ? (
+                          <Badge variant="secondary" className="border-0 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 text-xs">Cleared</Badge>
+                        ) : (
+                          <Badge variant="secondary" className="border-0 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 text-xs">Escalated</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {log.createdAt ? new Date(log.createdAt).toLocaleDateString() : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {log.screeningResult === "alert" && (!log.reviewStatus || log.reviewStatus === "open") && (
+                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setReviewDialog({ logId: log.id, subjectName: log.subjectName }); setReviewAction("cleared"); setReviewNote(""); }} data-testid={`button-review-hit-${log.id}`}>
+                            Action
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Document Expiry Alerts */}
+      <Card>
+        <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-500" />
             Document Expiry Alerts
@@ -982,57 +1130,463 @@ function MonitoringSection({ orgId }: { orgId: string }) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Shield className="h-4 w-4 text-primary" />
-            Sanctions &amp; AML Monitoring
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {sanctionsLoading ? (
-            <div className="space-y-2">{[1,2].map(i => <Skeleton key={i} className="h-10 w-full" />)}</div>
-          ) : !sanctionsData || sanctionsData.logs.length === 0 ? (
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">No screening runs recorded yet. Automated weekly screening is managed by Cellion One.</p>
-              <p className="text-xs text-muted-foreground p-3 rounded-lg bg-muted/40 border">
-                Sanctions monitoring runs weekly when enabled. Contact <a href="mailto:service@cellionone.com" className="underline">service@cellionone.com</a> to activate.
-              </p>
+      {/* Hit Review Dialog */}
+      <Dialog open={!!reviewDialog} onOpenChange={(o) => !o && setReviewDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Review Sanctions Hit</DialogTitle>
+            <DialogDescription>
+              Action this alert for <strong>{reviewDialog?.subjectName}</strong>. A mandatory note is required.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Decision</Label>
+              <Select value={reviewAction} onValueChange={(v) => setReviewAction(v as "cleared" | "escalated")}>
+                <SelectTrigger data-testid="select-review-action">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cleared">Reviewed — Cleared (False Positive)</SelectItem>
+                  <SelectItem value="escalated">Reviewed — Escalated (Genuine Concern)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Subject</TableHead>
-                    <TableHead>Result</TableHead>
-                    <TableHead>Risk Score</TableHead>
-                    <TableHead>Last Screened</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sanctionsData.logs.slice(0, 20).map((log: any) => (
-                    <TableRow key={log.id} data-testid={`row-sanctions-${log.id}`}>
-                      <TableCell className="text-sm font-medium">{log.subjectName}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className={cn("border-0", log.screeningResult === "alert" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400")}>
-                          {log.screeningResult === "alert" ? "Alert" : "Clear"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className={cn("text-sm font-medium capitalize", log.newRiskScore === "red" ? "text-red-500" : log.newRiskScore === "amber" ? "text-amber-500" : "text-green-600")}>
-                        {log.newRiskScore || "—"}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {log.createdAt ? new Date(log.createdAt).toLocaleDateString() : "—"}
-                      </TableCell>
-                    </TableRow>
+            <div className="space-y-2">
+              <Label>Review Note <span className="text-destructive">*</span></Label>
+              <Textarea
+                value={reviewNote}
+                onChange={e => setReviewNote(e.target.value)}
+                placeholder="Explain your decision in detail (minimum 10 characters)…"
+                rows={3}
+                data-testid="input-review-note"
+              />
+              {reviewNote.trim().length > 0 && reviewNote.trim().length < 10 && (
+                <p className="text-xs text-destructive">Note must be at least 10 characters.</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReviewDialog(null)}>Cancel</Button>
+            <Button
+              onClick={() => reviewMutation.mutate({ logId: reviewDialog!.logId, reviewStatus: reviewAction, reviewNote })}
+              disabled={reviewMutation.isPending || reviewNote.trim().length < 10}
+              className={cn(reviewAction === "escalated" ? "bg-orange-600 hover:bg-orange-700" : "")}
+              data-testid="button-submit-review"
+            >
+              {reviewMutation.isPending ? "Saving…" : reviewAction === "cleared" ? "Mark as Cleared" : "Escalate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── STR Reports Section ──────────────────────────────────────────────────────
+
+const STR_STATUS_LABELS: Record<string, string> = {
+  draft: "Draft",
+  internally_reviewed: "Internally Reviewed",
+  filed: "Filed",
+};
+const STR_STATUS_COLORS: Record<string, string> = {
+  draft: "bg-muted text-muted-foreground",
+  internally_reviewed: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  filed: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+};
+
+function ReportsSection({ orgId }: { orgId: string }) {
+  const { toast } = useToast();
+  const [newReportOpen, setNewReportOpen] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<any | null>(null);
+  const [advanceDialog, setAdvanceDialog] = useState<{ report: any; nextStatus: string } | null>(null);
+  const [nfiuRef, setNfiuRef] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [editData, setEditData] = useState<any>({});
+
+  // New report form state
+  const [form, setForm] = useState({
+    subjectName: "", subjectCertificateRef: "",
+    verificationRequestId: "",
+    suspiciousActivityDescription: "",
+    transactionAmountKobo: "",
+    activityDateFrom: "", activityDateTo: "",
+    reporterName: "", reporterRole: "", notes: "",
+  });
+
+  // Verified subjects for the subject picker
+  const { data: verifiedRequests } = useQuery<any[]>({
+    queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
+  });
+  const verifiedSubjects = (verifiedRequests || []).filter((r: any) => r.status === "verified");
+
+  const { data: reportsData, isLoading } = useQuery<{ reports: any[] }>({
+    queryKey: ["/api/kyc-service/orgs", orgId, "str-reports"],
+    queryFn: () => fetch(`/api/kyc-service/orgs/${orgId}/str-reports`, { credentials: "include" }).then(r => r.json()),
+  });
+  const reports = reportsData?.reports || [];
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const payload: any = {
+        subjectName: form.subjectName,
+        subjectCertificateRef: form.subjectCertificateRef || null,
+        suspiciousActivityDescription: form.suspiciousActivityDescription,
+        reporterName: form.reporterName,
+        reporterRole: form.reporterRole,
+        notes: form.notes || null,
+        activityDateFrom: form.activityDateFrom || null,
+        activityDateTo: form.activityDateTo || null,
+      };
+      if (form.verificationRequestId) payload.verificationRequestId = parseInt(form.verificationRequestId);
+      if (form.transactionAmountKobo) payload.transactionAmountKobo = Math.round(parseFloat(form.transactionAmountKobo) * 100);
+      const res = await apiRequest("POST", `/api/kyc-service/orgs/${orgId}/str-reports`, payload);
+      if (!res.ok) { const body = await res.json(); throw new Error(body.message || "Failed"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/orgs", orgId, "str-reports"] });
+      setNewReportOpen(false);
+      setForm({ subjectName: "", subjectCertificateRef: "", verificationRequestId: "", suspiciousActivityDescription: "", transactionAmountKobo: "", activityDateFrom: "", activityDateTo: "", reporterName: "", reporterRole: "", notes: "" });
+      toast({ title: "STR draft created" });
+    },
+    onError: (err: Error) => toast({ title: "Failed to create report", description: err.message, variant: "destructive" }),
+  });
+
+  const advanceMutation = useMutation({
+    mutationFn: async ({ report, nextStatus }: { report: any; nextStatus: string }) => {
+      const payload: any = { status: nextStatus };
+      if (nextStatus === "filed") payload.nfiuReference = nfiuRef;
+      const res = await apiRequest("PATCH", `/api/kyc-service/orgs/${orgId}/str-reports/${report.id}`, payload);
+      if (!res.ok) { const body = await res.json(); throw new Error(body.message || "Failed"); }
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/orgs", orgId, "str-reports"] });
+      setAdvanceDialog(null);
+      setSelectedReport(data);
+      setNfiuRef("");
+      toast({ title: "Report status updated" });
+    },
+    onError: (err: Error) => toast({ title: "Update failed", description: err.message, variant: "destructive" }),
+  });
+
+  const saveDraftMutation = useMutation({
+    mutationFn: async () => {
+      const payload: any = { ...editData };
+      if (payload.transactionAmountKobo) payload.transactionAmountKobo = Math.round(parseFloat(payload.transactionAmountKobo) * 100);
+      const res = await apiRequest("PATCH", `/api/kyc-service/orgs/${orgId}/str-reports/${selectedReport.id}`, payload);
+      if (!res.ok) { const body = await res.json(); throw new Error(body.message || "Failed"); }
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/kyc-service/orgs", orgId, "str-reports"] });
+      setSelectedReport(data);
+      setEditMode(false);
+      toast({ title: "Draft saved" });
+    },
+    onError: (err: Error) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
+  });
+
+  function openReport(report: any) {
+    setSelectedReport(report);
+    setEditMode(false);
+  }
+
+  function startEdit(report: any) {
+    setEditData({
+      suspiciousActivityDescription: report.suspiciousActivityDescription,
+      transactionAmountKobo: report.transactionAmountKobo ? (report.transactionAmountKobo / 100).toFixed(2) : "",
+      activityDateFrom: report.activityDateFrom || "",
+      activityDateTo: report.activityDateTo || "",
+      reporterName: report.reporterName,
+      reporterRole: report.reporterRole,
+      notes: report.notes || "",
+    });
+    setEditMode(true);
+  }
+
+  function populateFromSubject(requestId: string) {
+    const req = verifiedSubjects.find((r: any) => String(r.id) === requestId);
+    if (req) {
+      setForm(f => ({
+        ...f,
+        verificationRequestId: requestId,
+        subjectName: req.subjectName || "",
+        subjectCertificateRef: req.certificateRef || "",
+      }));
+    } else {
+      setForm(f => ({ ...f, verificationRequestId: requestId }));
+    }
+  }
+
+  const nextStatusMap: Record<string, string> = {
+    draft: "internally_reviewed",
+    internally_reviewed: "filed",
+  };
+  const nextStatusLabel: Record<string, string> = {
+    draft: "Mark as Internally Reviewed",
+    internally_reviewed: "Mark as Filed",
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold">STR Reports</h2>
+          <p className="text-sm text-muted-foreground">Suspicious Transaction Reports (NFIU) for your organisation</p>
+        </div>
+        <Button onClick={() => setNewReportOpen(true)} data-testid="button-new-str-report">
+          <Plus className="h-4 w-4 mr-2" />
+          New Report
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-14 w-full" />)}</div>
+      ) : reports.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+            <ScrollText className="h-10 w-10 text-muted-foreground" />
+            <p className="text-sm font-medium">No STR reports yet</p>
+            <p className="text-xs text-muted-foreground max-w-sm">
+              When you identify suspicious activity linked to a verified subject, create a Suspicious Transaction Report here to document and track your NFIU filing.
+            </p>
+            <Button onClick={() => setNewReportOpen(true)} variant="outline" data-testid="button-create-first-str">
+              <Plus className="h-4 w-4 mr-2" />
+              Create First Report
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Subject</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Reporter</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead>Updated</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {reports.map((r: any) => (
+                <TableRow key={r.id} data-testid={`row-str-report-${r.id}`}>
+                  <TableCell>
+                    <p className="text-sm font-medium">{r.subjectName}</p>
+                    {r.subjectCertificateRef && <p className="text-xs text-muted-foreground font-mono">{r.subjectCertificateRef}</p>}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className={cn("border-0 text-xs", STR_STATUS_COLORS[r.status])} data-testid={`badge-str-status-${r.id}`}>
+                      {STR_STATUS_LABELS[r.status] || r.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm">{r.reporterName}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{r.updatedAt ? new Date(r.updatedAt).toLocaleDateString() : "—"}</TableCell>
+                  <TableCell>
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openReport(r)} data-testid={`button-view-str-${r.id}`}>
+                      <Eye className="h-3.5 w-3.5 mr-1" />View
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* New Report Dialog */}
+      <Dialog open={newReportOpen} onOpenChange={setNewReportOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>New STR Report</DialogTitle>
+            <DialogDescription>Create a draft Suspicious Transaction Report linked to a verified subject.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="space-y-1">
+              <Label>Verified Subject (optional — pre-populates name)</Label>
+              <Select value={form.verificationRequestId} onValueChange={populateFromSubject}>
+                <SelectTrigger data-testid="select-str-subject">
+                  <SelectValue placeholder="Select a verified subject…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None / Enter manually</SelectItem>
+                  {verifiedSubjects.map((r: any) => (
+                    <SelectItem key={r.id} value={String(r.id)}>{r.subjectName} {r.certificateRef ? `(${r.certificateRef})` : ""}</SelectItem>
                   ))}
-                </TableBody>
-              </Table>
+                </SelectContent>
+              </Select>
             </div>
-          )}
-        </CardContent>
-      </Card>
+            <div className="space-y-1">
+              <Label>Subject Name <span className="text-destructive">*</span></Label>
+              <Input value={form.subjectName} onChange={e => setForm(f => ({ ...f, subjectName: e.target.value }))} placeholder="Full legal name" data-testid="input-str-subject-name" />
+            </div>
+            <div className="space-y-1">
+              <Label>Certificate Reference</Label>
+              <Input value={form.subjectCertificateRef} onChange={e => setForm(f => ({ ...f, subjectCertificateRef: e.target.value }))} placeholder="CO-KYC-YYYY-XXXXXXXX" data-testid="input-str-cert-ref" />
+            </div>
+            <div className="space-y-1">
+              <Label>Suspicious Activity Description <span className="text-destructive">*</span></Label>
+              <Textarea value={form.suspiciousActivityDescription} onChange={e => setForm(f => ({ ...f, suspiciousActivityDescription: e.target.value }))} placeholder="Describe the suspicious activity in detail…" rows={3} data-testid="input-str-description" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Transaction Amount (₦)</Label>
+                <Input type="number" value={form.transactionAmountKobo} onChange={e => setForm(f => ({ ...f, transactionAmountKobo: e.target.value }))} placeholder="0.00" data-testid="input-str-amount" />
+              </div>
+              <div className="space-y-1 col-span-1">
+                <Label>Activity Date From</Label>
+                <Input type="date" value={form.activityDateFrom} onChange={e => setForm(f => ({ ...f, activityDateFrom: e.target.value }))} data-testid="input-str-date-from" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Activity Date To</Label>
+              <Input type="date" value={form.activityDateTo} onChange={e => setForm(f => ({ ...f, activityDateTo: e.target.value }))} data-testid="input-str-date-to" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Reporter Name <span className="text-destructive">*</span></Label>
+                <Input value={form.reporterName} onChange={e => setForm(f => ({ ...f, reporterName: e.target.value }))} placeholder="Full name" data-testid="input-str-reporter-name" />
+              </div>
+              <div className="space-y-1">
+                <Label>Reporter Role <span className="text-destructive">*</span></Label>
+                <Input value={form.reporterRole} onChange={e => setForm(f => ({ ...f, reporterRole: e.target.value }))} placeholder="e.g. Compliance Officer" data-testid="input-str-reporter-role" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Notes</Label>
+              <Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Additional notes or observations…" rows={2} data-testid="input-str-notes" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewReportOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending || !form.subjectName.trim() || form.suspiciousActivityDescription.trim().length < 20 || !form.reporterName.trim() || !form.reporterRole.trim()}
+              data-testid="button-save-str-draft"
+            >
+              {createMutation.isPending ? "Saving…" : "Save Draft"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Report Detail Dialog */}
+      {selectedReport && (
+        <Dialog open={!!selectedReport} onOpenChange={(o) => !o && setSelectedReport(null)}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                STR Report #{selectedReport.id}
+                <Badge variant="secondary" className={cn("border-0 text-xs ml-1", STR_STATUS_COLORS[selectedReport.status])}>
+                  {STR_STATUS_LABELS[selectedReport.status]}
+                </Badge>
+              </DialogTitle>
+            </DialogHeader>
+            {editMode && selectedReport.status === "draft" ? (
+              <div className="space-y-3 py-1">
+                <div className="space-y-1">
+                  <Label>Suspicious Activity Description</Label>
+                  <Textarea value={editData.suspiciousActivityDescription} onChange={e => setEditData((d: any) => ({ ...d, suspiciousActivityDescription: e.target.value }))} rows={3} data-testid="input-edit-str-description" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Transaction Amount (₦)</Label>
+                  <Input type="number" value={editData.transactionAmountKobo} onChange={e => setEditData((d: any) => ({ ...d, transactionAmountKobo: e.target.value }))} data-testid="input-edit-str-amount" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1"><Label>Activity Date From</Label><Input type="date" value={editData.activityDateFrom} onChange={e => setEditData((d: any) => ({ ...d, activityDateFrom: e.target.value }))} /></div>
+                  <div className="space-y-1"><Label>Activity Date To</Label><Input type="date" value={editData.activityDateTo} onChange={e => setEditData((d: any) => ({ ...d, activityDateTo: e.target.value }))} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1"><Label>Reporter Name</Label><Input value={editData.reporterName} onChange={e => setEditData((d: any) => ({ ...d, reporterName: e.target.value }))} /></div>
+                  <div className="space-y-1"><Label>Reporter Role</Label><Input value={editData.reporterRole} onChange={e => setEditData((d: any) => ({ ...d, reporterRole: e.target.value }))} /></div>
+                </div>
+                <div className="space-y-1">
+                  <Label>Notes</Label>
+                  <Textarea value={editData.notes} onChange={e => setEditData((d: any) => ({ ...d, notes: e.target.value }))} rows={2} />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 py-1 text-sm">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  <div><p className="text-xs text-muted-foreground">Subject</p><p className="font-medium">{selectedReport.subjectName}</p></div>
+                  {selectedReport.subjectCertificateRef && <div><p className="text-xs text-muted-foreground">Certificate Ref</p><p className="font-mono text-xs">{selectedReport.subjectCertificateRef}</p></div>}
+                  <div><p className="text-xs text-muted-foreground">Reporter</p><p>{selectedReport.reporterName}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Role</p><p>{selectedReport.reporterRole}</p></div>
+                  {selectedReport.transactionAmountKobo && <div><p className="text-xs text-muted-foreground">Amount</p><p>₦{(selectedReport.transactionAmountKobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}</p></div>}
+                  {selectedReport.activityDateFrom && <div><p className="text-xs text-muted-foreground">Activity Period</p><p>{selectedReport.activityDateFrom}{selectedReport.activityDateTo ? ` → ${selectedReport.activityDateTo}` : ""}</p></div>}
+                  {selectedReport.nfiuReference && <div className="col-span-2"><p className="text-xs text-muted-foreground">NFIU Reference</p><p className="font-mono font-medium">{selectedReport.nfiuReference}</p></div>}
+                  {selectedReport.filedAt && <div><p className="text-xs text-muted-foreground">Filed At</p><p>{new Date(selectedReport.filedAt).toLocaleString()}</p></div>}
+                </div>
+                <Separator />
+                <div><p className="text-xs text-muted-foreground mb-1">Suspicious Activity</p><p className="text-sm whitespace-pre-wrap">{selectedReport.suspiciousActivityDescription}</p></div>
+                {selectedReport.notes && <div><p className="text-xs text-muted-foreground mb-1">Notes</p><p className="text-sm whitespace-pre-wrap">{selectedReport.notes}</p></div>}
+              </div>
+            )}
+            <DialogFooter className="flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setSelectedReport(null)}>Close</Button>
+              {editMode ? (
+                <>
+                  <Button variant="ghost" onClick={() => setEditMode(false)}>Cancel</Button>
+                  <Button onClick={() => saveDraftMutation.mutate()} disabled={saveDraftMutation.isPending} data-testid="button-save-edit-str">
+                    {saveDraftMutation.isPending ? "Saving…" : "Save Changes"}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {selectedReport.status === "draft" && (
+                    <Button variant="outline" onClick={() => startEdit(selectedReport)} data-testid="button-edit-str">
+                      <Pencil className="h-3.5 w-3.5 mr-1.5" />Edit
+                    </Button>
+                  )}
+                  {nextStatusMap[selectedReport.status] && (
+                    <Button onClick={() => { setAdvanceDialog({ report: selectedReport, nextStatus: nextStatusMap[selectedReport.status] }); setNfiuRef(""); }} data-testid="button-advance-str-status">
+                      <CheckCheck className="h-3.5 w-3.5 mr-1.5" />
+                      {nextStatusLabel[selectedReport.status]}
+                    </Button>
+                  )}
+                </>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Status Advance Confirmation Dialog */}
+      {advanceDialog && (
+        <Dialog open={!!advanceDialog} onOpenChange={(o) => !o && setAdvanceDialog(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{nextStatusLabel[advanceDialog.report.status]}</DialogTitle>
+              <DialogDescription>
+                {advanceDialog.nextStatus === "filed"
+                  ? "Enter the NFIU reference number you received after submitting the report to confirm filing."
+                  : "Confirm that this report has been internally reviewed and is ready to be filed with the NFIU."}
+              </DialogDescription>
+            </DialogHeader>
+            {advanceDialog.nextStatus === "filed" && (
+              <div className="space-y-2 py-2">
+                <Label>NFIU Reference Number <span className="text-destructive">*</span></Label>
+                <Input value={nfiuRef} onChange={e => setNfiuRef(e.target.value)} placeholder="Enter reference from NFIU portal" data-testid="input-nfiu-reference" />
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAdvanceDialog(null)}>Cancel</Button>
+              <Button
+                onClick={() => advanceMutation.mutate({ report: advanceDialog.report, nextStatus: advanceDialog.nextStatus })}
+                disabled={advanceMutation.isPending || (advanceDialog.nextStatus === "filed" && !nfiuRef.trim())}
+                data-testid="button-confirm-advance-str"
+              >
+                {advanceMutation.isPending ? "Saving…" : "Confirm"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -3026,6 +3580,7 @@ export default function OrgPortalPage() {
               {section === "sessions" && <SessionsSection orgId={orgId} />}
               {section === "users" && <UsersSection orgId={orgId} />}
               {section === "monitoring" && <MonitoringSection orgId={orgId} />}
+              {section === "reports" && <ReportsSection orgId={orgId} />}
               {section === "analytics" && <AnalyticsSection orgId={orgId} />}
               {section === "developers" && <DevelopersSection orgId={orgId} org={org} isAdmin={isAdmin} isOrgActive={org.status === "active"} />}
               {section === "billing" && <BillingSection orgId={orgId} isAdmin={isAdmin} isOrgActive={org.status === "active"} />}

@@ -8,7 +8,7 @@ import {
   kycDocumentRequirements, kycVerificationRequests,
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
   kycApiKeys, kycApiUsageLogs, kycBillingAccounts, kycBillingRequests, kycCreditTransactions, kycInvoices,
-  kycSessions, kycSanctionsLogs,
+  kycSessions, kycSanctionsLogs, kycStrReports,
   users, userRoles,
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
   type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
@@ -25,6 +25,11 @@ import { ObjectStorageService } from "../replit_integrations/object_storage";
 import { getResendClient } from "../services/emailService";
 import { getPaystackPrice } from "../config/priceBook";
 import { upsertVerifiedEntity } from "../services/verifiedEntityService";
+import {
+  captureVerifiedIdentityProfile,
+  getIdentityProfile,
+  getGovernmentPhotoUrl,
+} from "../services/identityProfileService";
 
 const TERMS_VERSION = "1.0";
 const objectStorageService = new ObjectStorageService();
@@ -816,7 +821,23 @@ export function registerKycServiceRoutes(app: Express) {
         }
       }));
 
-      res.json({ ...request, documents: docsWithUrls, requirements, supplierProfile, people });
+      // Attach verified identity profile if available (access is org-scoped)
+      const identityProfile = await getIdentityProfile(reqId);
+      const verifiedIdentity = identityProfile
+        ? {
+            fullName: identityProfile.fullName,
+            dateOfBirth: identityProfile.dateOfBirth,
+            phone: identityProfile.phone,
+            gender: identityProfile.gender,
+            address: identityProfile.address,
+            idTypesVerified: identityProfile.idTypesVerified,
+            dataSource: identityProfile.dataSource,
+            hasGovernmentPhoto: !!identityProfile.governmentPhotoPath,
+            capturedAt: identityProfile.capturedAt,
+          }
+        : null;
+
+      res.json({ ...request, documents: docsWithUrls, requirements, supplierProfile, people, verifiedIdentity });
     } catch (error: any) {
       console.error("[KYC] Get request detail error:", error);
       res.status(500).json({ message: "Failed to get verification request" });
@@ -971,6 +992,25 @@ export function registerKycServiceRoutes(app: Express) {
         ? "https://cellionone.com"
         : `http://localhost:${process.env.PORT || 5000}`;
 
+      // Build identity summary for webhook (extracted from accepted documents before firing)
+      let capturedFullName: string | null = null;
+      let capturedDob: string | null = null;
+      const idTypesVerified: string[] = [];
+
+      if (newStatus === "verified") {
+        const identityDocs = documents.filter(d => d.status === "accepted");
+        for (const doc of identityDocs) {
+          const ext = doc.extractedData as Record<string, any> | null;
+          if (ext) {
+            if (!capturedFullName && (ext.name || ext.fullName)) capturedFullName = String(ext.name || ext.fullName);
+            if (!capturedDob && (ext.dateOfBirth || ext.dob || ext.DOB)) capturedDob = String(ext.dateOfBirth || ext.dob || ext.DOB);
+          }
+          if (doc.detectedDocumentType) idTypesVerified.push(doc.detectedDocumentType);
+        }
+        if (!capturedFullName) capturedFullName = request.subjectName || null;
+        if (!capturedDob && parsedNotes.dateOfBirth) capturedDob = String(parsedNotes.dateOfBirth);
+      }
+
       const webhookPayload: Record<string, any> = {
         requestId: reqId,
         type: request.type,
@@ -983,6 +1023,14 @@ export function registerKycServiceRoutes(app: Express) {
       if (certificateRef) {
         webhookPayload.certificateRef = certificateRef;
         webhookPayload.certificateUrl = `${baseUrl}/api/v1/kyc/attest/${certificateRef}`;
+      }
+      if (newStatus === "verified" && capturedFullName) {
+        webhookPayload.verifiedIdentity = {
+          fullName: capturedFullName,
+          dateOfBirth: capturedDob || null,
+          idTypesVerified: idTypesVerified.length ? idTypesVerified : [],
+          dataSource: "document_review",
+        };
       }
 
       webhookService.deliverWebhook(orgId,
@@ -997,6 +1045,15 @@ export function registerKycServiceRoutes(app: Express) {
           riskScore,
           amlScreeningStatus: null,
         }).catch(err => console.error("[VerifiedEntity] Upsert error:", err));
+
+        captureVerifiedIdentityProfile({
+          verificationRequestId: reqId,
+          orgId,
+          fullName: capturedFullName,
+          dateOfBirth: capturedDob,
+          idTypesVerified: idTypesVerified.length ? idTypesVerified : undefined,
+          dataSource: "document_review",
+        }).catch(err => console.error("[IdentityProfile] Capture error:", err));
       }
 
       res.json(updated);
@@ -1927,6 +1984,35 @@ export function registerKycServiceRoutes(app: Express) {
   });
 
   // ==================== UPLOAD URL ENDPOINT ====================
+
+  // ── Government ID Photo endpoint (access-logged, org-scoped) ──────────────
+  app.get("/api/kyc-service/organisations/:id/verification-requests/:reqId/identity-photo", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const reqId = parseInt(req.params.reqId);
+      const userId = getUserId(req);
+
+      const [request] = await db.select().from(kycVerificationRequests)
+        .where(and(eq(kycVerificationRequests.id, reqId), eq(kycVerificationRequests.orgId, orgId)));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      if (request.status !== "verified") return res.status(403).json({ message: "Photo only available for verified requests" });
+
+      const identityProfile = await getIdentityProfile(reqId);
+      if (!identityProfile?.governmentPhotoPath) {
+        return res.status(404).json({ message: "No government photo available for this verification" });
+      }
+
+      const photoUrl = await getGovernmentPhotoUrl(identityProfile.governmentPhotoPath);
+      if (!photoUrl) return res.status(404).json({ message: "Photo file could not be retrieved" });
+
+      console.log(`[IdentityPhoto] Access by user ${userId} to government photo for request ${reqId} in org ${orgId} at ${new Date().toISOString()}`);
+
+      res.json({ photoUrl, expiresIn: 300 });
+    } catch (error: any) {
+      console.error("[KYC] Identity photo error:", error);
+      res.status(500).json({ message: "Failed to retrieve identity photo" });
+    }
+  });
 
   app.post("/api/kyc-service/upload-url", isAuthenticated, async (req: any, res: Response) => {
     try {
@@ -3244,7 +3330,7 @@ export function registerKycServiceRoutes(app: Express) {
       // Upsert verified entity registry if the subject was approved
       if (finalStatus === "verified") {
         try {
-          const amlStatus = amlResult ? (amlResult.isHit ? "hit" : "clear") : null;
+          const amlStatus = amlResult ? ((amlResult as smileIdService.AmlCheckResult).isHit ? "hit" : "clear") : null;
           await upsertVerifiedEntity({
             request: { ...request, status: finalStatus, updatedAt: new Date() } as any,
             orgId: session.orgId,
@@ -3253,6 +3339,34 @@ export function registerKycServiceRoutes(app: Express) {
         } catch (registryErr) {
           console.error("[KYC Session] Registry upsert error (non-blocking):", registryErr);
         }
+
+        // Capture identity profile from session submission data
+        const sessionDobForProfile = notesData.dateOfBirth as string | undefined;
+        const sessionIdTypesForProfile: string[] = [];
+        const sessionDocRows = await db.select({
+          detectedDocumentType: kycSubmittedDocuments.detectedDocumentType,
+          extractedData: kycSubmittedDocuments.extractedData,
+        }).from(kycSubmittedDocuments).where(eq(kycSubmittedDocuments.verificationRequestId, request.id));
+        let sessionCapturedName: string | null = null;
+        let sessionCapturedDob: string | null = sessionDobForProfile || null;
+        for (const doc of sessionDocRows) {
+          const ext = doc.extractedData as Record<string, any> | null;
+          if (ext) {
+            if (!sessionCapturedName && (ext.name || ext.fullName)) sessionCapturedName = String(ext.name || ext.fullName);
+            if (!sessionCapturedDob && (ext.dateOfBirth || ext.dob)) sessionCapturedDob = String(ext.dateOfBirth || ext.dob);
+          }
+          if (doc.detectedDocumentType) sessionIdTypesForProfile.push(doc.detectedDocumentType);
+        }
+        if (!sessionCapturedName) sessionCapturedName = subjectName || null;
+
+        captureVerifiedIdentityProfile({
+          verificationRequestId: request.id,
+          orgId: session.orgId,
+          fullName: sessionCapturedName,
+          dateOfBirth: sessionCapturedDob,
+          idTypesVerified: sessionIdTypesForProfile.length ? sessionIdTypesForProfile : undefined,
+          dataSource: "hosted_session",
+        }).catch(err => console.error("[IdentityProfile] Session capture error:", err));
       }
 
       // Build return URL with session params appended
@@ -3278,7 +3392,7 @@ export function registerKycServiceRoutes(app: Express) {
         : null;
 
       // Fire webhook — "verification.completed" with outcome (NO third-party branding)
-      await webhookService.deliverWebhook(session.orgId, "verification.completed", {
+      const sessionWebhookBody: Record<string, any> = {
         sessionId: session.id,
         sessionToken: token,
         verificationRequestId: request.id,
@@ -3294,7 +3408,16 @@ export function registerKycServiceRoutes(app: Express) {
         metadata: session.metadata,
         ...(sessionCertificateRef ? { certificateRef: sessionCertificateRef } : {}),
         ...(sessionCertificateUrl ? { certificateUrl: sessionCertificateUrl } : {}),
-      });
+      };
+      if (finalStatus === "verified" && sessionCapturedName) {
+        sessionWebhookBody.verifiedIdentity = {
+          fullName: sessionCapturedName,
+          dateOfBirth: sessionCapturedDob || null,
+          idTypesVerified: sessionIdTypesForProfile.length ? sessionIdTypesForProfile : [],
+          dataSource: "hosted_session",
+        };
+      }
+      await webhookService.deliverWebhook(session.orgId, "verification.completed", sessionWebhookBody);
 
       res.json({
         status: "completed",
@@ -3403,6 +3526,227 @@ export function registerKycServiceRoutes(app: Express) {
     } catch (error: any) {
       console.error("[KYC Expiry] List alerts error:", error);
       res.status(500).json({ message: "Failed to get expiry alerts" });
+    }
+  });
+
+  // ============== SANCTIONS LOG HIT REVIEW ==============
+
+  // PATCH /api/kyc-service/orgs/:id/sanctions-logs/:logId/review
+  app.patch("/api/kyc-service/orgs/:id/sanctions-logs/:logId/review", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const logId = parseInt(req.params.logId);
+      const { reviewStatus, reviewNote } = req.body;
+
+      if (!reviewStatus || !["cleared", "escalated"].includes(reviewStatus)) {
+        return res.status(400).json({ message: "reviewStatus must be 'cleared' or 'escalated'" });
+      }
+      if (!reviewNote || String(reviewNote).trim().length < 10) {
+        return res.status(400).json({ message: "A review note (minimum 10 characters) is required" });
+      }
+
+      const [log] = await db.select().from(kycSanctionsLogs)
+        .where(and(eq(kycSanctionsLogs.id, logId), eq(kycSanctionsLogs.orgId, orgId)));
+      if (!log) return res.status(404).json({ message: "Sanctions log not found" });
+
+      const [updated] = await db.update(kycSanctionsLogs)
+        .set({
+          reviewStatus,
+          reviewNote: reviewNote.trim(),
+          reviewedByUserId: req.user?.id,
+          reviewedAt: new Date(),
+        })
+        .where(eq(kycSanctionsLogs.id, logId))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[KYC Sanctions] Review error:", error);
+      res.status(500).json({ message: "Failed to update review" });
+    }
+  });
+
+  // Admin: GET /api/kyc-service/admin/sanctions-overview — orgs with open hits
+  app.get("/api/kyc-service/admin/sanctions-overview", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      if (!req.user?.roles?.includes("admin")) return res.status(403).json({ message: "Admin only" });
+
+      const openHits = await db.select({
+        orgId: kycSanctionsLogs.orgId,
+        orgName: kycOrganisations.name,
+        openCount: count(kycSanctionsLogs.id),
+        mostRecentAt: sql<string>`MAX(${kycSanctionsLogs.createdAt})`,
+      })
+        .from(kycSanctionsLogs)
+        .innerJoin(kycOrganisations, eq(kycSanctionsLogs.orgId, kycOrganisations.id))
+        .where(eq(kycSanctionsLogs.reviewStatus, "open"))
+        .groupBy(kycSanctionsLogs.orgId, kycOrganisations.name)
+        .orderBy(desc(sql`MAX(${kycSanctionsLogs.createdAt})`));
+
+      res.json({ orgs: openHits });
+    } catch (error: any) {
+      console.error("[KYC Sanctions] Admin overview error:", error);
+      res.status(500).json({ message: "Failed to get sanctions overview" });
+    }
+  });
+
+  // ============== STR REPORTS ==============
+
+  const strReportCreateSchema = z.object({
+    verificationRequestId: z.number().optional().nullable(),
+    subjectName: z.string().min(2),
+    subjectCertificateRef: z.string().optional().nullable(),
+    suspiciousActivityDescription: z.string().min(20),
+    transactionAmountKobo: z.number().optional().nullable(),
+    activityDateFrom: z.string().optional().nullable(),
+    activityDateTo: z.string().optional().nullable(),
+    reporterName: z.string().min(2),
+    reporterRole: z.string().min(2),
+    notes: z.string().optional().nullable(),
+  });
+
+  const strReportUpdateSchema = z.object({
+    status: z.enum(["draft", "internally_reviewed", "filed"]).optional(),
+    suspiciousActivityDescription: z.string().min(20).optional(),
+    transactionAmountKobo: z.number().optional().nullable(),
+    activityDateFrom: z.string().optional().nullable(),
+    activityDateTo: z.string().optional().nullable(),
+    reporterName: z.string().min(2).optional(),
+    reporterRole: z.string().min(2).optional(),
+    notes: z.string().optional().nullable(),
+    nfiuReference: z.string().optional().nullable(),
+  });
+
+  // POST /api/kyc-service/orgs/:id/str-reports
+  app.post("/api/kyc-service/orgs/:id/str-reports", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const data = strReportCreateSchema.parse(req.body);
+
+      const [created] = await db.insert(kycStrReports).values({
+        orgId,
+        ...data,
+        status: "draft",
+        createdByUserId: req.user!.id,
+      }).returning();
+
+      res.status(201).json(created);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC STR] Create error:", error);
+      res.status(500).json({ message: "Failed to create STR report" });
+    }
+  });
+
+  // GET /api/kyc-service/orgs/:id/str-reports
+  app.get("/api/kyc-service/orgs/:id/str-reports", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const reports = await db.select().from(kycStrReports)
+        .where(eq(kycStrReports.orgId, orgId))
+        .orderBy(desc(kycStrReports.createdAt));
+
+      res.json({ reports });
+    } catch (error: any) {
+      console.error("[KYC STR] List error:", error);
+      res.status(500).json({ message: "Failed to list STR reports" });
+    }
+  });
+
+  // GET /api/kyc-service/orgs/:id/str-reports/:reportId
+  app.get("/api/kyc-service/orgs/:id/str-reports/:reportId", isAuthenticated, requireOrgMember(), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const reportId = parseInt(req.params.reportId);
+
+      const [report] = await db.select().from(kycStrReports)
+        .where(and(eq(kycStrReports.id, reportId), eq(kycStrReports.orgId, orgId)));
+      if (!report) return res.status(404).json({ message: "Report not found" });
+
+      res.json(report);
+    } catch (error: any) {
+      console.error("[KYC STR] Get error:", error);
+      res.status(500).json({ message: "Failed to get STR report" });
+    }
+  });
+
+  // PATCH /api/kyc-service/orgs/:id/str-reports/:reportId
+  app.patch("/api/kyc-service/orgs/:id/str-reports/:reportId", isAuthenticated, requireOrgMember(["org_admin", "org_reviewer"]), async (req: any, res: Response) => {
+    try {
+      const orgId = parseInt(req.params.id);
+      const reportId = parseInt(req.params.reportId);
+      const data = strReportUpdateSchema.parse(req.body);
+
+      const [report] = await db.select().from(kycStrReports)
+        .where(and(eq(kycStrReports.id, reportId), eq(kycStrReports.orgId, orgId)));
+      if (!report) return res.status(404).json({ message: "Report not found" });
+      if (report.status === "filed") return res.status(400).json({ message: "Filed reports cannot be edited" });
+
+      // Status transition validations
+      if (data.status === "filed") {
+        if (!data.nfiuReference && !report.nfiuReference) {
+          return res.status(400).json({ message: "NFIU reference number is required to mark as filed" });
+        }
+      }
+
+      const updateData: Record<string, any> = { ...data, updatedAt: new Date() };
+      if (data.status === "internally_reviewed" && report.status === "draft") {
+        updateData.reviewedByUserId = req.user!.id;
+        updateData.reviewedAt = new Date();
+      }
+      if (data.status === "filed") {
+        updateData.filedAt = new Date();
+      }
+
+      const [updated] = await db.update(kycStrReports)
+        .set(updateData)
+        .where(eq(kycStrReports.id, reportId))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("[KYC STR] Update error:", error);
+      res.status(500).json({ message: "Failed to update STR report" });
+    }
+  });
+
+  // Admin: GET /api/kyc-service/admin/str-reports — cross-org view
+  app.get("/api/kyc-service/admin/str-reports", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      if (!req.user?.roles?.includes("admin")) return res.status(403).json({ message: "Admin only" });
+
+      const statusFilter = req.query.status as string | undefined;
+      const orgFilter = req.query.orgId ? parseInt(req.query.orgId as string) : undefined;
+
+      let query = db.select({
+        id: kycStrReports.id,
+        orgId: kycStrReports.orgId,
+        orgName: kycOrganisations.name,
+        subjectName: kycStrReports.subjectName,
+        subjectCertificateRef: kycStrReports.subjectCertificateRef,
+        status: kycStrReports.status,
+        reporterName: kycStrReports.reporterName,
+        createdAt: kycStrReports.createdAt,
+        updatedAt: kycStrReports.updatedAt,
+        filedAt: kycStrReports.filedAt,
+        nfiuReference: kycStrReports.nfiuReference,
+      })
+        .from(kycStrReports)
+        .innerJoin(kycOrganisations, eq(kycStrReports.orgId, kycOrganisations.id))
+        .$dynamic();
+
+      const conditions: any[] = [];
+      if (statusFilter) conditions.push(eq(kycStrReports.status, statusFilter));
+      if (orgFilter) conditions.push(eq(kycStrReports.orgId, orgFilter));
+      if (conditions.length > 0) query = query.where(and(...conditions)) as any;
+      query = (query as any).orderBy(desc(kycStrReports.createdAt)).limit(200) as any;
+
+      const reports = await query;
+      res.json({ reports });
+    } catch (error: any) {
+      console.error("[KYC STR] Admin list error:", error);
+      res.status(500).json({ message: "Failed to list STR reports" });
     }
   });
 

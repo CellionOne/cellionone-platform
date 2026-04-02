@@ -13,7 +13,15 @@ export interface ApiKeyRequest extends Request {
   };
 }
 
-export function authenticateApiKey(requiredPermission?: string) {
+/**
+ * Authenticate an API key and optionally enforce a required permission.
+ *
+ * @param requiredPermission - A single scope string OR an array of scope strings.
+ *   - String: the key must have that exact scope.
+ *   - Array: the key must have at least ONE of the listed scopes (OR logic).
+ *   - Omitted / undefined: any valid, active API key is accepted.
+ */
+export function authenticateApiKey(requiredPermission?: string | string[]) {
   return async (req: ApiKeyRequest, res: Response, next: NextFunction) => {
     const startTime = Date.now();
     const apiKey = req.headers["x-api-key"] as string;
@@ -33,16 +41,20 @@ export function authenticateApiKey(requiredPermission?: string) {
 
     const { apiKey: keyRecord, orgId, permissions } = result;
 
-    if (requiredPermission && !permissions.includes(requiredPermission)) {
-      await logApiUsage(
-        keyRecord.id,
-        req.path,
-        req.method,
-        403,
-        req.ip || null,
-        Date.now() - startTime
-      );
-      return res.status(403).json({ error: `Missing required permission: ${requiredPermission}` });
+    if (requiredPermission) {
+      const required = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
+      const hasPermission = required.some(p => permissions.includes(p));
+      if (!hasPermission) {
+        await logApiUsage(
+          keyRecord.id,
+          req.path,
+          req.method,
+          403,
+          req.ip || null,
+          Date.now() - startTime
+        );
+        return res.status(403).json({ error: `Missing required permission: ${required.join(" or ")}` });
+      }
     }
 
     const withinLimit = await checkRateLimit(keyRecord.id, keyRecord.rateLimitPerMinute);

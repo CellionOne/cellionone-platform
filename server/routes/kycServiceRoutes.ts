@@ -2142,7 +2142,7 @@ export function registerKycServiceRoutes(app: Express) {
       const [adminUser] = await db.select({ email: users.email }).from(users).where(eq(users.id, adminUserId));
       const adminEmail = adminUser?.email ?? "";
 
-      const ALLOWED_PERMISSIONS = ["verify:identity", "verify:individual", "verify:supplier"] as const;
+      const ALLOWED_PERMISSIONS = ["verify:identity", "verify:individual", "verify:supplier", "escrow:read", "escrow:write"] as const;
       const schema = z.object({
         name: z.string().min(2).max(255),
         clientType: z.enum(["organisation", "application"]),

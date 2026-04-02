@@ -140,7 +140,7 @@ export function registerEscrowApiRoutes(app: Express): void {
    * POST /api/v1/escrow/transactions
    * Create a new escrow transaction and get a Paystack payment URL for the buyer.
    */
-  app.post("/api/v1/escrow/transactions", authenticateApiKey("escrow:create"), async (req: ApiKeyRequest, res: Response) => {
+  app.post("/api/v1/escrow/transactions", authenticateApiKey("escrow:write"), async (req: ApiKeyRequest, res: Response) => {
     try {
       const flag = await storage.getFeatureFlag("enable_escrow_payments");
       if (!flag?.isEnabled) {
@@ -252,7 +252,7 @@ export function registerEscrowApiRoutes(app: Express): void {
    * GET /api/v1/escrow/transactions
    * List all escrow transactions for the authenticated org.
    */
-  app.get("/api/v1/escrow/transactions", authenticateApiKey(), async (req: ApiKeyRequest, res: Response) => {
+  app.get("/api/v1/escrow/transactions", authenticateApiKey(["escrow:read", "escrow:write"]), async (req: ApiKeyRequest, res: Response) => {
     try {
       const orgId = req.apiKeyContext!.orgId;
       const status = req.query.status as string | undefined;
@@ -288,7 +288,7 @@ export function registerEscrowApiRoutes(app: Express): void {
    * GET /api/v1/escrow/transactions/:reference
    * Get a single escrow transaction by reference.
    */
-  app.get("/api/v1/escrow/transactions/:reference", authenticateApiKey(), async (req: ApiKeyRequest, res: Response) => {
+  app.get("/api/v1/escrow/transactions/:reference", authenticateApiKey(["escrow:read", "escrow:write"]), async (req: ApiKeyRequest, res: Response) => {
     try {
       const orgId = req.apiKeyContext!.orgId;
       const tx = await storage.getEscrowApiTransaction(req.params.reference);
@@ -327,7 +327,7 @@ export function registerEscrowApiRoutes(app: Express): void {
    * POST /api/v1/escrow/transactions/:reference/release
    * Release funds to the beneficiary.
    */
-  app.post("/api/v1/escrow/transactions/:reference/release", authenticateApiKey("escrow:release"), async (req: ApiKeyRequest, res: Response) => {
+  app.post("/api/v1/escrow/transactions/:reference/release", authenticateApiKey("escrow:write"), async (req: ApiKeyRequest, res: Response) => {
     try {
       const orgId = req.apiKeyContext!.orgId;
       const tx = await storage.getEscrowApiTransaction(req.params.reference);
@@ -376,7 +376,7 @@ export function registerEscrowApiRoutes(app: Express): void {
    * POST /api/v1/escrow/transactions/:reference/dispute
    * Raise a dispute on an escrow transaction.
    */
-  app.post("/api/v1/escrow/transactions/:reference/dispute", authenticateApiKey(), async (req: ApiKeyRequest, res: Response) => {
+  app.post("/api/v1/escrow/transactions/:reference/dispute", authenticateApiKey("escrow:write"), async (req: ApiKeyRequest, res: Response) => {
     try {
       const orgId = req.apiKeyContext!.orgId;
       const tx = await storage.getEscrowApiTransaction(req.params.reference);

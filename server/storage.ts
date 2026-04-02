@@ -1833,7 +1833,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async activateBankPartner(id: number): Promise<BankPartner | undefined> {
-    // Deactivate all partners first (only one active at a time)
+    // Verify the target partner exists first so we never accidentally clear the
+    // active partner when given an invalid id.
+    const [target] = await db.select().from(bankPartners).where(eq(bankPartners.id, id)).limit(1);
+    if (!target) return undefined;
+    // Deactivate all currently active partners (only one active at a time)
     await db.update(bankPartners).set({ isActive: false, deactivatedAt: new Date() }).where(eq(bankPartners.isActive, true));
     const [partner] = await db.update(bankPartners)
       .set({ isActive: true, activatedAt: new Date(), deactivatedAt: null })

@@ -47,13 +47,14 @@ export function calculateEscrowFee(
   const serviceFee = Math.min(Math.max(raw, 150_000), 5_000_000);
 
   let bankCustodyFee = 0;
-  let bankPartnerId: number | null = null;
+  // Always link the active partner even at 0 bps so every transaction records
+  // which partner was active at creation time.
+  let bankPartnerId: number | null = activeBankPartner?.id ?? null;
 
   if (activeBankPartner && activeBankPartner.feeRateBps > 0) {
     const rawBankFee = Math.floor(principalKobo * activeBankPartner.feeRateBps / 10_000);
     // Clamp: the custody fee can never exceed Cellion's service fee (no negative Cellion revenue)
     bankCustodyFee = Math.min(rawBankFee, serviceFee);
-    bankPartnerId = activeBankPartner.id;
   }
 
   return { serviceFee, bankCustodyFee, bankPartnerId, totalCharged: principalKobo + serviceFee };

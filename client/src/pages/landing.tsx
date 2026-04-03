@@ -81,6 +81,22 @@ const businessSolutions = [
     cta: "Register Trademark",
     href: "/register",
   },
+  {
+    icon: ShieldCheck,
+    title: "Identity Verification",
+    description: "Verify employees, directors, and stakeholders — BVN/NIN validation, biometrics, document checks, and AML screening, with audit-ready certificates.",
+    price: "₦10,000/person",
+    cta: "Start Verifying",
+    href: "/register",
+  },
+  {
+    icon: Building,
+    title: "Supplier Verification",
+    description: "Comprehensive corporate due diligence for your vendors and suppliers. Verify registration, directors, financials, and compliance status.",
+    price: "₦100,000/company",
+    cta: "Verify Suppliers",
+    href: "/register",
+  },
 ];
 
 const platformSolutions = [
@@ -97,22 +113,6 @@ const platformSolutions = [
     description: "Hold and release funds programmatically for any transaction your platform handles. Auto-generates Paystack payment links and delivers webhook confirmations on every status change.",
     cta: "Read the Docs",
     href: "/api-docs",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Identity Verification",
-    description: "Verify employees, directors, and stakeholders — BVN/NIN validation, biometrics, document checks, and AML screening, with audit-ready certificates.",
-    price: "₦10,000/person",
-    cta: "Start Verifying",
-    href: "/register",
-  },
-  {
-    icon: Building,
-    title: "Supplier Verification",
-    description: "Comprehensive corporate due diligence for your vendors and suppliers. Verify registration, directors, financials, and compliance status.",
-    price: "₦100,000/company",
-    cta: "Verify Suppliers",
-    href: "/register",
   },
 ];
 
@@ -426,7 +426,6 @@ export default function LandingPage() {
       <PublicNav />
 
       <main>
-        {/* ─── Hero ─────────────────────────────────────────────────────────── */}
         <section className="relative pt-36 pb-24 px-4 sm:px-6 lg:px-8">
           <div className="absolute inset-0 -z-10 overflow-hidden">
             <div className="absolute top-1/3 left-1/3 w-[500px] h-[500px] bg-primary/8 rounded-full blur-[120px]" />
@@ -471,7 +470,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ─── Solutions ────────────────────────────────────────────────────── */}
         <section id="solutions" className="py-24 px-4 sm:px-6 lg:px-8">
           <div className="max-w-5xl mx-auto">
             <div className="text-center mb-16">
@@ -483,7 +481,6 @@ export default function LandingPage() {
               </p>
             </div>
 
-            {/* For Businesses */}
             <div className="mb-12">
               <div className="flex items-center gap-3 mb-6">
                 <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -492,7 +489,7 @@ export default function LandingPage() {
                 <h3 className="text-lg font-semibold" data-testid="text-business-solutions-heading">For Businesses</h3>
                 <div className="flex-1 h-px bg-border/60" />
               </div>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {businessSolutions.map((path, index) => (
                   <Card
                     key={index}
@@ -524,7 +521,6 @@ export default function LandingPage() {
               </div>
             </div>
 
-            {/* For Platforms & Developers */}
             <div>
               <div className="flex items-center gap-3 mb-6">
                 <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -533,7 +529,7 @@ export default function LandingPage() {
                 <h3 className="text-lg font-semibold" data-testid="text-platform-solutions-heading">For Platforms & Developers</h3>
                 <div className="flex-1 h-px bg-border/60" />
               </div>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              <div className="grid sm:grid-cols-2 gap-5 max-w-2xl">
                 {platformSolutions.map((path, index) => (
                   <Card
                     key={index}
@@ -567,7 +563,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ─── Trust bar ────────────────────────────────────────────────────── */}
         <section className="border-t border-b border-border/40 py-12 px-4 sm:px-6 lg:px-8" data-testid="trust-bar">
           <div className="max-w-4xl mx-auto">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
@@ -581,7 +576,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ─── How It Works ─────────────────────────────────────────────────── */}
         <section id="how-it-works" className="py-24 px-4 sm:px-6 lg:px-8">
           <div className="max-w-4xl mx-auto">
             <div className="text-center mb-10">
@@ -649,7 +643,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ─── FAQ ──────────────────────────────────────────────────────────── */}
         <section id="faq" className="py-24 px-4 sm:px-6 lg:px-8 bg-muted/20">
           <div className="max-w-2xl mx-auto">
             <div className="text-center mb-16">
@@ -674,7 +667,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* ─── CTA ──────────────────────────────────────────────────────────── */}
         <section className="py-24 px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl mx-auto text-center">
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">

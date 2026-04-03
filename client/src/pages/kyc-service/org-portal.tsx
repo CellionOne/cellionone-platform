@@ -29,7 +29,7 @@ import {
   Shield, Menu, X, ShieldCheck, ShieldX, Clock, Search,
   RefreshCw, Download, ChevronRight, Zap, Terminal, Activity,
   Upload, Layers, FileText, Camera, ScanFace, Timer,
-  Send, Pencil, CheckCheck, ScrollText, Filter, TrendingUp, Percent,
+  Send, Pencil, CheckCheck, ScrollText, Filter, TrendingUp, Percent, Fingerprint, MapPin,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -171,9 +171,10 @@ function KycPortalSidebar({
 // ─── Dashboard Section ────────────────────────────────────────────────────────
 
 function DashboardSection({ orgId, org, onNav }: { orgId: string; org: OrgWithStats | undefined; onNav: (s: Section) => void }) {
-  const { data: requests } = useQuery<KycVerificationRequest[]>({
+  const { data: requestsData } = useQuery<{ requests: KycVerificationRequest[]; total: number }>({
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
   });
+  const requests = requestsData?.requests;
   const { data: billing } = useQuery<any>({
     queryKey: ["/api/kyc-service/organisations", orgId, "billing"],
   });
@@ -318,9 +319,14 @@ function VerificationsSection({ orgId, isAdmin, isOrgActive }: { orgId: string; 
   const [newTemplateId, setNewTemplateId] = useState("none");
   const { toast } = useToast();
 
-  const { data: requests, isLoading } = useQuery<KycVerificationRequest[]>({
+  type RequestWithIdentity = KycVerificationRequest & {
+    identitySummary?: { fullName: string | null; dateOfBirth: string | null; idTypesVerified: string[] | null; hasGovernmentPhoto: boolean } | null;
+  };
+
+  const { data: requestsData, isLoading } = useQuery<{ requests: RequestWithIdentity[]; total: number }>({
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
   });
+  const requests = requestsData?.requests;
 
   const { data: templates } = useQuery<KycVerificationTemplate[]>({
     queryKey: ["/api/kyc-service/organisations", orgId, "templates"],
@@ -444,46 +450,54 @@ function VerificationsSection({ orgId, isAdmin, isOrgActive }: { orgId: string; 
           </div>
 
           {isLoading ? (
-            <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-20 w-full" />)}</div>
           ) : filtered.length === 0 ? (
             <EmptyState icon={ClipboardCheck} title="No verifications" description={requests?.length ? "No results match your filters." : "Create your first verification request."} />
           ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Subject</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead className="text-right">View</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((r) => (
-                    <TableRow key={r.id} data-testid={`row-verification-${r.id}`}>
-                      <TableCell>
-                        <p className="font-medium text-sm">{r.subjectName}</p>
-                        <p className="text-xs text-muted-foreground">{r.subjectEmail}</p>
-                      </TableCell>
-                      <TableCell><Badge variant="secondary" className="border-0 capitalize">{r.type}</Badge></TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className={cn("border-0", STATUS_COLORS[r.status] || "")}>
-                          {STATUS_LABELS[r.status] || r.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" asChild data-testid={`button-view-verification-${r.id}`}>
-                          <Link href={`/kyc/org/${orgId}/requests/${r.id}`}><Eye className="h-4 w-4" /></Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="space-y-2">
+              {filtered.map((r) => (
+                <div key={r.id} data-testid={`row-verification-${r.id}`} className="rounded-lg border bg-card p-3 flex flex-col gap-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{r.subjectName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{r.subjectEmail}</p>
+                      <p className="text-xs text-muted-foreground">{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—"}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <Badge variant="secondary" className={cn("border-0 text-xs", STATUS_COLORS[r.status] || "")}>{STATUS_LABELS[r.status] || r.status}</Badge>
+                      <Badge variant="secondary" className="border-0 capitalize text-xs">{r.type}</Badge>
+                    </div>
+                  </div>
+                  {r.identitySummary && (
+                    <div className="rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 p-2.5 flex flex-wrap gap-x-4 gap-y-1" data-testid={`card-identity-${r.id}`}>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Fingerprint className="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />
+                        <span className="text-xs font-medium text-green-800 dark:text-green-200 truncate">{r.identitySummary.fullName || r.subjectName}</span>
+                      </div>
+                      {r.identitySummary.dateOfBirth && (
+                        <span className="text-xs text-green-700 dark:text-green-300 flex items-center gap-1">
+                          <Clock className="h-3 w-3 shrink-0" /> DOB: {r.identitySummary.dateOfBirth}
+                        </span>
+                      )}
+                      {r.identitySummary.idTypesVerified?.length ? (
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {r.identitySummary.idTypesVerified.slice(0, 3).map(t => (
+                            <span key={t} className="text-[10px] bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full">{t}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {r.identitySummary.hasGovernmentPhoto && (
+                        <span className="text-xs text-green-700 dark:text-green-300 flex items-center gap-1"><Camera className="h-3 w-3 shrink-0" /> Photo</span>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex justify-end">
+                    <Button variant="ghost" size="sm" asChild data-testid={`button-view-verification-${r.id}`}>
+                      <Link href={`/kyc/org/${orgId}/requests/${r.id}`}><Eye className="h-4 w-4 mr-1" /> View</Link>
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </CardContent>

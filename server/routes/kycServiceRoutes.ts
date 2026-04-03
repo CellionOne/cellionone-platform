@@ -773,7 +773,31 @@ export function registerKycServiceRoutes(app: Express) {
 
       const [countResult] = await db.select({ total: count() }).from(kycVerificationRequests).where(and(...conditions));
 
-      res.json({ requests, total: countResult?.total || 0, page: parseInt(page), limit: parseInt(limit) });
+      // Attach identity profile summaries for verified requests (single batch query)
+      const verifiedIds = requests.filter(r => r.status === "verified").map(r => r.id);
+      const identityProfiles = verifiedIds.length > 0
+        ? await db.select({
+            verificationRequestId: kycVerifiedIdentityData.verificationRequestId,
+            fullName: kycVerifiedIdentityData.fullName,
+            dateOfBirth: kycVerifiedIdentityData.dateOfBirth,
+            idTypesVerified: kycVerifiedIdentityData.idTypesVerified,
+            hasGovernmentPhoto: kycVerifiedIdentityData.governmentPhotoPath,
+          }).from(kycVerifiedIdentityData)
+            .where(sql`${kycVerifiedIdentityData.verificationRequestId} = ANY(ARRAY[${sql.raw(verifiedIds.join(","))}]::int[])`)
+        : [];
+      const identityMap = new Map(identityProfiles.map(p => [p.verificationRequestId, {
+        fullName: p.fullName,
+        dateOfBirth: p.dateOfBirth,
+        idTypesVerified: p.idTypesVerified,
+        hasGovernmentPhoto: !!p.hasGovernmentPhoto,
+      }]));
+
+      const requestsWithIdentity = requests.map(r => ({
+        ...r,
+        identitySummary: identityMap.get(r.id) || null,
+      }));
+
+      res.json({ requests: requestsWithIdentity, total: countResult?.total || 0, page: parseInt(page), limit: parseInt(limit) });
     } catch (error: any) {
       console.error("[KYC] List requests error:", error);
       res.status(500).json({ message: "Failed to list verification requests" });
@@ -2024,11 +2048,14 @@ export function registerKycServiceRoutes(app: Express) {
       if (!request) return res.status(404).json({ message: "Request not found" });
       if (request.status !== "verified") return res.status(403).json({ message: "Photo only available for verified requests" });
 
-      // Verify the caller is a member of the request's org
+      // Verify the caller is either a member of the request's org OR a platform admin
       const orgId = request.orgId;
-      const [membership] = await db.select().from(kycOrgMembers)
-        .where(and(eq(kycOrgMembers.orgId, orgId), eq(kycOrgMembers.userId, userId)));
-      if (!membership) return res.status(403).json({ message: "Access denied" });
+      const isAdmin = req.user?.roles?.includes("admin") || req.user?.roles?.includes("super_admin");
+      if (!isAdmin) {
+        const [membership] = await db.select().from(kycOrgMembers)
+          .where(and(eq(kycOrgMembers.orgId, orgId), eq(kycOrgMembers.userId, userId)));
+        if (!membership) return res.status(403).json({ message: "Access denied" });
+      }
 
       const [identityProfile] = await db.select().from(kycVerifiedIdentityData)
         .where(eq(kycVerifiedIdentityData.verificationRequestId, verificationRequestId));
@@ -3828,6 +3855,42 @@ export function registerKycServiceRoutes(app: Express) {
     } catch (error: any) {
       console.error("[KYC STR] Admin list error:", error);
       res.status(500).json({ message: "Failed to list STR reports" });
+    }
+  });
+
+  // Admin: GET /api/kyc-service/admin/identity-records — cross-org verified identity profiles
+  app.get("/api/kyc-service/admin/identity-records", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    try {
+
+      const rows = await db
+        .select({
+          id: kycVerifiedIdentityData.id,
+          verificationRequestId: kycVerifiedIdentityData.verificationRequestId,
+          fullName: kycVerifiedIdentityData.fullName,
+          dateOfBirth: kycVerifiedIdentityData.dateOfBirth,
+          phone: kycVerifiedIdentityData.phone,
+          gender: kycVerifiedIdentityData.gender,
+          idTypesVerified: kycVerifiedIdentityData.idTypesVerified,
+          governmentPhotoPath: kycVerifiedIdentityData.governmentPhotoPath,
+          capturedAt: kycVerifiedIdentityData.capturedAt,
+          orgId: kycVerificationRequests.orgId,
+          orgName: kycOrganisations.name,
+          subjectName: kycVerificationRequests.subjectName,
+          subjectEmail: kycVerificationRequests.subjectEmail,
+          requestType: kycVerificationRequests.type,
+          certificateRef: kycVerificationRequests.certificateRef,
+        })
+        .from(kycVerifiedIdentityData)
+        .innerJoin(kycVerificationRequests, eq(kycVerifiedIdentityData.verificationRequestId, kycVerificationRequests.id))
+        .innerJoin(kycOrganisations, eq(kycVerificationRequests.orgId, kycOrganisations.id))
+        .orderBy(desc(kycVerifiedIdentityData.capturedAt))
+        .limit(500);
+
+      const records = rows.map(r => ({ ...r, hasGovernmentPhoto: !!r.governmentPhotoPath, governmentPhotoPath: undefined }));
+      res.json({ records });
+    } catch (error: any) {
+      console.error("[KYC Identity] Admin list error:", error);
+      res.status(500).json({ message: "Failed to list identity records" });
     }
   });
 

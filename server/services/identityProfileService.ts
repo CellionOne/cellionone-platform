@@ -13,6 +13,7 @@ import { eq, and, sql } from "drizzle-orm";
 import {
   kycVerifiedIdentityData,
   verifiedEntities,
+  sensitiveDataAccessLogs,
   type InsertKycVerifiedIdentityData,
 } from "@shared/schema";
 import { ObjectStorageService } from "../replit_integrations/object_storage";
@@ -30,6 +31,7 @@ export interface IdentityProfileInput {
   idTypesVerified?: string[];
   dataSource: string;
   governmentPhotoBase64?: string | null;
+  actorUserId?: string | null;
 }
 
 /**
@@ -64,11 +66,23 @@ export async function captureVerifiedIdentityProfile(input: IdentityProfileInput
     const {
       verificationRequestId, orgId, fullName, dateOfBirth,
       phone, gender, address, idTypesVerified, dataSource, governmentPhotoBase64,
+      actorUserId,
     } = input;
 
     let governmentPhotoPath: string | null = null;
     if (governmentPhotoBase64) {
       governmentPhotoPath = await storeGovernmentPhoto(governmentPhotoBase64);
+      // Durable audit log for government photo upload (sensitive data write)
+      if (governmentPhotoPath) {
+        db.insert(sensitiveDataAccessLogs).values({
+          accessorUserId: actorUserId || "system",
+          targetUserId: actorUserId || "system",
+          dataType: "government_id_photo",
+          action: "upload",
+          entityType: "kyc_verification_request",
+          entityId: String(verificationRequestId),
+        }).catch(err => console.error("[IdentityProfile] Photo upload audit log error:", err));
+      }
     }
 
     const row: InsertKycVerifiedIdentityData = {

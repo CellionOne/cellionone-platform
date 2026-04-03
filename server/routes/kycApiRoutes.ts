@@ -117,6 +117,7 @@ async function handleIdLookup(
       orgId,
       fullName: result.fullName || null,
       dateOfBirth: result.dob || null,
+      phone: result.phone || null,
       gender: result.gender || null,
       address: result.address || null,
       idTypesVerified: [idType],
@@ -133,6 +134,7 @@ async function handleIdLookup(
   };
   if (result.fullName) responseBody.fullName = result.fullName;
   if (result.dob) responseBody.dob = result.dob;
+  if (result.phone) responseBody.phone = result.phone;
   if (result.gender) responseBody.gender = result.gender;
   if (result.address) responseBody.address = result.address;
   if (!result.verified && result.reason) responseBody.reason = result.reason;

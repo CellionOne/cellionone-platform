@@ -51,6 +51,9 @@ import {
   AlertTriangle,
   ShieldAlert,
   ScrollText,
+  Fingerprint,
+  Camera,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -183,6 +186,135 @@ interface KycInvoice {
   sentAt: string | null;
   createdAt: string;
   orgName: string | null;
+}
+
+interface IdentityRecord {
+  id: number;
+  verificationRequestId: number;
+  fullName: string | null;
+  dateOfBirth: string | null;
+  phone: string | null;
+  gender: string | null;
+  idTypesVerified: string[] | null;
+  hasGovernmentPhoto: boolean;
+  capturedAt: string | null;
+  orgId: number;
+  orgName: string;
+  subjectName: string;
+  subjectEmail: string;
+  requestType: string;
+  certificateRef: string | null;
+}
+
+function IdentityRecordsTab() {
+  const [search, setSearch] = useState("");
+  const { data, isLoading } = useQuery<{ records: IdentityRecord[] }>({
+    queryKey: ["/api/kyc-service/admin/identity-records"],
+  });
+
+  const records = (data?.records || []).filter(r =>
+    !search || [r.fullName, r.subjectName, r.subjectEmail, r.orgName, r.certificateRef]
+      .some(v => v?.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <input
+            className="w-full border rounded-md py-2 pl-8 pr-3 text-sm bg-background"
+            placeholder="Search by name, email, org, or cert ref…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            data-testid="input-identity-search"
+          />
+        </div>
+        <Badge variant="secondary">{records.length} record{records.length !== 1 ? "s" : ""}</Badge>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-12"><LoadingSpinner size="lg" /></div>
+      ) : records.length === 0 ? (
+        <EmptyState icon={Fingerprint} title="No verified identity records" description={data?.records.length ? "No records match the search." : "Identity records are captured when individual verifications are approved."} />
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Verified Identity</TableHead>
+                  <TableHead>Organisation</TableHead>
+                  <TableHead>ID Types</TableHead>
+                  <TableHead>Photo</TableHead>
+                  <TableHead>Cert Ref</TableHead>
+                  <TableHead>Captured</TableHead>
+                  <TableHead className="text-right">View</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {records.map(r => (
+                  <TableRow key={r.id} data-testid={`row-identity-${r.id}`}>
+                    <TableCell>
+                      <div className="flex items-start gap-2">
+                        <Fingerprint className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="font-medium text-sm">{r.fullName || r.subjectName}</p>
+                          {r.fullName && r.fullName !== r.subjectName && (
+                            <p className="text-xs text-muted-foreground">{r.subjectName} ({r.subjectEmail})</p>
+                          )}
+                          <div className="flex gap-2 mt-0.5">
+                            {r.dateOfBirth && <span className="text-xs text-muted-foreground">DOB: {r.dateOfBirth}</span>}
+                            {r.gender && <span className="text-xs text-muted-foreground capitalize">{r.gender}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm">{r.orgName}</p>
+                      <Badge variant="secondary" className="text-xs capitalize mt-0.5">{r.requestType}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {(r.idTypesVerified || []).map(t => (
+                          <span key={t} className="text-[10px] bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full">{t}</span>
+                        ))}
+                        {(!r.idTypesVerified || r.idTypesVerified.length === 0) && <span className="text-xs text-muted-foreground">—</span>}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {r.hasGovernmentPhoto ? (
+                        <Camera className="h-4 w-4 text-green-600 dark:text-green-400" />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">None</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {r.certificateRef ? (
+                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{r.certificateRef}</code>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {r.capturedAt ? new Date(r.capturedAt).toLocaleDateString() : "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="icon" asChild data-testid={`button-view-identity-${r.id}`}>
+                        <Link href={`/kyc/org/${r.orgId}/requests/${r.verificationRequestId}`}>
+                          <Eye className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
 }
 
 export default function AdminKycOverview() {
@@ -495,11 +627,12 @@ export default function AdminKycOverview() {
                 <TabsTrigger value="invoices" data-testid="tab-invoices">Invoices</TabsTrigger>
                 <TabsTrigger value="sanctions" data-testid="tab-sanctions">
                   Sanctions
-                  {sanctionsOverview && sanctionsOverview.orgs.length > 0 && (
-                    <Badge variant="destructive" className="ml-2">{sanctionsOverview.orgs.length}</Badge>
+                  {sanctionsOverview && sanctionsOverview.orgs?.length > 0 && (
+                    <Badge variant="destructive" className="ml-2">{sanctionsOverview.orgs?.length}</Badge>
                   )}
                 </TabsTrigger>
                 <TabsTrigger value="str-reports" data-testid="tab-str-reports">STR Reports</TabsTrigger>
+                <TabsTrigger value="identity-records" data-testid="tab-identity-records">Identity Records</TabsTrigger>
               </TabsList>
 
               <TabsContent value="organisations">
@@ -947,7 +1080,7 @@ export default function AdminKycOverview() {
                   <CardContent>
                     {sanctionsLoading ? (
                       <div className="flex justify-center py-8"><LoadingSpinner /></div>
-                    ) : !sanctionsOverview || sanctionsOverview.orgs.length === 0 ? (
+                    ) : !sanctionsOverview || !sanctionsOverview.orgs?.length ? (
                       <div className="flex flex-col items-center gap-3 py-10 text-center">
                         <ShieldAlert className="h-8 w-8 text-green-500" />
                         <p className="text-sm font-medium text-green-700 dark:text-green-400">No open hits across any organisation</p>
@@ -964,7 +1097,7 @@ export default function AdminKycOverview() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {sanctionsOverview.orgs.map((org: any) => (
+                          {(sanctionsOverview?.orgs || []).map((org: any) => (
                             <TableRow key={org.orgId} data-testid={`row-sanctions-org-${org.orgId}`}>
                               <TableCell className="font-medium">{org.orgName}</TableCell>
                               <TableCell>
@@ -1027,7 +1160,7 @@ export default function AdminKycOverview() {
                   <CardContent>
                     {strLoading ? (
                       <div className="flex justify-center py-8"><LoadingSpinner /></div>
-                    ) : !adminStrReports || adminStrReports.reports.length === 0 ? (
+                    ) : !adminStrReports || !adminStrReports.reports?.length ? (
                       <div className="flex flex-col items-center gap-2 py-10 text-center">
                         <ScrollText className="h-8 w-8 text-muted-foreground" />
                         <p className="text-sm text-muted-foreground">No STR reports found matching your filters.</p>
@@ -1046,7 +1179,7 @@ export default function AdminKycOverview() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {adminStrReports.reports.map((r: any) => (
+                          {(adminStrReports?.reports || []).map((r: any) => (
                             <TableRow key={r.id} data-testid={`row-admin-str-${r.id}`}>
                               <TableCell className="text-sm">{r.orgName}</TableCell>
                               <TableCell>
@@ -1081,6 +1214,10 @@ export default function AdminKycOverview() {
                     )}
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              <TabsContent value="identity-records">
+                <IdentityRecordsTab />
               </TabsContent>
 
             </Tabs>

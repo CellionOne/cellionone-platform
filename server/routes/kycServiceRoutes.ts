@@ -129,6 +129,64 @@ function calculateRiskScore(docs: KycSubmittedDocument[], requirements: KycDocum
   return "green";
 }
 
+/**
+ * Maps a detected ID sub-type string to a Smile ID lookup call.
+ * Returns null when the sub-type is unrecognised or no ID number is present.
+ */
+interface SmileIdLookupOutcome {
+  result: smileIdService.IdLookupResult;
+  smileIdType: string;
+  dataSource: string;
+}
+
+async function attemptSmileIdLookupForApproval(
+  docs: Array<{ extractedData: unknown; detectedDocumentType: string | null }>,
+  orgId: number,
+): Promise<SmileIdLookupOutcome | null> {
+  for (const doc of docs) {
+    const raw = doc.extractedData;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const ext = raw as Record<string, unknown>;
+
+    // Extract idSubType and idNumber from ExtractionField objects
+    const idSubTypeField = ext.idSubType as { value?: unknown } | null | undefined;
+    const idNumberField = ext.idNumber as { value?: unknown } | null | undefined;
+    const idSubType = typeof idSubTypeField?.value === "string" ? idSubTypeField.value.toLowerCase() : "";
+    const idNumber = typeof idNumberField?.value === "string" ? idNumberField.value.trim() : "";
+
+    // Also check for flat bvn/nin fields stored by older extractors
+    const flatBvn = typeof ext.bvn === "string" ? ext.bvn.trim() : "";
+    const flatNin = typeof ext.nin === "string" ? ext.nin.trim() : "";
+
+    const ref = `org_approval_lookup_${orgId}_${Date.now()}`;
+
+    if ((idSubType.includes("bvn") || doc.detectedDocumentType?.toLowerCase().includes("bvn")) && (idNumber || flatBvn)) {
+      const num = idNumber || flatBvn;
+      if (num.length < 10) continue;
+      const result = await smileIdService.lookupBvn(num, ref);
+      return { result, smileIdType: "BVN", dataSource: "NIBSS BVN Database" };
+    }
+
+    if ((idSubType.includes("nin") || idSubType.includes("national_id") || doc.detectedDocumentType?.toLowerCase().includes("nin")) && (idNumber || flatNin)) {
+      const num = idNumber || flatNin;
+      if (num.length < 10) continue;
+      const result = await smileIdService.lookupNin(num, ref);
+      return { result, smileIdType: "NIN", dataSource: "NIMC National ID Database" };
+    }
+
+    if (idSubType.includes("drivers_licence") && idNumber && idNumber.length >= 10) {
+      const result = await smileIdService.lookupDriversLicence(idNumber, ref);
+      return { result, smileIdType: "DRIVERS_LICENSE", dataSource: "Nigeria FRSC Driver Database" };
+    }
+
+    if (idSubType.includes("voters_card") && idNumber && idNumber.length >= 10) {
+      const result = await smileIdService.lookupVoterId(idNumber, ref);
+      return { result, smileIdType: "VOTER_ID", dataSource: "INEC Voter Register" };
+    }
+  }
+  return null;
+}
+
 async function sendKycEmail(to: string, subject: string, html: string) {
   try {
     const { client, fromEmail } = await getResendClient();
@@ -1025,6 +1083,8 @@ export function registerKycServiceRoutes(app: Express) {
       let capturedAddress: string | null = null;
       const idTypesVerified: string[] = [];
 
+      let approvalSmileIdOutcome: SmileIdLookupOutcome | null = null;
+
       if (newStatus === "verified") {
         const identityDocs = documents.filter(d => d.status === "accepted");
         for (const doc of identityDocs) {
@@ -1047,6 +1107,26 @@ export function registerKycServiceRoutes(app: Express) {
         if (!capturedPhone && parsedNotes.phoneNumber) capturedPhone = String(parsedNotes.phoneNumber);
         if (!capturedGender && parsedNotes.gender) capturedGender = String(parsedNotes.gender);
         if (!capturedAddress && parsedNotes.address) capturedAddress = String(parsedNotes.address);
+
+        // Attempt Smile ID lookup to get canonical government identity data and photo.
+        // Smile ID data takes precedence over extracted document data where it differs.
+        try {
+          approvalSmileIdOutcome = await attemptSmileIdLookupForApproval(identityDocs, orgId);
+          if (approvalSmileIdOutcome?.result.verified) {
+            const r = approvalSmileIdOutcome.result;
+            if (r.fullName) capturedFullName = r.fullName;
+            if (r.dob) capturedDob = r.dob;
+            if (r.phone) capturedPhone = r.phone;
+            if (r.gender) capturedGender = r.gender;
+            if (r.address) capturedAddress = r.address;
+            if (approvalSmileIdOutcome.smileIdType && !idTypesVerified.includes(approvalSmileIdOutcome.smileIdType)) {
+              idTypesVerified.push(approvalSmileIdOutcome.smileIdType);
+            }
+          }
+        } catch (smileErr) {
+          console.warn("[KYC Review] Smile ID lookup during approval failed (non-blocking):", smileErr);
+          approvalSmileIdOutcome = null;
+        }
       }
 
       // Upsert verified entity registry FIRST (awaited) so the row exists before enrichment
@@ -1063,7 +1143,13 @@ export function registerKycServiceRoutes(app: Express) {
         }
       }
 
-      // Capture identity profile AFTER entity upsert so enrichVerifiedEntityRegistry can update the existing row
+      // Capture identity profile AFTER entity upsert so enrichVerifiedEntityRegistry can update the existing row.
+      // Use Smile ID government photo base64 when available (canonical source); fall back to document-review label.
+      const captureDataSource = approvalSmileIdOutcome?.dataSource ?? "document_review";
+      const capturePhotoBase64 = (approvalSmileIdOutcome?.result.verified && approvalSmileIdOutcome.result.photo)
+        ? approvalSmileIdOutcome.result.photo
+        : null;
+
       let capturedIdentityProfile: (typeof kycVerifiedIdentityData.$inferSelect) | null = null;
       if (newStatus === "verified") {
         await captureVerifiedIdentityProfile({
@@ -1075,7 +1161,8 @@ export function registerKycServiceRoutes(app: Express) {
           gender: capturedGender,
           address: capturedAddress,
           idTypesVerified: idTypesVerified.length ? idTypesVerified : undefined,
-          dataSource: "document_review",
+          dataSource: captureDataSource,
+          governmentPhotoBase64: capturePhotoBase64,
         }).catch(err => console.error("[IdentityProfile] Capture error:", err));
         // Fetch back for hasGovernmentPhoto / capturedAt
         const [idp] = await db.select().from(kycVerifiedIdentityData)

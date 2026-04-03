@@ -1240,10 +1240,10 @@ function ReportsSection({ orgId }: { orgId: string }) {
   });
 
   // Verified subjects for the subject picker
-  const { data: verifiedRequests } = useQuery<any[]>({
+  const { data: verifiedRequestsData } = useQuery<{ requests: KycVerificationRequest[]; total: number }>({
     queryKey: ["/api/kyc-service/organisations", orgId, "verification-requests"],
   });
-  const verifiedSubjects = (verifiedRequests || []).filter((r: any) => r.status === "verified");
+  const verifiedSubjects = (verifiedRequestsData?.requests || []).filter(r => r.status === "verified");
 
   const { data: reportsData, isLoading } = useQuery<{ reports: any[] }>({
     queryKey: ["/api/kyc-service/orgs", orgId, "str-reports"],

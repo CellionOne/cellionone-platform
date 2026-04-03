@@ -53,6 +53,33 @@ export const uploadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Tighter rate limiter for admin API routes (60 req / 15 min per IP)
+export const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 60,
+  message: { error: "Too many admin requests, please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Per-API-key 15-minute window rate limiter for public API routes
+// Provides a broader burst-protection layer on top of the per-minute DB check
+// in authenticateApiKey middleware.
+export const apiKeyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 200, // 200 requests per API key per 15 minutes
+  message: { error: "API rate limit exceeded. Please retry after 15 minutes.", retryAfter: 900 },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Key on the raw API key so limits are per-key, not per-IP
+    const apiKey = req.headers["x-api-key"];
+    if (apiKey && typeof apiKey === "string") return apiKey;
+    return req.ip || "unknown";
+  },
+  skip: (req) => !req.headers["x-api-key"], // Only apply to authenticated API key requests
+});
+
 export function setupSecurityMiddleware(app: Express): void {
   const isProduction = process.env.NODE_ENV === "production";
 
@@ -100,6 +127,12 @@ export function setupSecurityMiddleware(app: Express): void {
 
   // Apply general API rate limiting to /api routes
   app.use("/api", apiLimiter);
+
+  // Tighter limit for admin endpoints (60 req / 15 min per IP)
+  app.use("/api/admin", adminLimiter);
+
+  // Per-key 15-minute window for public API (KYC, Escrow) endpoints
+  app.use("/api/v1", apiKeyLimiter);
 
   // Apply stricter rate limiting to authentication routes
   app.use("/api/auth/login", authLimiter);

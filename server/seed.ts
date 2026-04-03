@@ -120,7 +120,7 @@ export async function seedDatabase() {
       console.log("==========================================================");
       console.log("SUPER ADMIN ACCOUNT CREATED");
       console.log(`Email: ${SUPER_ADMIN_EMAIL}`);
-      console.log(`Initial Password: ${initialPassword}`);
+      console.log("Password: [set via ADMIN_BOOTSTRAP_PASSWORD env var — not logged for security]");
       console.log("IMPORTANT: Change this password immediately after first login!");
       console.log("==========================================================");
     } else {

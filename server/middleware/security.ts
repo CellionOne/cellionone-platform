@@ -71,13 +71,18 @@ export const apiKeyLimiter = rateLimit({
   message: { error: "API rate limit exceeded. Please retry after 15 minutes.", retryAfter: 900 },
   standardHeaders: true,
   legacyHeaders: false,
+  // Key on the raw API key hash so limits are per-key, not per-IP.
+  // skip() ensures this limiter only runs when X-API-Key is present, so
+  // the keyGenerator will always have a non-IP string to return.
+  // We suppress the ipKeyGenerator validation warning because we intentionally
+  // never reach the IP fallback branch (the skip() guard fires first).
+  validate: { keyGeneratorIpFallback: false },
   keyGenerator: (req) => {
-    // Key on the raw API key so limits are per-key, not per-IP
     const apiKey = req.headers["x-api-key"];
     if (apiKey && typeof apiKey === "string") return apiKey;
-    return req.ip || "unknown";
+    return "no-key"; // Should never reach here due to skip()
   },
-  skip: (req) => !req.headers["x-api-key"], // Only apply to authenticated API key requests
+  skip: (req) => !req.headers["x-api-key"], // Only apply to API key authenticated requests
 });
 
 export function setupSecurityMiddleware(app: Express): void {

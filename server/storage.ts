@@ -51,6 +51,7 @@ import {
   procurementInvoices, type ProcurementInvoice, type InsertProcurementInvoice,
   procurementInvoiceItems, type ProcurementInvoiceItem, type InsertProcurementInvoiceItem,
   bankPartners, type BankPartner, type InsertBankPartner,
+  kycStrReports, type KycStrReport, type InsertKycStrReport,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -377,6 +378,12 @@ export interface IStorage {
   updateBankPartner(id: number, data: Partial<InsertBankPartner>): Promise<BankPartner | undefined>;
   activateBankPartner(id: number): Promise<BankPartner | undefined>;
   deactivateBankPartner(id: number): Promise<BankPartner | undefined>;
+
+  // STR Reports
+  createStrReport(data: InsertKycStrReport): Promise<KycStrReport>;
+  getStrReport(id: number, orgId: number): Promise<KycStrReport | undefined>;
+  listStrReports(orgId: number): Promise<KycStrReport[]>;
+  updateStrReport(id: number, data: Partial<InsertKycStrReport>): Promise<KycStrReport | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1852,6 +1859,32 @@ export class DatabaseStorage implements IStorage {
       .where(eq(bankPartners.id, id))
       .returning();
     return partner;
+  }
+
+  // STR Reports
+  async createStrReport(data: InsertKycStrReport): Promise<KycStrReport> {
+    const [report] = await db.insert(kycStrReports).values(data).returning();
+    return report;
+  }
+
+  async getStrReport(id: number, orgId: number): Promise<KycStrReport | undefined> {
+    const [report] = await db.select().from(kycStrReports)
+      .where(and(eq(kycStrReports.id, id), eq(kycStrReports.orgId, orgId)));
+    return report;
+  }
+
+  async listStrReports(orgId: number): Promise<KycStrReport[]> {
+    return db.select().from(kycStrReports)
+      .where(eq(kycStrReports.orgId, orgId))
+      .orderBy(desc(kycStrReports.createdAt));
+  }
+
+  async updateStrReport(id: number, data: Partial<InsertKycStrReport>): Promise<KycStrReport | undefined> {
+    const [report] = await db.update(kycStrReports)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(kycStrReports.id, id))
+      .returning();
+    return report;
   }
 }
 

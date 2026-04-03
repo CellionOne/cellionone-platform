@@ -176,7 +176,7 @@ function MobileNav() {
           </div>
 
           <a
-            href="mailto:hello@cellionone.com"
+            href="/contact"
             className="px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-muted transition-colors"
             data-testid="link-mobile-contact"
             onClick={() => setSheetOpen(false)}
@@ -213,7 +213,7 @@ export function PublicNav() {
             <NavDropdown label="Products" items={productsDropdown} testId="nav-products" />
             <a href="/#solutions" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-pricing">Solutions</a>
             <NavDropdown label="Resources" items={resourcesDropdown} testId="nav-resources" />
-            <a href="mailto:hello@cellionone.com" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-contact">Contact</a>
+            <a href="/contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-contact">Contact</a>
           </div>
 
           <div className="flex items-center gap-2">

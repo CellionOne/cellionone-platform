@@ -9,7 +9,7 @@
  * IMPORTANT: Smile ID branding must never appear in customer-facing responses.
  */
 import { db } from "../db";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import {
   kycVerifiedIdentityData,
   verifiedEntities,
@@ -32,7 +32,7 @@ export interface IdentityProfileInput {
   dataSource: string;
   /** Raw base64-encoded government ID photo — will be uploaded to private storage. */
   governmentPhotoBase64?: string | null;
-  /** Already-stored object storage path for a selfie or government ID photo — used directly without re-upload. */
+  /** Already-stored object storage path for a government ID photo — used directly without re-upload. */
   governmentPhotoStoredPath?: string | null;
   actorUserId?: string | null;
 }
@@ -40,19 +40,27 @@ export interface IdentityProfileInput {
 /**
  * Upload a raw base64 government ID photo to private object storage.
  * Returns the storage path, or null on failure (non-blocking).
+ * Validates the HTTP PUT response status before persisting the path.
  */
 async function storeGovernmentPhoto(base64: string): Promise<string | null> {
   try {
     const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
     const buffer = Buffer.from(cleanBase64, "base64");
-    if (buffer.length < 100) return null;
+    if (buffer.length < 100) {
+      console.warn("[IdentityProfile] Government photo too small, skipping upload");
+      return null;
+    }
     const uploadURL = await objectStorageService.getObjectEntityUploadURL();
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
-    await fetch(uploadURL, {
+    const putResponse = await fetch(uploadURL, {
       method: "PUT",
       body: buffer,
       headers: { "Content-Type": "image/jpeg" },
     });
+    if (!putResponse.ok) {
+      console.error(`[IdentityProfile] Government photo PUT failed: ${putResponse.status} ${putResponse.statusText}`);
+      return null;
+    }
     return objectPath;
   } catch (err) {
     console.error("[IdentityProfile] Government photo storage error:", err);
@@ -62,6 +70,8 @@ async function storeGovernmentPhoto(base64: string): Promise<string | null> {
 
 /**
  * Capture and persist verified identity data for a completed KYC request.
+ * Uses upsert (ON CONFLICT DO UPDATE) on verificationRequestId to ensure
+ * exactly one profile row per request regardless of retries.
  * Safe to call asynchronously — all errors are caught and logged.
  */
 export async function captureVerifiedIdentityProfile(input: IdentityProfileInput): Promise<void> {
@@ -76,7 +86,6 @@ export async function captureVerifiedIdentityProfile(input: IdentityProfileInput
     let governmentPhotoPath: string | null = governmentPhotoStoredPath || null;
 
     if (!governmentPhotoPath && governmentPhotoBase64) {
-      // Base64 provided — upload to private object storage
       governmentPhotoPath = await storeGovernmentPhoto(governmentPhotoBase64);
     }
 
@@ -106,9 +115,27 @@ export async function captureVerifiedIdentityProfile(input: IdentityProfileInput
       capturedAt: new Date(),
     };
 
-    await db.insert(kycVerifiedIdentityData).values(row);
+    // Upsert — unique constraint on verificationRequestId ensures one profile row per request.
+    // On conflict, update all mutable fields so re-captures (e.g. after Smile ID lookup succeeds
+    // on retry) always reflect the most recent and canonical identity data.
+    await db.insert(kycVerifiedIdentityData)
+      .values(row)
+      .onConflictDoUpdate({
+        target: kycVerifiedIdentityData.verificationRequestId,
+        set: {
+          fullName: row.fullName,
+          dateOfBirth: row.dateOfBirth,
+          phone: row.phone,
+          gender: row.gender,
+          address: row.address,
+          idTypesVerified: row.idTypesVerified,
+          dataSource: row.dataSource,
+          governmentPhotoPath: row.governmentPhotoPath,
+          capturedAt: row.capturedAt,
+        },
+      });
 
-    console.log(`[IdentityProfile] Captured identity profile for request ${verificationRequestId}`);
+    console.log(`[IdentityProfile] Upserted identity profile for request ${verificationRequestId} (source: ${dataSource})`);
 
     if (governmentPhotoPath || dateOfBirth) {
       await enrichVerifiedEntityRegistry(verificationRequestId, dateOfBirth || null, governmentPhotoPath);
@@ -128,7 +155,7 @@ async function enrichVerifiedEntityRegistry(
   governmentPhotoPath: string | null
 ): Promise<void> {
   try {
-    const setClause: Record<string, any> = { updatedAt: new Date() };
+    const setClause: Record<string, unknown> = { updatedAt: new Date() };
     if (dateOfBirth) setClause.dateOfBirth = dateOfBirth;
     if (governmentPhotoPath) setClause.governmentPhotoPath = governmentPhotoPath;
 
@@ -149,6 +176,7 @@ async function enrichVerifiedEntityRegistry(
 /**
  * Retrieve the stored identity profile for a verification request.
  * Returns null if not yet captured.
+ * Orders by capturedAt DESC for determinism even if multiple rows exist.
  */
 export async function getIdentityProfile(
   verificationRequestId: number
@@ -156,7 +184,9 @@ export async function getIdentityProfile(
   const [row] = await db
     .select()
     .from(kycVerifiedIdentityData)
-    .where(eq(kycVerifiedIdentityData.verificationRequestId, verificationRequestId));
+    .where(eq(kycVerifiedIdentityData.verificationRequestId, verificationRequestId))
+    .orderBy(desc(kycVerifiedIdentityData.capturedAt))
+    .limit(1);
   return row || null;
 }
 

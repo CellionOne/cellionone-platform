@@ -183,6 +183,26 @@ async function attemptSmileIdLookupForApproval(
       const result = await smileIdService.lookupVoterId(idNumber, ref);
       return { result, smileIdType: "VOTER_ID", dataSource: "INEC Voter Register" };
     }
+
+    // Passport — idSubType often contains "passport" or detectedDocumentType may say "international_passport"
+    const passportSubType = idSubType.includes("passport");
+    const passportDocType = doc.detectedDocumentType?.toLowerCase().includes("passport");
+    if ((passportSubType || passportDocType) && idNumber && idNumber.length >= 5) {
+      // Optional enrichment: expiry date and name fields from extraction
+      const expiryField = ext.expiryDate as { value?: unknown } | null | undefined;
+      const firstNameField = ext.firstName as { value?: unknown } | null | undefined;
+      const lastNameField = ext.lastName as { value?: unknown } | null | undefined;
+      const dobField = ext.dateOfBirth as { value?: unknown } | null | undefined;
+      const expiryDate = typeof expiryField?.value === "string" ? expiryField.value : undefined;
+      const firstName = typeof firstNameField?.value === "string" ? firstNameField.value : undefined;
+      const lastName = typeof lastNameField?.value === "string" ? lastNameField.value : undefined;
+      const dob = typeof dobField?.value === "string" ? dobField.value : undefined;
+      const result = await smileIdService.lookupPassport(
+        idNumber, ref, expiryDate,
+        (firstName || lastName || dob) ? { firstName, lastName, dob } : undefined,
+      );
+      return { result, smileIdType: "PASSPORT", dataSource: "NIS Passport Database" };
+    }
   }
   return null;
 }

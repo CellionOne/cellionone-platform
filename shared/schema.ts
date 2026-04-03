@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, json, jsonb, serial, index, check } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, json, jsonb, serial, index, uniqueIndex, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1533,7 +1533,7 @@ export const kycVerifiedIdentityData = pgTable("kyc_verified_identity_data", {
   capturedAt: timestamp("captured_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
-  index("idx_kvid_request").on(table.verificationRequestId),
+  uniqueIndex("idx_kvid_request_unique").on(table.verificationRequestId),
   index("idx_kvid_org").on(table.orgId),
 ]);
 

@@ -52,7 +52,7 @@ export function usePageMeta({ title, description, canonicalPath }: PageMeta) {
     canonical.setAttribute("href", canonicalUrl);
 
     return () => {
-      document.title = "Cellion One \u2014 Company Incorporation & KYC Verification in Nigeria";
+      document.title = "Cellion One \u2014 Nigeria\u2019s Digital Infrastructure for Trust, Compliance & Commerce";
     };
   }, [title, description, canonicalPath]);
 }

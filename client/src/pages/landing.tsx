@@ -32,19 +32,24 @@ import {
   Mail,
   Code2,
   Globe,
+  KeyRound,
+  Lock,
+  Users,
+  Terminal,
+  Fingerprint,
 } from "lucide-react";
 import { PublicNav } from "@/components/public-nav";
 import { PublicFooter } from "@/components/public-footer";
 import { usePageMeta } from "@/hooks/use-page-meta";
 
 const trustStats = [
-  { value: "500+", label: "Companies Incorporated" },
-  { value: "10,000+", label: "Verifications Completed" },
-  { value: "50+", label: "Organisations Onboard" },
-  { value: "99.9%", label: "Uptime" },
+  { value: "500+", label: "Businesses Formed" },
+  { value: "10,000+", label: "Identities Verified" },
+  { value: "50+", label: "Platforms & Orgs Onboard" },
+  { value: "99.9%", label: "API Uptime" },
 ];
 
-const solutionPaths = [
+const businessSolutions = [
   {
     icon: Building2,
     title: "Incorporate Your Company",
@@ -76,10 +81,27 @@ const solutionPaths = [
     cta: "Register Trademark",
     href: "/register",
   },
+];
+
+const platformSolutions = [
+  {
+    icon: Fingerprint,
+    title: "KYC-as-a-Service API",
+    description: "Add identity verification to any product with a few API calls. BVN/NIN validation, document checks, AML screening, and hosted verification sessions — all via REST.",
+    cta: "Read the Docs",
+    href: "/api-docs",
+  },
+  {
+    icon: Lock,
+    title: "Escrow-as-a-Service API",
+    description: "Hold and release funds programmatically for any transaction your platform handles. Auto-generates Paystack payment links and delivers webhook confirmations on every status change.",
+    cta: "Read the Docs",
+    href: "/api-docs",
+  },
   {
     icon: ShieldCheck,
     title: "Identity Verification",
-    description: "Verify employees, directors, and stakeholders — BVN/NIN validation, biometrics, document checks, and AML screening.",
+    description: "Verify employees, directors, and stakeholders — BVN/NIN validation, biometrics, document checks, and AML screening, with audit-ready certificates.",
     price: "₦10,000/person",
     cta: "Start Verifying",
     href: "/register",
@@ -104,6 +126,14 @@ const faqItems = [
     answer: "You'll need valid government-issued IDs (International Passport, Driver's Licence, or National ID) for all directors and shareholders, passport photographs, proof of address (utility bill or bank statement), and your proposed company details including preferred names, share capital structure, and registered office address."
   },
   {
+    question: "Can I integrate Cellion One's KYC service into my own platform?",
+    answer: "Yes. Our KYC-as-a-Service API lets you submit verification requests programmatically, track statuses via webhooks, and generate hosted verification sessions — shareable links where your users complete identity verification without needing a Cellion One account. You manage everything from an organisation dashboard with prepaid API credits. See the API Docs for full details on endpoints, authentication, and pricing."
+  },
+  {
+    question: "What is Escrow-as-a-Service?",
+    answer: "Escrow-as-a-Service lets your platform hold buyer funds in a protected escrow account until both parties confirm fulfilment. You create a transaction via our API, share the Paystack payment link with the buyer, and release funds to the seller when the service or goods are delivered — or raise a dispute if something goes wrong. A 1.5% service fee (min ₦1,500, max ₦50,000) applies per transaction."
+  },
+  {
     question: "How does the KYC verification service work?",
     answer: "Our KYC service lets organisations verify the identity of employees, suppliers, and other stakeholders. You create an organisation on the platform, invite team members, and submit verification requests. Each request goes through BVN/NIN validation, document checks, biometric verification, and AML screening, with results delivered as audit-ready certificates."
   },
@@ -113,10 +143,16 @@ const faqItems = [
   },
 ];
 
-const steps = [
-  { step: "1", title: "Create & Verify", desc: "Create your account and verify your identity in minutes" },
-  { step: "2", title: "Tell Us What You Need", desc: "Tell us what you need — incorporation, verification, registered office, or compliance" },
-  { step: "3", title: "We Handle the Rest", desc: "Track everything from your dashboard while we deliver" },
+const businessSteps = [
+  { step: "1", title: "Apply & Get Verified", desc: "Create your account and verify your identity in minutes — BVN, NIN, and document checks included." },
+  { step: "2", title: "Choose Your Service", desc: "Incorporation, registered office, SCUML certification, trademark — or a combination. We guide you through." },
+  { step: "3", title: "We Handle the Rest", desc: "Track every milestone from your dashboard while our licensed lawyers and compliance team deliver." },
+];
+
+const developerSteps = [
+  { step: "1", title: "Create an Account", desc: "Register on Cellion One, create a KYC organisation, and generate an API key from your dashboard." },
+  { step: "2", title: "Integrate in Minutes", desc: "Call our REST API — KYC verification, Escrow transactions, and webhooks are all fully documented with examples." },
+  { step: "3", title: "Go Live with Confidence", desc: "Monitor API calls, manage prepaid credits, review verification results, and receive real-time webhook alerts." },
 ];
 
 export function ContactSection() {
@@ -211,6 +247,7 @@ export function ContactSection() {
                       <SelectItem value="General Inquiry">General Inquiry</SelectItem>
                       <SelectItem value="Incorporation Help">Incorporation Help</SelectItem>
                       <SelectItem value="KYC/Verification">KYC/Verification</SelectItem>
+                      <SelectItem value="API Integration">API Integration</SelectItem>
                       <SelectItem value="Partnership Enquiry">Partnership Enquiry</SelectItem>
                       <SelectItem value="Technical Support">Technical Support</SelectItem>
                       <SelectItem value="Other">Other</SelectItem>
@@ -250,9 +287,11 @@ export function ContactSection() {
 }
 
 export default function LandingPage() {
+  const [howItWorksTab, setHowItWorksTab] = useState<"business" | "developer">("business");
+
   usePageMeta({
-    title: "Cellion One — Register and Run a Compliant Business in Nigeria",
-    description: "The smarter way to start and run a compliant business in Nigeria. From company registration to identity verification — we handle the regulatory complexity so you can focus on building your business.",
+    title: "Cellion One — Nigeria's Digital Infrastructure for Trust, Compliance & Commerce",
+    description: "KYC-as-a-Service, Escrow-as-a-Service, company incorporation, and compliance tools — the digital infrastructure powering Nigerian businesses and the platforms that serve them.",
     canonicalPath: "/",
   });
 
@@ -264,7 +303,7 @@ export default function LandingPage() {
       legalName: "Cellion Platforms Nigeria Limited",
       url: "https://cellionone.com",
       logo: "https://cellionone.com/icon-512.svg",
-      description: "The smarter way to start and run a compliant business in Nigeria. From company registration to identity verification, SCUML certification, and trademark registration — all through one platform.",
+      description: "Nigeria's digital infrastructure for trust, compliance, and verified commerce. KYC-as-a-Service, Escrow-as-a-Service, company incorporation, AML monitoring, and compliance tools — all accessible via dashboard or public API.",
       contactPoint: {
         "@type": "ContactPoint",
         email: "hello@cellionone.com",
@@ -316,7 +355,28 @@ export default function LandingPage() {
       {
         "@context": "https://schema.org",
         "@type": "Service",
-        serviceType: "KYC Employee Verification",
+        serviceType: "KYC-as-a-Service API",
+        provider: { "@type": "Organization", name: "Cellion One" },
+        description: "Submit identity verification requests programmatically via REST API, receive webhook callbacks, generate hosted verification sessions, and automate compliance workflows.",
+        areaServed: { "@type": "Country", name: "Nigeria" },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Service",
+        serviceType: "Escrow-as-a-Service API",
+        provider: { "@type": "Organization", name: "Cellion One" },
+        description: "Hold and release funds programmatically for any transaction via REST API. Creates Paystack payment links and delivers webhook notifications on funding, release, and dispute events.",
+        areaServed: { "@type": "Country", name: "Nigeria" },
+        offers: {
+          "@type": "Offer",
+          priceCurrency: "NGN",
+          description: "1.5% service fee per transaction (min ₦1,500, max ₦50,000)",
+        },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "Service",
+        serviceType: "KYC Identity Verification",
         provider: { "@type": "Organization", name: "Cellion One" },
         description: "Individual identity verification including BVN/NIN validation, document checks, biometrics, and AML screening.",
         areaServed: { "@type": "Country", name: "Nigeria" },
@@ -339,14 +399,6 @@ export default function LandingPage() {
           price: "100000",
         },
       },
-      {
-        "@context": "https://schema.org",
-        "@type": "Service",
-        serviceType: "KYC API Integration",
-        provider: { "@type": "Organization", name: "Cellion One" },
-        description: "Submit verification requests programmatically via REST API, receive webhook callbacks, and automate compliance workflows.",
-        areaServed: { "@type": "Country", name: "Nigeria" },
-      },
     ];
 
     const schemas = [organizationSchema, webSiteSchema, faqPageSchema, ...serviceSchemas];
@@ -367,11 +419,14 @@ export default function LandingPage() {
     };
   }, []);
 
+  const activeSteps = howItWorksTab === "business" ? businessSteps : developerSteps;
+
   return (
     <div className="min-h-screen bg-background">
       <PublicNav />
 
       <main>
+        {/* ─── Hero ─────────────────────────────────────────────────────────── */}
         <section className="relative pt-36 pb-24 px-4 sm:px-6 lg:px-8">
           <div className="absolute inset-0 -z-10 overflow-hidden">
             <div className="absolute top-1/3 left-1/3 w-[500px] h-[500px] bg-primary/8 rounded-full blur-[120px]" />
@@ -386,13 +441,13 @@ export default function LandingPage() {
 
             <div data-testid="hero-text-container">
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight tracking-tight" data-testid="hero-headline">
-                The Smarter Way to Start and Run a{" "}
-                <span className="text-primary">Compliant Business in Nigeria</span>
+                Nigeria's Digital Infrastructure for{" "}
+                <span className="text-primary">Trust, Compliance & Commerce</span>
               </h1>
             </div>
 
             <p className="text-lg sm:text-xl text-muted-foreground mt-6 max-w-2xl mx-auto leading-relaxed" data-testid="hero-subtitle">
-              From company registration to identity verification — we handle the regulatory complexity so you can focus on building your business.
+              From company formation and KYC verification to Escrow-as-a-Service — the compliance and transaction rails powering Nigerian businesses and the platforms that serve them.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center mt-10">
@@ -405,61 +460,114 @@ export default function LandingPage() {
               <Button size="lg" variant="ghost" asChild className="gap-2 text-base text-muted-foreground hover:text-foreground" data-testid="button-hero-secondary">
                 <a href="/api-docs">
                   <Code2 className="h-4 w-4" />
-                  View API Docs
+                  Explore the API
                 </a>
               </Button>
             </div>
 
             <p className="text-sm text-muted-foreground mt-8" data-testid="text-trust-line">
-              Trusted by 500+ companies across Nigeria
+              Trusted by 500+ businesses and 50+ platforms across Nigeria
             </p>
           </div>
         </section>
 
+        {/* ─── Solutions ────────────────────────────────────────────────────── */}
         <section id="solutions" className="py-24 px-4 sm:px-6 lg:px-8">
           <div className="max-w-5xl mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-3xl sm:text-4xl font-bold tracking-tight" data-testid="text-solutions-heading">
-                What does your business need?
+                What can Cellion One do for you?
               </h2>
               <p className="text-muted-foreground mt-4 text-lg max-w-xl mx-auto">
-                Choose the service that fits your needs. We'll guide you from there.
+                Whether you're forming a company or building a platform that needs compliance infrastructure — we have the tools.
               </p>
             </div>
 
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {solutionPaths.map((path, index) => (
-                <Card
-                  key={index}
-                  className="group relative border border-border/60 bg-card/50 hover:border-primary/30 hover:shadow-lg transition-all duration-300"
-                  data-testid={`card-solution-${index}`}
-                >
-                  <CardContent className="p-8 flex flex-col h-full">
-                    <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center mb-5 group-hover:bg-primary/15 transition-colors">
-                      <path.icon className="h-6 w-6 text-primary" />
-                    </div>
-                    <h3 className="font-semibold text-lg mb-2">{path.title}</h3>
-                    <p className="text-muted-foreground text-sm leading-relaxed flex-1">
-                      {path.description}
-                    </p>
-                    {"price" in path && path.price && (
-                      <p className="text-sm font-medium text-primary mt-3">{path.price}</p>
-                    )}
-                    <a
-                      href={path.href}
-                      className="inline-flex items-center gap-1.5 text-sm font-medium text-primary mt-4 group-hover:gap-2.5 transition-all"
-                      data-testid={`link-solution-${index}`}
-                    >
-                      {path.cta}
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </a>
-                  </CardContent>
-                </Card>
-              ))}
+            {/* For Businesses */}
+            <div className="mb-12">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Users className="h-4 w-4 text-primary" />
+                </div>
+                <h3 className="text-lg font-semibold" data-testid="text-business-solutions-heading">For Businesses</h3>
+                <div className="flex-1 h-px bg-border/60" />
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {businessSolutions.map((path, index) => (
+                  <Card
+                    key={index}
+                    className="group relative border border-border/60 bg-card/50 hover:border-primary/30 hover:shadow-lg transition-all duration-300"
+                    data-testid={`card-business-solution-${index}`}
+                  >
+                    <CardContent className="p-6 flex flex-col h-full">
+                      <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/15 transition-colors">
+                        <path.icon className="h-5 w-5 text-primary" />
+                      </div>
+                      <h3 className="font-semibold text-base mb-2">{path.title}</h3>
+                      <p className="text-muted-foreground text-sm leading-relaxed flex-1">
+                        {path.description}
+                      </p>
+                      {"price" in path && path.price && (
+                        <p className="text-sm font-medium text-primary mt-3">{path.price}</p>
+                      )}
+                      <a
+                        href={path.href}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium text-primary mt-4 group-hover:gap-2.5 transition-all"
+                        data-testid={`link-business-solution-${index}`}
+                      >
+                        {path.cta}
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </a>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            {/* For Platforms & Developers */}
+            <div>
+              <div className="flex items-center gap-3 mb-6">
+                <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Terminal className="h-4 w-4 text-primary" />
+                </div>
+                <h3 className="text-lg font-semibold" data-testid="text-platform-solutions-heading">For Platforms & Developers</h3>
+                <div className="flex-1 h-px bg-border/60" />
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {platformSolutions.map((path, index) => (
+                  <Card
+                    key={index}
+                    className="group relative border border-border/60 bg-card/50 hover:border-primary/30 hover:shadow-lg transition-all duration-300"
+                    data-testid={`card-platform-solution-${index}`}
+                  >
+                    <CardContent className="p-6 flex flex-col h-full">
+                      <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/15 transition-colors">
+                        <path.icon className="h-5 w-5 text-primary" />
+                      </div>
+                      <h3 className="font-semibold text-base mb-2">{path.title}</h3>
+                      <p className="text-muted-foreground text-sm leading-relaxed flex-1">
+                        {path.description}
+                      </p>
+                      {"price" in path && path.price && (
+                        <p className="text-sm font-medium text-primary mt-3">{path.price}</p>
+                      )}
+                      <a
+                        href={path.href}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium text-primary mt-4 group-hover:gap-2.5 transition-all"
+                        data-testid={`link-platform-solution-${index}`}
+                      >
+                        {path.cta}
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </a>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             </div>
           </div>
         </section>
 
+        {/* ─── Trust bar ────────────────────────────────────────────────────── */}
         <section className="border-t border-b border-border/40 py-12 px-4 sm:px-6 lg:px-8" data-testid="trust-bar">
           <div className="max-w-4xl mx-auto">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
@@ -473,18 +581,49 @@ export default function LandingPage() {
           </div>
         </section>
 
+        {/* ─── How It Works ─────────────────────────────────────────────────── */}
         <section id="how-it-works" className="py-24 px-4 sm:px-6 lg:px-8">
           <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-16">
+            <div className="text-center mb-10">
               <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">How It Works</h2>
               <p className="text-muted-foreground mt-4 text-lg">
-                Three simple steps to get started
+                Three steps — whether you're a business or a developer
               </p>
             </div>
 
+            {/* Tab toggle */}
+            <div className="flex justify-center mb-12">
+              <div className="inline-flex rounded-xl border border-border/60 bg-muted/30 p-1 gap-1">
+                <button
+                  onClick={() => setHowItWorksTab("business")}
+                  className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${
+                    howItWorksTab === "business"
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  data-testid="tab-how-business"
+                >
+                  <Users className="h-4 w-4" />
+                  For Businesses
+                </button>
+                <button
+                  onClick={() => setHowItWorksTab("developer")}
+                  className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${
+                    howItWorksTab === "developer"
+                      ? "bg-background shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  data-testid="tab-how-developer"
+                >
+                  <Terminal className="h-4 w-4" />
+                  For Developers
+                </button>
+              </div>
+            </div>
+
             <div className="grid md:grid-cols-3 gap-12 md:gap-8">
-              {steps.map((item, index) => (
-                <div key={index} className="relative text-center">
+              {activeSteps.map((item, index) => (
+                <div key={`${howItWorksTab}-${index}`} className="relative text-center">
                   <div className="h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold mx-auto mb-5">
                     {item.step}
                   </div>
@@ -496,9 +635,21 @@ export default function LandingPage() {
                 </div>
               ))}
             </div>
+
+            {howItWorksTab === "developer" && (
+              <div className="mt-10 text-center">
+                <Button variant="outline" asChild className="gap-2" data-testid="button-how-view-api-docs">
+                  <a href="/api-docs">
+                    <Code2 className="h-4 w-4" />
+                    View Full API Documentation
+                  </a>
+                </Button>
+              </div>
+            )}
           </div>
         </section>
 
+        {/* ─── FAQ ──────────────────────────────────────────────────────────── */}
         <section id="faq" className="py-24 px-4 sm:px-6 lg:px-8 bg-muted/20">
           <div className="max-w-2xl mx-auto">
             <div className="text-center mb-16">
@@ -523,20 +674,29 @@ export default function LandingPage() {
           </div>
         </section>
 
+        {/* ─── CTA ──────────────────────────────────────────────────────────── */}
         <section className="py-24 px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl mx-auto text-center">
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
-              Start building your verified business today
+              Start building on Cellion One today
             </h2>
             <p className="text-lg text-muted-foreground mb-8">
-              Join hundreds of founders who trust Cellion One to handle the regulatory complexity.
+              Whether you're forming a company or integrating compliance infrastructure into your platform — this is where you start.
             </p>
-            <Button size="lg" asChild className="gap-2 text-base px-8 h-12" data-testid="button-cta-start">
-              <a href="/register">
-                Get Started Today
-                <ArrowRight className="h-4 w-4" />
-              </a>
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <Button size="lg" asChild className="gap-2 text-base px-8 h-12" data-testid="button-cta-start">
+                <a href="/register">
+                  Get Started
+                  <ArrowRight className="h-4 w-4" />
+                </a>
+              </Button>
+              <Button size="lg" variant="outline" asChild className="gap-2 text-base px-8 h-12" data-testid="button-cta-api-docs">
+                <a href="/api-docs">
+                  <Code2 className="h-4 w-4" />
+                  Explore the API
+                </a>
+              </Button>
+            </div>
             <p className="text-sm text-muted-foreground mt-6">
               Have questions?{" "}
               <a href="mailto:hello@cellionone.com" className="text-primary hover:underline" data-testid="link-contact-email">

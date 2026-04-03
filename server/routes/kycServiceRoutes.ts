@@ -3942,7 +3942,7 @@ export function registerKycServiceRoutes(app: Express) {
 
       const [updated] = await db.update(kycStrReports)
         .set(updateData)
-        .where(eq(kycStrReports.id, reportId))
+        .where(and(eq(kycStrReports.id, reportId), eq(kycStrReports.orgId, orgId)))
         .returning();
 
       res.json(updated);

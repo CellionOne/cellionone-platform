@@ -383,7 +383,7 @@ export interface IStorage {
   createStrReport(data: InsertKycStrReport): Promise<KycStrReport>;
   getStrReport(id: number, orgId: number): Promise<KycStrReport | undefined>;
   listStrReports(orgId: number): Promise<KycStrReport[]>;
-  updateStrReport(id: number, data: Partial<InsertKycStrReport>): Promise<KycStrReport | undefined>;
+  updateStrReport(id: number, orgId: number, data: Partial<InsertKycStrReport>): Promise<KycStrReport | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1879,10 +1879,10 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(kycStrReports.createdAt));
   }
 
-  async updateStrReport(id: number, data: Partial<InsertKycStrReport>): Promise<KycStrReport | undefined> {
+  async updateStrReport(id: number, orgId: number, data: Partial<InsertKycStrReport>): Promise<KycStrReport | undefined> {
     const [report] = await db.update(kycStrReports)
       .set({ ...data, updatedAt: new Date() })
-      .where(eq(kycStrReports.id, id))
+      .where(and(eq(kycStrReports.id, id), eq(kycStrReports.orgId, orgId)))
       .returning();
     return report;
   }

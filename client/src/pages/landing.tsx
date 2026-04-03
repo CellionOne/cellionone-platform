@@ -32,7 +32,6 @@ import {
   Mail,
   Code2,
   Globe,
-  KeyRound,
   Lock,
   Users,
   Terminal,
@@ -144,15 +143,15 @@ const faqItems = [
 ];
 
 const businessSteps = [
-  { step: "1", title: "Apply & Get Verified", desc: "Create your account and verify your identity in minutes — BVN, NIN, and document checks included." },
-  { step: "2", title: "Choose Your Service", desc: "Incorporation, registered office, SCUML certification, trademark — or a combination. We guide you through." },
-  { step: "3", title: "We Handle the Rest", desc: "Track every milestone from your dashboard while our licensed lawyers and compliance team deliver." },
+  { step: "1", title: "Apply", desc: "Create your account and submit your application in minutes — identity verification included at sign-up." },
+  { step: "2", title: "Get Verified", desc: "Our licensed lawyers and compliance team handle all filings, follow-ups, and regulatory submissions on your behalf." },
+  { step: "3", title: "Stay Compliant", desc: "Auto-scheduled compliance tasks, deadline reminders, and annual return tracking keep your business on track year-round." },
 ];
 
 const developerSteps = [
-  { step: "1", title: "Create an Account", desc: "Register on Cellion One, create a KYC organisation, and generate an API key from your dashboard." },
-  { step: "2", title: "Integrate in Minutes", desc: "Call our REST API — KYC verification, Escrow transactions, and webhooks are all fully documented with examples." },
-  { step: "3", title: "Go Live with Confidence", desc: "Monitor API calls, manage prepaid credits, review verification results, and receive real-time webhook alerts." },
+  { step: "1", title: "Get API Key", desc: "Register on Cellion One, create a KYC organisation or escrow account, and generate your API key from the dashboard." },
+  { step: "2", title: "Integrate", desc: "Call our REST API — KYC verification, Escrow transactions, hosted verification sessions, and webhooks are fully documented." },
+  { step: "3", title: "Go Live", desc: "Monitor API calls, manage prepaid credits, review results, and receive real-time webhook alerts for every status change." },
 ];
 
 export function ContactSection() {

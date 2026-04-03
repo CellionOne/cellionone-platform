@@ -122,9 +122,11 @@ async function handleIdLookup(
     console.error("[KYC API] Audit log error (non-blocking):", auditErr);
   }
 
-  // Capture verified identity profile (including government photo if available)
+  // Capture verified identity profile (including government photo if available).
+  // Awaited to ensure verifiedIdentity is present when the caller immediately
+  // fetches GET /api/v1/kyc/requests/:requestId after this response.
   if (result.verified) {
-    captureVerifiedIdentityProfile({
+    await captureVerifiedIdentityProfile({
       verificationRequestId: insertedRow.id,
       orgId,
       fullName: result.fullName || null,
@@ -135,7 +137,7 @@ async function handleIdLookup(
       idTypesVerified: [idType],
       dataSource: idTypeToDataSource(idType),
       governmentPhotoBase64: result.photo || null,
-    }).catch(err => console.error("[KYC API] Identity profile capture error:", err));
+    });
   }
 
   const responseBody: Record<string, unknown> = {

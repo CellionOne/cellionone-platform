@@ -147,7 +147,7 @@ Sensitive field encryption uses AES-256-GCM with a dedicated `ENCRYPTION_KEY` se
 
 | ID | Risk | Severity | Action |
 |----|------|----------|--------|
-| OR-1 | `ENCRYPTION_KEY` not set — falls back to SESSION_SECRET | HIGH | Set dedicated `ENCRYPTION_KEY` secret |
+| OR-1 | ~~`ENCRYPTION_KEY` falls back to SESSION_SECRET~~ | ~~HIGH~~ | **RESOLVED** — `ENCRYPTION_KEY` is now required exclusively; production startup aborts if absent |
 | OR-2 | brace-expansion 2.0.2 DoS (CVE-2026-33750) | MODERATE | Transitive dep — upgrade parent when available |
 | OR-3 | minimatch 9.0.x multiple CVEs | HIGH | Transitive dep (node_modules only, not runtime critical path) |
 | OR-4 | HTML template string interpolation in email bodies | MEDIUM | Add lightweight HTML escaper at next email template refactor |

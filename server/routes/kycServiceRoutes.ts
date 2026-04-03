@@ -3818,7 +3818,10 @@ export function registerKycServiceRoutes(app: Express) {
       })
         .from(kycSanctionsLogs)
         .innerJoin(kycOrganisations, eq(kycSanctionsLogs.orgId, kycOrganisations.id))
-        .where(eq(kycSanctionsLogs.reviewStatus, "open"))
+        .where(and(
+          eq(kycSanctionsLogs.screeningResult, "alert"),
+          eq(kycSanctionsLogs.reviewStatus, "open"),
+        ))
         .groupBy(kycSanctionsLogs.orgId, kycOrganisations.name)
         .orderBy(desc(sql`MAX(${kycSanctionsLogs.createdAt})`));
 

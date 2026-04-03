@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq, or, and, sql } from "drizzle-orm";
+import { eq, or, and, sql, type SQL } from "drizzle-orm";
 import {
   verifiedEntities,
   kycSupplierProfiles,
@@ -27,13 +27,31 @@ function tryDecryptAndHash(encryptedValue: string): string | null {
   }
 }
 
-function extractIdFromDocuments(documents: any[]): { bvn?: string; nin?: string } {
+interface ExtractedDocumentData {
+  bvn?: string | number;
+  nin?: string | number;
+  BVN?: string | number;
+  NIN?: string | number;
+  id_number?: string | number;
+  [key: string]: unknown;
+}
+
+function parseExtractedData(raw: unknown): ExtractedDocumentData | null {
+  if (!raw) return null;
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw) as ExtractedDocumentData; } catch { return null; }
+  }
+  if (typeof raw === "object") return raw as ExtractedDocumentData;
+  return null;
+}
+
+function extractIdFromDocuments(
+  documents: { extractedData: unknown; detectedDocumentType: string | null }[]
+): { bvn?: string; nin?: string } {
   const result: { bvn?: string; nin?: string } = {};
   for (const doc of documents) {
-    if (!doc.extractedData) continue;
-    const data = typeof doc.extractedData === "string"
-      ? JSON.parse(doc.extractedData)
-      : doc.extractedData;
+    const data = parseExtractedData(doc.extractedData);
+    if (!data) continue;
 
     if (data.bvn && !result.bvn) result.bvn = String(data.bvn).trim();
     if (data.nin && !result.nin) result.nin = String(data.nin).trim();
@@ -168,7 +186,7 @@ async function upsertIndividual(
     if (!ninHash && extracted.nin) ninHash = hashValue(extracted.nin);
   }
 
-  const matchConditions: any[] = [];
+  const matchConditions: SQL<boolean>[] = [];
   if (bvnHash) matchConditions.push(eq(verifiedEntities.bvnHash, bvnHash));
   if (ninHash) matchConditions.push(eq(verifiedEntities.ninHash, ninHash));
 

@@ -1028,13 +1028,17 @@ export function registerKycServiceRoutes(app: Express) {
       if (newStatus === "verified") {
         const identityDocs = documents.filter(d => d.status === "accepted");
         for (const doc of identityDocs) {
-          const ext = doc.extractedData as Record<string, any> | null;
+          const rawExt = doc.extractedData;
+          const ext = (rawExt && typeof rawExt === "object" && !Array.isArray(rawExt))
+            ? (rawExt as Record<string, unknown>)
+            : null;
           if (ext) {
-            if (!capturedFullName && (ext.name || ext.fullName)) capturedFullName = String(ext.name || ext.fullName);
-            if (!capturedDob && (ext.dateOfBirth || ext.dob || ext.DOB)) capturedDob = String(ext.dateOfBirth || ext.dob || ext.DOB);
-            if (!capturedPhone && (ext.phone || ext.phoneNumber || ext.PhoneNumber)) capturedPhone = String(ext.phone || ext.phoneNumber || ext.PhoneNumber);
-            if (!capturedGender && (ext.gender || ext.Gender)) capturedGender = String(ext.gender || ext.Gender);
-            if (!capturedAddress && (ext.address || ext.Address)) capturedAddress = String(ext.address || ext.Address);
+            const sv = (v: unknown) => (v ? String(v) : undefined);
+            if (!capturedFullName && (ext.name || ext.fullName)) capturedFullName = sv(ext.name ?? ext.fullName) || null;
+            if (!capturedDob && (ext.dateOfBirth || ext.dob || ext.DOB)) capturedDob = sv(ext.dateOfBirth ?? ext.dob ?? ext.DOB) || null;
+            if (!capturedPhone && (ext.phone || ext.phoneNumber || ext.PhoneNumber)) capturedPhone = sv(ext.phone ?? ext.phoneNumber ?? ext.PhoneNumber) || null;
+            if (!capturedGender && (ext.gender || ext.Gender)) capturedGender = sv(ext.gender ?? ext.Gender) || null;
+            if (!capturedAddress && (ext.address || ext.Address)) capturedAddress = sv(ext.address ?? ext.Address) || null;
           }
           if (doc.detectedDocumentType) idTypesVerified.push(doc.detectedDocumentType);
         }
@@ -1045,8 +1049,37 @@ export function registerKycServiceRoutes(app: Express) {
         if (!capturedAddress && parsedNotes.address) capturedAddress = String(parsedNotes.address);
       }
 
-      // Capture identity profile BEFORE firing webhook so hasGovernmentPhoto is available
-      let capturedIdentityProfile: typeof kycVerifiedIdentityData.$inferSelect | null = null;
+      // Find selfie/portrait document stored path for identity profile photo
+      let selfieStoredPath: string | null = null;
+      if (newStatus === "verified") {
+        const selfieDoc = documents.find(d =>
+          d.status === "accepted" && (
+            d.detectedDocumentType === "selfie" ||
+            d.detectedDocumentType === "portrait" ||
+            (d.detectedDocumentType || "").toLowerCase().includes("selfie") ||
+            (d.detectedDocumentType || "").toLowerCase().includes("portrait") ||
+            (d.mimeType || "").startsWith("image/")
+          )
+        );
+        selfieStoredPath = selfieDoc?.filePath || null;
+      }
+
+      // Upsert verified entity registry FIRST (awaited) so the row exists before enrichment
+      if (newStatus === "verified") {
+        try {
+          await upsertVerifiedEntity({
+            request: updated,
+            orgId,
+            riskScore,
+            amlScreeningStatus: null,
+          });
+        } catch (entityErr) {
+          console.error("[VerifiedEntity] Upsert error (non-blocking):", entityErr);
+        }
+      }
+
+      // Capture identity profile AFTER entity upsert so enrichVerifiedEntityRegistry can update the existing row
+      let capturedIdentityProfile: (typeof kycVerifiedIdentityData.$inferSelect) | null = null;
       if (newStatus === "verified") {
         await captureVerifiedIdentityProfile({
           verificationRequestId: reqId,
@@ -1058,6 +1091,7 @@ export function registerKycServiceRoutes(app: Express) {
           address: capturedAddress,
           idTypesVerified: idTypesVerified.length ? idTypesVerified : undefined,
           dataSource: "document_review",
+          governmentPhotoStoredPath: selfieStoredPath,
         }).catch(err => console.error("[IdentityProfile] Capture error:", err));
         // Fetch back for hasGovernmentPhoto / capturedAt
         const [idp] = await db.select().from(kycVerifiedIdentityData)
@@ -1096,15 +1130,6 @@ export function registerKycServiceRoutes(app: Express) {
         newStatus === "verified" ? "verification.completed" : "verification.failed",
         webhookPayload
       ).catch(err => console.error("[KYC Webhook] Delivery error:", err));
-
-      if (newStatus === "verified") {
-        upsertVerifiedEntity({
-          request: updated,
-          orgId,
-          riskScore,
-          amlScreeningStatus: null,
-        }).catch(err => console.error("[VerifiedEntity] Upsert error:", err));
-      }
 
       res.json(updated);
     } catch (error: any) {
@@ -3421,8 +3446,9 @@ export function registerKycServiceRoutes(app: Express) {
       if (finalStatus === "verified") {
         try {
           const amlStatus = amlResult ? ((amlResult as smileIdService.AmlCheckResult).isHit ? "hit" : "clear") : null;
+          const requestForRegistry: KycVerificationRequest = { ...request, status: finalStatus, updatedAt: new Date() };
           await upsertVerifiedEntity({
-            request: { ...request, status: finalStatus, updatedAt: new Date() } as any,
+            request: requestForRegistry,
             orgId: session.orgId,
             amlScreeningStatus: amlStatus,
           });
@@ -3438,13 +3464,17 @@ export function registerKycServiceRoutes(app: Express) {
           extractedData: kycSubmittedDocuments.extractedData,
         }).from(kycSubmittedDocuments).where(eq(kycSubmittedDocuments.verificationRequestId, request.id));
         for (const doc of sessionDocRows) {
-          const ext = doc.extractedData as Record<string, any> | null;
+          const rawExt = doc.extractedData;
+          const ext = (rawExt && typeof rawExt === "object" && !Array.isArray(rawExt))
+            ? (rawExt as Record<string, unknown>)
+            : null;
           if (ext) {
-            if (!sessionCapturedName && (ext.name || ext.fullName)) sessionCapturedName = String(ext.name || ext.fullName);
-            if (!sessionCapturedDob && (ext.dateOfBirth || ext.dob)) sessionCapturedDob = String(ext.dateOfBirth || ext.dob);
-            if (!sessionCapturedPhone && (ext.phone || ext.phoneNumber || ext.PhoneNumber)) sessionCapturedPhone = String(ext.phone || ext.phoneNumber || ext.PhoneNumber);
-            if (!sessionCapturedGender && (ext.gender || ext.Gender)) sessionCapturedGender = String(ext.gender || ext.Gender);
-            if (!sessionCapturedAddress && (ext.address || ext.Address)) sessionCapturedAddress = String(ext.address || ext.Address);
+            const sv = (v: unknown) => (v ? String(v) : undefined);
+            if (!sessionCapturedName && (ext.name || ext.fullName)) sessionCapturedName = sv(ext.name ?? ext.fullName) || null;
+            if (!sessionCapturedDob && (ext.dateOfBirth || ext.dob)) sessionCapturedDob = sv(ext.dateOfBirth ?? ext.dob) || null;
+            if (!sessionCapturedPhone && (ext.phone || ext.phoneNumber || ext.PhoneNumber)) sessionCapturedPhone = sv(ext.phone ?? ext.phoneNumber ?? ext.PhoneNumber) || null;
+            if (!sessionCapturedGender && (ext.gender || ext.Gender)) sessionCapturedGender = sv(ext.gender ?? ext.Gender) || null;
+            if (!sessionCapturedAddress && (ext.address || ext.Address)) sessionCapturedAddress = sv(ext.address ?? ext.Address) || null;
           }
           if (doc.detectedDocumentType) sessionIdTypesForProfile.push(doc.detectedDocumentType);
         }
@@ -3453,7 +3483,8 @@ export function registerKycServiceRoutes(app: Express) {
         if (!sessionCapturedGender && notesData.gender) sessionCapturedGender = String(notesData.gender);
         if (!sessionCapturedAddress && notesData.address) sessionCapturedAddress = String(notesData.address);
 
-        // Await capture so hasGovernmentPhoto is known before firing webhook
+        // Await capture so hasGovernmentPhoto is known before firing webhook.
+        // Pass storedSelfiePath so the selfie already uploaded to object storage is reused directly.
         await captureVerifiedIdentityProfile({
           verificationRequestId: request.id,
           orgId: session.orgId,
@@ -3464,6 +3495,7 @@ export function registerKycServiceRoutes(app: Express) {
           address: sessionCapturedAddress,
           idTypesVerified: sessionIdTypesForProfile.length ? sessionIdTypesForProfile : undefined,
           dataSource: "hosted_session",
+          governmentPhotoStoredPath: storedSelfiePath,
         }).catch(err => console.error("[IdentityProfile] Session capture error:", err));
 
         // Fetch back to get hasGovernmentPhoto / capturedAt for webhook

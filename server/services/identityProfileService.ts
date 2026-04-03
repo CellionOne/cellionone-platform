@@ -30,7 +30,10 @@ export interface IdentityProfileInput {
   address?: string | null;
   idTypesVerified?: string[];
   dataSource: string;
+  /** Raw base64-encoded government ID photo — will be uploaded to private storage. */
   governmentPhotoBase64?: string | null;
+  /** Already-stored object storage path for a selfie or government ID photo — used directly without re-upload. */
+  governmentPhotoStoredPath?: string | null;
   actorUserId?: string | null;
 }
 
@@ -65,24 +68,28 @@ export async function captureVerifiedIdentityProfile(input: IdentityProfileInput
   try {
     const {
       verificationRequestId, orgId, fullName, dateOfBirth,
-      phone, gender, address, idTypesVerified, dataSource, governmentPhotoBase64,
+      phone, gender, address, idTypesVerified, dataSource,
+      governmentPhotoBase64, governmentPhotoStoredPath,
       actorUserId,
     } = input;
 
-    let governmentPhotoPath: string | null = null;
-    if (governmentPhotoBase64) {
+    let governmentPhotoPath: string | null = governmentPhotoStoredPath || null;
+
+    if (!governmentPhotoPath && governmentPhotoBase64) {
+      // Base64 provided — upload to private object storage
       governmentPhotoPath = await storeGovernmentPhoto(governmentPhotoBase64);
-      // Durable audit log for government photo upload (sensitive data write)
-      if (governmentPhotoPath) {
-        db.insert(sensitiveDataAccessLogs).values({
-          accessorUserId: actorUserId || "system",
-          targetUserId: actorUserId || "system",
-          dataType: "government_id_photo",
-          action: "upload",
-          entityType: "kyc_verification_request",
-          entityId: String(verificationRequestId),
-        }).catch(err => console.error("[IdentityProfile] Photo upload audit log error:", err));
-      }
+    }
+
+    // Durable audit log whenever a government photo path is captured
+    if (governmentPhotoPath) {
+      db.insert(sensitiveDataAccessLogs).values({
+        accessorUserId: actorUserId || "system",
+        targetUserId: actorUserId || "system",
+        dataType: "government_id_photo",
+        action: "upload",
+        entityType: "kyc_verification_request",
+        entityId: String(verificationRequestId),
+      }).catch(err => console.error("[IdentityProfile] Photo audit log error:", err));
     }
 
     const row: InsertKycVerifiedIdentityData = {

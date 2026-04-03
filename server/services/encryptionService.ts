@@ -6,21 +6,14 @@ const TAG_LENGTH = 16;
 
 function getEncryptionKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
-  if (key) {
-    return crypto.createHash('sha256').update(key).digest();
-  }
-
-  // Legacy fallback — warn loudly, will be removed in a future release
-  const legacy = process.env.SESSION_SECRET;
-  if (legacy) {
-    console.warn(
-      '[Security] ENCRYPTION_KEY is not set — falling back to SESSION_SECRET for field encryption. ' +
-      'Please set a dedicated ENCRYPTION_KEY secret to decouple encryption from session signing.'
+  if (!key) {
+    throw new Error(
+      '[Security] ENCRYPTION_KEY environment variable is not set. ' +
+      'This secret is required for field-level encryption of sensitive PII (BVN, NIN). ' +
+      'Set a dedicated ENCRYPTION_KEY secret with at least 32 random characters.'
     );
-    return crypto.createHash('sha256').update(legacy).digest();
   }
-
-  throw new Error('[Security] Neither ENCRYPTION_KEY nor SESSION_SECRET is set. Cannot perform field encryption.');
+  return crypto.createHash('sha256').update(key).digest();
 }
 
 export function encryptField(plaintext: string): string {

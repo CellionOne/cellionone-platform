@@ -11,6 +11,18 @@ import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUp
 // Log as early as possible so deployment systems can confirm startup
 console.log(`[Startup] Cellion One server starting — NODE_ENV=${process.env.NODE_ENV || "development"} PID=${process.pid}`);
 
+// ============== MANDATORY SECURITY SECRETS CHECK ==============
+// ENCRYPTION_KEY is required for field-level AES-256-GCM encryption of PII (BVN, NIN).
+// Fail fast in production — development allows missing key for easier local setup.
+if (!process.env.ENCRYPTION_KEY) {
+  if (process.env.NODE_ENV === "production") {
+    console.error("[Security] FATAL: ENCRYPTION_KEY is not set. This secret is required to protect encrypted PII fields (BVN, NIN). Refusing to start in production without it.");
+    process.exit(1);
+  } else {
+    console.warn("[Security] WARNING: ENCRYPTION_KEY is not set. Field encryption will fail if any encrypted PII is accessed. Set this secret before deploying to production.");
+  }
+}
+
 process.on('uncaughtException', (err) => {
   console.error('[FATAL] Uncaught exception (process kept alive):', err.message || err);
 });

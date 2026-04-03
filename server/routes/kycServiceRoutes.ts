@@ -1183,17 +1183,18 @@ export function registerKycServiceRoutes(app: Express) {
         webhookPayload.certificateRef = certificateRef;
         webhookPayload.certificateUrl = `${baseUrl}/api/v1/kyc/attest/${certificateRef}`;
       }
-      if (newStatus === "verified" && capturedFullName) {
+      // Source verifiedIdentity from the persisted profile so webhook payload matches GET response exactly
+      if (newStatus === "verified" && (capturedIdentityProfile || capturedFullName)) {
         webhookPayload.verifiedIdentity = {
-          fullName: capturedFullName,
-          dateOfBirth: capturedDob || null,
-          phone: capturedPhone || null,
-          gender: capturedGender || null,
-          address: capturedAddress || null,
-          idTypesVerified: idTypesVerified.length ? idTypesVerified : [],
-          dataSource: "document_review",
+          fullName: capturedIdentityProfile?.fullName ?? capturedFullName ?? null,
+          dateOfBirth: capturedIdentityProfile?.dateOfBirth ?? capturedDob ?? null,
+          phone: capturedIdentityProfile?.phone ?? capturedPhone ?? null,
+          gender: capturedIdentityProfile?.gender ?? capturedGender ?? null,
+          address: capturedIdentityProfile?.address ?? capturedAddress ?? null,
+          idTypesVerified: capturedIdentityProfile?.idTypesVerified ?? (idTypesVerified.length ? idTypesVerified : []),
+          dataSource: capturedIdentityProfile?.dataSource ?? captureDataSource,
           hasGovernmentPhoto: !!capturedIdentityProfile?.governmentPhotoPath,
-          capturedAt: capturedIdentityProfile?.capturedAt?.toISOString() || null,
+          capturedAt: capturedIdentityProfile?.capturedAt?.toISOString() ?? null,
         };
       }
 
@@ -3946,13 +3947,14 @@ export function registerKycServiceRoutes(app: Express) {
         .innerJoin(kycOrganisations, eq(kycStrReports.orgId, kycOrganisations.id))
         .$dynamic();
 
-      const conditions: any[] = [];
+      const conditions: Parameters<typeof and>[0][] = [];
       if (statusFilter) conditions.push(eq(kycStrReports.status, statusFilter));
       if (orgFilter) conditions.push(eq(kycStrReports.orgId, orgFilter));
-      if (conditions.length > 0) query = query.where(and(...conditions)) as any;
-      query = (query as any).orderBy(desc(kycStrReports.createdAt)).limit(200) as any;
+      const strQuery = conditions.length > 0
+        ? query.where(and(...conditions)).orderBy(desc(kycStrReports.createdAt)).limit(200)
+        : query.orderBy(desc(kycStrReports.createdAt)).limit(200);
 
-      const reports = await query;
+      const reports = await strQuery;
       res.json({ reports });
     } catch (error: any) {
       console.error("[KYC STR] Admin list error:", error);

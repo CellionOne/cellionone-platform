@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "../db";
-import { eq, and, desc, asc, or, ilike, sql, count, isNull } from "drizzle-orm";
+import { eq, and, desc, asc, or, ilike, sql, count, isNull, inArray } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
 import {
@@ -66,6 +66,14 @@ function requireOrgMember(allowedRoles?: string[]) {
 
     const orgId = parseInt(req.params.id);
     if (isNaN(orgId)) return res.status(400).json({ message: "Invalid org ID" });
+
+    // Platform admins and super admins bypass org membership — they can access any org's data
+    const userRoles: string[] = req.user?.roles ?? [];
+    const isPlatformAdmin = userRoles.includes("admin") || userRoles.includes("super_admin");
+    if (isPlatformAdmin) {
+      (req as any).orgMember = { role: "org_admin", orgId, userId, isPlatformAdminOverride: true };
+      return next();
+    }
 
     const member = await getOrgMembership(orgId, userId);
     if (!member) return res.status(403).json({ message: "Not a member of this organisation" });
@@ -861,7 +869,7 @@ export function registerKycServiceRoutes(app: Express) {
             idTypesVerified: kycVerifiedIdentityData.idTypesVerified,
             hasGovernmentPhoto: kycVerifiedIdentityData.governmentPhotoPath,
           }).from(kycVerifiedIdentityData)
-            .where(sql`${kycVerifiedIdentityData.verificationRequestId} = ANY(ARRAY[${sql.raw(verifiedIds.join(","))}]::int[])`)
+            .where(inArray(kycVerifiedIdentityData.verificationRequestId, verifiedIds))
         : [];
       const identityMap = new Map(identityProfiles.map(p => [p.verificationRequestId, {
         fullName: p.fullName,

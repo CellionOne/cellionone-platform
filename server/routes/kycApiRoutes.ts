@@ -48,6 +48,18 @@ function maskId(id: string): string {
   return `****${id.slice(-4)}`;
 }
 
+/** Maps a Smile ID idType to its Nigerian government data source label */
+function idTypeToDataSource(idType: string): string {
+  switch (idType.toUpperCase()) {
+    case "BVN": return "NIBSS BVN Database";
+    case "NIN": return "NIMC National ID Database";
+    case "DRIVERS_LICENSE": return "Nigeria FRSC Driver Database";
+    case "VOTER_ID": return "INEC Voter Register";
+    case "INTERNATIONAL_PASSPORT": return "Nigeria Immigration (NIS)";
+    default: return `Nigeria Government ID (${idType})`;
+  }
+}
+
 async function handleIdLookup(
   req: ApiKeyRequest,
   res: Response,
@@ -121,7 +133,7 @@ async function handleIdLookup(
       gender: result.gender || null,
       address: result.address || null,
       idTypesVerified: [idType],
-      dataSource: "instant_id_lookup",
+      dataSource: idTypeToDataSource(idType),
       governmentPhotoBase64: result.photo || null,
     }).catch(err => console.error("[KYC API] Identity profile capture error:", err));
   }

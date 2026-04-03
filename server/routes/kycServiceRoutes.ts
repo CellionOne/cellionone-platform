@@ -1049,21 +1049,6 @@ export function registerKycServiceRoutes(app: Express) {
         if (!capturedAddress && parsedNotes.address) capturedAddress = String(parsedNotes.address);
       }
 
-      // Find selfie/portrait document stored path for identity profile photo
-      let selfieStoredPath: string | null = null;
-      if (newStatus === "verified") {
-        const selfieDoc = documents.find(d =>
-          d.status === "accepted" && (
-            d.detectedDocumentType === "selfie" ||
-            d.detectedDocumentType === "portrait" ||
-            (d.detectedDocumentType || "").toLowerCase().includes("selfie") ||
-            (d.detectedDocumentType || "").toLowerCase().includes("portrait") ||
-            (d.mimeType || "").startsWith("image/")
-          )
-        );
-        selfieStoredPath = selfieDoc?.filePath || null;
-      }
-
       // Upsert verified entity registry FIRST (awaited) so the row exists before enrichment
       if (newStatus === "verified") {
         try {
@@ -1091,7 +1076,6 @@ export function registerKycServiceRoutes(app: Express) {
           address: capturedAddress,
           idTypesVerified: idTypesVerified.length ? idTypesVerified : undefined,
           dataSource: "document_review",
-          governmentPhotoStoredPath: selfieStoredPath,
         }).catch(err => console.error("[IdentityProfile] Capture error:", err));
         // Fetch back for hasGovernmentPhoto / capturedAt
         const [idp] = await db.select().from(kycVerifiedIdentityData)
@@ -3484,7 +3468,7 @@ export function registerKycServiceRoutes(app: Express) {
         if (!sessionCapturedAddress && notesData.address) sessionCapturedAddress = String(notesData.address);
 
         // Await capture so hasGovernmentPhoto is known before firing webhook.
-        // Pass storedSelfiePath so the selfie already uploaded to object storage is reused directly.
+        // Government photo is only captured when returned by Smile ID ID lookup — not substituted with selfie.
         await captureVerifiedIdentityProfile({
           verificationRequestId: request.id,
           orgId: session.orgId,
@@ -3495,7 +3479,6 @@ export function registerKycServiceRoutes(app: Express) {
           address: sessionCapturedAddress,
           idTypesVerified: sessionIdTypesForProfile.length ? sessionIdTypesForProfile : undefined,
           dataSource: "hosted_session",
-          governmentPhotoStoredPath: storedSelfiePath,
         }).catch(err => console.error("[IdentityProfile] Session capture error:", err));
 
         // Fetch back to get hasGovernmentPhoto / capturedAt for webhook

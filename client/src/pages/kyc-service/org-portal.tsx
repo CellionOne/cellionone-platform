@@ -469,26 +469,36 @@ function VerificationsSection({ orgId, isAdmin, isOrgActive }: { orgId: string; 
                     </div>
                   </div>
                   {r.identitySummary && (
-                    <div className="rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 p-2.5 flex flex-wrap gap-x-4 gap-y-1" data-testid={`card-identity-${r.id}`}>
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <Fingerprint className="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />
-                        <span className="text-xs font-medium text-green-800 dark:text-green-200 truncate">{r.identitySummary.fullName || r.subjectName}</span>
-                      </div>
-                      {r.identitySummary.dateOfBirth && (
-                        <span className="text-xs text-green-700 dark:text-green-300 flex items-center gap-1">
-                          <Clock className="h-3 w-3 shrink-0" /> DOB: {r.identitySummary.dateOfBirth}
-                        </span>
-                      )}
-                      {r.identitySummary.idTypesVerified?.length ? (
-                        <div className="flex items-center gap-1 flex-wrap">
-                          {r.identitySummary.idTypesVerified.slice(0, 3).map(t => (
-                            <span key={t} className="text-[10px] bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full">{t}</span>
-                          ))}
-                        </div>
-                      ) : null}
+                    <div className="rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 p-2.5 flex gap-3" data-testid={`card-identity-${r.id}`}>
                       {r.identitySummary.hasGovernmentPhoto && (
-                        <span className="text-xs text-green-700 dark:text-green-300 flex items-center gap-1"><Camera className="h-3 w-3 shrink-0" /> Photo</span>
+                        <div className="shrink-0 self-start">
+                          <img
+                            src={`/api/kyc-service/identity-data/${r.id}/photo`}
+                            alt="Government ID photo"
+                            className="w-12 h-12 object-cover rounded-md border border-green-300 dark:border-green-700 bg-green-100 dark:bg-green-900/40"
+                            data-testid={`img-govt-photo-${r.id}`}
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                          />
+                        </div>
                       )}
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0 w-full">
+                          <Fingerprint className="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />
+                          <span className="text-xs font-medium text-green-800 dark:text-green-200 truncate">{r.identitySummary.fullName || r.subjectName}</span>
+                        </div>
+                        {r.identitySummary.dateOfBirth && (
+                          <span className="text-xs text-green-700 dark:text-green-300 flex items-center gap-1">
+                            <Clock className="h-3 w-3 shrink-0" /> DOB: {r.identitySummary.dateOfBirth}
+                          </span>
+                        )}
+                        {r.identitySummary.idTypesVerified?.length ? (
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {r.identitySummary.idTypesVerified.slice(0, 3).map(t => (
+                              <span key={t} className="text-[10px] bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full">{t}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   )}
                   <div className="flex justify-end">

@@ -17,6 +17,19 @@ import { storage } from "../storage";
 import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth";
 
 // ─── Tier constants ────────────────────────────────────────────────────────────
+//
+// DESIGN DECISION: CIE tiers are encoded as API key permissions rather than
+// read from a separate billing/subscription record. This is intentional for
+// Task #30 (API surface + gating). Task #31 (CIE Subscription Billing) will
+// introduce a `cieSubscriptions` table; at that point the key-issuance flow
+// will set/update these permission scopes based on the active billing plan,
+// so the permission array remains the runtime source of truth for access
+// control while billing governs how permissions are assigned.
+//
+// Tier hierarchy (additive):
+//   free       → ["cie:read"]
+//   subscriber → ["cie:read", "cie:subscriber"]
+//   pro        → ["cie:read", "cie:subscriber", "cie:pro"]
 
 type CieTier = "free" | "subscriber" | "pro";
 const TIER_ORDER: Record<CieTier, number> = { free: 0, subscriber: 1, pro: 2 };

@@ -286,14 +286,48 @@ export function parseXlsxBuffer(buffer: Buffer): PriceRow[] {
 }
 
 // ============================================================
-// PDF extraction via GPT-4o (with per-row confidence)
+// PDF extraction: text via pdf-parse → structured via GPT-4o
+// Mirrors the existing document extraction pipeline pattern:
+//   extract raw text → send as text prompt → parse JSON response
 // ============================================================
 
+// GPT response payload shape (unvalidated JSON from the model)
+interface GptPriceRow {
+  symbol?: unknown;
+  date?: unknown;
+  open?: unknown;
+  high?: unknown;
+  low?: unknown;
+  close?: unknown;
+  volume?: unknown;
+  confidence?: unknown;
+}
+interface GptResponsePayload {
+  rows?: GptPriceRow[];
+  data?: GptPriceRow[];
+  prices?: GptPriceRow[];
+}
+
 export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise<PriceRow[]> {
-  const base64 = buffer.toString("base64");
+  // Step 1: Extract raw text from the PDF using pdf-parse
+  let rawText = "";
+  try {
+    const pdfParse = (await import("pdf-parse")).default;
+    const result = await pdfParse(buffer);
+    rawText = result.text ?? "";
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[CIEIngest] pdf-parse text extraction failed:", errMsg);
+    return [];
+  }
+
+  if (!rawText.trim()) {
+    console.warn("[CIEIngest] PDF yielded no text content — cannot extract price data");
+    return [];
+  }
 
   const systemPrompt = `You are a financial data extraction engine.
-Extract NGX (Nigerian Exchange Group) equity price data from the document.
+Extract NGX (Nigerian Exchange Group) equity price data from the text below.
 Return ONLY a JSON object with a "rows" array. Each item must have:
   symbol    (string, NGX ticker code, required)
   date      (string, YYYY-MM-DD, required)
@@ -302,51 +336,24 @@ Return ONLY a JSON object with a "rows" array. Each item must have:
   low       (number, Naira, optional)
   close     (number, Naira, required)
   volume    (integer, shares, optional)
-  confidence (number 0-1: 1.0 = clearly readable, 0.5 = partially obscured, 0.2 = low quality/guess)
-Return {"rows":[]} if no price data found. No markdown. Pure JSON only.`;
+  confidence (number 0-1: 1.0 = clearly readable, 0.5 = inferred/partial, 0.2 = uncertain/guess)
+Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
 
+  // Step 2: Send extracted text to GPT-4o as a text prompt (no Vision API)
   try {
     const openai = await getOpenAI();
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: systemPrompt },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:application/pdf;base64,${base64}`,
-                detail: "high",
-              },
-            },
-          ],
-        },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: rawText.slice(0, 48_000) }, // respect context window
       ],
       response_format: { type: "json_object" },
+      temperature: 0.1,
       max_tokens: 4096,
     });
 
     const content = response.choices[0]?.message?.content ?? "{}";
-
-    // GPT response payload shape (unvalidated JSON from the model)
-    interface GptPriceRow {
-      symbol?: unknown;
-      date?: unknown;
-      open?: unknown;
-      high?: unknown;
-      low?: unknown;
-      close?: unknown;
-      volume?: unknown;
-      confidence?: unknown;
-    }
-    interface GptResponsePayload {
-      rows?: GptPriceRow[];
-      data?: GptPriceRow[];
-      prices?: GptPriceRow[];
-    }
-
     let parsed: GptResponsePayload | GptPriceRow[];
     try {
       parsed = JSON.parse(content) as GptResponsePayload | GptPriceRow[];

@@ -419,6 +419,7 @@ export interface IStorage {
   listCieModelVersions(): Promise<CieModelVersion[]>;
   getActiveCieModelVersion(): Promise<CieModelVersion | undefined>;
   updateCieModelVersion(id: number, data: Partial<InsertCieModelVersion>): Promise<CieModelVersion | undefined>;
+  submitCieModelVersion(id: number): Promise<CieModelVersion | undefined>;
   activateCieModelVersion(id: number, reviewerUserId: string): Promise<CieModelVersion | undefined>;
 
   // CIE Dividends
@@ -2109,8 +2110,21 @@ export class DatabaseStorage implements IStorage {
     return mv;
   }
 
+  /** Transition a model version from draft → pending (submit for review) */
+  async submitCieModelVersion(id: number): Promise<CieModelVersion | undefined> {
+    const [mv] = await db.update(cieModelVersions)
+      .set({ status: "pending", updatedAt: new Date() })
+      .where(and(eq(cieModelVersions.id, id), eq(cieModelVersions.status, "draft")))
+      .returning();
+    return mv;
+  }
+
+  /** Transition a model version from pending → active. Demotes any current active to draft. */
   async activateCieModelVersion(id: number, reviewerUserId: string): Promise<CieModelVersion | undefined> {
-    await db.update(cieModelVersions).set({ status: "draft" }).where(eq(cieModelVersions.status, "active"));
+    // Only allow activation from pending state (enforce lifecycle)
+    const [candidate] = await db.select().from(cieModelVersions).where(eq(cieModelVersions.id, id));
+    if (!candidate || candidate.status !== "pending") return undefined;
+    await db.update(cieModelVersions).set({ status: "draft", updatedAt: new Date() }).where(eq(cieModelVersions.status, "active"));
     const [mv] = await db.update(cieModelVersions)
       .set({ status: "active", reviewedByUserId: reviewerUserId, activatedAt: new Date(), updatedAt: new Date() })
       .where(eq(cieModelVersions.id, id))

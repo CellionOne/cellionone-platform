@@ -368,7 +368,7 @@ export function registerCieAdminRoutes(app: Express): void {
         versionLabel: body.versionLabel,
         weights: body.weights,
         notes: body.notes ?? null,
-        status: "pending",
+        status: "draft",
         submittedByUserId: getUserId(req),
       });
 
@@ -387,13 +387,35 @@ export function registerCieAdminRoutes(app: Express): void {
     }
   });
 
-  /** POST /api/admin/cie/model-versions/:id/activate — activate a model version */
+  /** POST /api/admin/cie/model-versions/:id/submit — submit a draft version for approval (draft → pending) */
+  app.post("/api/admin/cie/model-versions/:id/submit", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const id = parseInt(req.params.id);
+      const mv = await storage.submitCieModelVersion(id);
+      if (!mv) return res.status(409).json({ error: "Model version not found or not in draft status" });
+
+      await storage.createAuditLog({
+        actorUserId: getUserId(req),
+        action: "cie_model_version_submitted",
+        entityType: "cie_model_version",
+        entityId: String(id),
+        details: { versionLabel: mv.versionLabel },
+      });
+
+      res.json({ ...mv, message: "Model version submitted for review." });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /** POST /api/admin/cie/model-versions/:id/activate — activate a pending model version (pending → active) */
   app.post("/api/admin/cie/model-versions/:id/activate", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const id = parseInt(req.params.id);
       const mv = await storage.activateCieModelVersion(id, getUserId(req));
-      if (!mv) return res.status(404).json({ error: "Model version not found" });
+      if (!mv) return res.status(409).json({ error: "Model version not found or not in pending status — submit for review first" });
 
       await storage.createAuditLog({
         actorUserId: getUserId(req),

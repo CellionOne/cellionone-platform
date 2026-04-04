@@ -356,7 +356,7 @@ export interface CieSignalDraft {
 }
 
 export async function generateCieSignalDraft(context: {
-  prompt: string;
+  prompt?: string;
   ticker?: string | null;
   sector?: string | null;
   currentIas?: number | null;
@@ -388,9 +388,11 @@ Be specific, reference Nigerian market context where relevant.`;
     context.currentRecommendation ? `Current Recommendation: ${context.currentRecommendation}` : "",
   ].filter(Boolean).join("\n");
 
-  const userPrompt = `${contextLines ? contextLines + "\n\n" : ""}Analyst notes: ${context.prompt}
+  const notesLine = context.prompt?.trim()
+    ? `Analyst notes: ${context.prompt}\n\n`
+    : "";
 
-Draft the analyst signal.`;
+  const userPrompt = `${contextLines ? contextLines + "\n\n" : ""}${notesLine}Draft the analyst signal.`;
 
   try {
     const openai = await getOpenAI();

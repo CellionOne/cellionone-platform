@@ -603,12 +603,17 @@ export function registerCieAdminRoutes(app: Express): void {
       }
 
       const schema = z.object({
-        prompt: z.string().min(10).max(2000),
+        prompt: z.string().min(0).max(2000).optional().default(""),
         ticker: z.string().optional(),
         sector: z.string().optional(),
         signalType: z.enum(["trade_call", "news", "rumour", "sector_rotation"]).optional(),
       });
       const { prompt, ticker, sector, signalType } = schema.parse(req.body);
+
+      // Require at least a ticker OR a non-empty prompt to generate a meaningful draft
+      if (!prompt && !ticker) {
+        return res.status(400).json({ error: "Provide at least a ticker symbol or analyst notes to generate a draft." });
+      }
 
       // Optionally enrich with score data for the ticker
       let currentIas: number | null = null;

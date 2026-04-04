@@ -939,7 +939,7 @@ function SignalsTab() {
             </div>
             <Button
               onClick={() => aiDraftMutation.mutate()}
-              disabled={aiPrompt.length < 10 || aiDraftMutation.isPending}
+              disabled={(aiPrompt.length > 0 && aiPrompt.length < 5) || (!aiPrompt && !aiTicker) || aiDraftMutation.isPending}
               size="sm"
               className="gap-2"
               data-testid="button-generate-ai-draft"

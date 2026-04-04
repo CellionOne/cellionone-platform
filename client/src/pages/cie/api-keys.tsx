@@ -48,7 +48,7 @@ export default function CieApiKeys() {
       toast({ title: "API key created — copy it now, it won't be shown again" });
       setNewKeyLabel("");
     },
-    onError: (e: any) => toast({ title: e?.message ?? "Failed to create key", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: err instanceof Error ? err.message : "Failed to create key", variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({

@@ -481,6 +481,10 @@ export function registerCiePortalRoutes(app: Express): void {
         .from(kycApiKeys)
         .where(and(eq(kycApiKeys.id, keyId), ownershipFilter));
       if (!key) return res.status(404).json({ error: "Key not found" });
+      // Scope guard: only CIE keys may be revoked via this endpoint
+      if (!key.permissions?.includes("cie:read")) {
+        return res.status(403).json({ error: "Not a CIE API key" });
+      }
 
       await db.update(kycApiKeys).set({ isActive: false }).where(eq(kycApiKeys.id, keyId));
 

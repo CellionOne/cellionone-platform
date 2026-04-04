@@ -1,10 +1,12 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { CieLayout } from "./layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 import { CheckCircle2, Shield, Star } from "lucide-react";
 
 interface StatusData {
@@ -23,9 +25,11 @@ function formatDate(d?: string | null) {
 
 export default function CieSubscribe() {
   const { toast } = useToast();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
 
   const { data: status, isLoading: statusLoading } = useQuery<StatusData>({
     queryKey: ["/api/cie-portal/status"],
+    enabled: isAuthenticated,
   });
 
   const tier = status?.tier ?? "free";
@@ -62,7 +66,7 @@ export default function CieSubscribe() {
     onError: (err: unknown) => toast({ title: err instanceof Error ? err.message : "Failed to cancel", variant: "destructive" }),
   });
 
-  if (statusLoading) {
+  if (authLoading || (isAuthenticated && statusLoading)) {
     return (
       <CieLayout tier="free">
         <div className="flex items-center justify-center py-20"><LoadingSpinner /></div>
@@ -166,17 +170,29 @@ export default function CieSubscribe() {
                   ))}
                 </ul>
               </div>
-              <Button
-                className="shrink-0"
-                variant={t.highlight ? "default" : "outline"}
-                disabled={tier === t.tier || subscribeMutation.isPending}
-                onClick={() => subscribeMutation.mutate(t.tier)}
-                data-testid={`button-subscribe-${t.tier}`}
-              >
-                {subscribeMutation.isPending && tier !== t.tier
-                  ? <LoadingSpinner size="sm" />
-                  : tier === t.tier ? "Current Plan" : "Subscribe"}
-              </Button>
+              {!isAuthenticated ? (
+                <Link href="/login?next=/cie/subscribe">
+                  <Button
+                    className="shrink-0"
+                    variant={t.highlight ? "default" : "outline"}
+                    data-testid={`button-subscribe-signin-${t.tier}`}
+                  >
+                    Sign In to Subscribe
+                  </Button>
+                </Link>
+              ) : (
+                <Button
+                  className="shrink-0"
+                  variant={t.highlight ? "default" : "outline"}
+                  disabled={tier === t.tier || subscribeMutation.isPending}
+                  onClick={() => subscribeMutation.mutate(t.tier)}
+                  data-testid={`button-subscribe-${t.tier}`}
+                >
+                  {subscribeMutation.isPending && tier !== t.tier
+                    ? <LoadingSpinner size="sm" />
+                    : tier === t.tier ? "Current Plan" : "Subscribe"}
+                </Button>
+              )}
             </CardContent>
           </Card>
         ))}

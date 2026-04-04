@@ -396,9 +396,7 @@ function Router() {
       <Route path="/cie/subscribe/success">
         <ProtectedRoute component={CieSubscribeSuccess} />
       </Route>
-      <Route path="/cie/subscribe">
-        <ProtectedRoute component={CieSubscribePage} />
-      </Route>
+      <Route path="/cie/subscribe" component={CieSubscribePage} />
       <Route path="/cie/api-keys">
         <CieTierRoute component={CieApiKeys} minTier="subscriber" />
       </Route>

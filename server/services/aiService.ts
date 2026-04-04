@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { z } from "zod";
 import { db } from "../db";
 import { applicationAIEvents, type InsertApplicationAIEvent } from "@shared/schema";
 
@@ -263,8 +264,13 @@ Write the analyst narrative.`;
     });
 
     const content = response.choices[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content) as CieScoreNarrative;
-    return parsed;
+    const raw = JSON.parse(content);
+    const parsed = CieScoreNarrativeSchema.safeParse(raw);
+    if (!parsed.success) {
+      console.error("[AI] CIE score narrative schema validation failed:", parsed.error.issues);
+      return null;
+    }
+    return parsed.data as CieScoreNarrative;
   } catch (error) {
     console.error("[AI] CIE score narrative error:", error);
     return null;
@@ -324,6 +330,23 @@ Write the daily market commentary.`;
 // CIE Signal Draft (Feature C)
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ── Zod schemas for AI JSON output validation ─────────────────────────────────
+
+const CieScoreNarrativeSchema = z.object({
+  headline: z.string().max(200).default(""),
+  body: z.string().max(2000).default(""),
+  keyPoints: z.array(z.string()).max(10).default([]),
+  caveats: z.string().max(500).default(""),
+});
+
+const CieSignalDraftSchema = z.object({
+  content: z.string().min(1).max(5000).default(""),
+  suggestedType: z.enum(["trade_call", "news", "rumour", "sector_rotation"]).default("trade_call"),
+  suggestedSentiment: z.enum(["bullish", "bearish", "neutral"]).default("neutral"),
+  suggestedCredibility: z.number().int().min(1).max(5).default(3),
+  suggestedTags: z.array(z.string()).max(10).default([]),
+});
+
 export interface CieSignalDraft {
   content: string;
   suggestedType: "trade_call" | "news" | "rumour" | "sector_rotation";
@@ -381,9 +404,14 @@ Draft the analyst signal.`;
       temperature: 0.5,
     });
 
-    const raw = response.choices[0]?.message?.content || "{}";
-    const parsed = JSON.parse(raw) as CieSignalDraft;
-    return parsed;
+    const rawContent = response.choices[0]?.message?.content || "{}";
+    const rawObj = JSON.parse(rawContent);
+    const parsed = CieSignalDraftSchema.safeParse(rawObj);
+    if (!parsed.success) {
+      console.error("[AI] CIE signal draft schema validation failed:", parsed.error.issues);
+      return null;
+    }
+    return parsed.data as CieSignalDraft;
   } catch (error) {
     console.error("[AI] CIE signal draft error:", error);
     return null;

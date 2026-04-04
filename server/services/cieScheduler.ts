@@ -9,7 +9,7 @@
  */
 
 import { computeAndPersistScores } from "./cieScoreEngine";
-import { generateCieMarketCommentary } from "./aiService";
+import { generateCieMarketCommentary, isOpenAIAvailable } from "./aiService";
 import { storage } from "../storage";
 
 const WAT_OFFSET_HOURS = 1; // WAT = UTC+1
@@ -106,6 +106,11 @@ async function runScoreComputation(): Promise<void> {
 }
 
 async function runMarketCommentary(): Promise<void> {
+  if (!isOpenAIAvailable()) {
+    console.log("[CIEScheduler] AI commentary skipped — OPENAI_API_KEY not configured");
+    return;
+  }
+
   try {
     const pulse = await storage.getLatestCieMarketPulse();
     const scores = await storage.getLatestCieScores();

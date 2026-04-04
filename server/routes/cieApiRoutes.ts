@@ -76,6 +76,7 @@ export function registerCieApiRoutes(app: Express): void {
       if (!pulse) {
         return res.json({
           available: false,
+          commentary: null,
           message: "Market pulse data not yet populated. Check back after the next scheduled update.",
         });
       }

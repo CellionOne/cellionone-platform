@@ -1,6 +1,6 @@
 import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -51,6 +51,7 @@ import AdminBankingPartners from "@/pages/admin/banking-partners";
 import AdminCieCockpit from "@/pages/admin/cie";
 import CiePortal from "@/pages/cie/index";
 import CieSecurities from "@/pages/cie/securities";
+import CieSecurityDetail from "@/pages/cie/security-detail";
 import CieSignals from "@/pages/cie/signals";
 import CieApiKeys from "@/pages/cie/api-keys";
 import CieSubscribePage from "@/pages/cie/subscribe";
@@ -159,6 +160,40 @@ function ProtectedRoute({
     return <LoadingPage />;
   }
   
+  return <Component />;
+}
+
+// Tier-aware route guard for CIE portal pages
+// Redirects free users to /cie/subscribe when they try to access subscriber/pro content
+function CieTierRoute({
+  component: Component,
+  minTier,
+}: {
+  component: React.ComponentType;
+  minTier: "subscriber" | "pro";
+}) {
+  const { isLoading: authLoading, isAuthenticated } = useAuth();
+  const { data: cieStatus, isLoading: tierLoading } = useQuery<{ tier: string; isPaid: boolean }>({
+    queryKey: ["/api/cie-portal/status"],
+    enabled: isAuthenticated,
+  });
+
+  if (authLoading || tierLoading) return <LoadingPage />;
+
+  if (!isAuthenticated) {
+    window.location.href = "/login";
+    return <LoadingPage />;
+  }
+
+  const tierOrder: Record<string, number> = { free: 0, subscriber: 1, pro: 2 };
+  const userTier = cieStatus?.tier ?? "free";
+  const required = minTier === "pro" ? 2 : 1;
+
+  if ((tierOrder[userTier] ?? 0) < required) {
+    window.location.href = "/cie/subscribe";
+    return <LoadingPage />;
+  }
+
   return <Component />;
 }
 
@@ -365,13 +400,16 @@ function Router() {
         <ProtectedRoute component={CieSubscribePage} />
       </Route>
       <Route path="/cie/api-keys">
-        <ProtectedRoute component={CieApiKeys} />
+        <CieTierRoute component={CieApiKeys} minTier="subscriber" />
       </Route>
       <Route path="/cie/signals">
-        <ProtectedRoute component={CieSignals} />
+        <CieTierRoute component={CieSignals} minTier="pro" />
+      </Route>
+      <Route path="/cie/securities/:ticker">
+        <CieTierRoute component={CieSecurityDetail} minTier="subscriber" />
       </Route>
       <Route path="/cie/securities">
-        <ProtectedRoute component={CieSecurities} />
+        <CieTierRoute component={CieSecurities} minTier="subscriber" />
       </Route>
       <Route path="/cie">
         <ProtectedRoute component={CiePortal} />

@@ -34,12 +34,18 @@ export default function CieSubscribe() {
   const subscribeMutation = useMutation({
     mutationFn: async (newTier: "subscriber" | "pro") => {
       const res = await apiRequest("POST", "/api/cie-billing/subscribe", { tier: newTier });
-      return res.json() as Promise<{ ok: boolean; data: { authorizationUrl: string; reference: string } }>;
+      // Server returns result.data directly: { authorizationUrl, reference, subscriptionId, tier, ... }
+      return res.json() as Promise<{ authorizationUrl?: string; reference?: string; subscriptionId?: number; directSwitch?: boolean }>;
     },
     onSuccess: (data) => {
-      const url = data?.data?.authorizationUrl;
-      if (url) window.location.href = url;
-      else toast({ title: "Subscription initiated — check your email to complete payment" });
+      if (data?.authorizationUrl) {
+        window.location.href = data.authorizationUrl;
+      } else if (data?.directSwitch) {
+        queryClient.invalidateQueries({ queryKey: ["/api/cie-portal/status"] });
+        toast({ title: "Plan upgraded successfully!" });
+      } else {
+        toast({ title: "Subscription initiated — check your email to complete payment" });
+      }
     },
     onError: (e: any) => toast({ title: e?.message ?? "Failed to initiate subscription", variant: "destructive" }),
   });

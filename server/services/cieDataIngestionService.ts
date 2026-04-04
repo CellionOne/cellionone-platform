@@ -168,6 +168,45 @@ function findCol(headers: string[], ...candidates: string[]): number {
 }
 
 // ============================================================
+// Sheet detection: find the best sheet by expected column headers
+// ============================================================
+
+const PRICE_HEADER_CANDIDATES = ["symbol", "ticker", "stock", "close", "closing", "last price", "date"];
+
+/**
+ * Select the worksheet that most likely contains price data by scoring each sheet
+ * against the set of expected column headers. Falls back to the first sheet.
+ */
+function detectPriceSheet(wb: XLSX.WorkBook): XLSX.WorkSheet {
+  let bestSheet = wb.Sheets[wb.SheetNames[0]];
+  let bestScore = -1;
+
+  for (const name of wb.SheetNames) {
+    const sheet = wb.Sheets[name];
+    const json = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: "", range: 0 });
+    const headerRow: string[] = (json[0] as string[] ?? []).map(h => String(h ?? "").trim().toLowerCase());
+
+    let score = 0;
+    for (const candidate of PRICE_HEADER_CANDIDATES) {
+      if (headerRow.some(h => h.includes(candidate))) score++;
+    }
+
+    // Bonus for sheets with data rows (>1 row)
+    if (json.length > 2) score += 1;
+    // Bonus for sheet names that suggest price data
+    const lName = name.toLowerCase();
+    if (lName.includes("price") || lName.includes("equity") || lName.includes("ngx") || lName.includes("data")) score += 2;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestSheet = sheet;
+    }
+  }
+
+  return bestSheet;
+}
+
+// ============================================================
 // CSV / Excel parsing
 // ============================================================
 
@@ -241,7 +280,7 @@ export function parseCsvBuffer(buffer: Buffer): PriceRow[] {
 
 export function parseXlsxBuffer(buffer: Buffer): PriceRow[] {
   const wb = XLSX.read(buffer, { type: "buffer", raw: false, cellDates: false });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const sheet = detectPriceSheet(wb); // smart sheet detection by header scoring
   return parseSheetRows(sheet, "xlsx");
 }
 
@@ -511,32 +550,76 @@ export async function commitFromToken(
 }
 
 // ============================================================
-// Data entry templates (in-memory CSV generation)
+// Template data (shared between CSV and XLSX generators)
+// ============================================================
+
+const PRICES_TEMPLATE_DATA = [
+  ["Symbol", "Date", "Open", "High", "Low", "Close", "Volume"],
+  ["DANGCEM", "2026-04-03", 620.00, 625.00, 618.00, 622.00, 1500000],
+  ["GTCO", "2026-04-03", 47.50, 48.00, 47.00, 47.80, 3200000],
+  ["ZENITHBANK", "2026-04-03", 35.00, 35.50, 34.80, 35.20, 2800000],
+];
+
+const DIVIDENDS_TEMPLATE_DATA = [
+  ["Symbol", "ExDividendDate", "PaymentDate", "AmountPerShare"],
+  ["DANGCEM", "2026-04-10", "2026-04-25", 10.00],
+  ["GTCO", "2026-04-15", "2026-04-30", 1.50],
+];
+
+const SIGNALS_TEMPLATE_DATA = [
+  ["Symbol", "Type", "Sentiment", "Credibility", "Content", "Tags"],
+  ["MTNN", "news", "bullish", 4, "MTN Nigeria reports 22% growth in data subscribers", "telecom;earnings"],
+  ["SEPLAT", "sector_rotation", "neutral", 3, "Oil sector rotation on crude price recovery", "oil;macro"],
+];
+
+// ============================================================
+// CSV templates
 // ============================================================
 
 export function generatePricesTemplate(): string {
-  return [
-    "Symbol,Date,Open,High,Low,Close,Volume",
-    "DANGCEM,2026-04-03,620.00,625.00,618.00,622.00,1500000",
-    "GTCO,2026-04-03,47.50,48.00,47.00,47.80,3200000",
-    "ZENITHBANK,2026-04-03,35.00,35.50,34.80,35.20,2800000",
-  ].join("\r\n");
+  return PRICES_TEMPLATE_DATA.map(row => row.join(",")).join("\r\n");
 }
 
 export function generateDividendsTemplate(): string {
-  return [
-    "Symbol,ExDividendDate,PaymentDate,AmountPerShare",
-    "DANGCEM,2026-04-10,2026-04-25,10.00",
-    "GTCO,2026-04-15,2026-04-30,1.50",
-  ].join("\r\n");
+  return DIVIDENDS_TEMPLATE_DATA.map(row => row.join(",")).join("\r\n");
 }
 
 export function generateSignalsTemplate(): string {
-  return [
-    "Symbol,Type,Sentiment,Credibility,Content,Tags",
-    "MTNN,news,bullish,4,\"MTN Nigeria reports 22% growth in data subscribers\",\"telecom;earnings\"",
-    "SEPLAT,sector_rotation,neutral,3,\"Oil sector rotation expected on crude price recovery\",\"oil;macro\"",
-  ].join("\r\n");
+  // Wrap content in quotes to handle commas/semicolons
+  return SIGNALS_TEMPLATE_DATA.map((row, i) =>
+    i === 0 ? row.join(",") : `${row.slice(0, 4).join(",")},${JSON.stringify(row[4])},${JSON.stringify(row[5])}`
+  ).join("\r\n");
+}
+
+// ============================================================
+// XLSX templates
+// ============================================================
+
+function buildXlsxTemplate(data: (string | number)[][], sheetName: string): Buffer {
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(data);
+
+  // Auto-fit column widths based on max content length per column
+  const colWidths = data[0].map((_, colIdx) => {
+    const maxLen = Math.max(...data.map(row => String(row[colIdx] ?? "").length));
+    return { wch: Math.min(Math.max(maxLen + 2, 10), 50) };
+  });
+  ws["!cols"] = colWidths;
+
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  return Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }));
+}
+
+export function generatePricesXlsxTemplate(): Buffer {
+  return buildXlsxTemplate(PRICES_TEMPLATE_DATA, "Prices");
+}
+
+export function generateDividendsXlsxTemplate(): Buffer {
+  return buildXlsxTemplate(DIVIDENDS_TEMPLATE_DATA, "Dividends");
+}
+
+export function generateSignalsXlsxTemplate(): Buffer {
+  return buildXlsxTemplate(SIGNALS_TEMPLATE_DATA, "Signals");
 }
 
 export function generateDataEntryGuide(): object {
@@ -545,8 +628,9 @@ export function generateDataEntryGuide(): object {
     updatedAt: new Date().toISOString().slice(0, 10),
     templates: {
       prices: {
-        url: "/api/admin/cie/templates/prices",
-        format: "CSV",
+        urlCsv: "/api/admin/cie/templates/prices",
+        urlXlsx: "/api/admin/cie/templates/prices?format=xlsx",
+        format: "CSV or XLSX",
         requiredColumns: ["Symbol", "Date", "Close"],
         optionalColumns: ["Open", "High", "Low", "Volume"],
         notes: [
@@ -559,8 +643,9 @@ export function generateDataEntryGuide(): object {
         ],
       },
       dividends: {
-        url: "/api/admin/cie/templates/dividends",
-        format: "CSV",
+        urlCsv: "/api/admin/cie/templates/dividends",
+        urlXlsx: "/api/admin/cie/templates/dividends?format=xlsx",
+        format: "CSV or XLSX",
         requiredColumns: ["Symbol", "ExDividendDate", "AmountPerShare"],
         optionalColumns: ["PaymentDate"],
         notes: [
@@ -569,8 +654,9 @@ export function generateDataEntryGuide(): object {
         ],
       },
       signals: {
-        url: "/api/admin/cie/templates/signals",
-        format: "CSV",
+        urlCsv: "/api/admin/cie/templates/signals",
+        urlXlsx: "/api/admin/cie/templates/signals?format=xlsx",
+        format: "CSV or XLSX",
         requiredColumns: ["Symbol", "Type", "Content"],
         optionalColumns: ["Sentiment", "Credibility", "Tags"],
         notes: [

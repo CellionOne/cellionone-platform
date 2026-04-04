@@ -21,6 +21,9 @@ import {
   generatePricesTemplate,
   generateDividendsTemplate,
   generateSignalsTemplate,
+  generatePricesXlsxTemplate,
+  generateDividendsXlsxTemplate,
+  generateSignalsXlsxTemplate,
   generateDataEntryGuide,
 } from "../services/cieDataIngestionService";
 import { triggerImmediateScoreRun } from "../services/cieScheduler";
@@ -54,28 +57,53 @@ export function registerCieAdminRoutes(app: Express): void {
     }
   });
 
-  /** GET /api/admin/cie/templates/:type — download CSV template (prices | dividends | signals) */
+  /**
+   * GET /api/admin/cie/templates/:type[?format=xlsx]
+   * Download a data entry template for prices | dividends | signals.
+   * Accepts optional ?format=xlsx for Excel workbook; defaults to CSV.
+   */
   app.get("/api/admin/cie/templates/:type", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const { type } = req.params;
+      const isXlsx = req.query.format === "xlsx";
 
+      const validTypes = ["prices", "dividends", "signals"] as const;
+      if (!validTypes.includes(type as typeof validTypes[number])) {
+        return res.status(404).json({ error: `Unknown template type '${type}'. Use: prices | dividends | signals` });
+      }
+
+      if (isXlsx) {
+        let buf: Buffer;
+        let filename: string;
+        if (type === "prices") {
+          buf = generatePricesXlsxTemplate();
+          filename = "cie-prices-template.xlsx";
+        } else if (type === "dividends") {
+          buf = generateDividendsXlsxTemplate();
+          filename = "cie-dividends-template.xlsx";
+        } else {
+          buf = generateSignalsXlsxTemplate();
+          filename = "cie-signals-template.xlsx";
+        }
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        return res.send(buf);
+      }
+
+      // CSV (default)
       let csv: string;
       let filename: string;
-
       if (type === "prices") {
         csv = generatePricesTemplate();
         filename = "cie-prices-template.csv";
       } else if (type === "dividends") {
         csv = generateDividendsTemplate();
         filename = "cie-dividends-template.csv";
-      } else if (type === "signals") {
+      } else {
         csv = generateSignalsTemplate();
         filename = "cie-signals-template.csv";
-      } else {
-        return res.status(404).json({ error: `Unknown template type '${type}'. Use: prices | dividends | signals` });
       }
-
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.send(csv);

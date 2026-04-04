@@ -426,7 +426,7 @@ export interface IStorage {
 
   // CIE Signals
   createCieSignal(data: InsertCieSignal): Promise<CieSignal>;
-  listCieSignals(publishedOnly?: boolean, limit?: number): Promise<(CieSignal & { symbol?: string })[]>;
+  listCieSignals(publishedOnly?: boolean, limit?: number): Promise<(CieSignal & { symbol: string | null })[]>;
   updateCieSignal(id: number, data: Partial<InsertCieSignal>): Promise<CieSignal | undefined>;
   deleteCieSignal(id: number): Promise<void>;
 
@@ -2119,7 +2119,7 @@ export class DatabaseStorage implements IStorage {
 
   async listCieDividends(upcomingOnly = false): Promise<(CieDividend & { symbol: string; name: string })[]> {
     const today = new Date().toISOString().slice(0, 10);
-    const query = db.select({
+    const selectShape = {
       id: cieDividends.id,
       securityId: cieDividends.securityId,
       exDividendDate: cieDividends.exDividendDate,
@@ -2129,13 +2129,17 @@ export class DatabaseStorage implements IStorage {
       createdAt: cieDividends.createdAt,
       symbol: cieSecurities.symbol,
       name: cieSecurities.name,
-    }).from(cieDividends)
+    } as const;
+
+    const base = db.select(selectShape)
+      .from(cieDividends)
       .innerJoin(cieSecurities, eq(cieDividends.securityId, cieSecurities.id));
 
-    if (upcomingOnly) {
-      return query.where(gte(cieDividends.exDividendDate, today)).orderBy(cieDividends.exDividendDate) as any;
-    }
-    return query.orderBy(desc(cieDividends.exDividendDate)) as any;
+    const rows = upcomingOnly
+      ? await base.where(gte(cieDividends.exDividendDate, today)).orderBy(cieDividends.exDividendDate)
+      : await base.orderBy(desc(cieDividends.exDividendDate));
+
+    return rows as (CieDividend & { symbol: string; name: string })[];
   }
 
   async deleteCieDividend(id: number): Promise<void> {
@@ -2148,8 +2152,8 @@ export class DatabaseStorage implements IStorage {
     return sig;
   }
 
-  async listCieSignals(publishedOnly = true, limit = 50): Promise<(CieSignal & { symbol?: string })[]> {
-    const baseQuery = db.select({
+  async listCieSignals(publishedOnly = true, limit = 50): Promise<(CieSignal & { symbol: string | null })[]> {
+    const selectShape = {
       id: cieSignals.id,
       securityId: cieSignals.securityId,
       type: cieSignals.type,
@@ -2163,15 +2167,17 @@ export class DatabaseStorage implements IStorage {
       expiresAt: cieSignals.expiresAt,
       createdAt: cieSignals.createdAt,
       symbol: cieSecurities.symbol,
-    }).from(cieSignals)
+    } as const;
+
+    const base = db.select(selectShape)
+      .from(cieSignals)
       .leftJoin(cieSecurities, eq(cieSignals.securityId, cieSecurities.id));
 
-    if (publishedOnly) {
-      return baseQuery.where(eq(cieSignals.isPublished, true))
-        .orderBy(desc(cieSignals.publishedAt))
-        .limit(limit) as any;
-    }
-    return baseQuery.orderBy(desc(cieSignals.createdAt)).limit(limit) as any;
+    const rows = publishedOnly
+      ? await base.where(eq(cieSignals.isPublished, true)).orderBy(desc(cieSignals.publishedAt)).limit(limit)
+      : await base.orderBy(desc(cieSignals.createdAt)).limit(limit);
+
+    return rows as (CieSignal & { symbol: string | null })[];
   }
 
   async updateCieSignal(id: number, data: Partial<InsertCieSignal>): Promise<CieSignal | undefined> {

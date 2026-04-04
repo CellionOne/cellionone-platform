@@ -17,7 +17,7 @@
 
 import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "../db";
-import { eq, and, desc, gte, sql } from "drizzle-orm";
+import { eq, and, desc, gte, sql, or, isNull } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
 import { storage } from "../storage";
@@ -34,8 +34,17 @@ import {
 type CieTier = "free" | "subscriber" | "pro";
 const TIER_ORDER: Record<CieTier, number> = { free: 0, subscriber: 1, pro: 2 };
 
-function getUserId(req: any): string {
+interface AuthRequest extends Request {
+  user?: { claims?: { sub?: string } };
+  cieTier?: CieTier;
+}
+
+function getUserId(req: AuthRequest): string {
   return req.user?.claims?.sub ?? "";
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : "Internal server error";
 }
 
 async function resolveUserTier(userId: string): Promise<CieTier> {
@@ -79,10 +88,10 @@ async function resolveUserTier(userId: string): Promise<CieTier> {
 }
 
 function requireCieTierSession(minTier: CieTier) {
-  return async (req: any, res: Response, next: NextFunction) => {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
     const userId = getUserId(req);
     const tier = await resolveUserTier(userId);
-    (req as any).cieTier = tier;
+    req.cieTier = tier;
     if (TIER_ORDER[tier] < TIER_ORDER[minTier]) {
       return res.status(403).json({
         error: `This section requires CIE ${minTier} tier or higher`,
@@ -113,13 +122,15 @@ async function resolveUserOrg(userId: string): Promise<number | null> {
 export function registerCiePortalRoutes(app: Express): void {
 
   // ── GET /api/cie-portal/status ───────────────────────────────────────────
-  app.get("/api/cie-portal/status", isAuthenticated, async (req: any, res: Response) => {
+  app.get("/api/cie-portal/status", isAuthenticated, async (req: AuthRequest, res: Response) => {
     try {
       const userId = getUserId(req);
       const tier = await resolveUserTier(userId);
-
       const now = new Date();
-      const [sub] = await db.select()
+
+      // Find the subscription that actually grants the current tier:
+      // 1. Look for a personal subscription first
+      const [personalSub] = await db.select()
         .from(cieSubscriptions)
         .where(and(
           eq(cieSubscriptions.userId, userId),
@@ -129,21 +140,42 @@ export function registerCiePortalRoutes(app: Express): void {
         .orderBy(desc(cieSubscriptions.currentPeriodEnd))
         .limit(1);
 
+      // 2. If no personal sub, look for org-scoped subscription
+      let activeSub = personalSub ?? null;
+      if (!activeSub) {
+        const memberships = await db.select({ orgId: kycOrgMembers.orgId })
+          .from(kycOrgMembers)
+          .where(and(eq(kycOrgMembers.userId, userId), eq(kycOrgMembers.inviteStatus, "accepted")))
+          .limit(5);
+        for (const { orgId } of memberships) {
+          const [orgSub] = await db.select()
+            .from(cieSubscriptions)
+            .where(and(
+              eq(cieSubscriptions.orgId, orgId),
+              eq(cieSubscriptions.status, "active"),
+              gte(cieSubscriptions.currentPeriodEnd, now),
+            ))
+            .orderBy(desc(cieSubscriptions.currentPeriodEnd))
+            .limit(1);
+          if (orgSub) { activeSub = orgSub; break; }
+        }
+      }
+
       res.json({
         tier,
         isPaid: tier !== "free",
-        subscription: sub ? {
-          id: sub.id,
-          tier: sub.tier,
-          status: sub.status,
-          currentPeriodEnd: sub.currentPeriodEnd,
-          cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
-          cancelledAt: sub.cancelledAt,
-          paystackCustomerCode: sub.paystackCustomerCode,
+        subscription: activeSub ? {
+          id: activeSub.id,
+          tier: activeSub.tier,
+          status: activeSub.status,
+          currentPeriodEnd: activeSub.currentPeriodEnd,
+          cancelAtPeriodEnd: activeSub.cancelAtPeriodEnd,
+          cancelledAt: activeSub.cancelledAt,
+          paystackCustomerCode: activeSub.paystackCustomerCode,
         } : null,
       });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (err: unknown) {
+      res.status(500).json({ error: errMsg(err) });
     }
   });
 
@@ -163,8 +195,8 @@ export function registerCiePortalRoutes(app: Express): void {
         source: pulse.source ?? "manual",
         updatedAt: pulse.updatedAt,
       });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (err: unknown) {
+      res.status(500).json({ error: errMsg(err) });
     }
   });
 
@@ -173,7 +205,7 @@ export function registerCiePortalRoutes(app: Express): void {
     "/api/cie-portal/securities",
     isAuthenticated,
     requireCieTierSession("subscriber"),
-    async (req: any, res: Response) => {
+    async (req: AuthRequest, res: Response) => {
       try {
         const { sector, q } = z.object({
           sector: z.string().optional(),
@@ -248,8 +280,8 @@ export function registerCiePortalRoutes(app: Express): void {
           sectors: Array.from(new Set(scores.map(s => s.sector))).sort(),
           total: filtered.length,
         });
-      } catch (e: any) {
-        res.status(500).json({ error: e.message });
+      } catch (err: unknown) {
+        res.status(500).json({ error: errMsg(err) });
       }
     },
   );
@@ -259,7 +291,7 @@ export function registerCiePortalRoutes(app: Express): void {
     "/api/cie-portal/securities/:ticker",
     isAuthenticated,
     requireCieTierSession("subscriber"),
-    async (req: any, res: Response) => {
+    async (req: AuthRequest, res: Response) => {
       try {
         const ticker = req.params.ticker.toUpperCase();
         const security = await storage.getCieSecurityBySymbol(ticker);
@@ -309,8 +341,8 @@ export function registerCiePortalRoutes(app: Express): void {
             daysUntil: Math.ceil((new Date(divAlert.exDividendDate).getTime() - now.getTime()) / 86400000),
           } : null,
         });
-      } catch (e: any) {
-        res.status(500).json({ error: e.message });
+      } catch (err: unknown) {
+        res.status(500).json({ error: errMsg(err) });
       }
     },
   );
@@ -324,27 +356,36 @@ export function registerCiePortalRoutes(app: Express): void {
       try {
         const signals = await storage.listCieSignals(true, 30);
         res.json({ signals, count: signals.length });
-      } catch (e: any) {
-        res.status(500).json({ error: e.message });
+      } catch (err: unknown) {
+        res.status(500).json({ error: errMsg(err) });
       }
     },
   );
 
   // ── GET /api/cie-portal/api-keys ─────────────────────────────────────────
-  app.get("/api/cie-portal/api-keys", isAuthenticated, async (req: any, res: Response) => {
+  // Supports both org-scoped and personal (no-org) CIE subscribers
+  app.get("/api/cie-portal/api-keys", isAuthenticated, async (req: AuthRequest, res: Response) => {
     try {
       const userId = getUserId(req);
       const tier = await resolveUserTier(userId);
       if (tier === "free") return res.status(403).json({ error: "CIE subscription required to use API keys." });
+
       const orgId = await resolveUserOrg(userId);
-      if (!orgId) return res.json({ keys: [], orgId: null, message: "No KYC organisation found. Create one to generate API keys." });
+
+      // Build ownership filter: org keys OR personal keys (userId-scoped, no org)
+      const ownershipFilter = orgId
+        ? or(
+            eq(kycApiKeys.organisationId, orgId),
+            and(eq(kycApiKeys.userId, userId), isNull(kycApiKeys.organisationId)),
+          )
+        : and(eq(kycApiKeys.userId, userId), isNull(kycApiKeys.organisationId));
 
       const keys = await db.select()
         .from(kycApiKeys)
-        .where(and(eq(kycApiKeys.organisationId, orgId), eq(kycApiKeys.isActive, true)))
+        .where(and(ownershipFilter, eq(kycApiKeys.isActive, true)))
         .orderBy(desc(kycApiKeys.createdAt));
 
-      // Filter for cie:read keys
+      // Filter for cie:read keys only
       const cieKeys = keys.filter(k => k.permissions?.includes("cie:read"));
 
       const keysWithUsage = await Promise.all(cieKeys.map(async k => {
@@ -367,45 +408,41 @@ export function registerCiePortalRoutes(app: Express): void {
         };
       }));
 
-      res.json({ keys: keysWithUsage, orgId });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.json({ keys: keysWithUsage, orgId: orgId ?? null });
+    } catch (err: unknown) {
+      res.status(500).json({ error: errMsg(err) });
     }
   });
 
   // ── POST /api/cie-portal/api-keys ────────────────────────────────────────
-  app.post("/api/cie-portal/api-keys", isAuthenticated, async (req: any, res: Response) => {
+  // Org-scoped if the user belongs to a KYC org; personal (userId-scoped) otherwise
+  app.post("/api/cie-portal/api-keys", isAuthenticated, async (req: AuthRequest, res: Response) => {
     try {
       const userId = getUserId(req);
-      const orgId = await resolveUserOrg(userId);
-      if (!orgId) return res.status(400).json({ error: "No KYC organisation found. Create one to generate API keys." });
-
       const tier = await resolveUserTier(userId);
       if (tier === "free") return res.status(403).json({ error: "CIE subscription required to create API keys." });
 
       const { label } = z.object({ label: z.string().min(1).max(100) }).parse(req.body);
+      const orgId = await resolveUserOrg(userId);
 
       const rawKey = `cie_${crypto.randomBytes(32).toString("hex")}`;
       const keyHash = crypto.createHash("sha256").update(rawKey).digest("hex");
       const keyPrefix = rawKey.substring(0, 12);
       const rateLimitPerMinute = tier === "pro" ? 1000 : 500;
 
-      await db.insert(kycApiKeys).values({
-        organisationId: orgId,
-        name: label,
-        keyPrefix,
-        keyHash,
-        permissions: ["cie:read"],
-        rateLimitPerMinute,
-        isActive: true,
-      });
+      // Store with org ownership when available, otherwise as a personal key (userId)
+      await db.insert(kycApiKeys).values(
+        orgId
+          ? { organisationId: orgId, name: label, keyPrefix, keyHash, permissions: ["cie:read"], rateLimitPerMinute, isActive: true }
+          : { userId, name: label, keyPrefix, keyHash, permissions: ["cie:read"], rateLimitPerMinute, isActive: true },
+      );
 
       await storage.createAuditLog({
         actorUserId: userId,
         action: "cie_api_key_created",
         entityType: "kyc_api_key",
         entityId: label,
-        details: { orgId, tier, label },
+        details: { orgId: orgId ?? null, tier, label, scope: orgId ? "org" : "personal" },
       });
 
       res.status(201).json({
@@ -415,25 +452,34 @@ export function registerCiePortalRoutes(app: Express): void {
         permissions: ["cie:read"],
         rateLimit: rateLimitPerMinute,
       });
-    } catch (e: any) {
-      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
-      res.status(500).json({ error: e.message });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
+      res.status(500).json({ error: errMsg(err) });
     }
   });
 
   // ── DELETE /api/cie-portal/api-keys/:id ──────────────────────────────────
-  app.delete("/api/cie-portal/api-keys/:id", isAuthenticated, async (req: any, res: Response) => {
+  app.delete("/api/cie-portal/api-keys/:id", isAuthenticated, async (req: AuthRequest, res: Response) => {
     try {
       const userId = getUserId(req);
       const tier = await resolveUserTier(userId);
       if (tier === "free") return res.status(403).json({ error: "CIE subscription required." });
+
       const orgId = await resolveUserOrg(userId);
-      const keyId = parseInt(req.params.id);
+      const keyId = parseInt(req.params.id as string);
       if (isNaN(keyId)) return res.status(400).json({ error: "Invalid key ID" });
+
+      // Verify ownership: org-scoped OR personal
+      const ownershipFilter = orgId
+        ? or(
+            eq(kycApiKeys.organisationId, orgId),
+            and(eq(kycApiKeys.userId, userId), isNull(kycApiKeys.organisationId)),
+          )
+        : and(eq(kycApiKeys.userId, userId), isNull(kycApiKeys.organisationId));
 
       const [key] = await db.select()
         .from(kycApiKeys)
-        .where(and(eq(kycApiKeys.id, keyId), eq(kycApiKeys.organisationId, orgId ?? -1)));
+        .where(and(eq(kycApiKeys.id, keyId), ownershipFilter));
       if (!key) return res.status(404).json({ error: "Key not found" });
 
       await db.update(kycApiKeys).set({ isActive: false }).where(eq(kycApiKeys.id, keyId));
@@ -443,12 +489,12 @@ export function registerCiePortalRoutes(app: Express): void {
         action: "cie_api_key_revoked",
         entityType: "kyc_api_key",
         entityId: String(keyId),
-        details: { orgId, label: key.name },
+        details: { orgId: orgId ?? null, label: key.name },
       });
 
       res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (err: unknown) {
+      res.status(500).json({ error: errMsg(err) });
     }
   });
 }

@@ -18,9 +18,10 @@
  * paystackWebhookHandler.ts drives all state transitions.
  */
 
-import type { Express, Response } from "express";
+import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
+
 import { db } from "../db";
 import { kycOrganisations, kycOrgMembers, cieSubscriptions } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
@@ -28,6 +29,25 @@ import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import type { CieSubscription } from "@shared/schema";
 import { invalidateCieApiKeyTierCache } from "../middleware/apiKeyAuth";
+
+interface AuthBillingRequest extends Request {
+  user?: { id?: string; claims?: { sub?: string } };
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : "Internal server error";
+}
+
+interface PaystackPlan {
+  plan_code: string;
+  name: string;
+  amount: number;
+}
+
+interface PaystackSubscriptionResponse {
+  subscription_code: string;
+  customer?: { customer_code?: string };
+}
 
 const PAYSTACK_BASE = "https://api.paystack.co";
 
@@ -111,9 +131,9 @@ export async function seedCiePlans(): Promise<void> {
   for (const p of paidPlans) {
     const configured = process.env[p.envKey];
     try {
-      const list = await paystackReq<any[]>("/plan?perPage=100");
-      const plans: any[] = Array.isArray(list) ? list : [];
-      const found = plans.find((x: any) => x.name === p.name);
+      const list = await paystackReq<PaystackPlan[]>("/plan?perPage=100");
+      const plans: PaystackPlan[] = Array.isArray(list) ? list : [];
+      const found = plans.find((x: PaystackPlan) => x.name === p.name);
       if (found) {
         if (found.amount !== p.amount) {
           await paystackReq(`/plan/${found.plan_code}`, "PUT", { amount: p.amount, interval: "monthly" });
@@ -128,8 +148,8 @@ export async function seedCiePlans(): Promise<void> {
         console.log(`[CIE Billing] Created plan "${p.name}": ${c.plan_code}`);
         console.log(`[CIE Billing] ⚠️  Set ${p.envKey}=${c.plan_code}`);
       }
-    } catch (err: any) {
-      console.warn(`[CIE Billing] Failed to seed "${p.name}": ${err.message}`);
+    } catch (err: unknown) {
+      console.warn(`[CIE Billing] Failed to seed "${p.name}": ${errMsg(err)}`);
     }
   }
 }
@@ -181,13 +201,13 @@ async function createPaystackSubscriptionDirect(params: {
       authorization: params.authorizationCode,
     };
     if (params.startDate) body.start_date = params.startDate.toISOString();
-    const result = await paystackReq<any>("/subscription", "POST", body);
+    const result = await paystackReq<PaystackSubscriptionResponse>("/subscription", "POST", body);
     return {
       subscriptionCode: result.subscription_code,
       customerCode: result.customer?.customer_code || params.customerCode,
     };
-  } catch (err: any) {
-    console.warn("[CIE Billing] Direct subscription creation failed:", err.message);
+  } catch (err: unknown) {
+    console.warn("[CIE Billing] Direct subscription creation failed:", errMsg(err));
     return null;
   }
 }
@@ -221,7 +241,7 @@ type CheckoutResult =
   | { ok: false; status: number; error: string; code?: string };
 
 async function buildCheckout(params: {
-  req: any;
+  req: AuthBillingRequest;
   userId: string;
   userEmail: string;
   orgId: number | null;
@@ -273,7 +293,7 @@ async function buildCheckout(params: {
 export function registerCieBillingRoutes(app: Express): void {
 
   // GET /api/cie-billing/status
-  app.get("/api/cie-billing/status", isAuthenticated, async (req: any, res: Response) => {
+  app.get("/api/cie-billing/status", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -296,14 +316,14 @@ export function registerCieBillingRoutes(app: Express): void {
         },
         currency: "NGN",
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[CIE Billing] Status error:", err);
       res.status(500).json({ error: "Failed to retrieve subscription status" });
     }
   });
 
   // POST /api/cie-billing/subscribe
-  app.post("/api/cie-billing/subscribe", isAuthenticated, async (req: any, res: Response) => {
+  app.post("/api/cie-billing/subscribe", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -331,17 +351,17 @@ export function registerCieBillingRoutes(app: Express): void {
 
       const result = await buildCheckout({ req, userId, userEmail: user.email, orgId, tier, actionLabel: "cie_subscription_initiated" });
       return result.ok ? res.json(result.data) : res.status(result.status).json({ error: result.error, code: result.code });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
       console.error("[CIE Billing] Subscribe error:", err);
-      res.status(500).json({ error: err.message || "Failed to initiate subscription" });
+      res.status(500).json({ error: errMsg(err) || "Failed to initiate subscription" });
     }
   });
 
   // POST /api/cie-billing/cancel
   // Disables the Paystack subscription from the platform and marks our record as pending cancel.
   // Falls back to a management link if Paystack disable requires user interaction.
-  app.post("/api/cie-billing/cancel", isAuthenticated, async (req: any, res: Response) => {
+  app.post("/api/cie-billing/cancel", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -382,7 +402,7 @@ export function registerCieBillingRoutes(app: Express): void {
         paystackCancelled,
         managementLink,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[CIE Billing] Cancel error:", err);
       res.status(500).json({ error: "Failed to cancel subscription" });
     }
@@ -391,7 +411,7 @@ export function registerCieBillingRoutes(app: Express): void {
   // POST /api/cie-billing/upgrade  (Subscriber → Pro)
   // Uses stored Paystack authorization code for a direct plan switch where available.
   // Falls back to checkout page if authorization code not yet stored.
-  app.post("/api/cie-billing/upgrade", isAuthenticated, async (req: any, res: Response) => {
+  app.post("/api/cie-billing/upgrade", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -442,15 +462,15 @@ export function registerCieBillingRoutes(app: Express): void {
       // Fallback: checkout page if no authorization code stored yet
       const result = await buildCheckout({ req, userId, userEmail: user.email, orgId, tier: "pro", previousSubscriptionId: activeSub.id, actionLabel: "cie_subscription_upgrade_initiated" });
       return result.ok ? res.json(result.data) : res.status(result.status).json({ error: result.error, code: result.code });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[CIE Billing] Upgrade error:", err);
-      res.status(500).json({ error: err.message || "Failed to initiate upgrade" });
+      res.status(500).json({ error: errMsg(err) || "Failed to initiate upgrade" });
     }
   });
 
   // POST /api/cie-billing/downgrade  (Pro → Subscriber)
   // Direct plan switch where authorization code is available. Checkout fallback otherwise.
-  app.post("/api/cie-billing/downgrade", isAuthenticated, async (req: any, res: Response) => {
+  app.post("/api/cie-billing/downgrade", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -505,9 +525,9 @@ export function registerCieBillingRoutes(app: Express): void {
       const result = await buildCheckout({ req, userId, userEmail: user.email, orgId, tier: "subscriber", previousSubscriptionId: activeSub.id, actionLabel: "cie_subscription_downgrade_initiated" });
       if (!result.ok) return res.status(result.status).json({ error: result.error, code: result.code });
       return res.json({ ...result.data, managementLink });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[CIE Billing] Downgrade error:", err);
-      res.status(500).json({ error: err.message || "Failed to initiate downgrade" });
+      res.status(500).json({ error: errMsg(err) || "Failed to initiate downgrade" });
     }
   });
 

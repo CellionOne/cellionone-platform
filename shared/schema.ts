@@ -1308,7 +1308,8 @@ export type KycSupplierPerson = typeof kycSupplierPeople.$inferSelect;
 // ============== KYC API KEYS ==============
 export const kycApiKeys = pgTable("kyc_api_keys", {
   id: serial("id").primaryKey(),
-  organisationId: integer("organisation_id").notNull(),
+  organisationId: integer("organisation_id"),
+  userId: varchar("user_id", { length: 255 }),
   keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
   keyHash: varchar("key_hash", { length: 128 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),

@@ -61,6 +61,10 @@ function getUserId(req: AuthenticatedRequest): string {
   return req.user?.claims?.sub ?? "system";
 }
 
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : "Internal server error";
+}
+
 export function registerCieAdminRoutes(app: Express): void {
 
   // ================================================================
@@ -72,8 +76,8 @@ export function registerCieAdminRoutes(app: Express): void {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       res.json(generateDataEntryGuide());
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -127,8 +131,8 @@ export function registerCieAdminRoutes(app: Express): void {
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.send(csv);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -143,8 +147,8 @@ export function registerCieAdminRoutes(app: Express): void {
       const activeOnly = req.query.activeOnly !== "false";
       const securities = await storage.listCieSecurities(activeOnly);
       res.json({ securities, count: securities.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -175,9 +179,9 @@ export function registerCieAdminRoutes(app: Express): void {
         details: { name: sec.name, sector: sec.sector },
       });
       res.status(201).json(sec);
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -195,9 +199,9 @@ export function registerCieAdminRoutes(app: Express): void {
       const sec = await storage.updateCieSecurity(id, body);
       if (!sec) return res.status(404).json({ error: "Security not found" });
       res.json(sec);
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -260,8 +264,8 @@ export function registerCieAdminRoutes(app: Express): void {
         previewRows: preview.previewRows,                // first 20 for quick display
         expiresAt: preview.expiresAt,
       });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -319,10 +323,11 @@ export function registerCieAdminRoutes(app: Express): void {
         skipped: result.skipped,
         message: `${result.committed} price rows committed. Score recomputation triggered.`,
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
-      if (e.message?.includes("Preview token")) return res.status(410).json({ error: e.message });
-      res.status(500).json({ error: e.message });
+      const msg = errMsg(e);
+      if (msg.includes("Preview token")) return res.status(410).json({ error: msg });
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -333,8 +338,8 @@ export function registerCieAdminRoutes(app: Express): void {
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 100);
       const logs = await storage.listCieIngestionLogs(limit);
       res.json({ logs, count: logs.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -348,8 +353,8 @@ export function registerCieAdminRoutes(app: Express): void {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const versions = await storage.listCieModelVersions();
       res.json({ versions, count: versions.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -391,9 +396,9 @@ export function registerCieAdminRoutes(app: Express): void {
       });
 
       res.status(201).json(mv);
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -414,8 +419,8 @@ export function registerCieAdminRoutes(app: Express): void {
       });
 
       res.json({ ...mv, message: "Model version submitted for review." });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -441,8 +446,8 @@ export function registerCieAdminRoutes(app: Express): void {
       });
 
       res.json({ ...mv, message: "Model version activated. Score recomputation triggered." });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -456,8 +461,8 @@ export function registerCieAdminRoutes(app: Express): void {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const scores = await storage.listLatestCieScores();
       res.json({ scores, count: scores.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -469,8 +474,8 @@ export function registerCieAdminRoutes(app: Express): void {
       const days = Math.min(parseInt(String(req.query.days ?? "30")), 365);
       const history = await storage.listCieScoreHistory(securityId, days);
       res.json({ history, count: history.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -487,8 +492,8 @@ export function registerCieAdminRoutes(app: Express): void {
         details: result,
       });
       res.json({ ...result, message: `Score run complete: ${result.scored} scored, ${result.skipped} skipped` });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -504,8 +509,8 @@ export function registerCieAdminRoutes(app: Express): void {
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const signals = await storage.listCieSignals(publishedOnly, limit);
       res.json({ signals, count: signals.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -541,9 +546,9 @@ export function registerCieAdminRoutes(app: Express): void {
       });
 
       res.status(201).json(sig);
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -567,9 +572,9 @@ export function registerCieAdminRoutes(app: Express): void {
       const sig = await storage.updateCieSignal(id, updates);
       if (!sig) return res.status(404).json({ error: "Signal not found" });
       res.json(sig);
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -580,8 +585,8 @@ export function registerCieAdminRoutes(app: Express): void {
       const id = parseInt(req.params.id as string);
       await storage.deleteCieSignal(id);
       res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -595,8 +600,8 @@ export function registerCieAdminRoutes(app: Express): void {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const pulse = await storage.getLatestCieMarketPulse();
       res.json(pulse ?? null);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -628,9 +633,9 @@ export function registerCieAdminRoutes(app: Express): void {
       });
 
       res.json(pulse);
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -645,8 +650,8 @@ export function registerCieAdminRoutes(app: Express): void {
       const upcomingOnly = req.query.upcomingOnly === "true";
       const dividends = await storage.listCieDividends(upcomingOnly);
       res.json({ dividends, count: dividends.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -670,9 +675,9 @@ export function registerCieAdminRoutes(app: Express): void {
         notes: body.notes ?? null,
       });
       res.status(201).json(div);
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -683,8 +688,8 @@ export function registerCieAdminRoutes(app: Express): void {
       const id = parseInt(req.params.id as string);
       await storage.deleteCieDividend(id);
       res.json({ success: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 
@@ -768,8 +773,8 @@ export function registerCieAdminRoutes(app: Express): void {
           paystackCustomerCode: s.paystackCustomerCode,
         })),
       });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 

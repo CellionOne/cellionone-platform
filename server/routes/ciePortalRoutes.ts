@@ -24,6 +24,7 @@ import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import {
   cieSubscriptions,
+  cieScores,
   kycOrganisations,
   kycOrgMembers,
   kycApiKeys,
@@ -193,6 +194,45 @@ export function registerCiePortalRoutes(app: Express): void {
           );
         }
 
+        // ── Compute RS momentum (daily / weekly / monthly) ──────────────────
+        // Fetch all scores from the last 31 days in one query, then derive trends
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 31);
+        const recentRows = await db.select({
+          securityId: cieScores.securityId,
+          scoreDate: cieScores.scoreDate,
+          rs: cieScores.rs,
+        }).from(cieScores)
+          .where(gte(cieScores.scoreDate, cutoff.toISOString().slice(0, 10)))
+          .orderBy(cieScores.securityId, desc(cieScores.scoreDate));
+
+        // Group by securityId: sorted most-recent-first
+        const histMap = new Map<number, { scoreDate: string; rs: number }[]>();
+        for (const row of recentRows) {
+          if (!histMap.has(row.securityId)) histMap.set(row.securityId, []);
+          histMap.get(row.securityId)!.push({ scoreDate: row.scoreDate, rs: row.rs ?? 0 });
+        }
+
+        const trendDir = (curr: number, prior: number | undefined): "up" | "down" | "flat" | null => {
+          if (prior === undefined) return null;
+          const diff = curr - prior;
+          if (Math.abs(diff) < 0.5) return "flat";
+          return diff > 0 ? "up" : "down";
+        };
+
+        const getMomentum = (secId: number, currRs: number | null): { daily: string | null; weekly: string | null; monthly: string | null } => {
+          const hist = histMap.get(secId) ?? [];
+          if (currRs === null || hist.length < 2) return { daily: null, weekly: null, monthly: null };
+          const d1 = hist[1]?.rs;
+          const d7 = hist[5]?.rs;
+          const d30 = hist[20]?.rs;
+          return {
+            daily: trendDir(currRs, d1),
+            weekly: trendDir(currRs, d7),
+            monthly: trendDir(currRs, d30),
+          };
+        };
+
         res.json({
           securities: filtered.map(s => ({
             ticker: s.symbol,
@@ -203,9 +243,10 @@ export function registerCiePortalRoutes(app: Express): void {
             cs: s.cs,
             recommendation: s.recommendation,
             scoreDate: s.scoreDate,
+            momentum: getMomentum(s.securityId, s.rs),
           })),
+          sectors: Array.from(new Set(scores.map(s => s.sector))).sort(),
           total: filtered.length,
-          tier: (req as any).cieTier,
         });
       } catch (e: any) {
         res.status(500).json({ error: e.message });
@@ -293,6 +334,8 @@ export function registerCiePortalRoutes(app: Express): void {
   app.get("/api/cie-portal/api-keys", isAuthenticated, async (req: any, res: Response) => {
     try {
       const userId = getUserId(req);
+      const tier = await resolveUserTier(userId);
+      if (tier === "free") return res.status(403).json({ error: "CIE subscription required to use API keys." });
       const orgId = await resolveUserOrg(userId);
       if (!orgId) return res.json({ keys: [], orgId: null, message: "No KYC organisation found. Create one to generate API keys." });
 
@@ -319,6 +362,7 @@ export function registerCiePortalRoutes(app: Express): void {
           rateLimit: k.rateLimitPerMinute,
           isActive: k.isActive,
           createdAt: k.createdAt,
+          lastUsedAt: usage?.lastUsedAt ?? null,
           totalCalls: Number(usage?.totalCalls ?? 0),
         };
       }));
@@ -381,6 +425,8 @@ export function registerCiePortalRoutes(app: Express): void {
   app.delete("/api/cie-portal/api-keys/:id", isAuthenticated, async (req: any, res: Response) => {
     try {
       const userId = getUserId(req);
+      const tier = await resolveUserTier(userId);
+      if (tier === "free") return res.status(403).json({ error: "CIE subscription required." });
       const orgId = await resolveUserOrg(userId);
       const keyId = parseInt(req.params.id);
       if (isNaN(keyId)) return res.status(400).json({ error: "Invalid key ID" });

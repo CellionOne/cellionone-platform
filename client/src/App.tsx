@@ -50,6 +50,10 @@ import AdminEscrowDashboard from "@/pages/admin/escrow-dashboard";
 import AdminBankingPartners from "@/pages/admin/banking-partners";
 import AdminCieCockpit from "@/pages/admin/cie";
 import CiePortal from "@/pages/cie/index";
+import CieSecurities from "@/pages/cie/securities";
+import CieSignals from "@/pages/cie/signals";
+import CieApiKeys from "@/pages/cie/api-keys";
+import CieSubscribePage from "@/pages/cie/subscribe";
 import CieSubscribeSuccess from "@/pages/cie/subscribe-success";
 import CieIntelligencePage from "@/pages/cie-intelligence";
 import PlatformOverview from "@/pages/platform-overview";
@@ -356,6 +360,18 @@ function Router() {
 
       <Route path="/cie/subscribe/success">
         <ProtectedRoute component={CieSubscribeSuccess} />
+      </Route>
+      <Route path="/cie/subscribe">
+        <ProtectedRoute component={CieSubscribePage} />
+      </Route>
+      <Route path="/cie/api-keys">
+        <ProtectedRoute component={CieApiKeys} />
+      </Route>
+      <Route path="/cie/signals">
+        <ProtectedRoute component={CieSignals} />
+      </Route>
+      <Route path="/cie/securities">
+        <ProtectedRoute component={CieSecurities} />
       </Route>
       <Route path="/cie">
         <ProtectedRoute component={CiePortal} />

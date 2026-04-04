@@ -447,6 +447,7 @@ export interface IStorage {
   getCieSubscriptionById(id: number): Promise<CieSubscription | undefined>;
   getCieSubscriptionByUserId(userId: string): Promise<CieSubscription | undefined>;
   getCieSubscriptionByOrgId(orgId: number): Promise<CieSubscription | undefined>;
+  getCieSubscriptionByReference(reference: string): Promise<CieSubscription | undefined>;
   getCieSubscriptionByPaystackCode(code: string): Promise<CieSubscription | undefined>;
   updateCieSubscription(id: number, data: Partial<InsertCieSubscription>): Promise<CieSubscription | undefined>;
   listCieSubscriptions(limit?: number): Promise<CieSubscription[]>;
@@ -2257,18 +2258,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCieSubscriptionByUserId(userId: string): Promise<CieSubscription | undefined> {
+    // Returns the most recent subscription record regardless of status.
+    // Callers are responsible for checking .status explicitly.
     const [sub] = await db.select().from(cieSubscriptions)
-      .where(and(eq(cieSubscriptions.userId, userId), eq(cieSubscriptions.status, 'active')))
+      .where(eq(cieSubscriptions.userId, userId))
       .orderBy(desc(cieSubscriptions.createdAt))
       .limit(1);
     return sub;
   }
 
   async getCieSubscriptionByOrgId(orgId: number): Promise<CieSubscription | undefined> {
+    // Returns the most recent active subscription for this org.
     const [sub] = await db.select().from(cieSubscriptions)
       .where(and(eq(cieSubscriptions.orgId, orgId), eq(cieSubscriptions.status, 'active')))
       .orderBy(desc(cieSubscriptions.createdAt))
       .limit(1);
+    return sub;
+  }
+
+  async getCieSubscriptionByReference(reference: string): Promise<CieSubscription | undefined> {
+    const [sub] = await db.select().from(cieSubscriptions)
+      .where(eq(cieSubscriptions.paystackReference, reference));
     return sub;
   }
 

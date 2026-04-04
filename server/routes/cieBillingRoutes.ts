@@ -12,18 +12,24 @@
  *
  * Paystack flow:
  *   1. POST /transaction/initialize with { plan, email, metadata }
+ *      Subscription record created with status='pending'.
  *   2. Redirect user to authorizationUrl
  *   3. On charge.success webhook (metadata.type = 'cie_subscription'):
- *      → activate subscription, store subscription code + period dates
- *   4. On subscription.disable webhook:
- *      → mark subscription cancelled
- *   5. On invoice.payment_failed webhook:
- *      → mark subscription past_due, send notification
+ *      → Update subscription to status='active'; set Paystack codes + period dates.
+ *   4. On subscription.disable webhook → status='cancelled'
+ *   5. On invoice.payment_failed webhook → status='past_due'
+ *
+ * Pricing (task spec):
+ *   Subscriber: ₦5,000/month  (500,000 kobo)
+ *   Pro:        ₦10,000/month (1,000,000 kobo)
  */
 
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import crypto from "crypto";
+import { db } from "../db";
+import { kycOrganisations } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 
@@ -37,10 +43,10 @@ const TIER_LABELS: Record<CieTier, string> = {
   pro: "CIE Pro",
 };
 
-// Monthly amounts in kobo (NGN)
+// Monthly amounts in kobo (NGN). Display only — Paystack plan amount governs the actual charge.
 const TIER_AMOUNTS_KOBO: Record<Exclude<CieTier, "free">, number> = {
-  subscriber: 5_000_00, // ₦50,000/month
-  pro: 15_000_00,       // ₦150,000/month
+  subscriber: 500_000,   // ₦5,000/month
+  pro: 1_000_000,        // ₦10,000/month
 };
 
 function getPaystackSecretKey(): string {
@@ -51,7 +57,7 @@ function getPaystackSecretKey(): string {
 
 async function paystackRequest<T>(
   endpoint: string,
-  method: "GET" | "POST" = "GET",
+  method: "GET" | "POST" | "PUT" = "GET",
   body?: Record<string, unknown>,
 ): Promise<T> {
   const secretKey = getPaystackSecretKey();
@@ -79,8 +85,8 @@ function getPlanCode(tier: "subscriber" | "pro"): string | null {
 
 /**
  * Seed Paystack CIE plans if the env vars are not set.
+ * Also updates existing plans if the amount differs from the spec.
  * Called on startup — logs plan codes for admin to copy into env vars.
- * Safe to call multiple times (idempotent via plan lookup).
  */
 export async function seedCiePlans(): Promise<void> {
   if (!process.env.PAYSTACK_SECRET_KEY && !process.env.PAYSTACK_TEST_SECRET_KEY) {
@@ -88,7 +94,12 @@ export async function seedCiePlans(): Promise<void> {
     return;
   }
 
-  const plans: Array<{ tier: "subscriber" | "pro"; envKey: string; name: string; amount: number }> = [
+  const plans: Array<{
+    tier: "subscriber" | "pro";
+    envKey: string;
+    name: string;
+    amount: number;
+  }> = [
     {
       tier: "subscriber",
       envKey: "PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE",
@@ -104,34 +115,35 @@ export async function seedCiePlans(): Promise<void> {
   ];
 
   for (const plan of plans) {
-    if (process.env[plan.envKey]) {
-      console.log(`[CIE Billing] ${plan.envKey} already set (${process.env[plan.envKey]})`);
-      continue;
-    }
+    const envCode = process.env[plan.envKey];
     try {
-      // Check if a plan with this name already exists
-      const listResult = await paystackRequest<{ data: Array<{ plan_code: string; name: string }> }>(
-        `/plan?perPage=100`,
-        "GET",
-      );
-      const existing = Array.isArray((listResult as any)) 
-        ? (listResult as any[]).find((p: any) => p.name === plan.name)
-        : null;
+      // List plans and find by name
+      const listResult = await paystackRequest<any[]>("/plan?perPage=100");
+      const planList: any[] = Array.isArray(listResult) ? listResult : [];
+      const existing = planList.find((p: any) => p.name === plan.name);
 
       if (existing) {
-        console.log(`[CIE Billing] Plan "${plan.name}" already exists: ${existing.plan_code}`);
-        console.log(`[CIE Billing] ⚠️  Set env var: ${plan.envKey}=${existing.plan_code}`);
-      } else {
-        const created = await paystackRequest<{ plan_code: string }>(
-          "/plan",
-          "POST",
-          {
-            name: plan.name,
+        // If amount has changed, update the plan
+        if (existing.amount !== plan.amount) {
+          await paystackRequest(`/plan/${existing.plan_code}`, "PUT", {
             amount: plan.amount,
             interval: "monthly",
-            description: `Cellion Intelligence Engine — ${TIER_LABELS[plan.tier]} tier, monthly subscription`,
-          },
-        );
+          });
+          console.log(`[CIE Billing] Updated plan "${plan.name}" amount to ${plan.amount} kobo`);
+        }
+        if (!envCode) {
+          console.log(`[CIE Billing] Plan "${plan.name}" already exists: ${existing.plan_code}`);
+          console.log(`[CIE Billing] ⚠️  Set env var: ${plan.envKey}=${existing.plan_code}`);
+        } else {
+          console.log(`[CIE Billing] ${plan.envKey} configured (${envCode})`);
+        }
+      } else {
+        const created = await paystackRequest<{ plan_code: string }>("/plan", "POST", {
+          name: plan.name,
+          amount: plan.amount,
+          interval: "monthly",
+          description: `Cellion Intelligence Engine — ${TIER_LABELS[plan.tier]} tier, monthly subscription`,
+        });
         console.log(`[CIE Billing] Created Paystack plan "${plan.name}": ${created.plan_code}`);
         console.log(`[CIE Billing] ⚠️  Set env var: ${plan.envKey}=${created.plan_code}`);
       }
@@ -141,10 +153,23 @@ export async function seedCiePlans(): Promise<void> {
   }
 }
 
+/** Look up the KYC organisation ID for a given userId (returns null if none). */
+async function resolveOrgForUser(userId: string): Promise<number | null> {
+  try {
+    const [org] = await db.select({ id: kycOrganisations.id })
+      .from(kycOrganisations)
+      .where(eq(kycOrganisations.createdByUserId, userId))
+      .limit(1);
+    return org?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function registerCieBillingRoutes(app: Express): void {
   // ──────────────────────────────────────────────────────────────────────────
   // GET /api/cie-billing/status
-  // Returns the caller's active CIE subscription details (or free tier if none).
+  // Returns the caller's CIE subscription state (free if none / expired).
   // ──────────────────────────────────────────────────────────────────────────
   app.get("/api/cie-billing/status", isAuthenticated, async (req: any, res: Response) => {
     try {
@@ -153,26 +178,19 @@ export function registerCieBillingRoutes(app: Express): void {
 
       const sub = await storage.getCieSubscriptionByUserId(userId);
 
-      if (!sub || sub.status !== "active") {
-        return res.json({
-          tier: "free",
-          status: "none",
-          subscriberPlanAmount: TIER_AMOUNTS_KOBO.subscriber / 100,
-          proPlanAmount: TIER_AMOUNTS_KOBO.pro / 100,
-          currency: "NGN",
-        });
-      }
-
+      const isActive = sub?.status === "active";
       return res.json({
-        id: sub.id,
-        tier: sub.tier,
-        status: sub.status,
-        currentPeriodStart: sub.currentPeriodStart,
-        currentPeriodEnd: sub.currentPeriodEnd,
-        cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
-        paystackSubscriptionCode: sub.paystackSubscriptionCode,
-        subscriberPlanAmount: TIER_AMOUNTS_KOBO.subscriber / 100,
-        proPlanAmount: TIER_AMOUNTS_KOBO.pro / 100,
+        id: isActive ? sub!.id : undefined,
+        tier: isActive ? sub!.tier : "free",
+        status: sub?.status ?? "none",
+        currentPeriodStart: isActive ? sub!.currentPeriodStart : undefined,
+        currentPeriodEnd: isActive ? sub!.currentPeriodEnd : undefined,
+        cancelAtPeriodEnd: isActive ? sub!.cancelAtPeriodEnd : undefined,
+        paystackSubscriptionCode: isActive ? sub!.paystackSubscriptionCode : undefined,
+        plans: {
+          subscriber: { amountNaira: TIER_AMOUNTS_KOBO.subscriber / 100, interval: "monthly" },
+          pro: { amountNaira: TIER_AMOUNTS_KOBO.pro / 100, interval: "monthly" },
+        },
         currency: "NGN",
       });
     } catch (err: any) {
@@ -184,7 +202,8 @@ export function registerCieBillingRoutes(app: Express): void {
   // ──────────────────────────────────────────────────────────────────────────
   // POST /api/cie-billing/subscribe
   // Initiate a new CIE subscription (subscriber or pro).
-  // Returns: { authorizationUrl, reference }
+  // Creates a PENDING subscription record; activation occurs on charge.success.
+  // Returns: { authorizationUrl, reference, subscriptionId, tier, amount }
   // ──────────────────────────────────────────────────────────────────────────
   app.post("/api/cie-billing/subscribe", isAuthenticated, async (req: any, res: Response) => {
     try {
@@ -214,18 +233,20 @@ export function registerCieBillingRoutes(app: Express): void {
         return res.status(400).json({ error: "User email is required for subscription" });
       }
 
-      // Ensure no active subscription already exists for this tier
+      // Reject if an active subscription already exists for the same tier
       const existing = await storage.getCieSubscriptionByUserId(userId);
-      if (existing && existing.status === "active" && existing.tier === tier) {
+      if (existing?.status === "active" && existing.tier === tier) {
         return res.status(409).json({
           error: `You already have an active CIE ${tier} subscription`,
           subscriptionId: existing.id,
         });
       }
 
-      const reference = `cie_sub_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
+      // Resolve KYC org so the subscription can be found by API-key orgId
+      const orgId = await resolveOrgForUser(userId);
 
-      const baseUrl = req.headers.origin || 
+      const reference = `cie_sub_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
+      const baseUrl = req.headers.origin ||
         (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "https://cellionone.com");
 
       const txResult = await paystackRequest<{
@@ -234,7 +255,7 @@ export function registerCieBillingRoutes(app: Express): void {
         reference: string;
       }>("/transaction/initialize", "POST", {
         email: user.email,
-        amount: TIER_AMOUNTS_KOBO[tier],
+        amount: TIER_AMOUNTS_KOBO[tier], // Display hint; Paystack uses plan amount
         reference,
         plan: planCode,
         currency: "NGN",
@@ -243,6 +264,7 @@ export function registerCieBillingRoutes(app: Express): void {
           type: "cie_subscription",
           userId,
           tier,
+          orgId: orgId ?? null,
           custom_fields: [
             { display_name: "CIE Tier", variable_name: "cie_tier", value: tier },
             { display_name: "User ID", variable_name: "user_id", value: userId },
@@ -250,11 +272,12 @@ export function registerCieBillingRoutes(app: Express): void {
         },
       });
 
-      // Store a pending subscription record
+      // Create PENDING subscription — activated only on charge.success webhook
       const pendingSub = await storage.createCieSubscription({
         userId,
+        orgId: orgId ?? undefined,
         tier,
-        status: "active",
+        status: "pending",
         paystackEmail: user.email,
         paystackPlanCode: planCode,
         paystackReference: reference,
@@ -265,7 +288,7 @@ export function registerCieBillingRoutes(app: Express): void {
         action: "cie_subscription_initiated",
         entityType: "cie_subscription",
         entityId: String(pendingSub.id),
-        details: { tier, reference, planCode },
+        details: { tier, reference, planCode, orgId },
       });
 
       return res.json({
@@ -273,7 +296,7 @@ export function registerCieBillingRoutes(app: Express): void {
         reference,
         subscriptionId: pendingSub.id,
         tier,
-        amount: TIER_AMOUNTS_KOBO[tier] / 100,
+        amountNaira: TIER_AMOUNTS_KOBO[tier] / 100,
         currency: "NGN",
       });
     } catch (err: any) {
@@ -287,8 +310,8 @@ export function registerCieBillingRoutes(app: Express): void {
 
   // ──────────────────────────────────────────────────────────────────────────
   // POST /api/cie-billing/cancel
-  // Cancel the current subscription at period end.
-  // Returns a Paystack management link so the user can confirm cancellation.
+  // Cancel the current active subscription at period end.
+  // Returns a Paystack management link for the user to confirm.
   // ──────────────────────────────────────────────────────────────────────────
   app.post("/api/cie-billing/cancel", isAuthenticated, async (req: any, res: Response) => {
     try {
@@ -300,7 +323,7 @@ export function registerCieBillingRoutes(app: Express): void {
         return res.status(404).json({ error: "No active CIE subscription found" });
       }
 
-      // Mark cancel-at-period-end in our DB immediately
+      // Mark cancel-at-period-end; actual cancellation fires via subscription.disable webhook
       await storage.updateCieSubscription(sub.id, { cancelAtPeriodEnd: true });
 
       let managementLink: string | null = null;
@@ -325,8 +348,8 @@ export function registerCieBillingRoutes(app: Express): void {
 
       await storage.createNotification({
         userId,
-        title: "CIE Subscription Cancellation",
-        message: `Your CIE ${TIER_LABELS[sub.tier as CieTier]} subscription will be cancelled at the end of the current billing period.`,
+        title: "CIE Subscription Cancellation Requested",
+        message: `Your CIE ${TIER_LABELS[sub.tier as CieTier]} subscription will cancel at the end of the current billing period.`,
         type: "info",
         linkUrl: "/cie/subscribe",
       });
@@ -345,8 +368,8 @@ export function registerCieBillingRoutes(app: Express): void {
 
   // ──────────────────────────────────────────────────────────────────────────
   // POST /api/cie-billing/upgrade
-  // Upgrade from Subscriber → Pro (initiates a new payment).
-  // On success webhook, the existing subscription is superseded.
+  // Upgrade Subscriber → Pro. Creates a new PENDING subscription record.
+  // Previous subscription is superseded when the upgrade charge.success arrives.
   // ──────────────────────────────────────────────────────────────────────────
   app.post("/api/cie-billing/upgrade", isAuthenticated, async (req: any, res: Response) => {
     try {
@@ -374,6 +397,7 @@ export function registerCieBillingRoutes(app: Express): void {
         return res.status(400).json({ error: "User email is required" });
       }
 
+      const orgId = existing.orgId ?? (await resolveOrgForUser(userId));
       const reference = `cie_sub_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
       const baseUrl = req.headers.origin ||
         (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "https://cellionone.com");
@@ -393,6 +417,7 @@ export function registerCieBillingRoutes(app: Express): void {
           type: "cie_subscription",
           userId,
           tier: "pro",
+          orgId: orgId ?? null,
           previousSubscriptionId: existing.id,
           custom_fields: [
             { display_name: "CIE Tier", variable_name: "cie_tier", value: "pro" },
@@ -401,11 +426,12 @@ export function registerCieBillingRoutes(app: Express): void {
         },
       });
 
-      // Create a new pending pro subscription record
+      // Create PENDING pro subscription — activated on charge.success
       const newSub = await storage.createCieSubscription({
         userId,
+        orgId: orgId ?? undefined,
         tier: "pro",
-        status: "active",
+        status: "pending",
         paystackEmail: user.email,
         paystackPlanCode: planCode,
         paystackReference: reference,
@@ -416,7 +442,7 @@ export function registerCieBillingRoutes(app: Express): void {
         action: "cie_subscription_upgrade_initiated",
         entityType: "cie_subscription",
         entityId: String(newSub.id),
-        details: { from: existing.tier, to: "pro", reference },
+        details: { from: existing.tier, to: "pro", reference, previousSubscriptionId: existing.id },
       });
 
       return res.json({
@@ -424,7 +450,7 @@ export function registerCieBillingRoutes(app: Express): void {
         reference,
         subscriptionId: newSub.id,
         tier: "pro",
-        amount: TIER_AMOUNTS_KOBO.pro / 100,
+        amountNaira: TIER_AMOUNTS_KOBO.pro / 100,
         currency: "NGN",
       });
     } catch (err: any) {

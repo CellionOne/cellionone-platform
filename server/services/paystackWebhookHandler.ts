@@ -730,48 +730,68 @@ async function handleCieSubscriptionSuccess(data: PaystackWebhookEvent['data']):
   const meta = data.metadata as any;
   const userId = meta?.userId;
   const tier = meta?.tier as 'subscriber' | 'pro' | undefined;
+  const orgId = meta?.orgId ? Number(meta.orgId) : null;
+  const previousSubscriptionId = meta?.previousSubscriptionId ? Number(meta.previousSubscriptionId) : null;
 
   if (!userId || !tier) {
     console.error('[Paystack Webhook] CIE subscription missing userId or tier in metadata');
     return;
   }
 
-  // Paystack includes plan + subscription details in charge.success for recurring plans
+  const paystackReference = data.reference;
   const planData = (data as any).plan;
   const subscriptionCode = (data as any).subscription_code || null;
   const customerCode = data.customer?.customer_code || null;
   const paidAt = data.paid_at ? new Date(data.paid_at) : new Date();
-
-  // Compute period dates: currentPeriodStart = paidAt, currentPeriodEnd = +30 days
   const periodStart = paidAt;
   const periodEnd = new Date(paidAt);
   periodEnd.setDate(periodEnd.getDate() + 30);
 
-  // Find pending subscription by reference
-  const existingSub = await storage.getCieSubscriptionByUserId(userId);
+  const periodEndStr = periodEnd.toLocaleDateString('en-NG', {
+    day: 'numeric', month: 'long', year: 'numeric',
+  });
 
-  if (existingSub && existingSub.status === 'active') {
-    // Update existing record with confirmed Paystack details
-    await storage.updateCieSubscription(existingSub.id, {
-      tier,
+  // 1. Find the PENDING subscription by the Paystack transaction reference
+  //    (the reference we set when calling POST /transaction/initialize)
+  let targetSub = await storage.getCieSubscriptionByReference(paystackReference);
+
+  if (targetSub) {
+    // Activate the pending record
+    await storage.updateCieSubscription(targetSub.id, {
       status: 'active',
-      paystackSubscriptionCode: subscriptionCode || existingSub.paystackSubscriptionCode,
-      paystackCustomerCode: customerCode || existingSub.paystackCustomerCode,
-      paystackReference: data.reference,
+      tier,
+      orgId: orgId || targetSub.orgId || undefined,
+      paystackSubscriptionCode: subscriptionCode || targetSub.paystackSubscriptionCode,
+      paystackCustomerCode: customerCode || targetSub.paystackCustomerCode,
+      paystackEmail: data.customer?.email || targetSub.paystackEmail,
+      paystackPlanCode: planData?.plan_code || targetSub.paystackPlanCode,
+      paystackReference,
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
       cancelAtPeriodEnd: false,
     });
 
-    // Invalidate tier cache for this org (if linked)
-    if (existingSub.orgId) {
-      try { invalidateCieOrgTierCache(existingSub.orgId); } catch {}
+    const effectiveOrgId = orgId || (targetSub.orgId ? Number(targetSub.orgId) : null);
+    if (effectiveOrgId) {
+      try { invalidateCieOrgTierCache(effectiveOrgId); } catch {}
+    }
+
+    // 2. If this was an upgrade, expire the previous subscription
+    if (previousSubscriptionId) {
+      const prevSub = await storage.getCieSubscriptionById(previousSubscriptionId);
+      if (prevSub && prevSub.status === 'active') {
+        await storage.updateCieSubscription(previousSubscriptionId, {
+          status: 'expired',
+          cancelledAt: new Date(),
+        });
+        console.log(`[Paystack Webhook] CIE previous subscription #${previousSubscriptionId} expired (superseded by upgrade)`);
+      }
     }
 
     await storage.createNotification({
       userId,
       title: `CIE ${tier === 'pro' ? 'Pro' : 'Subscriber'} Activated`,
-      message: `Your CIE ${tier === 'pro' ? 'Pro' : 'Subscriber'} subscription is now active until ${periodEnd.toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' })}.`,
+      message: `Your CIE ${tier === 'pro' ? 'Pro' : 'Subscriber'} subscription is now active until ${periodEndStr}.`,
       type: 'success',
       linkUrl: '/cie/subscribe',
     });
@@ -780,30 +800,35 @@ async function handleCieSubscriptionSuccess(data: PaystackWebhookEvent['data']):
       actorUserId: userId,
       action: 'cie_subscription_activated',
       entityType: 'cie_subscription',
-      entityId: String(existingSub.id),
-      details: { tier, subscriptionCode, reference: data.reference, periodEnd },
+      entityId: String(targetSub.id),
+      details: { tier, subscriptionCode, reference: paystackReference, periodEnd, previousSubscriptionId },
     });
 
-    console.log(`[Paystack Webhook] CIE ${tier} subscription activated for user ${userId}, sub code: ${subscriptionCode}`);
+    console.log(`[Paystack Webhook] CIE ${tier} subscription #${targetSub.id} activated for user ${userId}`);
   } else {
-    // No existing pending record — create fresh
+    // No pending record found by reference — create a fresh active record (idempotent safety net)
     const newSub = await storage.createCieSubscription({
       userId,
+      orgId: orgId || undefined,
       tier,
       status: 'active',
       paystackSubscriptionCode: subscriptionCode,
       paystackCustomerCode: customerCode,
-      paystackEmail: data.customer?.email || null,
-      paystackPlanCode: planData?.plan_code || null,
-      paystackReference: data.reference,
+      paystackEmail: data.customer?.email || undefined,
+      paystackPlanCode: planData?.plan_code || undefined,
+      paystackReference,
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
     });
 
+    if (orgId) {
+      try { invalidateCieOrgTierCache(orgId); } catch {}
+    }
+
     await storage.createNotification({
       userId,
       title: `CIE ${tier === 'pro' ? 'Pro' : 'Subscriber'} Activated`,
-      message: `Your CIE subscription is now active.`,
+      message: `Your CIE subscription is now active until ${periodEndStr}.`,
       type: 'success',
       linkUrl: '/cie/subscribe',
     });
@@ -813,10 +838,10 @@ async function handleCieSubscriptionSuccess(data: PaystackWebhookEvent['data']):
       action: 'cie_subscription_activated',
       entityType: 'cie_subscription',
       entityId: String(newSub.id),
-      details: { tier, subscriptionCode, reference: data.reference },
+      details: { tier, subscriptionCode, reference: paystackReference, source: 'safety_net' },
     });
 
-    console.log(`[Paystack Webhook] CIE ${tier} subscription created (fresh) for user ${userId}`);
+    console.log(`[Paystack Webhook] CIE ${tier} subscription created (safety net) for user ${userId}`);
   }
 }
 

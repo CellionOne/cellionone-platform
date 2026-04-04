@@ -295,6 +295,12 @@ function PriceUploadTab() {
     onError: (err: unknown) => toast({ title: toErrorMessage(err, "AI commentary failed"), variant: "destructive" }),
   });
 
+  const { data: aiStatus } = useQuery<{ available: boolean }>({
+    queryKey: ["/api/cie-portal/ai-status"],
+    staleTime: 5 * 60 * 1000,
+  });
+  const aiAvailable = aiStatus?.available !== false;
+
   const uploadFile = useCallback(async (file: File) => {
     setIsUploading(true);
     try {
@@ -409,7 +415,8 @@ function PriceUploadTab() {
             <Button
               className="w-full gap-2" variant="outline"
               onClick={() => aiCommentaryMutation.mutate()}
-              disabled={aiCommentaryMutation.isPending}
+              disabled={aiCommentaryMutation.isPending || !aiAvailable}
+              title={!aiAvailable ? "AI unavailable — OPENAI_API_KEY not configured" : undefined}
               data-testid="button-regenerate-commentary"
             >
               {aiCommentaryMutation.isPending ? <LoadingSpinner size="sm" /> : <Sparkles className="h-4 w-4 text-primary" />}
@@ -809,7 +816,14 @@ function SignalsTab() {
   const [showAiPanel, setShowAiPanel] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiTicker, setAiTicker] = useState("");
+  const [aiSignalType, setAiSignalType] = useState("trade_call");
   const [aiDraft, setAiDraft] = useState<CieSignalDraft | null>(null);
+
+  const { data: aiStatus } = useQuery<{ available: boolean }>({
+    queryKey: ["/api/cie-portal/ai-status"],
+    staleTime: 5 * 60 * 1000,
+  });
+  const aiAvailable = aiStatus?.available !== false;
 
   const { data: signalsData, isLoading } = useQuery<{ signals: Signal[] }>({
     queryKey: ["/api/admin/cie/signals"],
@@ -839,6 +853,7 @@ function SignalsTab() {
       const res = await apiRequest("POST", "/api/admin/cie/signals/ai-draft", {
         prompt: aiPrompt,
         ticker: aiTicker || undefined,
+        signalType: aiSignalType,
       });
       return res.json() as Promise<{ draft: CieSignalDraft }>;
     },
@@ -896,15 +911,30 @@ function SignalsTab() {
                   data-testid="textarea-ai-prompt"
                 />
               </div>
-              <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Ticker (optional)</Label>
-                <Input
-                  placeholder="e.g. GTCO"
-                  value={aiTicker}
-                  onChange={e => setAiTicker(e.target.value.toUpperCase())}
-                  data-testid="input-ai-ticker"
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">Enriches with CIE score data if available</p>
+              <div className="space-y-2">
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Signal Type</Label>
+                  <Select value={aiSignalType} onValueChange={setAiSignalType}>
+                    <SelectTrigger className="h-8 text-xs" data-testid="select-ai-signal-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="trade_call">Trade Call</SelectItem>
+                      <SelectItem value="news">News</SelectItem>
+                      <SelectItem value="rumour">Rumour</SelectItem>
+                      <SelectItem value="sector_rotation">Sector Rotation</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Ticker (optional)</Label>
+                  <Input
+                    placeholder="e.g. GTCO"
+                    value={aiTicker}
+                    onChange={e => setAiTicker(e.target.value.toUpperCase())}
+                    data-testid="input-ai-ticker"
+                  />
+                </div>
               </div>
             </div>
             <Button
@@ -949,8 +979,17 @@ function SignalsTab() {
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm">Publish Analyst Signal</CardTitle>
             {!showAiPanel && (
-              <Button size="sm" variant="outline" onClick={() => setShowAiPanel(true)} className="gap-1.5 text-xs h-7" data-testid="button-open-ai-draft">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowAiPanel(true)}
+                className="gap-1.5 text-xs h-7"
+                disabled={!aiAvailable}
+                title={!aiAvailable ? "AI assistant unavailable — OPENAI_API_KEY not configured" : undefined}
+                data-testid="button-open-ai-draft"
+              >
                 <Sparkles className="h-3 w-3 text-primary" /> AI Draft
+                {!aiAvailable && <span className="text-[10px] text-muted-foreground ml-1">(unavailable)</span>}
               </Button>
             )}
           </div>

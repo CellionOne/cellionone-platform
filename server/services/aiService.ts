@@ -12,6 +12,10 @@ const PROMPT_VERSIONS = {
   doc_quality: "v1.0",
 };
 
+export function isOpenAIAvailable(): boolean {
+  return !!process.env.OPENAI_API_KEY;
+}
+
 async function getOpenAI() {
   if (!openaiClient) {
     const { OpenAI } = await import("openai");
@@ -334,10 +338,16 @@ export async function generateCieSignalDraft(context: {
   sector?: string | null;
   currentIas?: number | null;
   currentRecommendation?: string | null;
+  signalType?: string | null;
 }): Promise<CieSignalDraft | null> {
+  const typeHint = context.signalType
+    ? `The analyst has selected signal type: "${context.signalType}". Use this as the suggestedType unless it clearly does not fit the brief.`
+    : "";
+
   const systemPrompt = `You are a senior Nigerian equity analyst at Cellion Intelligence Engine (CIE).
 Draft a professional analyst signal based on the analyst's brief notes.
 Signals are published to Pro-tier subscribers on the CIE platform.
+${typeHint}
 
 Return JSON with:
 - content: the full signal text (100–400 words, professional Nigerian equity research tone)

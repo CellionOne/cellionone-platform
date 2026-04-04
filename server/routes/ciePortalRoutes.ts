@@ -22,7 +22,7 @@ import { z } from "zod";
 import crypto from "crypto";
 import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
-import { generateCieScoreNarrative } from "../services/aiService";
+import { generateCieScoreNarrative, isOpenAIAvailable } from "../services/aiService";
 import {
   cieSubscriptions,
   cieScores,
@@ -515,6 +515,10 @@ export function registerCiePortalRoutes(app: Express): void {
     requireCieTierSession("subscriber"),
     async (req: AuthRequest, res: Response) => {
       try {
+        if (!isOpenAIAvailable()) {
+          return res.status(503).json({ error: "AI analysis is not available in this environment.", code: "AI_UNAVAILABLE" });
+        }
+
         const ticker = (req.params.ticker as string).toUpperCase();
         const security = await storage.getCieSecurityBySymbol(ticker);
         if (!security) return res.status(404).json({ error: `Security '${ticker}' not found` });
@@ -548,4 +552,10 @@ export function registerCiePortalRoutes(app: Express): void {
       }
     },
   );
+
+  // ── GET /api/cie-portal/ai-status ────────────────────────────────────────
+  // Lightweight endpoint for the frontend to check AI availability
+  app.get("/api/cie-portal/ai-status", isAuthenticated, (_req: Request, res: Response) => {
+    res.json({ available: isOpenAIAvailable() });
+  });
 }

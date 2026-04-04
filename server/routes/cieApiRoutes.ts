@@ -9,6 +9,7 @@ import type { Express, Response, NextFunction } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
 import { authenticateApiKey, invalidateCieApiKeyTierCache, type ApiKeyRequest } from "../middleware/apiKeyAuth";
+import { generateCieScoreNarrative, isOpenAIAvailable } from "../services/aiService";
 
 type CieTier = "free" | "subscriber" | "pro";
 const TIER_ORDER: Record<CieTier, number> = { free: 0, subscriber: 1, pro: 2 };
@@ -87,6 +88,7 @@ export function registerCieApiRoutes(app: Express): void {
         ngnPerUsd: pulse.ngnPerUsd != null ? pulse.ngnPerUsd / 100 : null,
         source: pulse.source ?? "manual",
         updatedAt: pulse.updatedAt,
+        commentary: pulse.commentary ?? null,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Internal error";
@@ -152,6 +154,7 @@ export function registerCieApiRoutes(app: Express): void {
   // ──────────────────────────────────────────────────────────────────────────
   // GET /api/v1/cie/securities/:ticker
   // Full score detail including pillar breakdown — Subscriber+
+  // Optional: ?aiSummary=true — includes an AI-generated analyst narrative
   // ──────────────────────────────────────────────────────────────────────────
   app.get(
     "/api/v1/cie/securities/:ticker",
@@ -160,6 +163,8 @@ export function registerCieApiRoutes(app: Express): void {
     async (req: ApiKeyRequest, res: Response) => {
       try {
         const ticker = (req.params.ticker as string).toUpperCase();
+        const wantsAiSummary = req.query.aiSummary === "true" || req.query.aiSummary === "1";
+
         const security = await storage.getCieSecurityBySymbol(ticker);
         if (!security) {
           return res.status(404).json({ error: `Security '${ticker}' not found` });
@@ -167,6 +172,28 @@ export function registerCieApiRoutes(app: Express): void {
 
         const score = await storage.getLatestCieScore(security.id);
         const latestPrice = await storage.getLatestCiePrice(security.id);
+        const latestPriceNaira = latestPrice?.closeKobo != null ? latestPrice.closeKobo / 100 : null;
+
+        let aiSummary: Record<string, unknown> | null = null;
+        if (wantsAiSummary && score) {
+          if (!isOpenAIAvailable()) {
+            aiSummary = null; // Gracefully omit rather than error
+          } else {
+            const narrative = await generateCieScoreNarrative({
+              ticker: security.symbol,
+              name: security.name,
+              sector: security.sector,
+              ias: score.ias ?? 0,
+              rs: score.rs ?? 0,
+              cs: score.cs ?? 0,
+              recommendation: score.recommendation ?? "",
+              pillarBreakdown: (score.pillarBreakdown as Record<string, number> | null) ?? null,
+              latestPriceNaira,
+              scoreDate: score.scoreDate,
+            });
+            aiSummary = narrative ? (narrative as unknown as Record<string, unknown>) : null;
+          }
+        }
 
         return res.json({
           ticker:   security.symbol,
@@ -195,6 +222,7 @@ export function registerCieApiRoutes(app: Express): void {
                 updatedAt:      score.createdAt,
               }
             : null,
+          ...(wantsAiSummary ? { aiSummary } : {}),
         });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Internal error";

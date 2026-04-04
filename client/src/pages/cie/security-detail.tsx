@@ -1,9 +1,9 @@
-import { useState } from "react";
 import { useParams } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { CieLayout } from "./layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -89,20 +89,29 @@ function MomentumDots({ m }: { m: Momentum }) {
 }
 
 function AiInsightCard({ ticker }: { ticker: string }) {
-  const [narrative, setNarrative] = useState<CieScoreNarrative | null>(null);
-  const [hasRequested, setHasRequested] = useState(false);
-
-  const narrativeMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("GET", `/api/cie-portal/securities/${ticker}/ai-narrative`);
-      const json = await res.json() as { ticker: string; narrative: CieScoreNarrative };
-      return json.narrative;
-    },
-    onSuccess: (data) => {
-      setNarrative(data);
-      setHasRequested(true);
-    },
+  // Check if AI is available first — hide the entire card if not
+  const { data: aiStatus } = useQuery<{ available: boolean }>({
+    queryKey: ["/api/cie-portal/ai-status"],
+    staleTime: 5 * 60 * 1000,
   });
+
+  // Auto-fetch the narrative on mount (enabled once we know AI is available)
+  const { data: narrativeData, isLoading, isError, refetch, isFetching } = useQuery<{ ticker: string; narrative: CieScoreNarrative }>({
+    queryKey: ["/api/cie-portal/securities", ticker, "ai-narrative"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/cie-portal/securities/${ticker}/ai-narrative`);
+      if (!res.ok) throw new Error("Failed to generate narrative");
+      return res.json();
+    },
+    enabled: aiStatus?.available === true,
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+
+  // Gracefully hide the entire card when AI is unavailable
+  if (aiStatus?.available === false) return null;
+
+  const narrative = narrativeData?.narrative ?? null;
 
   return (
     <Card data-testid="card-ai-insight">
@@ -112,38 +121,32 @@ function AiInsightCard({ ticker }: { ticker: string }) {
             <Sparkles className="h-4 w-4 text-primary" />
             AI Analyst Insight
           </CardTitle>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5 h-7 text-xs"
-            onClick={() => narrativeMutation.mutate()}
-            disabled={narrativeMutation.isPending}
-            data-testid="button-generate-ai-insight"
-          >
-            {narrativeMutation.isPending ? (
-              <><LoadingSpinner className="h-3 w-3" /> Generating…</>
-            ) : hasRequested ? (
-              <><RefreshCw className="h-3 w-3" /> Regenerate</>
-            ) : (
-              <><Sparkles className="h-3 w-3" /> Generate</>
-            )}
-          </Button>
+          {!isLoading && !isError && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="gap-1.5 h-7 text-xs"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              data-testid="button-refresh-ai-insight"
+            >
+              {isFetching ? <LoadingSpinner className="h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
+              Refresh
+            </Button>
+          )}
         </div>
       </CardHeader>
       <CardContent>
-        {narrativeMutation.isError && (
-          <p className="text-sm text-destructive">Failed to generate insight. Please try again.</p>
-        )}
-        {!hasRequested && !narrativeMutation.isPending && !narrativeMutation.isError && (
-          <p className="text-sm text-muted-foreground">
-            Click <strong>Generate</strong> to get an AI-powered analyst narrative for this security based on its CIE scores and pillar breakdown.
-          </p>
-        )}
-        {narrativeMutation.isPending && (
-          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-            <LoadingSpinner className="h-4 w-4" />
-            Analysing scores with GPT-4o…
+        {(isLoading || (isFetching && !narrative)) && (
+          <div className="space-y-3" data-testid="skeleton-ai-insight">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-5/6" />
+            <Skeleton className="h-3 w-4/5" />
           </div>
+        )}
+        {isError && !narrative && (
+          <p className="text-sm text-muted-foreground italic">AI insight currently unavailable for this security.</p>
         )}
         {narrative && (
           <div className="space-y-4">

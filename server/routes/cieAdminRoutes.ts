@@ -33,7 +33,7 @@ import {
   generateDataEntryGuide,
 } from "../services/cieDataIngestionService";
 import { triggerImmediateScoreRun } from "../services/cieScheduler";
-import { generateCieSignalDraft, generateCieMarketCommentary } from "../services/aiService";
+import { generateCieSignalDraft, generateCieMarketCommentary, isOpenAIAvailable } from "../services/aiService";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -597,19 +597,27 @@ export function registerCieAdminRoutes(app: Express): void {
   app.post("/api/admin/cie/signals/ai-draft", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      if (!isOpenAIAvailable()) {
+        return res.status(503).json({ error: "AI assistant is not available in this environment.", code: "AI_UNAVAILABLE" });
+      }
+
       const schema = z.object({
         prompt: z.string().min(10).max(2000),
         ticker: z.string().optional(),
         sector: z.string().optional(),
+        signalType: z.enum(["trade_call", "news", "rumour", "sector_rotation"]).optional(),
       });
-      const { prompt, ticker, sector } = schema.parse(req.body);
+      const { prompt, ticker, sector, signalType } = schema.parse(req.body);
 
       // Optionally enrich with score data for the ticker
       let currentIas: number | null = null;
       let currentRecommendation: string | null = null;
+      let resolvedSector = sector ?? null;
       if (ticker) {
         const security = await storage.getCieSecurityBySymbol(ticker.toUpperCase());
         if (security) {
+          resolvedSector = resolvedSector ?? security.sector;
           const score = await storage.getLatestCieScore(security.id);
           if (score) {
             currentIas = score.ias;
@@ -618,7 +626,14 @@ export function registerCieAdminRoutes(app: Express): void {
         }
       }
 
-      const draft = await generateCieSignalDraft({ prompt, ticker: ticker ?? null, sector: sector ?? null, currentIas, currentRecommendation });
+      const draft = await generateCieSignalDraft({
+        prompt,
+        ticker: ticker ?? null,
+        sector: resolvedSector,
+        currentIas,
+        currentRecommendation,
+        signalType: signalType ?? null,
+      });
       if (!draft) return res.status(503).json({ error: "AI signal draft generation failed. Please try again." });
 
       res.json({ draft });
@@ -632,6 +647,9 @@ export function registerCieAdminRoutes(app: Express): void {
   app.post("/api/admin/cie/market-pulse/ai-commentary", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!isOpenAIAvailable()) {
+        return res.status(503).json({ error: "AI commentary is not available in this environment.", code: "AI_UNAVAILABLE" });
+      }
       const pulse = await storage.getLatestCieMarketPulse();
       const scores = await storage.getLatestCieScores();
       const topSecurities = [...scores]

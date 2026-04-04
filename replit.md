@@ -1,7 +1,7 @@
 # Cellion One - Nigeria Legal Tech Platform
 
 ## Overview
-Cellion One is a comprehensive legal tech platform designed to streamline company incorporation in Nigeria. It provides a digital application wizard, document management, integrated payments, AI-powered suggestions for corporate activities, lawyer assignment, and robust administrative controls. The platform aims to revolutionize legal processes in Nigeria for Founders, Lawyers, and Administrators by offering an efficient, transparent, and technology-driven solution for company registration and related legal services. Its business vision includes significant market potential by simplifying a complex legal process and setting new standards for legal tech in Nigeria.
+Cellion One is a comprehensive legal tech platform designed to streamline company incorporation and related legal services in Nigeria. It aims to revolutionize legal processes for Founders, Lawyers, and Administrators by offering an efficient, transparent, and technology-driven solution, thereby simplifying a complex legal process and setting new standards for legal tech in Nigeria. Key capabilities include a digital application wizard, document management, integrated payments, AI-powered suggestions, lawyer assignment, and robust administrative controls.
 
 ## User Preferences
 I want iterative development.
@@ -11,56 +11,31 @@ Do not make changes to the folder `server/replit_integrations/`.
 Do not make changes to the file `server/__tests__/auth.regression.test.ts`.
 
 ## System Architecture
-The platform employs a modern web stack: React with TypeScript, Vite, Tailwind CSS, and shadcn/ui for the frontend; Express.js with TypeScript for the backend; and PostgreSQL (Neon-backed) for the database. Authentication uses a custom email/password system integrated with Resend. The UI/UX features a primary green/teal color scheme (hsl(156 72% 35%)) and full dark mode support.
+The platform utilizes a modern web stack: React with TypeScript, Vite, Tailwind CSS, and shadcn/ui for the frontend; Express.js with TypeScript for the backend; and PostgreSQL (Neon-backed) for the database. Authentication uses a custom email/password system. The UI/UX features a primary green/teal color scheme (hsl(156 72% 35%)) and full dark mode support. It supports four distinct user roles: Founder, Lawyer, Admin, and Building Manager, each with tailored portals.
 
 Key architectural decisions and features include:
-- **Four distinct user roles:** Founder, Lawyer, Admin, and Building Manager, each with tailored portals and functionalities.
-- **Modular Frontend:** Organized into reusable components, role-specific pages, and custom hooks.
-- **Structured Backend:** Clear separation of API routes, database operations, and shared schema definitions.
-- **Progressive Web Application (PWA):** Supports offline functionality.
-- **Paystack-Only Payment System:** All payments processed via Paystack in NGN, supporting split payments with Cellion taking a fixed cut and auto-settlement to lawyer subaccounts.
-- **Banking Partner Fee Layer:** Admin can register custody banking partners with a basis-point fee carve-out (max 150 bps = 1.50%, matching Cellion's service fee ceiling). Only one partner active at a time. Their fee is carved from Cellion's 1.5% escrow service fee — buyers see no price change. `bankCustodyFee` is clamped to never exceed `serviceFee`. Admin UI at `/admin/banking-partners`. `bankCustodyFee` and `bankPartnerId` stored on both escrow tables with FK to `bankPartners`. Escrow dashboard shows per-transaction fee breakdown (service fee, bank custody cut, Cellion net) and a cumulative custody fees card scoped to the active partner's activation period.
-- **Registered Office Service:** Tiered virtual registered address services with mail handling, configurable limits, and automated subscription management. Includes a proof-of-address workflow and supports multiple locations.
-- **Admin Role Security:** Super admin controls admin role assignments; other admins manage lawyer roles.
-- **Feature Flags:** Dynamic control over feature availability.
-- **Comprehensive Audit Logging:** Tracks significant user and system actions.
-- **Post-Incorporation Support Suite:** Features an AI Legal Assistant, digital Company Profiles, a 10-task Post-Incorporation Checklist, and an auto-calculated Compliance Calendar with email reminders.
-- **Service Requests:** Auto-created for certain add-ons, managing detailed service workflows including document uploads and status updates.
-- **Identity Verification (Payment-Based):** Comprehensive 4-step verification via Smile ID (BVN/NIN, document, biometric, AML/sanctions screening) for a one-time fee.
-- **Personal Profile System:** Comprehensive user profiles with encrypted NIN/BVN storage, document uploads, profile completion tracking, and residential address.
-- **Director/Shareholder Management:** Founders can invite directors, shareholders, and company secretaries who then complete profiles and undergo individual verification.
-- **Two-Factor Authentication (2FA):** SMS-based OTP verification via Africa's Talking API with backup codes.
-- **Sensitive Data Access Logging:** All access to sensitive data is logged with detailed information.
-- **User Settings Page:** Unified settings for all roles, offering profile editing, password changes, 2FA management, and role-adaptive notification preferences.
-- **Security Hardening Suite:** Multi-layer security including HTTP security headers (Helmet.js, CSP), tiered rate limiting, CORS, account lockout, CSRF protection, suspicious request blocking, login anomaly detection, and an admin security dashboard.
-- **Consent-Based Data Sharing:** Founders can create time-limited, revocable consent tokens to share verified data with named partners.
-- **KYC-as-a-Service Module:** Full KYC verification service for individuals and corporates with organisation onboarding, AI-powered document extraction, risk scoring, document expiry tracking, and Paystack integration. Includes a public API for programmatic verification requests with API key management, prepaid credits, and webhook delivery. Features **Hosted Verification Sessions** (POST /api/v1/kyc/sessions) — generates a shareable link so subjects verify without a Cellion account, with a mobile-first wizard at `/kyc/session/:token`. KYC org dashboard sections: Requests, Sessions (hosted session list + copy-link), Monitoring (compliance readiness card, AML screening log with hit review, expiry alerts), STR Reports, and Analytics. Automated weekly sanctions screening enabled by default (`enable_sanctions_monitoring` flag now defaults `true`, upserted on startup). API docs include a full Hosted Sessions section. **Verification Attestation API:** On approval, a unique `certificateRef` (format: `CO-KYC-YYYY-XXXXXXXX`) and `verifiedDataSnapshot` are generated and stored on the `kycVerificationRequests` table. Public unauthenticated endpoint `GET /api/v1/kyc/attest/:token` returns validity, type, dates, and certification body — zero PII. The `verification.completed` webhook now includes `certificateRef`, `attestationUrl`, and `verifiedIdentity` summary (fullName, DOB, idTypesVerified, dataSource). **Verified Identity Profile Store:** `kycVerifiedIdentityData` table captures extracted identity (fullName, DOB, phone, gender, address, idTypesVerified, government photo path) at verification approval; photo served via access-logged endpoint (`GET /api/kyc-service/identity-data/:verificationRequestId/photo`); enriched into `GET /api/v1/kyc/requests/:id` and the org portal's verification detail page. Org portal verification list (`VerificationsSection`) displays identity mini-cards (name, DOB, ID types, photo badge) for verified requests using `identitySummary` from the list endpoint. Admin KYC overview (`/admin/kyc`) has an "Identity Records" tab showing cross-org identity profiles via `GET /api/kyc-service/admin/identity-records` — searchable table with subject, org, ID types, photo indicator, cert ref, and link to verification detail. **AML Monitoring Hub:** Sanctions log hit review workflow (PATCH `.../sanctions-logs/:id/review`; reviewStatus open/cleared/escalated with mandatory note); Compliance Readiness card shows screened count, 30-day coverage %, open hits, and last screening date; admin cross-org sanctions overview at `GET /api/kyc-service/admin/sanctions-overview`. **STR Report Builder:** `kycStrReports` table; CRUD API at `.../orgs/:id/str-reports`; org portal Reports tab with subject picker, form, status lifecycle (Draft → Internally Reviewed → Filed, requires NFIU reference); admin cross-org STR view at `GET /api/kyc-service/admin/str-reports` with status/org filters.
-- **Notification Centre:** In-app notification system with a bell icon, popover, and a full notifications page.
-- **Digital Signature Pad:** Personal profile page offers draw-on-screen and upload options for signature specimens, stored securely.
-- **Shared Public Navigation & Footer:** Reusable components for marketing and public pages, including navigation, product/resource dropdowns, pricing, contact links, and theme toggling.
-- **Landing Page:** Clean, spacious, founder-focused design with 6 sections: hero ("The Smarter Way to Start and Run a Compliant Business in Nigeria"), "What does your business need?" solution paths (6 cards: Incorporate, Registered Office, SCUML, Trademark, Identity Verification, Supplier Verification), trust bar, 3-step How It Works, FAQ (4 items), and final CTA. ContactSection component preserved but not rendered on landing.
-- **Verified Entities Registry:** Cross-platform catalogue of all verified individuals and companies, auto-populated upon KYC approval.
-- **Verified Procurement Marketplace:** Full RFQ/Bid/Contract/Invoice system for verified organisations. Features include: RFQ creation (draft/publish workflow, open/invited visibility, line items, categories), bid submission with templates, contract award with milestone tracking, professional invoice generation with manual tax entry, and full escrow payments (`enable_escrow_payments` flag enabled). Contract detail shows "Fund Escrow" → Paystack redirect; on webhook confirmation the status updates to `funded`; buyer can release or raise dispute. All amounts stored in kobo. Contract numbers: CO-YYYY-XXXXX, Invoice numbers: INV-YYYY-XXXXX. Routes in `server/routes/procurementRoutes.ts`, pages in `client/src/pages/procurement/`. 20 seeded categories covering Nigerian business sectors.
-- **Escrow-as-a-Service API:** Public REST API for third-party platforms to create and manage escrow transactions. Authenticated via `X-API-Key` header (same API key infrastructure as KYC API). Scopes: `escrow:write` (create/release/dispute), `escrow:read` (list/get). Endpoints: `POST /api/v1/escrow/transactions` (creates transaction + Paystack payment link), `GET /api/v1/escrow/transactions`, `GET /api/v1/escrow/transactions/:ref`, `POST /api/v1/escrow/transactions/:ref/release`, `POST /api/v1/escrow/transactions/:ref/dispute`. Reference format: `CO-ESC-YYYY-XXXXXXXX`. Fee: 1.5% of principal (min ₦1,500, max ₦50,000). Bank custody fee carved from Cellion's service fee when active banking partner exists. Paystack webhook confirms funding via `api_escrow` metadata type. Org webhook delivered on fund/release/dispute. Routes in `server/routes/escrowApiRoutes.ts`. Admin dashboard at `/admin/escrow-dashboard` shows combined procurement + API escrow transactions with manual release/refund actions. Full API docs section in `client/src/pages/api-docs.tsx`.
-- **Admin Proposals Page:** Admin-only page for viewing partnership proposals as formatted HTML for browser-native printing/saving. Includes Bank Partnership, Verification Partner, and Supplier Verification proposals.
-- **Partner With Us Page:** Public page at `/partner-with-us` showcasing two partnership tracks (Verification Partner for corporates/fintechs, Banking Partner for banks) with enquiry form posting to `/api/contact`.
-- **Certificate HTML Fallback:** Verification certificates support `?format=html` query parameter for browser-rendered viewing when PDF generation fails.
-- **SEO & Structured Data:**
-  - Open Graph and Twitter Card meta tags in `index.html` for social sharing previews.
-  - Schema.org JSON-LD structured data on landing page: Organization, WebSite, FAQPage, and Service schemas.
-  - `robots.txt` blocking private routes (`/admin/`, `/founder/`, `/lawyer/`, `/kyc/`, `/settings/`, `/profile/`, `/api/`).
-  - `sitemap.xml` listing all 9 public pages with priority/changefreq.
-  - `usePageMeta` hook (`client/src/hooks/use-page-meta.ts`) for per-page title, meta description, OG tags, Twitter tags, and canonical URL updates. Applied to: landing, why-cellion-one, api-docs, terms, privacy, apply-lawyer, partner-with-us, login, register.
-  - Canonical domain: `https://cellionone.com`.
-
-- **CIE — Cellion Intelligence Engine:** Subscription API serving NGX equity intelligence to stockbroking firms, fintechs, and wealth managers. Endpoints under `/api/v1/cie/`. Uses `kycApiKeys` table for authentication (`X-API-Key`) with three permission tiers: `cie:read` (free — market pulse only), `cie:subscriber` (scores/history/dividends), `cie:pro` (signals/sector-rotation). The `authenticateApiKey` middleware accepts `{ skipBillingCheck: true }` to bypass KYC credit billing for subscription-based CIE access. Routes in `server/routes/cieApiRoutes.ts`. Score engine writes to `cieScores` table; ingestion via PDF/Excel upload or AI extraction. Admin cockpit at `/admin/cie/*`. Full API documentation section in `client/src/pages/api-docs.tsx`.
+-   **Modular Design:** Reusable frontend components and a structured backend with clear separation of concerns.
+-   **Progressive Web Application (PWA):** Supports offline functionality.
+-   **Payment System:** Paystack-only for NGN, supporting split payments and auto-settlement, with an optional banking partner fee layer.
+-   **Registered Office Service:** Tiered virtual address services with mail handling and automated subscription management.
+-   **Security & Administration:** Super admin controls, feature flags, comprehensive audit logging, 2FA via SMS OTP, sensitive data access logging, and a robust security hardening suite including HTTP headers, rate limiting, and CSRF protection.
+-   **Post-Incorporation Support:** AI Legal Assistant, digital Company Profiles, a 10-task Post-Incorporation Checklist, and an auto-calculated Compliance Calendar with email reminders.
+-   **Identity & KYC:** Comprehensive 4-step identity verification via Smile ID (BVN/NIN, document, biometric, AML/sanctions) for individuals, and a full KYC-as-a-Service module for individuals and corporates. This includes hosted verification sessions, a public API, verified identity profile store, AML monitoring hub, and STR Report Builder.
+-   **User Management:** Personal profile system with encrypted NIN/BVN storage, document uploads, and Director/Shareholder management with individual verification.
+-   **Procurement Marketplace:** A full RFQ/Bid/Contract/Invoice system for verified organizations with escrow payments.
+-   **Escrow-as-a-Service API:** Public REST API for third-party platforms to manage escrow transactions.
+-   **CIE (Cellion Intelligence Engine):** A subscription API serving NGX equity intelligence with tiered access and integrated billing.
+-   **Notification Centre:** In-app notification system.
+-   **Digital Signature Pad:** For signature specimens.
+-   **SEO & Structured Data:** Open Graph, Twitter Cards, Schema.org JSON-LD, `robots.txt`, `sitemap.xml`, and a `usePageMeta` hook for dynamic SEO.
+-   **Consent-Based Data Sharing:** Founders can create time-limited, revocable consent tokens to share verified data.
 
 ## External Dependencies
-- **PostgreSQL:** Primary database, hosted via Neon.
-- **OpenAI GPT-4o:** Powers the AI Legal Assistant.
-- **Paystack:** Sole payment gateway for all NGN transactions.
-- **Resend:** Email service for authentication, notifications, and system communications.
-- **Africa's Talking:** SMS OTP provider for Two-Factor Authentication.
-- **Smile ID:** Identity verification service for BVN/NIN validation and biometric matching.
-- **Replit Auth:** Used for foundational user authentication services.
-- **Replit Object Storage:** Utilized for secure storage of document uploads.
+-   **PostgreSQL:** Primary database, hosted via Neon.
+-   **OpenAI GPT-4o:** Powers the AI Legal Assistant.
+-   **Paystack:** Payment gateway for all NGN transactions.
+-   **Resend:** Email service for authentication and notifications.
+-   **Africa's Talking:** SMS OTP provider for Two-Factor Authentication.
+-   **Smile ID:** Identity verification service.
+-   **Replit Auth:** Foundational user authentication.
+-   **Replit Object Storage:** Secure storage for document uploads.

@@ -2,6 +2,7 @@ import { storage } from '../storage';
 import { db } from '../db';
 import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
+import { invalidateCieOrgTierCache } from '../routes/cieApiRoutes';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
 import { sendNewOrderNotificationEmail, ADMIN_NOTIFICATION_EMAIL } from './emailService';
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
@@ -86,6 +87,12 @@ export async function processWebhook(
     case 'charge.failed':
       await handleChargeFailed(event.data, payload);
       break;
+    case 'invoice.payment_failed':
+      await handleCieInvoicePaymentFailed(event.data);
+      break;
+    case 'subscription.disable':
+      await handleCieSubscriptionDisable(event.data);
+      break;
     default:
       console.log(`[Paystack Webhook] Unhandled event type: ${event.event}`);
   }
@@ -97,7 +104,9 @@ async function handleChargeSuccess(data: PaystackWebhookEvent['data'], rawPayloa
   const reference = data.reference;
   const metaType = (data.metadata as any)?.type;
 
-  if (metaType === 'procurement_escrow') {
+  if (metaType === 'cie_subscription') {
+    await handleCieSubscriptionSuccess(data);
+  } else if (metaType === 'procurement_escrow') {
     await handleProcurementEscrowSuccess(data);
   } else if (metaType === 'api_escrow') {
     await handleApiEscrowSuccess(data);
@@ -711,6 +720,183 @@ async function handleKycCreditPurchaseSuccess(data: PaystackWebhookEvent['data']
   } catch (err) {
     console.error(`[Paystack Webhook] Error processing KYC credit purchase:`, err);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CIE Subscription Webhook Handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleCieSubscriptionSuccess(data: PaystackWebhookEvent['data']): Promise<void> {
+  const meta = data.metadata as any;
+  const userId = meta?.userId;
+  const tier = meta?.tier as 'subscriber' | 'pro' | undefined;
+
+  if (!userId || !tier) {
+    console.error('[Paystack Webhook] CIE subscription missing userId or tier in metadata');
+    return;
+  }
+
+  // Paystack includes plan + subscription details in charge.success for recurring plans
+  const planData = (data as any).plan;
+  const subscriptionCode = (data as any).subscription_code || null;
+  const customerCode = data.customer?.customer_code || null;
+  const paidAt = data.paid_at ? new Date(data.paid_at) : new Date();
+
+  // Compute period dates: currentPeriodStart = paidAt, currentPeriodEnd = +30 days
+  const periodStart = paidAt;
+  const periodEnd = new Date(paidAt);
+  periodEnd.setDate(periodEnd.getDate() + 30);
+
+  // Find pending subscription by reference
+  const existingSub = await storage.getCieSubscriptionByUserId(userId);
+
+  if (existingSub && existingSub.status === 'active') {
+    // Update existing record with confirmed Paystack details
+    await storage.updateCieSubscription(existingSub.id, {
+      tier,
+      status: 'active',
+      paystackSubscriptionCode: subscriptionCode || existingSub.paystackSubscriptionCode,
+      paystackCustomerCode: customerCode || existingSub.paystackCustomerCode,
+      paystackReference: data.reference,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+      cancelAtPeriodEnd: false,
+    });
+
+    // Invalidate tier cache for this org (if linked)
+    if (existingSub.orgId) {
+      try { invalidateCieOrgTierCache(existingSub.orgId); } catch {}
+    }
+
+    await storage.createNotification({
+      userId,
+      title: `CIE ${tier === 'pro' ? 'Pro' : 'Subscriber'} Activated`,
+      message: `Your CIE ${tier === 'pro' ? 'Pro' : 'Subscriber'} subscription is now active until ${periodEnd.toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' })}.`,
+      type: 'success',
+      linkUrl: '/cie/subscribe',
+    });
+
+    await storage.createAuditLog({
+      actorUserId: userId,
+      action: 'cie_subscription_activated',
+      entityType: 'cie_subscription',
+      entityId: String(existingSub.id),
+      details: { tier, subscriptionCode, reference: data.reference, periodEnd },
+    });
+
+    console.log(`[Paystack Webhook] CIE ${tier} subscription activated for user ${userId}, sub code: ${subscriptionCode}`);
+  } else {
+    // No existing pending record — create fresh
+    const newSub = await storage.createCieSubscription({
+      userId,
+      tier,
+      status: 'active',
+      paystackSubscriptionCode: subscriptionCode,
+      paystackCustomerCode: customerCode,
+      paystackEmail: data.customer?.email || null,
+      paystackPlanCode: planData?.plan_code || null,
+      paystackReference: data.reference,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
+    });
+
+    await storage.createNotification({
+      userId,
+      title: `CIE ${tier === 'pro' ? 'Pro' : 'Subscriber'} Activated`,
+      message: `Your CIE subscription is now active.`,
+      type: 'success',
+      linkUrl: '/cie/subscribe',
+    });
+
+    await storage.createAuditLog({
+      actorUserId: userId,
+      action: 'cie_subscription_activated',
+      entityType: 'cie_subscription',
+      entityId: String(newSub.id),
+      details: { tier, subscriptionCode, reference: data.reference },
+    });
+
+    console.log(`[Paystack Webhook] CIE ${tier} subscription created (fresh) for user ${userId}`);
+  }
+}
+
+async function handleCieInvoicePaymentFailed(data: any): Promise<void> {
+  const subscriptionCode = data?.subscription?.subscription_code;
+  if (!subscriptionCode) {
+    console.warn('[Paystack Webhook] invoice.payment_failed missing subscription_code');
+    return;
+  }
+
+  const sub = await storage.getCieSubscriptionByPaystackCode(subscriptionCode);
+  if (!sub) {
+    console.warn(`[Paystack Webhook] No CIE subscription found for code ${subscriptionCode}`);
+    return;
+  }
+
+  await storage.updateCieSubscription(sub.id, { status: 'past_due' });
+
+  if (sub.orgId) {
+    try { invalidateCieOrgTierCache(sub.orgId); } catch {}
+  }
+
+  await storage.createNotification({
+    userId: sub.userId,
+    title: 'CIE Payment Failed',
+    message: 'Your CIE subscription payment failed. Please update your payment method to maintain access.',
+    type: 'warning',
+    linkUrl: '/cie/subscribe',
+  });
+
+  await storage.createAuditLog({
+    actorUserId: sub.userId,
+    action: 'cie_subscription_payment_failed',
+    entityType: 'cie_subscription',
+    entityId: String(sub.id),
+    details: { subscriptionCode },
+  });
+
+  console.log(`[Paystack Webhook] CIE subscription ${subscriptionCode} marked past_due`);
+}
+
+async function handleCieSubscriptionDisable(data: any): Promise<void> {
+  const subscriptionCode = data?.subscription_code || data?.code;
+  if (!subscriptionCode) {
+    console.warn('[Paystack Webhook] subscription.disable missing subscription_code');
+    return;
+  }
+
+  const sub = await storage.getCieSubscriptionByPaystackCode(subscriptionCode);
+  if (!sub) {
+    console.warn(`[Paystack Webhook] No CIE subscription found for code ${subscriptionCode}`);
+    return;
+  }
+
+  await storage.updateCieSubscription(sub.id, {
+    status: 'cancelled',
+    cancelledAt: new Date(),
+  });
+
+  if (sub.orgId) {
+    try { invalidateCieOrgTierCache(sub.orgId); } catch {}
+  }
+
+  await storage.createNotification({
+    userId: sub.userId,
+    title: 'CIE Subscription Cancelled',
+    message: 'Your CIE subscription has been cancelled. You now have free-tier access.',
+    type: 'info',
+    linkUrl: '/cie/subscribe',
+  });
+
+  await storage.createAuditLog({
+    actorUserId: sub.userId,
+    action: 'cie_subscription_cancelled',
+    entityType: 'cie_subscription',
+    entityId: String(sub.id),
+    details: { subscriptionCode },
+  });
+
+  console.log(`[Paystack Webhook] CIE subscription ${subscriptionCode} cancelled`);
 }
 
 export default {

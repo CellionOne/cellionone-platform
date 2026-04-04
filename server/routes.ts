@@ -21,6 +21,7 @@ import { registerProcurementRoutes } from "./routes/procurementRoutes";
 import { registerEscrowApiRoutes } from "./routes/escrowApiRoutes";
 import { registerCieAdminRoutes } from "./routes/cieAdminRoutes";
 import { registerCieApiRoutes } from "./routes/cieApiRoutes";
+import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 
 // Validation schemas
 const createApplicationSchema = insertCompanyApplicationSchema.pick({
@@ -8747,6 +8748,9 @@ For questions, contact: service@cellionone.com
 
   // ============== CIE PUBLIC API ROUTES (v1) ==============
   registerCieApiRoutes(app);
+
+  // ============== CIE SUBSCRIPTION BILLING ROUTES ==============
+  registerCieBillingRoutes(app);
 
   return httpServer;
 }

@@ -60,6 +60,7 @@ import {
   cieModelVersions, type CieModelVersion, type InsertCieModelVersion,
   cieMarketPulse, type CieMarketPulse, type InsertCieMarketPulse,
   cieIngestionLogs, type CieIngestionLog, type InsertCieIngestionLog,
+  cieSubscriptions, type CieSubscription, type InsertCieSubscription,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -441,6 +442,14 @@ export interface IStorage {
   createCieIngestionLog(data: InsertCieIngestionLog): Promise<CieIngestionLog>;
   updateCieIngestionLog(id: number, data: Partial<InsertCieIngestionLog>): Promise<CieIngestionLog | undefined>;
   listCieIngestionLogs(limit?: number): Promise<CieIngestionLog[]>;
+  // CIE Subscriptions
+  createCieSubscription(data: InsertCieSubscription): Promise<CieSubscription>;
+  getCieSubscriptionById(id: number): Promise<CieSubscription | undefined>;
+  getCieSubscriptionByUserId(userId: string): Promise<CieSubscription | undefined>;
+  getCieSubscriptionByOrgId(orgId: number): Promise<CieSubscription | undefined>;
+  getCieSubscriptionByPaystackCode(code: string): Promise<CieSubscription | undefined>;
+  updateCieSubscription(id: number, data: Partial<InsertCieSubscription>): Promise<CieSubscription | undefined>;
+  listCieSubscriptions(limit?: number): Promise<CieSubscription[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -2234,6 +2243,51 @@ export class DatabaseStorage implements IStorage {
 
   async listCieIngestionLogs(limit = 50): Promise<CieIngestionLog[]> {
     return db.select().from(cieIngestionLogs).orderBy(desc(cieIngestionLogs.createdAt)).limit(limit);
+  }
+
+  // ============== CIE Subscriptions ==============
+  async createCieSubscription(data: InsertCieSubscription): Promise<CieSubscription> {
+    const [sub] = await db.insert(cieSubscriptions).values(data).returning();
+    return sub;
+  }
+
+  async getCieSubscriptionById(id: number): Promise<CieSubscription | undefined> {
+    const [sub] = await db.select().from(cieSubscriptions).where(eq(cieSubscriptions.id, id));
+    return sub;
+  }
+
+  async getCieSubscriptionByUserId(userId: string): Promise<CieSubscription | undefined> {
+    const [sub] = await db.select().from(cieSubscriptions)
+      .where(and(eq(cieSubscriptions.userId, userId), eq(cieSubscriptions.status, 'active')))
+      .orderBy(desc(cieSubscriptions.createdAt))
+      .limit(1);
+    return sub;
+  }
+
+  async getCieSubscriptionByOrgId(orgId: number): Promise<CieSubscription | undefined> {
+    const [sub] = await db.select().from(cieSubscriptions)
+      .where(and(eq(cieSubscriptions.orgId, orgId), eq(cieSubscriptions.status, 'active')))
+      .orderBy(desc(cieSubscriptions.createdAt))
+      .limit(1);
+    return sub;
+  }
+
+  async getCieSubscriptionByPaystackCode(code: string): Promise<CieSubscription | undefined> {
+    const [sub] = await db.select().from(cieSubscriptions)
+      .where(eq(cieSubscriptions.paystackSubscriptionCode, code));
+    return sub;
+  }
+
+  async updateCieSubscription(id: number, data: Partial<InsertCieSubscription>): Promise<CieSubscription | undefined> {
+    const [sub] = await db.update(cieSubscriptions)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(cieSubscriptions.id, id))
+      .returning();
+    return sub;
+  }
+
+  async listCieSubscriptions(limit = 100): Promise<CieSubscription[]> {
+    return db.select().from(cieSubscriptions).orderBy(desc(cieSubscriptions.createdAt)).limit(limit);
   }
 }
 

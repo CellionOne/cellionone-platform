@@ -18,40 +18,72 @@ import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth
 
 // ─── Tier constants ────────────────────────────────────────────────────────────
 //
-// DESIGN DECISION: CIE tiers are encoded as API key permissions rather than
-// read from a separate billing/subscription record. This is intentional for
-// Task #30 (API surface + gating). Task #31 (CIE Subscription Billing) will
-// introduce a `cieSubscriptions` table; at that point the key-issuance flow
-// will set/update these permission scopes based on the active billing plan,
-// so the permission array remains the runtime source of truth for access
-// control while billing governs how permissions are assigned.
+// CIE tier hierarchy (additive):
+//   free       → only cie:read scope — market pulse only
+//   subscriber → cie:subscriber scope — scores, history, dividends
+//   pro        → cie:pro scope — signals, sector-rotation
 //
-// Tier hierarchy (additive):
-//   free       → ["cie:read"]
-//   subscriber → ["cie:read", "cie:subscriber"]
-//   pro        → ["cie:read", "cie:subscriber", "cie:pro"]
+// AUTHORITATIVE SOURCE (Task #31): The cieSubscriptions table is the runtime
+// source of truth for tier access, checked per API call with a 5-minute
+// in-memory cache (keyed by orgId). API key permissions serve as fallback
+// for keys issued before subscription billing was deployed.
 
 type CieTier = "free" | "subscriber" | "pro";
 const TIER_ORDER: Record<CieTier, number> = { free: 0, subscriber: 1, pro: 2 };
 
+// ─── 5-minute in-memory tier cache ────────────────────────────────────────────
+const TIER_CACHE_TTL_MS = 5 * 60 * 1000;
+interface TierCacheEntry { tier: CieTier; fetchedAt: number }
+const tierCache = new Map<number, TierCacheEntry>();
+
+/** Called by webhook handler to force a fresh DB lookup on next request. */
+export function invalidateCieOrgTierCache(orgId: number): void {
+  tierCache.delete(orgId);
+}
+
 /**
- * Returns the effective CIE tier for a request based on its permissions.
- * `cie:pro` implies all lower tiers (pro keys always have subscriber access too).
+ * Determine the effective CIE tier for an organisation.
+ * Checks cieSubscriptions table first (authoritative, cached 5 min).
+ * Falls back to API key permissions for backward compatibility.
  */
-function getEffectiveTier(permissions: string[]): CieTier {
-  if (permissions.includes("cie:pro")) return "pro";
-  if (permissions.includes("cie:subscriber")) return "subscriber";
-  return "free";
+async function resolveOrgTier(orgId: number, permissions: string[]): Promise<CieTier> {
+  const cached = tierCache.get(orgId);
+  if (cached && Date.now() - cached.fetchedAt < TIER_CACHE_TTL_MS) {
+    return cached.tier;
+  }
+
+  let tier: CieTier = "free";
+  try {
+    const sub = await storage.getCieSubscriptionByOrgId(orgId);
+    if (sub && sub.status === "active") {
+      tier = sub.tier as CieTier;
+    } else {
+      // Fallback: read from API key permissions (backward compat)
+      if (permissions.includes("cie:pro")) tier = "pro";
+      else if (permissions.includes("cie:subscriber")) tier = "subscriber";
+      else tier = "free";
+    }
+  } catch (err) {
+    console.error("[CIE] resolveOrgTier error — falling back to permissions:", err);
+    if (permissions.includes("cie:pro")) tier = "pro";
+    else if (permissions.includes("cie:subscriber")) tier = "subscriber";
+    else tier = "free";
+  }
+
+  tierCache.set(orgId, { tier, fetchedAt: Date.now() });
+  return tier;
 }
 
 /**
  * Middleware factory that enforces a minimum CIE tier.
  * Must be placed after authenticateApiKey so apiKeyContext is populated.
+ * Resolves tier from cieSubscriptions table (authoritative) with 5-min cache.
  */
 function requireCieTier(minTier: CieTier) {
-  return (req: ApiKeyRequest, res: Response, next: NextFunction) => {
+  return async (req: ApiKeyRequest, res: Response, next: NextFunction) => {
+    const orgId = req.apiKeyContext!.orgId;
     const perms = req.apiKeyContext?.permissions ?? [];
-    const effective = getEffectiveTier(perms);
+    const effective = await resolveOrgTier(orgId, perms);
     if (TIER_ORDER[effective] < TIER_ORDER[minTier]) {
       return res.status(403).json({
         error: `This endpoint requires CIE ${minTier} tier or higher`,

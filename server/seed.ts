@@ -423,6 +423,14 @@ export async function seedDatabase() {
       console.log("Seeded CIE initial market pulse");
     }
 
+    // Seed CIE Paystack plans (best-effort: logs plan codes if not already in env vars)
+    try {
+      const { seedCiePlans } = await import("./routes/cieBillingRoutes");
+      await seedCiePlans();
+    } catch (planErr: any) {
+      console.warn("[Seed] CIE plan seeding skipped:", planErr.message);
+    }
+
     console.log("Database seeding complete");
   } catch (error) {
     console.error("Seed error:", error);

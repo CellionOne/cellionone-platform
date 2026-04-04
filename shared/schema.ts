@@ -2214,3 +2214,34 @@ export const insertCieIngestionLogSchema = createInsertSchema(cieIngestionLogs).
 export type CieIngestionLog = typeof cieIngestionLogs.$inferSelect;
 export type InsertCieIngestionLog = z.infer<typeof insertCieIngestionLogSchema>;
 
+// ============== CIE SUBSCRIPTIONS ==============
+// Tracks Paystack recurring subscriptions for CIE tier access.
+// userId is the Cellion user; orgId is optional (set when the subscriber is
+// a KYC org, null for direct individual subscribers).
+export const cieSubscriptions = pgTable("cie_subscriptions", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull(),
+  orgId: integer("org_id").references(() => kycOrganisations.id),
+  tier: varchar("tier", { length: 20 }).notNull().default("free"), // free | subscriber | pro
+  status: varchar("status", { length: 20 }).notNull().default("active"), // active | cancelled | expired | past_due
+  paystackSubscriptionCode: varchar("paystack_subscription_code", { length: 100 }),
+  paystackCustomerCode: varchar("paystack_customer_code", { length: 100 }),
+  paystackPlanCode: varchar("paystack_plan_code", { length: 100 }),
+  paystackEmail: varchar("paystack_email", { length: 255 }),
+  paystackReference: varchar("paystack_reference", { length: 255 }),
+  currentPeriodStart: timestamp("current_period_start"),
+  currentPeriodEnd: timestamp("current_period_end"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_cie_sub_user").on(table.userId),
+  index("idx_cie_sub_org").on(table.orgId),
+  index("idx_cie_sub_status").on(table.status),
+]);
+
+export const insertCieSubscriptionSchema = createInsertSchema(cieSubscriptions).omit({ id: true, createdAt: true, updatedAt: true });
+export type CieSubscription = typeof cieSubscriptions.$inferSelect;
+export type InsertCieSubscription = z.infer<typeof insertCieSubscriptionSchema>;
+

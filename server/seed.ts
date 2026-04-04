@@ -159,6 +159,7 @@ export async function seedDatabase() {
         { id: "demo-lawyer-002", username: "lawyer2@celion.ng", email: "lawyer2@celion.ng", firstName: "Amaka", lastName: "Nwachukwu" },
         { id: "demo-founder-001", username: "founder@celion.ng", email: "founder@celion.ng", firstName: "Emeka", lastName: "Okoro", primaryIntent: "founder_new_co" },
         { id: "demo-founder-002", username: "founder2@celion.ng", email: "founder2@celion.ng", firstName: "Ngozi", lastName: "Adeyemi", primaryIntent: "founder_new_co" },
+        { id: "demo-analyst-001", username: "analyst@celion.ng", email: "analyst@celion.ng", firstName: "CIE", lastName: "Analyst" },
       ];
       
       for (const user of demoUsers) {
@@ -175,6 +176,7 @@ export async function seedDatabase() {
         { userId: "demo-lawyer-002", role: "lawyer" },
         { userId: "demo-founder-001", role: "founder" },
         { userId: "demo-founder-002", role: "founder" },
+        { userId: "demo-analyst-001", role: "cie_analyst" },
       ];
       
       for (const r of demoRoles) {

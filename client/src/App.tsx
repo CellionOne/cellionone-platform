@@ -390,7 +390,7 @@ function Router() {
         <ProtectedRoute component={AdminBankingPartners} roles={["admin"]} />
       </Route>
       <Route path="/admin/cie">
-        <ProtectedRoute component={AdminCieCockpit} roles={["admin"]} />
+        <ProtectedRoute component={AdminCieCockpit} roles={["admin", "cie_analyst"]} />
       </Route>
 
       <Route path="/cie/subscribe/success">

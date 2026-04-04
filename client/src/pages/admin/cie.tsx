@@ -1480,6 +1480,11 @@ function RevenueTab() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AdminCieCockpit() {
+  const { user } = useAuth();
+  const userRoles = user?.roles ?? [];
+  const isFullAdmin = userRoles.includes("admin");
+  const isCieAnalyst = userRoles.includes("cie_analyst") && !isFullAdmin;
+
   return (
     <DashboardLayout role="admin" breadcrumbs={[{ label: "Admin", href: "/admin/dashboard" }, { label: "CIE Engine" }]}>
       <div className="px-4 sm:px-6 lg:px-8 py-6">
@@ -1489,28 +1494,40 @@ export default function AdminCieCockpit() {
           </div>
           <div>
             <h1 className="text-xl font-bold" data-testid="text-cie-cockpit-heading">Cellion Intelligence Engine</h1>
-            <p className="text-sm text-muted-foreground">Admin research cockpit — securities, scores, models, signals</p>
+            <p className="text-sm text-muted-foreground">
+              {isCieAnalyst ? "Analyst workspace — price upload & signals" : "Admin research cockpit — securities, scores, models, signals"}
+            </p>
           </div>
         </div>
 
-        <Tabs defaultValue="securities">
+        <Tabs defaultValue={isCieAnalyst ? "prices" : "securities"}>
           <TabsList className="mb-6 flex-wrap h-auto gap-1" data-testid="tabs-cie-cockpit">
-            <TabsTrigger value="securities" className="gap-2" data-testid="tab-securities"><ArrowUpDown className="h-4 w-4" />Securities</TabsTrigger>
+            {!isCieAnalyst && (
+              <TabsTrigger value="securities" className="gap-2" data-testid="tab-securities"><ArrowUpDown className="h-4 w-4" />Securities</TabsTrigger>
+            )}
             <TabsTrigger value="prices" className="gap-2" data-testid="tab-prices"><Upload className="h-4 w-4" />Price Upload</TabsTrigger>
-            <TabsTrigger value="model" className="gap-2" data-testid="tab-model"><Settings2 className="h-4 w-4" />Model Editor</TabsTrigger>
-            <TabsTrigger value="dividends" className="gap-2" data-testid="tab-dividends"><Banknote className="h-4 w-4" />Dividends</TabsTrigger>
+            {!isCieAnalyst && (
+              <TabsTrigger value="model" className="gap-2" data-testid="tab-model"><Settings2 className="h-4 w-4" />Model Editor</TabsTrigger>
+            )}
+            {!isCieAnalyst && (
+              <TabsTrigger value="dividends" className="gap-2" data-testid="tab-dividends"><Banknote className="h-4 w-4" />Dividends</TabsTrigger>
+            )}
             <TabsTrigger value="signals" className="gap-2" data-testid="tab-signals"><Zap className="h-4 w-4" />Signals</TabsTrigger>
-            <TabsTrigger value="partners" className="gap-2" data-testid="tab-partners"><Handshake className="h-4 w-4" />Partners</TabsTrigger>
-            <TabsTrigger value="revenue" className="gap-2" data-testid="tab-revenue"><TrendingUp className="h-4 w-4" />Revenue</TabsTrigger>
+            {!isCieAnalyst && (
+              <TabsTrigger value="partners" className="gap-2" data-testid="tab-partners"><Handshake className="h-4 w-4" />Partners</TabsTrigger>
+            )}
+            {!isCieAnalyst && (
+              <TabsTrigger value="revenue" className="gap-2" data-testid="tab-revenue"><TrendingUp className="h-4 w-4" />Revenue</TabsTrigger>
+            )}
           </TabsList>
 
-          <TabsContent value="securities"><SecuritiesTab /></TabsContent>
+          {!isCieAnalyst && <TabsContent value="securities"><SecuritiesTab /></TabsContent>}
           <TabsContent value="prices"><PriceUploadTab /></TabsContent>
-          <TabsContent value="model"><ModelEditorTab /></TabsContent>
-          <TabsContent value="dividends"><DividendsTab /></TabsContent>
+          {!isCieAnalyst && <TabsContent value="model"><ModelEditorTab /></TabsContent>}
+          {!isCieAnalyst && <TabsContent value="dividends"><DividendsTab /></TabsContent>}
           <TabsContent value="signals"><SignalsTab /></TabsContent>
-          <TabsContent value="partners"><PartnersTab /></TabsContent>
-          <TabsContent value="revenue"><RevenueTab /></TabsContent>
+          {!isCieAnalyst && <TabsContent value="partners"><PartnersTab /></TabsContent>}
+          {!isCieAnalyst && <TabsContent value="revenue"><RevenueTab /></TabsContent>}
         </Tabs>
       </div>
     </DashboardLayout>

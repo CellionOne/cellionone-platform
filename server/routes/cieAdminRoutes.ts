@@ -60,6 +60,14 @@ async function isSuperAdmin(req: AuthenticatedRequest): Promise<boolean> {
   return roles.includes("super_admin");
 }
 
+/** Returns true for both full admin and the restricted cie_analyst role */
+async function isCieAnalystOrAdmin(req: AuthenticatedRequest): Promise<boolean> {
+  const userId = req.user?.claims?.sub;
+  if (!userId) return false;
+  const roles = await storage.getUserRoles(userId);
+  return roles.includes("admin") || roles.includes("cie_analyst");
+}
+
 function getUserId(req: AuthenticatedRequest): string {
   return req.user?.claims?.sub ?? "system";
 }
@@ -77,7 +85,7 @@ export function registerCieAdminRoutes(app: Express): void {
   /** GET /api/admin/cie/data-entry-guide — full JSON guide with field specs and workflow */
   app.get("/api/admin/cie/data-entry-guide", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       res.json(generateDataEntryGuide());
     } catch (e: unknown) {
       res.status(500).json({ error: errMsg(e) });
@@ -91,7 +99,7 @@ export function registerCieAdminRoutes(app: Express): void {
    */
   app.get("/api/admin/cie/templates/:type", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const { type } = req.params;
       const isXlsx = req.query.format === "xlsx";
 
@@ -226,7 +234,7 @@ export function registerCieAdminRoutes(app: Express): void {
    */
   app.post("/api/admin/cie/ingest/preview", isAuthenticated, upload.single("file"), async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
@@ -284,7 +292,7 @@ export function registerCieAdminRoutes(app: Express): void {
    */
   app.post("/api/admin/cie/ingest/confirm", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
       const schema = z.object({
         previewToken: z.string().uuid("previewToken must be a valid UUID"),
@@ -337,7 +345,7 @@ export function registerCieAdminRoutes(app: Express): void {
   /** GET /api/admin/cie/ingest/logs — list recent ingestion logs */
   app.get("/api/admin/cie/ingest/logs", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 100);
       const logs = await storage.listCieIngestionLogs(limit);
       res.json({ logs, count: logs.length });
@@ -485,7 +493,7 @@ export function registerCieAdminRoutes(app: Express): void {
   /** POST /api/admin/cie/scores/run — trigger immediate score run */
   app.post("/api/admin/cie/scores/run", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const result = await triggerImmediateScoreRun();
       await storage.createAuditLog({
         actorUserId: getUserId(req),
@@ -507,7 +515,7 @@ export function registerCieAdminRoutes(app: Express): void {
   /** GET /api/admin/cie/signals — list all signals */
   app.get("/api/admin/cie/signals", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const publishedOnly = req.query.publishedOnly === "true";
       const limit = Math.min(parseInt(String(req.query.limit ?? "50")), 200);
       const signals = await storage.listCieSignals(publishedOnly, limit);
@@ -520,7 +528,7 @@ export function registerCieAdminRoutes(app: Express): void {
   /** POST /api/admin/cie/signals — create a signal */
   app.post("/api/admin/cie/signals", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const schema = z.object({
         securityId: z.number().int().optional(),
         type: z.enum(["rumour", "news", "trade_call", "sector_rotation"]),
@@ -558,7 +566,7 @@ export function registerCieAdminRoutes(app: Express): void {
   /** PATCH /api/admin/cie/signals/:id — update a signal */
   app.patch("/api/admin/cie/signals/:id", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const id = parseInt(req.params.id as string);
       const schema = z.object({
         content: z.string().min(10).max(5000).optional(),
@@ -584,7 +592,7 @@ export function registerCieAdminRoutes(app: Express): void {
   /** DELETE /api/admin/cie/signals/:id — delete a signal */
   app.delete("/api/admin/cie/signals/:id", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const id = parseInt(req.params.id as string);
       await storage.deleteCieSignal(id);
       res.json({ success: true });
@@ -596,7 +604,7 @@ export function registerCieAdminRoutes(app: Express): void {
   /** POST /api/admin/cie/signals/ai-draft — generate AI signal draft */
   app.post("/api/admin/cie/signals/ai-draft", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
       if (!isOpenAIAvailable()) {
         return res.status(503).json({ error: "AI assistant is not available in this environment.", code: "AI_UNAVAILABLE" });
@@ -651,7 +659,7 @@ export function registerCieAdminRoutes(app: Express): void {
   /** POST /api/admin/cie/market-pulse/ai-commentary — regenerate AI market commentary on demand */
   app.post("/api/admin/cie/market-pulse/ai-commentary", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       if (!isOpenAIAvailable()) {
         return res.status(503).json({ error: "AI commentary is not available in this environment.", code: "AI_UNAVAILABLE" });
       }

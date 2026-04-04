@@ -52,6 +52,14 @@ import {
   procurementInvoiceItems, type ProcurementInvoiceItem, type InsertProcurementInvoiceItem,
   bankPartners, type BankPartner, type InsertBankPartner,
   kycStrReports, type KycStrReport, type InsertKycStrReport,
+  cieSecurities, type CieSecurity, type InsertCieSecurity,
+  ciePrices, type CiePrice, type InsertCiePrice,
+  cieScores, type CieScore, type InsertCieScore,
+  cieDividends, type CieDividend, type InsertCieDividend,
+  cieSignals, type CieSignal, type InsertCieSignal,
+  cieModelVersions, type CieModelVersion, type InsertCieModelVersion,
+  cieMarketPulse, type CieMarketPulse, type InsertCieMarketPulse,
+  cieIngestionLogs, type CieIngestionLog, type InsertCieIngestionLog,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -384,6 +392,52 @@ export interface IStorage {
   getStrReport(id: number, orgId: number): Promise<KycStrReport | undefined>;
   listStrReports(orgId: number): Promise<KycStrReport[]>;
   updateStrReport(id: number, orgId: number, data: Partial<InsertKycStrReport>): Promise<KycStrReport | undefined>;
+
+  // CIE Securities
+  createCieSecurity(data: InsertCieSecurity): Promise<CieSecurity>;
+  upsertCieSecurity(data: InsertCieSecurity): Promise<CieSecurity>;
+  getCieSecurityBySymbol(symbol: string): Promise<CieSecurity | undefined>;
+  listCieSecurities(activeOnly?: boolean): Promise<CieSecurity[]>;
+  updateCieSecurity(id: number, data: Partial<InsertCieSecurity>): Promise<CieSecurity | undefined>;
+
+  // CIE Prices
+  upsertCiePrice(data: InsertCiePrice): Promise<CiePrice>;
+  listCiePrices(securityId: number, days?: number): Promise<CiePrice[]>;
+  getLatestCiePrice(securityId: number): Promise<CiePrice | undefined>;
+
+  // CIE Scores
+  upsertCieScore(data: InsertCieScore): Promise<CieScore>;
+  getLatestCieScore(securityId: number): Promise<CieScore | undefined>;
+  listLatestCieScores(): Promise<(CieScore & { symbol: string; name: string; sector: string })[]>;
+  listCieScoreHistory(securityId: number, days?: number): Promise<CieScore[]>;
+
+  // CIE Model Versions
+  createCieModelVersion(data: InsertCieModelVersion): Promise<CieModelVersion>;
+  getCieModelVersion(id: number): Promise<CieModelVersion | undefined>;
+  listCieModelVersions(): Promise<CieModelVersion[]>;
+  getActiveCieModelVersion(): Promise<CieModelVersion | undefined>;
+  updateCieModelVersion(id: number, data: Partial<InsertCieModelVersion>): Promise<CieModelVersion | undefined>;
+  activateCieModelVersion(id: number, reviewerUserId: string): Promise<CieModelVersion | undefined>;
+
+  // CIE Dividends
+  createCieDividend(data: InsertCieDividend): Promise<CieDividend>;
+  listCieDividends(upcomingOnly?: boolean): Promise<(CieDividend & { symbol: string; name: string })[]>;
+  deleteCieDividend(id: number): Promise<void>;
+
+  // CIE Signals
+  createCieSignal(data: InsertCieSignal): Promise<CieSignal>;
+  listCieSignals(publishedOnly?: boolean, limit?: number): Promise<(CieSignal & { symbol?: string })[]>;
+  updateCieSignal(id: number, data: Partial<InsertCieSignal>): Promise<CieSignal | undefined>;
+  deleteCieSignal(id: number): Promise<void>;
+
+  // CIE Market Pulse
+  getLatestCieMarketPulse(): Promise<CieMarketPulse | undefined>;
+  upsertCieMarketPulse(data: InsertCieMarketPulse): Promise<CieMarketPulse>;
+
+  // CIE Ingestion Logs
+  createCieIngestionLog(data: InsertCieIngestionLog): Promise<CieIngestionLog>;
+  updateCieIngestionLog(id: number, data: Partial<InsertCieIngestionLog>): Promise<CieIngestionLog | undefined>;
+  listCieIngestionLogs(limit?: number): Promise<CieIngestionLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1885,6 +1939,274 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(kycStrReports.id, id), eq(kycStrReports.orgId, orgId)))
       .returning();
     return report;
+  }
+
+  // ============== CIE Securities ==============
+  async createCieSecurity(data: InsertCieSecurity): Promise<CieSecurity> {
+    const [sec] = await db.insert(cieSecurities).values(data).returning();
+    return sec;
+  }
+
+  async upsertCieSecurity(data: InsertCieSecurity): Promise<CieSecurity> {
+    const [sec] = await db.insert(cieSecurities).values(data)
+      .onConflictDoUpdate({
+        target: cieSecurities.symbol,
+        set: { name: data.name, sector: data.sector, isActive: data.isActive, updatedAt: new Date() },
+      }).returning();
+    return sec;
+  }
+
+  async getCieSecurityBySymbol(symbol: string): Promise<CieSecurity | undefined> {
+    const [sec] = await db.select().from(cieSecurities).where(eq(cieSecurities.symbol, symbol.toUpperCase()));
+    return sec;
+  }
+
+  async listCieSecurities(activeOnly = true): Promise<CieSecurity[]> {
+    if (activeOnly) {
+      return db.select().from(cieSecurities).where(eq(cieSecurities.isActive, true)).orderBy(cieSecurities.symbol);
+    }
+    return db.select().from(cieSecurities).orderBy(cieSecurities.symbol);
+  }
+
+  async updateCieSecurity(id: number, data: Partial<InsertCieSecurity>): Promise<CieSecurity | undefined> {
+    const [sec] = await db.update(cieSecurities).set({ ...data, updatedAt: new Date() }).where(eq(cieSecurities.id, id)).returning();
+    return sec;
+  }
+
+  // ============== CIE Prices ==============
+  async upsertCiePrice(data: InsertCiePrice): Promise<CiePrice> {
+    const [price] = await db.insert(ciePrices).values(data)
+      .onConflictDoUpdate({
+        target: [ciePrices.securityId, ciePrices.tradeDate],
+        set: {
+          openKobo: data.openKobo,
+          highKobo: data.highKobo,
+          lowKobo: data.lowKobo,
+          closeKobo: data.closeKobo,
+          volume: data.volume,
+        },
+      }).returning();
+    return price;
+  }
+
+  async listCiePrices(securityId: number, days = 90): Promise<CiePrice[]> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+    return db.select().from(ciePrices)
+      .where(and(eq(ciePrices.securityId, securityId), gte(ciePrices.tradeDate, cutoffStr)))
+      .orderBy(desc(ciePrices.tradeDate));
+  }
+
+  async getLatestCiePrice(securityId: number): Promise<CiePrice | undefined> {
+    const [price] = await db.select().from(ciePrices)
+      .where(eq(ciePrices.securityId, securityId))
+      .orderBy(desc(ciePrices.tradeDate))
+      .limit(1);
+    return price;
+  }
+
+  // ============== CIE Scores ==============
+  async upsertCieScore(data: InsertCieScore): Promise<CieScore> {
+    const [score] = await db.insert(cieScores).values(data)
+      .onConflictDoUpdate({
+        target: [cieScores.securityId, cieScores.scoreDate],
+        set: {
+          ias: data.ias,
+          rs: data.rs,
+          cs: data.cs,
+          recommendation: data.recommendation,
+          pillarBreakdown: data.pillarBreakdown,
+          modelVersionId: data.modelVersionId,
+          dataPointsUsed: data.dataPointsUsed,
+        },
+      }).returning();
+    return score;
+  }
+
+  async getLatestCieScore(securityId: number): Promise<CieScore | undefined> {
+    const [score] = await db.select().from(cieScores)
+      .where(eq(cieScores.securityId, securityId))
+      .orderBy(desc(cieScores.scoreDate))
+      .limit(1);
+    return score;
+  }
+
+  async listLatestCieScores(): Promise<(CieScore & { symbol: string; name: string; sector: string })[]> {
+    const latestDates = await db.select({
+      securityId: cieScores.securityId,
+      maxDate: sql<string>`MAX(${cieScores.scoreDate})`.as("max_date"),
+    }).from(cieScores).groupBy(cieScores.securityId);
+
+    if (latestDates.length === 0) return [];
+
+    const results: (CieScore & { symbol: string; name: string; sector: string })[] = [];
+    for (const { securityId, maxDate } of latestDates) {
+      const [row] = await db.select({
+        id: cieScores.id,
+        securityId: cieScores.securityId,
+        scoreDate: cieScores.scoreDate,
+        ias: cieScores.ias,
+        rs: cieScores.rs,
+        cs: cieScores.cs,
+        recommendation: cieScores.recommendation,
+        pillarBreakdown: cieScores.pillarBreakdown,
+        modelVersionId: cieScores.modelVersionId,
+        dataPointsUsed: cieScores.dataPointsUsed,
+        createdAt: cieScores.createdAt,
+        symbol: cieSecurities.symbol,
+        name: cieSecurities.name,
+        sector: cieSecurities.sector,
+      }).from(cieScores)
+        .innerJoin(cieSecurities, eq(cieScores.securityId, cieSecurities.id))
+        .where(and(eq(cieScores.securityId, securityId), eq(cieScores.scoreDate, maxDate)));
+      if (row) results.push(row);
+    }
+    return results.sort((a, b) => (b.ias ?? 0) - (a.ias ?? 0));
+  }
+
+  async listCieScoreHistory(securityId: number, days = 30): Promise<CieScore[]> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+    return db.select().from(cieScores)
+      .where(and(eq(cieScores.securityId, securityId), gte(cieScores.scoreDate, cutoffStr)))
+      .orderBy(desc(cieScores.scoreDate));
+  }
+
+  // ============== CIE Model Versions ==============
+  async createCieModelVersion(data: InsertCieModelVersion): Promise<CieModelVersion> {
+    const [mv] = await db.insert(cieModelVersions).values(data).returning();
+    return mv;
+  }
+
+  async getCieModelVersion(id: number): Promise<CieModelVersion | undefined> {
+    const [mv] = await db.select().from(cieModelVersions).where(eq(cieModelVersions.id, id));
+    return mv;
+  }
+
+  async listCieModelVersions(): Promise<CieModelVersion[]> {
+    return db.select().from(cieModelVersions).orderBy(desc(cieModelVersions.createdAt));
+  }
+
+  async getActiveCieModelVersion(): Promise<CieModelVersion | undefined> {
+    const [mv] = await db.select().from(cieModelVersions)
+      .where(eq(cieModelVersions.status, "active"))
+      .orderBy(desc(cieModelVersions.activatedAt))
+      .limit(1);
+    return mv;
+  }
+
+  async updateCieModelVersion(id: number, data: Partial<InsertCieModelVersion>): Promise<CieModelVersion | undefined> {
+    const [mv] = await db.update(cieModelVersions).set({ ...data, updatedAt: new Date() }).where(eq(cieModelVersions.id, id)).returning();
+    return mv;
+  }
+
+  async activateCieModelVersion(id: number, reviewerUserId: string): Promise<CieModelVersion | undefined> {
+    await db.update(cieModelVersions).set({ status: "draft" }).where(eq(cieModelVersions.status, "active"));
+    const [mv] = await db.update(cieModelVersions)
+      .set({ status: "active", reviewedByUserId: reviewerUserId, activatedAt: new Date(), updatedAt: new Date() })
+      .where(eq(cieModelVersions.id, id))
+      .returning();
+    return mv;
+  }
+
+  // ============== CIE Dividends ==============
+  async createCieDividend(data: InsertCieDividend): Promise<CieDividend> {
+    const [div] = await db.insert(cieDividends).values(data).returning();
+    return div;
+  }
+
+  async listCieDividends(upcomingOnly = false): Promise<(CieDividend & { symbol: string; name: string })[]> {
+    const today = new Date().toISOString().slice(0, 10);
+    const query = db.select({
+      id: cieDividends.id,
+      securityId: cieDividends.securityId,
+      exDividendDate: cieDividends.exDividendDate,
+      paymentDate: cieDividends.paymentDate,
+      amountPerShareKobo: cieDividends.amountPerShareKobo,
+      notes: cieDividends.notes,
+      createdAt: cieDividends.createdAt,
+      symbol: cieSecurities.symbol,
+      name: cieSecurities.name,
+    }).from(cieDividends)
+      .innerJoin(cieSecurities, eq(cieDividends.securityId, cieSecurities.id));
+
+    if (upcomingOnly) {
+      return query.where(gte(cieDividends.exDividendDate, today)).orderBy(cieDividends.exDividendDate) as any;
+    }
+    return query.orderBy(desc(cieDividends.exDividendDate)) as any;
+  }
+
+  async deleteCieDividend(id: number): Promise<void> {
+    await db.delete(cieDividends).where(eq(cieDividends.id, id));
+  }
+
+  // ============== CIE Signals ==============
+  async createCieSignal(data: InsertCieSignal): Promise<CieSignal> {
+    const [sig] = await db.insert(cieSignals).values(data).returning();
+    return sig;
+  }
+
+  async listCieSignals(publishedOnly = true, limit = 50): Promise<(CieSignal & { symbol?: string })[]> {
+    const baseQuery = db.select({
+      id: cieSignals.id,
+      securityId: cieSignals.securityId,
+      type: cieSignals.type,
+      sentiment: cieSignals.sentiment,
+      credibility: cieSignals.credibility,
+      content: cieSignals.content,
+      analystUserId: cieSignals.analystUserId,
+      tags: cieSignals.tags,
+      isPublished: cieSignals.isPublished,
+      publishedAt: cieSignals.publishedAt,
+      expiresAt: cieSignals.expiresAt,
+      createdAt: cieSignals.createdAt,
+      symbol: cieSecurities.symbol,
+    }).from(cieSignals)
+      .leftJoin(cieSecurities, eq(cieSignals.securityId, cieSecurities.id));
+
+    if (publishedOnly) {
+      return baseQuery.where(eq(cieSignals.isPublished, true))
+        .orderBy(desc(cieSignals.publishedAt))
+        .limit(limit) as any;
+    }
+    return baseQuery.orderBy(desc(cieSignals.createdAt)).limit(limit) as any;
+  }
+
+  async updateCieSignal(id: number, data: Partial<InsertCieSignal>): Promise<CieSignal | undefined> {
+    const [sig] = await db.update(cieSignals).set(data).where(eq(cieSignals.id, id)).returning();
+    return sig;
+  }
+
+  async deleteCieSignal(id: number): Promise<void> {
+    await db.delete(cieSignals).where(eq(cieSignals.id, id));
+  }
+
+  // ============== CIE Market Pulse ==============
+  async getLatestCieMarketPulse(): Promise<CieMarketPulse | undefined> {
+    const [pulse] = await db.select().from(cieMarketPulse).orderBy(desc(cieMarketPulse.createdAt)).limit(1);
+    return pulse;
+  }
+
+  async upsertCieMarketPulse(data: InsertCieMarketPulse): Promise<CieMarketPulse> {
+    const [pulse] = await db.insert(cieMarketPulse).values(data).returning();
+    return pulse;
+  }
+
+  // ============== CIE Ingestion Logs ==============
+  async createCieIngestionLog(data: InsertCieIngestionLog): Promise<CieIngestionLog> {
+    const [log] = await db.insert(cieIngestionLogs).values(data).returning();
+    return log;
+  }
+
+  async updateCieIngestionLog(id: number, data: Partial<InsertCieIngestionLog>): Promise<CieIngestionLog | undefined> {
+    const [log] = await db.update(cieIngestionLogs).set(data).where(eq(cieIngestionLogs.id, id)).returning();
+    return log;
+  }
+
+  async listCieIngestionLogs(limit = 50): Promise<CieIngestionLog[]> {
+    return db.select().from(cieIngestionLogs).orderBy(desc(cieIngestionLogs.createdAt)).limit(limit);
   }
 }
 

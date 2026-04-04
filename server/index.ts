@@ -6,6 +6,7 @@ import { seedDatabase } from "./seed";
 import { startSubscriptionScheduler } from "./services/subscriptionScheduler";
 import { runComplianceDeadlineCheck } from "./services/complianceScheduler";
 import { runKycExpiryCheck, runSanctionsMonitoring, runIndividualExpiryCheck, runDocumentFilesExpiryCheck } from "./services/kycSchedulerService";
+import { startCieScheduler } from "./services/cieScheduler";
 import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUploadMiddleware } from "./middleware/security";
 
 // Log as early as possible so deployment systems can confirm startup
@@ -226,6 +227,9 @@ httpServer.listen(
 
     // Start the subscription scheduler for expiry/renewal processing
     startSubscriptionScheduler();
+
+    // Start the CIE (Cellion Intelligence Engine) nightly scoring scheduler
+    startCieScheduler();
 
     const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 

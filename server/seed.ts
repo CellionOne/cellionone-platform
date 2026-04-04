@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
-import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts } from "@shared/schema";
+import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts, cieSecurities, cieModelVersions, cieMarketPulse } from "@shared/schema";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
@@ -32,6 +32,7 @@ export async function seedDatabase() {
       { key: "enable_escrow_payments", isEnabled: true, description: "Enable escrow payment system for procurement contracts and Escrow-as-a-Service API" },
       { key: "enable_sanctions_monitoring", isEnabled: true, description: "Enable weekly automated sanctions/AML re-screening for all verified individuals" },
       { key: "enable_kyc_hosted_sessions", isEnabled: true, description: "Enable hosted KYC session links (no-code verification URLs for API customers)" },
+      { key: "enable_cie_service", isEnabled: true, description: "Enable CIE (Cellion Intelligence Engine) — NGX equity intelligence scores and signals" },
     ];
     
     // Upsert feature flags — keep existing isEnabled values unless flag is new,
@@ -281,6 +282,146 @@ export async function seedDatabase() {
       await db.insert(rfqCategories).values(cat).onConflictDoNothing();
     }
     console.log("Synced procurement categories");
+
+    // ============ CIE NGX Securities Master List ============
+    const ngxSecurities = [
+      // Banking
+      { symbol: "GTCO", name: "Guaranty Trust Holding Company Plc", sector: "Banking" },
+      { symbol: "ZENITHBANK", name: "Zenith Bank Plc", sector: "Banking" },
+      { symbol: "ACCESSCORP", name: "Access Holdings Plc", sector: "Banking" },
+      { symbol: "FBNH", name: "FBN Holdings Plc", sector: "Banking" },
+      { symbol: "UBA", name: "United Bank for Africa Plc", sector: "Banking" },
+      { symbol: "FIDELITYBK", name: "Fidelity Bank Plc", sector: "Banking" },
+      { symbol: "STANBIC", name: "Stanbic IBTC Holdings Plc", sector: "Banking" },
+      { symbol: "WEMABANK", name: "Wema Bank Plc", sector: "Banking" },
+      { symbol: "STERLING", name: "Sterling Financial Holdings Plc", sector: "Banking" },
+      { symbol: "FCMB", name: "FCMB Group Plc", sector: "Banking" },
+      { symbol: "ECOBANK", name: "Ecobank Transnational Incorporated", sector: "Banking" },
+      { symbol: "CORONATION", name: "Coronation Bank Plc", sector: "Banking" },
+      { symbol: "UNITYBNK", name: "Unity Bank Plc", sector: "Banking" },
+      { symbol: "JAIZBANK", name: "Jaiz Bank Plc", sector: "Banking" },
+      // Consumer Goods
+      { symbol: "DANGSUGAR", name: "Dangote Sugar Refinery Plc", sector: "Consumer Goods" },
+      { symbol: "NASCON", name: "NASCON Allied Industries Plc", sector: "Consumer Goods" },
+      { symbol: "NESTLE", name: "Nestle Nigeria Plc", sector: "Consumer Goods" },
+      { symbol: "UNILEVER", name: "Unilever Nigeria Plc", sector: "Consumer Goods" },
+      { symbol: "CADBURY", name: "Cadbury Nigeria Plc", sector: "Consumer Goods" },
+      { symbol: "PZ", name: "PZ Cussons Nigeria Plc", sector: "Consumer Goods" },
+      { symbol: "FLOURMILL", name: "Flour Mills of Nigeria Plc", sector: "Consumer Goods" },
+      { symbol: "NB", name: "Nigerian Breweries Plc", sector: "Consumer Goods" },
+      { symbol: "GUINNESS", name: "Guinness Nigeria Plc", sector: "Consumer Goods" },
+      { symbol: "CHAMPION", name: "Champion Breweries Plc", sector: "Consumer Goods" },
+      { symbol: "INTBREW", name: "International Breweries Plc", sector: "Consumer Goods" },
+      { symbol: "VITAFOAM", name: "Vitafoam Nigeria Plc", sector: "Consumer Goods" },
+      // Agri-Business
+      { symbol: "PRESCO", name: "Presco Plc", sector: "Agri-Business" },
+      { symbol: "OKOMUOIL", name: "The Okomu Oil Palm Company Plc", sector: "Agri-Business" },
+      { symbol: "LIVESTOCK", name: "Livestock Feeds Plc", sector: "Agri-Business" },
+      // Oil & Gas
+      { symbol: "OANDO", name: "Oando Plc", sector: "Oil & Gas" },
+      { symbol: "SEPLAT", name: "Seplat Energy Plc", sector: "Oil & Gas" },
+      { symbol: "CONOIL", name: "Conoil Plc", sector: "Oil & Gas" },
+      { symbol: "TOTAL", name: "TotalEnergies Marketing Nigeria Plc", sector: "Oil & Gas" },
+      { symbol: "ETERNA", name: "Eterna Plc", sector: "Oil & Gas" },
+      { symbol: "MRS", name: "MRS Oil Nigeria Plc", sector: "Oil & Gas" },
+      { symbol: "ARDOVA", name: "Ardova Plc", sector: "Oil & Gas" },
+      { symbol: "ARADEL", name: "Aradel Holdings Plc", sector: "Oil & Gas" },
+      // Industrial Goods
+      { symbol: "DANGCEM", name: "Dangote Cement Plc", sector: "Industrial Goods" },
+      { symbol: "WAPCO", name: "Lafarge Africa Plc", sector: "Industrial Goods" },
+      { symbol: "BUACEMENT", name: "BUA Cement Plc", sector: "Industrial Goods" },
+      { symbol: "JBERGER", name: "Julius Berger Nigeria Plc", sector: "Industrial Goods" },
+      { symbol: "CUTIX", name: "Cutix Plc", sector: "Industrial Goods" },
+      { symbol: "PORTPAINT", name: "Portland Paints and Products Nig. Plc", sector: "Industrial Goods" },
+      { symbol: "BUAFOODS", name: "BUA Foods Plc", sector: "Industrial Goods" },
+      { symbol: "GEREGU", name: "Geregu Power Plc", sector: "Industrial Goods" },
+      // Telecoms
+      { symbol: "MTNN", name: "MTN Nigeria Communications Plc", sector: "Telecoms" },
+      { symbol: "AIRTELAFRI", name: "Airtel Africa Plc", sector: "Telecoms" },
+      // Healthcare
+      { symbol: "FIDSON", name: "Fidson Healthcare Plc", sector: "Healthcare" },
+      { symbol: "GLAXOSMITH", name: "GSK Consumer Nigeria Plc", sector: "Healthcare" },
+      { symbol: "NEIMETH", name: "Neimeth International Pharmaceuticals Plc", sector: "Healthcare" },
+      { symbol: "MAYBAKER", name: "May & Baker Nigeria Plc", sector: "Healthcare" },
+      { symbol: "MORISON", name: "Morison Industries Plc", sector: "Healthcare" },
+      { symbol: "AGLEVENT", name: "Agilvent Life Sciences Plc", sector: "Healthcare" },
+      // Financial Services
+      { symbol: "AFRIPRUD", name: "Africa Prudential Plc", sector: "Financial Services" },
+      { symbol: "UPDC-REIT", name: "UPDC Real Estate Investment Trust", sector: "Financial Services" },
+      { symbol: "FGNSUKUK", name: "FGN Sukuk Trust", sector: "Financial Services" },
+      { symbol: "TRANSCORP", name: "Transnational Corporation Plc", sector: "Financial Services" },
+      // Insurance
+      { symbol: "CUSTODIAN", name: "Custodian Investment Plc", sector: "Insurance" },
+      { symbol: "AIICO", name: "AIICO Insurance Plc", sector: "Insurance" },
+      { symbol: "MANSARD", name: "AXA Mansard Insurance Plc", sector: "Insurance" },
+      { symbol: "NEM", name: "NEM Insurance Plc", sector: "Insurance" },
+      { symbol: "CONTINSURE", name: "Continental Reinsurance Plc", sector: "Insurance" },
+      { symbol: "WAPIC", name: "Coronation Insurance Plc", sector: "Insurance" },
+      { symbol: "LINKASSURE", name: "Linkage Assurance Plc", sector: "Insurance" },
+      // Conglomerate
+      { symbol: "UACN", name: "UAC of Nigeria Plc", sector: "Conglomerate" },
+      { symbol: "CHELLARAMS", name: "Chellarams Plc", sector: "Conglomerate" },
+      // Technology
+      { symbol: "CHAMS", name: "Chams Holding Company Plc", sector: "Technology" },
+      { symbol: "CWG", name: "CWG Plc", sector: "Technology" },
+      { symbol: "NCR", name: "NCR Corporation Nigeria", sector: "Technology" },
+      { symbol: "COURTVILLE", name: "Courtville Business Solutions Plc", sector: "Technology" },
+      { symbol: "OMATEK", name: "Omatek Ventures Plc", sector: "Technology" },
+      // Real Estate
+      { symbol: "UPDC", name: "UPDC Plc", sector: "Real Estate" },
+      { symbol: "LIVINGTRUST", name: "Livingtrust Mortgage Bank Plc", sector: "Real Estate" },
+      { symbol: "DEAPCAP", name: "Deap Capital Management & Trust Plc", sector: "Real Estate" },
+      // Utilities
+      { symbol: "TRANSPOWER", name: "Transmission Company of Nigeria Plc", sector: "Utilities" },
+      { symbol: "LASACO", name: "Lasaco Assurance Plc", sector: "Utilities" },
+    ];
+
+    for (const sec of ngxSecurities) {
+      await db.insert(cieSecurities).values({
+        symbol: sec.symbol,
+        name: sec.name,
+        sector: sec.sector,
+        exchange: "NGX",
+        isActive: true,
+      }).onConflictDoUpdate({
+        target: cieSecurities.symbol,
+        set: { name: sec.name, sector: sec.sector, isActive: true },
+      });
+    }
+    console.log(`Synced ${ngxSecurities.length} NGX securities`);
+
+    // Seed default CIE model version (if none active)
+    const [existingModel] = await db.select().from(cieModelVersions).limit(1);
+    if (!existingModel) {
+      await db.insert(cieModelVersions).values({
+        versionLabel: "v1.0-baseline",
+        weights: {
+          momentum: 0.15,
+          liquidity: 0.10,
+          valuation: 0.20,
+          quality: 0.20,
+          growth: 0.20,
+          financialStrength: 0.15,
+        },
+        status: "active",
+        notes: "Baseline model — equal emphasis on quality and growth, moderate momentum weighting",
+        activatedAt: new Date(),
+      });
+      console.log("Seeded CIE default model version v1.0-baseline");
+    }
+
+    // Seed initial market pulse snapshot
+    const [existingPulse] = await db.select().from(cieMarketPulse).limit(1);
+    if (!existingPulse) {
+      await db.insert(cieMarketPulse).values({
+        asiIndex: 10100500,      // ~101,005.00
+        brentCrudeUsdCents: 7450, // $74.50
+        ngnPerUsd: 163000,       // ₦1,630.00 per USD ×100
+        asiChange: -25,          // -0.25% daily change (×100)
+        source: "seed",
+      });
+      console.log("Seeded CIE initial market pulse");
+    }
 
     console.log("Database seeding complete");
   } catch (error) {

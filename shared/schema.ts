@@ -2021,3 +2021,192 @@ export const insertKycStrReportSchema = createInsertSchema(kycStrReports).omit({
 export type KycStrReport = typeof kycStrReports.$inferSelect;
 export type InsertKycStrReport = z.infer<typeof insertKycStrReportSchema>;
 
+// ============================================================
+// CIE — CELLION INTELLIGENCE ENGINE (NGX Equity Intelligence)
+// ============================================================
+
+// ============== CIE SECURITIES ==============
+export const cieSecurities = pgTable("cie_securities", {
+  id: serial("id").primaryKey(),
+  symbol: varchar("symbol", { length: 20 }).notNull().unique(), // e.g. GTCO, DANGCEM
+  name: varchar("name", { length: 255 }).notNull(),
+  sector: varchar("sector", { length: 100 }).notNull(),
+  exchange: varchar("exchange", { length: 50 }).default("NGX"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_cie_sec_symbol").on(table.symbol),
+  index("idx_cie_sec_sector").on(table.sector),
+  index("idx_cie_sec_active").on(table.isActive),
+]);
+
+export const insertCieSecuritySchema = createInsertSchema(cieSecurities).omit({ id: true, createdAt: true, updatedAt: true });
+export type CieSecurity = typeof cieSecurities.$inferSelect;
+export type InsertCieSecurity = z.infer<typeof insertCieSecuritySchema>;
+
+// ============== CIE PRICES (end-of-day OHLCV) ==============
+// Prices stored as kobo (Naira × 100) for integer precision
+export const ciePrices = pgTable("cie_prices", {
+  id: serial("id").primaryKey(),
+  securityId: integer("security_id").notNull().references(() => cieSecurities.id),
+  tradeDate: varchar("trade_date", { length: 20 }).notNull(), // YYYY-MM-DD
+  openKobo: integer("open_kobo"),
+  highKobo: integer("high_kobo"),
+  lowKobo: integer("low_kobo"),
+  closeKobo: integer("close_kobo").notNull(),
+  volume: integer("volume"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_cie_prices_sec_date").on(table.securityId, table.tradeDate),
+  index("idx_cie_prices_date").on(table.tradeDate),
+  uniqueIndex("cie_prices_sec_date_unique").on(table.securityId, table.tradeDate),
+]);
+
+export const insertCiePriceSchema = createInsertSchema(ciePrices).omit({ id: true, createdAt: true });
+export type CiePrice = typeof ciePrices.$inferSelect;
+export type InsertCiePrice = z.infer<typeof insertCiePriceSchema>;
+
+// ============== CIE MODEL VERSIONS ==============
+export const cieModelVersions = pgTable("cie_model_versions", {
+  id: serial("id").primaryKey(),
+  versionLabel: varchar("version_label", { length: 50 }).notNull(),
+  weights: jsonb("weights").$type<{
+    momentum: number;
+    liquidity: number;
+    valuation: number;
+    quality: number;
+    growth: number;
+    financialStrength: number;
+  }>().notNull(),
+  status: varchar("status", { length: 20 }).default("draft").notNull(), // draft, pending, active
+  notes: text("notes"),
+  submittedByUserId: varchar("submitted_by_user_id"),
+  reviewedByUserId: varchar("reviewed_by_user_id"),
+  activatedAt: timestamp("activated_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_cie_mv_status").on(table.status),
+]);
+
+export const insertCieModelVersionSchema = createInsertSchema(cieModelVersions).omit({ id: true, createdAt: true, updatedAt: true });
+export type CieModelVersion = typeof cieModelVersions.$inferSelect;
+export type InsertCieModelVersion = z.infer<typeof insertCieModelVersionSchema>;
+
+// ============== CIE SCORES (nightly computed) ==============
+export const cieScores = pgTable("cie_scores", {
+  id: serial("id").primaryKey(),
+  securityId: integer("security_id").notNull().references(() => cieSecurities.id),
+  scoreDate: varchar("score_date", { length: 20 }).notNull(), // YYYY-MM-DD
+  ias: integer("ias"), // Investment Attractiveness Score 0-100
+  rs: integer("rs"),  // Risk Score 0-100
+  cs: integer("cs"),  // Confidence Score 0-100
+  recommendation: varchar("recommendation", { length: 30 }), // Strong Buy, Accumulate, Hold, Reduce, Sell
+  pillarBreakdown: jsonb("pillar_breakdown").$type<{
+    momentum: number;
+    liquidity: number;
+    valuation: number;
+    quality: number;
+    growth: number;
+    financialStrength: number;
+    rawMomentum?: number;
+    rawLiquidity?: number;
+  }>(),
+  modelVersionId: integer("model_version_id").references(() => cieModelVersions.id),
+  dataPointsUsed: integer("data_points_used"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_cie_scores_sec_date").on(table.securityId, table.scoreDate),
+  index("idx_cie_scores_date").on(table.scoreDate),
+  uniqueIndex("cie_scores_sec_date_unique").on(table.securityId, table.scoreDate),
+]);
+
+export const insertCieScoreSchema = createInsertSchema(cieScores).omit({ id: true, createdAt: true });
+export type CieScore = typeof cieScores.$inferSelect;
+export type InsertCieScore = z.infer<typeof insertCieScoreSchema>;
+
+// ============== CIE DIVIDENDS ==============
+export const cieDividends = pgTable("cie_dividends", {
+  id: serial("id").primaryKey(),
+  securityId: integer("security_id").notNull().references(() => cieSecurities.id),
+  exDividendDate: varchar("ex_dividend_date", { length: 20 }).notNull(), // YYYY-MM-DD
+  paymentDate: varchar("payment_date", { length: 20 }),
+  amountPerShareKobo: integer("amount_per_share_kobo"), // dividend amount in kobo
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_cie_div_sec").on(table.securityId),
+  index("idx_cie_div_exdate").on(table.exDividendDate),
+]);
+
+export const insertCieDividendSchema = createInsertSchema(cieDividends).omit({ id: true, createdAt: true });
+export type CieDividend = typeof cieDividends.$inferSelect;
+export type InsertCieDividend = z.infer<typeof insertCieDividendSchema>;
+
+// ============== CIE SIGNALS (analyst intel) ==============
+export const cieSignals = pgTable("cie_signals", {
+  id: serial("id").primaryKey(),
+  securityId: integer("security_id").references(() => cieSecurities.id), // null = market-wide signal
+  type: varchar("type", { length: 30 }).notNull(), // rumour, news, trade_call, sector_rotation
+  sentiment: varchar("sentiment", { length: 20 }), // bullish, bearish, neutral
+  credibility: integer("credibility"), // 1-5 analyst credibility rating
+  content: text("content").notNull(),
+  analystUserId: varchar("analyst_user_id"),
+  tags: text("tags").array(),
+  isPublished: boolean("is_published").default(false),
+  publishedAt: timestamp("published_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_cie_sig_sec").on(table.securityId),
+  index("idx_cie_sig_type").on(table.type),
+  index("idx_cie_sig_published").on(table.isPublished),
+]);
+
+export const insertCieSignalSchema = createInsertSchema(cieSignals).omit({ id: true, createdAt: true });
+export type CieSignal = typeof cieSignals.$inferSelect;
+export type InsertCieSignal = z.infer<typeof insertCieSignalSchema>;
+
+// ============== CIE MARKET PULSE ==============
+export const cieMarketPulse = pgTable("cie_market_pulse", {
+  id: serial("id").primaryKey(),
+  asiIndex: integer("asi_index"), // ASI in integer form (×100 for 2 decimal places)
+  brentCrudeUsdCents: integer("brent_crude_usd_cents"), // Brent crude in USD cents
+  ngnPerUsd: integer("ngn_per_usd"), // Naira per USD ×100
+  asiChange: integer("asi_change"), // daily change ×100 (basis points)
+  source: varchar("source", { length: 50 }).default("manual"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCieMarketPulseSchema = createInsertSchema(cieMarketPulse).omit({ id: true, createdAt: true });
+export type CieMarketPulse = typeof cieMarketPulse.$inferSelect;
+export type InsertCieMarketPulse = z.infer<typeof insertCieMarketPulseSchema>;
+
+// ============== CIE INGESTION LOGS ==============
+export const cieIngestionLogs = pgTable("cie_ingestion_logs", {
+  id: serial("id").primaryKey(),
+  format: varchar("format", { length: 20 }).notNull(), // csv, xlsx, pdf
+  dataType: varchar("data_type", { length: 30 }).notNull(), // prices, dividends, signals, market_pulse
+  filename: varchar("filename", { length: 255 }),
+  rowsExtracted: integer("rows_extracted").default(0),
+  rowsAccepted: integer("rows_accepted").default(0),
+  rowsRejected: integer("rows_rejected").default(0),
+  rowsFlagged: integer("rows_flagged").default(0),
+  status: varchar("status", { length: 20 }).default("pending"), // pending, previewed, committed, failed
+  errorSummary: text("error_summary"),
+  uploadedByUserId: varchar("uploaded_by_user_id"),
+  triggeredRecomputation: boolean("triggered_recomputation").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  committedAt: timestamp("committed_at"),
+}, (table) => [
+  index("idx_cie_ingest_type").on(table.dataType),
+  index("idx_cie_ingest_status").on(table.status),
+  index("idx_cie_ingest_created").on(table.createdAt),
+]);
+
+export const insertCieIngestionLogSchema = createInsertSchema(cieIngestionLogs).omit({ id: true, createdAt: true });
+export type CieIngestionLog = typeof cieIngestionLogs.$inferSelect;
+export type InsertCieIngestionLog = z.infer<typeof insertCieIngestionLogSchema>;
+

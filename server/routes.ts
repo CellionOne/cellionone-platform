@@ -19,6 +19,7 @@ import { registerKycServiceRoutes } from "./routes/kycServiceRoutes";
 import { registerKycApiRoutes } from "./routes/kycApiRoutes";
 import { registerProcurementRoutes } from "./routes/procurementRoutes";
 import { registerEscrowApiRoutes } from "./routes/escrowApiRoutes";
+import { registerCieAdminRoutes } from "./routes/cieAdminRoutes";
 
 // Validation schemas
 const createApplicationSchema = insertCompanyApplicationSchema.pick({
@@ -8739,6 +8740,9 @@ For questions, contact: service@cellionone.com
 
   // ============== ESCROW-AS-A-SERVICE API ROUTES (v1) ==============
   registerEscrowApiRoutes(app);
+
+  // ============== CIE ADMIN ROUTES ==============
+  registerCieAdminRoutes(app);
 
   return httpServer;
 }

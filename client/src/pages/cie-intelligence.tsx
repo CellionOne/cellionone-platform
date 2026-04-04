@@ -36,7 +36,7 @@ const tiers = [
       "Analyst recommendations (Strong Buy → Sell)",
       "Dividend calendar & corporate actions",
       "Security deep-dive pages",
-      "API access (read-only, 100 req/min)",
+      "API access (read-only, 500 req/min)",
     ],
     cta: "Subscribe Now",
     href: "/cie",
@@ -52,7 +52,7 @@ const tiers = [
       "Analyst trade calls & signals",
       "Sector rotation alerts",
       "Credibility-rated intelligence feed",
-      "Priority API (300 req/min)",
+      "Priority API (1,000 req/min)",
       "Dedicated support",
     ],
     cta: "Go Pro",
@@ -85,7 +85,7 @@ const faq = [
   },
   {
     q: "Can I access CIE data via API?",
-    a: "Yes. Subscriber and Pro plans include API access with a dedicated key. Subscriber keys support read-only endpoints (market pulse, scores, dividends) at 100 req/min. Pro keys also unlock the signals feed at 300 req/min. Full API documentation is available at /api-docs.",
+    a: "Yes. Subscriber and Pro plans include API access with a dedicated key. Subscriber keys support read-only endpoints (market pulse, scores, dividends) at 500 req/min. Pro keys also unlock the signals feed at 1,000 req/min. Full API documentation is available at /api-docs.",
   },
   {
     q: "How do I cancel or downgrade my subscription?",

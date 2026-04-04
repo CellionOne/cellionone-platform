@@ -36,7 +36,7 @@ export default function CieSubscribeSuccess() {
     if (isCancelled) return "failed";
     if (isLoading) return "loading";
     if (data?.isPaid) return "success";
-    // After 3 poll cycles still not active → show pending
+    // Data loaded but subscription not yet active — webhook may still be processing
     return "pending";
   }
 

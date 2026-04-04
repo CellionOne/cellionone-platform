@@ -138,8 +138,12 @@ async function runMarketCommentary(): Promise<void> {
     });
 
     if (commentary) {
-      await storage.updateLatestCieMarketPulseCommentary(commentary);
-      console.log("[CIEScheduler] AI market commentary generated and stored");
+      const stored = await storage.updateLatestCieMarketPulseCommentary(commentary);
+      if (stored) {
+        console.log("[CIEScheduler] AI market commentary generated and stored");
+      } else {
+        console.warn("[CIEScheduler] AI commentary generated but no market pulse row exists to attach it to");
+      }
     }
   } catch (err: any) {
     console.error("[CIEScheduler] Market commentary generation error:", err.message);

@@ -667,7 +667,10 @@ export function registerCieAdminRoutes(app: Express): void {
         scoreDate: today,
       });
       if (!commentary) return res.status(503).json({ error: "AI commentary generation failed. Please try again." });
-      await storage.updateLatestCieMarketPulseCommentary(commentary);
+      const stored = await storage.updateLatestCieMarketPulseCommentary(commentary);
+      if (!stored) {
+        return res.status(409).json({ error: "AI commentary generated but no market pulse record exists to attach it to. Upload market pulse data first." });
+      }
       res.json({ commentary });
     } catch (e: unknown) {
       res.status(500).json({ error: errMsg(e) });

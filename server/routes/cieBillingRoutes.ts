@@ -84,7 +84,44 @@ function getPlanCode(tier: "subscriber" | "pro"): string | null {
 }
 
 /**
- * Seed Paystack CIE plans if the env vars are not set.
+ * CIE Tier Plan Definitions
+ *
+ * Three tiers exist; only the paid tiers have Paystack plans.
+ * Free is the default tier — no plan code needed, no billing.
+ *
+ * Tier | Paystack Plan | Amount        | Features
+ * -----|---------------|---------------|-----------------------------------
+ * free | none (default)| ₦0            | 2 securities, no analytics
+ * sub  | PLN_xxx       | ₦5,000/month  | 20 securities, basic analytics
+ * pro  | PLN_xxx       | ₦10,000/month | Unlimited securities + full suite
+ */
+export const CIE_PLAN_CONFIG = [
+  {
+    tier: "free" as const,
+    paystackPlanCode: null,   // Free tier has no Paystack plan
+    amountKobo: 0,
+    name: "CIE Free",
+    description: "Default access tier — no subscription required",
+  },
+  {
+    tier: "subscriber" as const,
+    paystackPlanCode: process.env.PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE ?? null,
+    amountKobo: TIER_AMOUNTS_KOBO.subscriber,
+    name: "CIE Subscriber — Monthly",
+    description: "CIE Subscriber tier, monthly subscription",
+  },
+  {
+    tier: "pro" as const,
+    paystackPlanCode: process.env.PAYSTACK_CIE_PRO_PLAN_CODE ?? null,
+    amountKobo: TIER_AMOUNTS_KOBO.pro,
+    name: "CIE Pro — Monthly",
+    description: "CIE Pro tier, monthly subscription",
+  },
+] as const;
+
+/**
+ * Seed Paystack CIE plans for the two paid tiers (Subscriber and Pro).
+ * The Free tier is the platform default — it does not require a Paystack plan.
  * Also updates existing plans if the amount differs from the spec.
  * Called on startup — logs plan codes for admin to copy into env vars.
  */
@@ -94,25 +131,17 @@ export async function seedCiePlans(): Promise<void> {
     return;
   }
 
-  const plans: Array<{
-    tier: "subscriber" | "pro";
-    envKey: string;
-    name: string;
-    amount: number;
-  }> = [
-    {
-      tier: "subscriber",
-      envKey: "PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE",
-      name: "CIE Subscriber — Monthly",
-      amount: TIER_AMOUNTS_KOBO.subscriber,
-    },
-    {
-      tier: "pro",
-      envKey: "PAYSTACK_CIE_PRO_PLAN_CODE",
-      name: "CIE Pro — Monthly",
-      amount: TIER_AMOUNTS_KOBO.pro,
-    },
-  ];
+  // Free tier: no Paystack plan required; log its status for visibility
+  console.log("[CIE Billing] Free tier: default access (no Paystack plan)");
+
+  const plans = CIE_PLAN_CONFIG
+    .filter((p) => p.tier !== "free")
+    .map((p) => ({
+      tier: p.tier as "subscriber" | "pro",
+      envKey: p.tier === "subscriber" ? "PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE" : "PAYSTACK_CIE_PRO_PLAN_CODE",
+      name: p.name,
+      amount: p.amountKobo,
+    }));
 
   for (const plan of plans) {
     const envCode = process.env[plan.envKey];
@@ -233,12 +262,27 @@ export function registerCieBillingRoutes(app: Express): void {
         return res.status(400).json({ error: "User email is required for subscription" });
       }
 
-      // Reject if an active subscription already exists for the same tier
-      const existing = await storage.getCieSubscriptionByUserId(userId);
-      if (existing?.status === "active" && existing.tier === tier) {
+      // Reject if an active subscription already exists for this user
+      const activeSub = await storage.getCieSubscriptionByUserId(userId);
+      if (activeSub && activeSub.tier === tier) {
         return res.status(409).json({
           error: `You already have an active CIE ${tier} subscription`,
-          subscriptionId: existing.id,
+          subscriptionId: activeSub.id,
+        });
+      }
+      if (activeSub && activeSub.tier === "pro" && tier === "subscriber") {
+        return res.status(409).json({
+          error: "You already have a higher-tier CIE Pro subscription",
+          subscriptionId: activeSub.id,
+        });
+      }
+
+      // Reject if a pending record for the same tier already exists (prevents double-click duplicates)
+      const latestSub = await storage.getLatestCieSubscriptionByUserId(userId);
+      if (latestSub?.status === "pending" && latestSub.tier === tier) {
+        return res.status(409).json({
+          error: `A pending CIE ${tier} subscription already exists. Please complete checkout or wait for it to expire.`,
+          subscriptionId: latestSub.id,
         });
       }
 

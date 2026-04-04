@@ -44,12 +44,14 @@ export function invalidateCieOrgTierCache(orgId: number): void {
 /**
  * Determine the effective CIE tier for an organisation.
  *
- * Resolution order (authoritative source = subscription table):
+ * Resolution order (subscription table is authoritative):
  *   1. If org has an ACTIVE subscription → use that tier.
- *   2. If org has a subscription record but it is NOT active (past_due, cancelled,
- *      expired, pending) → force "free" regardless of API key permissions.
- *      This ensures lapsed/cancelled subscriptions are immediately downgraded.
- *   3. If org has NO subscription record at all → fall back to API key permissions
+ *      "Most current active" = highest currentPeriodEnd among active rows.
+ *      A new pending record created during checkout does NOT shadow an active one.
+ *   2. If org has NO active subscription but DOES have other subscription history
+ *      (e.g. past_due, cancelled, expired, pending) → force "free".
+ *      Lapsed/cancelled organisations are immediately downgraded.
+ *   3. If org has NO subscription history at all → fall back to API key permissions
  *      for backward compatibility with keys issued before billing was deployed.
  *
  * Result is cached per orgId for 5 minutes; evicted by invalidateCieOrgTierCache().
@@ -62,28 +64,36 @@ async function resolveOrgTier(orgId: number, permissions: string[]): Promise<Cie
 
   let tier: CieTier = "free";
   try {
-    // Query the most recent subscription for this org regardless of status
     const { db } = await import("../db");
     const { cieSubscriptions } = await import("@shared/schema");
-    const { eq, desc } = await import("drizzle-orm");
-    const [sub] = await db.select()
+    const { eq, desc, and } = await import("drizzle-orm");
+
+    // Step 1: look for the current active subscription (most recent period end wins)
+    const [activeSub] = await db.select()
       .from(cieSubscriptions)
-      .where(eq(cieSubscriptions.orgId, orgId))
-      .orderBy(desc(cieSubscriptions.createdAt))
+      .where(and(eq(cieSubscriptions.orgId, orgId), eq(cieSubscriptions.status, "active")))
+      .orderBy(desc(cieSubscriptions.currentPeriodEnd))
       .limit(1);
 
-    if (!sub) {
-      // No subscription history → backward-compat fallback to API key permissions
-      if (permissions.includes("cie:pro")) tier = "pro";
-      else if (permissions.includes("cie:subscriber")) tier = "subscriber";
-      else tier = "free";
-    } else if (sub.status === "active") {
-      // Active subscription → authoritative tier
-      tier = sub.tier as CieTier;
+    if (activeSub) {
+      // Active subscription wins — pending/other records are irrelevant
+      tier = activeSub.tier as CieTier;
     } else {
-      // Record exists but is not active (pending, past_due, cancelled, expired)
-      // → downgrade to free; never let lapsed permissions persist
-      tier = "free";
+      // Step 2: check whether any subscription history exists at all
+      const [anySub] = await db.select({ id: cieSubscriptions.id })
+        .from(cieSubscriptions)
+        .where(eq(cieSubscriptions.orgId, orgId))
+        .limit(1);
+
+      if (anySub) {
+        // History exists but no active row → downgrade; do NOT fall back to key perms
+        tier = "free";
+      } else {
+        // No history at all → backward-compat fallback to API key permissions
+        if (permissions.includes("cie:pro")) tier = "pro";
+        else if (permissions.includes("cie:subscriber")) tier = "subscriber";
+        else tier = "free";
+      }
     }
   } catch (err) {
     console.error("[CIE] resolveOrgTier DB error — failing safe to free:", err);

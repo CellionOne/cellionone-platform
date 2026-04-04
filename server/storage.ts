@@ -446,6 +446,7 @@ export interface IStorage {
   createCieSubscription(data: InsertCieSubscription): Promise<CieSubscription>;
   getCieSubscriptionById(id: number): Promise<CieSubscription | undefined>;
   getCieSubscriptionByUserId(userId: string): Promise<CieSubscription | undefined>;
+  getLatestCieSubscriptionByUserId(userId: string): Promise<CieSubscription | undefined>;
   getCieSubscriptionByOrgId(orgId: number): Promise<CieSubscription | undefined>;
   getCieSubscriptionByReference(reference: string): Promise<CieSubscription | undefined>;
   getCieSubscriptionByPaystackCode(code: string): Promise<CieSubscription | undefined>;
@@ -2258,8 +2259,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCieSubscriptionByUserId(userId: string): Promise<CieSubscription | undefined> {
-    // Returns the most recent subscription record regardless of status.
-    // Callers are responsible for checking .status explicitly.
+    // Returns the current ACTIVE subscription for this user (most recent period end).
+    // Use getLatestCieSubscriptionByUserId when you need records in any status.
+    const [sub] = await db.select().from(cieSubscriptions)
+      .where(and(eq(cieSubscriptions.userId, userId), eq(cieSubscriptions.status, "active")))
+      .orderBy(desc(cieSubscriptions.currentPeriodEnd))
+      .limit(1);
+    return sub;
+  }
+
+  async getLatestCieSubscriptionByUserId(userId: string): Promise<CieSubscription | undefined> {
+    // Returns the most recent subscription for this user regardless of status.
+    // Used by the subscribe/upgrade routes to detect existing pending records.
     const [sub] = await db.select().from(cieSubscriptions)
       .where(eq(cieSubscriptions.userId, userId))
       .orderBy(desc(cieSubscriptions.createdAt))

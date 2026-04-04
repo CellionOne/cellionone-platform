@@ -1,0 +1,38 @@
+What It Is
+The CIE is an internal market research and analysis platform built specifically for Nigerian Exchange (NGX) equities. It applies a deterministic scoring model to every listed security and packages those insights for clients and internal analysts. It's Cellion's core technology product, licensed to Icon Stockbrokers.
+
+The Scoring Engine
+Every NGX security gets three scores, computed nightly:
+
+Score	What it measures
+IAS (Investment Attractiveness Score, 0–100)	Weighted average across Momentum (15%), Liquidity (10%), Quality, Valuation, Growth, and Financial Strength
+RS (Risk Score, 0–100)	Derived from 90-day volatility, max drawdown, and liquidity risk
+CS (Confidence Score, 0–100)	Data reliability — based on price history length, recency, and anomaly detection
+Scores are penalised for missing fundamentals, low liquidity, or stale data, and are normalised cross-sectionally (ranked against sector peers) so they always reflect relative value.
+
+Subscription Tiers
+Access is strictly gated:
+
+Tier	Price	What you get
+Free	₦0	Market Pulse (ASI, oil, FX) + scores only for securities you already hold
+CIE Subscriber	₦5,000/mo	Scores for all NGX securities, weekly buy/sell/hold recommendations, dividend intelligence, sector rotation signals
+CIE Pro	₦10,000/mo	Everything above + enhanced momentum signals (daily/weekly/monthly), portfolio-level risk overlays, and priority analyst commentary
+Revenue from subscriptions splits 70% to Cellion / 30% to Icon, enforced at the Paystack level on every transaction via a subaccount split.
+
+Data & Automation
+Nightly scheduler runs at 18:30 WAT to ingest end-of-day prices, then at 19:00 WAT to recompute all scores
+Excel ingestion — admins can manually upload standard NGX75 reports to feed dividends, analyst notes, and market context
+Model templates — scoring pillar weights can be adjusted via a Research Cockpit (Draft → Pending Approval → Active workflow)
+Community signals — internal analysts can log Rumours, News items, and Trade Calls with credibility ratings (1–5) and sentiment tags
+What Clients See (Intel Tab)
+Market Pulse — macro snapshot: ASI index, Brent crude, Naira/USD
+Security cards — each ticker shows a star rating (0–5), momentum dots (daily/weekly/monthly direction), and a recommendation badge (Strong Buy, Accumulate, Hold, Reduce, Sell)
+Portfolio Intelligence — highlights signals specifically for stocks the client owns
+Dividend alerts — "last day to buy" urgency badges for upcoming qualification dates
+Upgrade prompts — free users see locked content with tier upgrade CTAs
+What Admins & Executives See (Research Cockpit)
+Top IAS gainers and high-risk alerts across the full NGX universe
+A model editor with sliders to tune pillar weights
+An immutable audit log of every score recomputation and model version change
+Subscription revenue dashboards and payment history
+In summary, the CIE is the platform's premium differentiator — an equity intelligence layer that turns raw NGX price data into structured, scored, and actionable research for retail investors, while giving Cellion a recurring subscription revenue stream on top of the brokerage commissions

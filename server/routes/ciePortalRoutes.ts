@@ -293,7 +293,7 @@ export function registerCiePortalRoutes(app: Express): void {
     requireCieTierSession("subscriber"),
     async (req: AuthRequest, res: Response) => {
       try {
-        const ticker = req.params.ticker.toUpperCase();
+        const ticker = (req.params.ticker as string).toUpperCase();
         const security = await storage.getCieSecurityBySymbol(ticker);
         if (!security) return res.status(404).json({ error: `Security '${ticker}' not found` });
 

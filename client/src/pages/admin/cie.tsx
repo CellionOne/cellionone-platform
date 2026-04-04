@@ -39,7 +39,7 @@ interface IngestionLog {
 }
 
 interface ModelVersion {
-  id: number; version: string; status: string; weights: Record<string, number>;
+  id: number; versionLabel: string; status: string; weights: Record<string, number>;
   notes: string | null; createdAt: string; activatedAt: string | null;
 }
 
@@ -50,8 +50,8 @@ interface Dividend {
 }
 
 interface Signal {
-  id: number; ticker: string | null; type: string; sentiment: string;
-  credibility: string; headline: string; body: string | null;
+  id: number; securityId: number | null; type: string; sentiment: string | null;
+  credibility: number | null; content: string;
   isPublished: boolean; publishedAt: string | null; createdAt: string;
 }
 
@@ -67,10 +67,10 @@ interface Revenue {
 interface PreviewResult {
   previewToken: string;
   filename: string;
-  rowCount: number;
-  validRows: number;
-  invalidRows: number;
-  rows: Array<Record<string, string | number | null>>;
+  rowsExtracted: number;
+  rowsAccepted: number;
+  acceptedRows: Array<{ rowIndex: number; [key: string]: string | number | null }>;
+  previewRows: Array<Record<string, string | number | null>>;
 }
 
 function toErrorMessage(err: unknown, fallback = "An error occurred"): string {
@@ -116,7 +116,8 @@ function SecuritiesTab() {
   const [newSector, setNewSector] = useState("");
 
   const { data: securitiesData, isLoading } = useQuery<{ securities: Security[] }>({
-    queryKey: ["/api/admin/cie/securities"],
+    queryKey: ["/api/admin/cie/securities", "all"],
+    queryFn: () => fetch("/api/admin/cie/securities?activeOnly=false", { credentials: "include" }).then(r => r.json()),
   });
 
   const { data: scoresData } = useQuery<{ scores: SecurityScore[] }>({
@@ -298,7 +299,7 @@ function PriceUploadTab() {
   const confirmMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/cie/ingest/confirm", {
       previewToken: preview?.previewToken,
-      acceptedRowIndices: preview?.rows?.map((_, i: number) => i) ?? [],
+      acceptedRowIndices: (preview?.acceptedRows ?? []).map(r => r.rowIndex),
     }),
     onSuccess: () => {
       toast({ title: "Data ingested successfully" });
@@ -373,19 +374,19 @@ function PriceUploadTab() {
       {preview && (
         <Card className="border-primary/40">
           <CardHeader>
-            <CardTitle className="text-sm">Preview — {preview.rowCount} rows</CardTitle>
-            <CardDescription className="text-xs">{preview.filename} · {preview.validRows} valid · {preview.invalidRows} invalid</CardDescription>
+            <CardTitle className="text-sm">Preview — {preview.rowsExtracted} rows extracted</CardTitle>
+            <CardDescription className="text-xs">{preview.filename} · {preview.rowsAccepted} accepted · {preview.rowsExtracted - preview.rowsAccepted} rejected</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="max-h-60 overflow-y-auto mb-4 text-xs font-mono bg-muted rounded p-3 space-y-1">
-              {(preview.rows ?? []).slice(0, 10).map((row: Record<string, string | number | null>, i: number) => (
+              {(preview.previewRows ?? []).slice(0, 10).map((row: Record<string, string | number | null>, i: number) => (
                 <div key={i} className="flex gap-2">
                   <span className="text-muted-foreground w-4">{i + 1}</span>
                   <span>{JSON.stringify(row)}</span>
                 </div>
               ))}
-              {(preview.rows ?? []).length > 10 && (
-                <div className="text-muted-foreground">…and {preview.rows.length - 10} more</div>
+              {(preview.previewRows ?? []).length > 10 && (
+                <div className="text-muted-foreground">…and {preview.previewRows.length - 10} more</div>
               )}
             </div>
             <div className="flex gap-3">
@@ -438,10 +439,10 @@ function PriceUploadTab() {
 
 // ─── Model Editor Tab ─────────────────────────────────────────────────────────
 
-const DEFAULT_WEIGHTS = { momentum: 0.20, liquidity: 0.15, valuation: 0.20, quality: 0.15, growth: 0.15, financial_strength: 0.15 };
+const DEFAULT_WEIGHTS = { momentum: 0.20, liquidity: 0.15, valuation: 0.20, quality: 0.15, growth: 0.15, financialStrength: 0.15 };
 const PILLAR_LABELS: Record<string, string> = {
   momentum: "Momentum", liquidity: "Liquidity", valuation: "Valuation",
-  quality: "Quality", growth: "Growth", financial_strength: "Financial Strength",
+  quality: "Quality", growth: "Growth", financialStrength: "Financial Strength",
 };
 
 function ModelEditorTab() {
@@ -449,6 +450,7 @@ function ModelEditorTab() {
   const { user } = useAuth();
   const isSuperAdmin = (user?.roles ?? []).includes("super_admin");
   const [weights, setWeights] = useState<Record<string, number>>(DEFAULT_WEIGHTS);
+  const [versionLabel, setVersionLabel] = useState("");
   const [notes, setNotes] = useState("");
 
   const { data: versionsData, isLoading } = useQuery<{ versions: ModelVersion[] }>({
@@ -456,11 +458,11 @@ function ModelEditorTab() {
   });
 
   const createMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/admin/cie/model-versions", { weights, notes: notes || undefined }),
+    mutationFn: () => apiRequest("POST", "/api/admin/cie/model-versions", { versionLabel: versionLabel.trim(), weights, notes: notes || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/model-versions"] });
       toast({ title: "Draft saved" });
-      setNotes("");
+      setVersionLabel(""); setNotes("");
     },
     onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed"), variant: "destructive" }),
   });
@@ -507,6 +509,13 @@ function ModelEditorTab() {
               </div>
             ))}
           </div>
+          <Input
+            placeholder="Version label (e.g. v2.1-momentum-boost)"
+            value={versionLabel}
+            onChange={e => setVersionLabel(e.target.value)}
+            className="mb-3"
+            data-testid="input-model-version-label"
+          />
           <Textarea
             placeholder="Version notes (optional)"
             value={notes}
@@ -517,7 +526,7 @@ function ModelEditorTab() {
           />
           <Button
             onClick={() => createMutation.mutate()}
-            disabled={!isValid || createMutation.isPending}
+            disabled={!isValid || versionLabel.trim().length < 2 || createMutation.isPending}
             className="gap-2"
             data-testid="button-save-draft"
           >
@@ -546,7 +555,7 @@ function ModelEditorTab() {
               <TableBody>
                 {(versionsData?.versions ?? []).map(v => (
                   <TableRow key={v.id} data-testid={`row-model-${v.id}`}>
-                    <TableCell className="font-mono text-sm">{v.version}</TableCell>
+                    <TableCell className="font-mono text-sm">{v.versionLabel}</TableCell>
                     <TableCell>
                       <Badge variant={v.status === "active" ? "default" : v.status === "pending" ? "secondary" : "outline"}>
                         {v.status}
@@ -735,12 +744,10 @@ function DividendsTab() {
 
 function SignalsTab() {
   const { toast } = useToast();
-  const [ticker, setTicker] = useState("");
   const [type, setType] = useState("trade_call");
   const [sentiment, setSentiment] = useState("bullish");
-  const [credibility, setCredibility] = useState("medium");
-  const [headline, setHeadline] = useState("");
-  const [body, setBody] = useState("");
+  const [credibility, setCredibility] = useState("3");
+  const [content, setContent] = useState("");
 
   const { data: signalsData, isLoading } = useQuery<{ signals: Signal[] }>({
     queryKey: ["/api/admin/cie/signals"],
@@ -748,13 +755,13 @@ function SignalsTab() {
 
   const createMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/cie/signals", {
-      ticker: ticker || undefined, type, sentiment, credibility,
-      headline, body: body || undefined, isPublished: true,
+      type, sentiment, credibility: parseInt(credibility, 10),
+      content, isPublished: true,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/signals"] });
       toast({ title: "Signal published" });
-      setTicker(""); setHeadline(""); setBody("");
+      setContent("");
     },
     onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed"), variant: "destructive" }),
   });
@@ -774,8 +781,7 @@ function SignalsTab() {
       <Card>
         <CardHeader><CardTitle className="text-sm">Publish Analyst Signal</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-            <Input placeholder="Ticker (optional)" value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} data-testid="input-signal-ticker" />
+          <div className="grid sm:grid-cols-3 gap-3 mb-3">
             <Select value={type} onValueChange={setType}>
               <SelectTrigger data-testid="select-signal-type"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -796,15 +802,16 @@ function SignalsTab() {
             <Select value={credibility} onValueChange={setCredibility}>
               <SelectTrigger data-testid="select-signal-credibility"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="5">5 — Very High</SelectItem>
+                <SelectItem value="4">4 — High</SelectItem>
+                <SelectItem value="3">3 — Medium</SelectItem>
+                <SelectItem value="2">2 — Low</SelectItem>
+                <SelectItem value="1">1 — Very Low</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          <Input placeholder="Headline" value={headline} onChange={e => setHeadline(e.target.value)} className="mb-3" data-testid="input-signal-headline" />
-          <Textarea placeholder="Body (optional)" value={body} onChange={e => setBody(e.target.value)} rows={3} className="mb-3" data-testid="textarea-signal-body" />
-          <Button onClick={() => createMutation.mutate()} disabled={!headline || createMutation.isPending} className="gap-2" data-testid="button-publish-signal">
+          <Textarea placeholder="Signal content (min 10 characters)" value={content} onChange={e => setContent(e.target.value)} rows={4} className="mb-3" data-testid="textarea-signal-content" />
+          <Button onClick={() => createMutation.mutate()} disabled={content.length < 10 || createMutation.isPending} className="gap-2" data-testid="button-publish-signal">
             <Zap className="h-4 w-4" /> Publish Signal
           </Button>
         </CardContent>
@@ -819,11 +826,10 @@ function SignalsTab() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Ticker</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Sentiment</TableHead>
-                  <TableHead>Credibility</TableHead>
-                  <TableHead>Headline</TableHead>
+                  <TableHead className="text-center">Cred.</TableHead>
+                  <TableHead>Content</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead />
                 </TableRow>
@@ -831,11 +837,10 @@ function SignalsTab() {
               <TableBody>
                 {(signalsData?.signals ?? []).map(s => (
                   <TableRow key={s.id} data-testid={`row-signal-${s.id}`}>
-                    <TableCell className="font-mono text-primary font-semibold">{s.ticker ?? "—"}</TableCell>
                     <TableCell className="text-xs capitalize">{s.type.replace("_", " ")}</TableCell>
-                    <TableCell className={`text-xs font-medium capitalize ${sentimentColor[s.sentiment] ?? ""}`}>{s.sentiment}</TableCell>
-                    <TableCell className="text-xs capitalize">{s.credibility}</TableCell>
-                    <TableCell className="text-sm max-w-[200px] truncate">{s.headline}</TableCell>
+                    <TableCell className={`text-xs font-medium capitalize ${sentimentColor[s.sentiment ?? ""] ?? ""}`}>{s.sentiment ?? "—"}</TableCell>
+                    <TableCell className="text-xs text-center">{s.credibility ?? "—"}/5</TableCell>
+                    <TableCell className="text-sm max-w-[240px] truncate">{s.content}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{formatDate(s.createdAt)}</TableCell>
                     <TableCell>
                       <Button size="sm" variant="ghost" onClick={() => deleteMutation.mutate(s.id)} disabled={deleteMutation.isPending} data-testid={`button-delete-signal-${s.id}`}>
@@ -846,7 +851,7 @@ function SignalsTab() {
                 ))}
                 {!signalsData?.signals?.length && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8 text-sm">No signals published</TableCell>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8 text-sm">No signals published</TableCell>
                   </TableRow>
                 )}
               </TableBody>

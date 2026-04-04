@@ -57,11 +57,26 @@ interface Signal {
 
 interface Revenue {
   subscriberCount: number; proCount: number; totalActive: number;
-  mrrNaira: number; churnLast30Days: number;
+  mrrNaira: number; churnLast30Days: number; churnRatePct: number;
   subscribers: Array<{
     id: number; email: string; name: string; tier: string;
     renewalDate: string; cancelAtPeriodEnd: boolean;
   }>;
+}
+
+interface PreviewResult {
+  previewToken: string;
+  filename: string;
+  rowCount: number;
+  validRows: number;
+  invalidRows: number;
+  rows: Array<Record<string, string | number | null>>;
+}
+
+function toErrorMessage(err: unknown, fallback = "An error occurred"): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  return fallback;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -128,7 +143,7 @@ function SecuritiesTab() {
       toast({ title: "Security added" });
       setNewTicker(""); setNewName(""); setNewSector("");
     },
-    onError: (e: any) => { toast({ title: e?.message ?? "Failed to add security", variant: "destructive" }); },
+    onError: (err: unknown) => { toast({ title: toErrorMessage(err, "Failed to add security"), variant: "destructive" }); },
   });
 
   const securities = securitiesData?.securities ?? [];
@@ -223,8 +238,9 @@ function SecuritiesTab() {
 
 function PriceUploadTab() {
   const { toast } = useToast();
-  const [preview, setPreview] = useState<any>(null);
+  const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: logsData } = useQuery<{ logs: IngestionLog[] }>({
@@ -234,12 +250,10 @@ function PriceUploadTab() {
   const scoreMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/cie/scores/run", {}),
     onSuccess: () => toast({ title: "Score recomputation triggered" }),
-    onError: () => toast({ title: "Failed to trigger recomputation", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed to trigger recomputation"), variant: "destructive" }),
   });
 
-  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const uploadFile = useCallback(async (file: File) => {
     setIsUploading(true);
     try {
       const form = new FormData();
@@ -249,28 +263,47 @@ function PriceUploadTab() {
         body: form,
         credentials: "include",
       });
-      const data = await res.json();
+      const data: PreviewResult & { error?: string } = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
       setPreview(data);
-    } catch (e: any) {
-      toast({ title: e.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: toErrorMessage(err, "Upload failed"), variant: "destructive" });
     } finally {
       setIsUploading(false);
       if (fileRef.current) fileRef.current.value = "";
     }
   }, [toast]);
 
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) uploadFile(file);
+  }, [uploadFile]);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => setIsDragging(false), []);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) uploadFile(file);
+  }, [uploadFile]);
+
   const confirmMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/cie/ingest/confirm", {
       previewToken: preview?.previewToken,
-      acceptedRowIndices: preview?.rows?.map((_: any, i: number) => i) ?? [],
+      acceptedRowIndices: preview?.rows?.map((_, i: number) => i) ?? [],
     }),
     onSuccess: () => {
       toast({ title: "Data ingested successfully" });
       setPreview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/ingest/logs"] });
     },
-    onError: (e: any) => toast({ title: e?.message ?? "Failed to confirm", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed to confirm"), variant: "destructive" }),
   });
 
   return (
@@ -284,8 +317,13 @@ function PriceUploadTab() {
           <CardContent>
             <label
               htmlFor="price-file-input"
-              className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors border-border hover:border-primary/50"
+              className={`flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+              }`}
               data-testid="dropzone-price-upload"
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
             >
               <input
                 id="price-file-input"
@@ -296,11 +334,16 @@ function PriceUploadTab() {
                 onChange={handleFileChange}
                 data-testid="input-file-upload"
               />
-              <Upload className="h-8 w-8 text-muted-foreground mb-3" />
+              <Upload className={`h-8 w-8 mb-3 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
               {isUploading ? (
                 <p className="text-sm text-muted-foreground">Processing…</p>
+              ) : isDragging ? (
+                <p className="text-sm text-primary font-medium">Drop to upload</p>
               ) : (
-                <p className="text-sm text-muted-foreground">Click to browse CSV / XLSX</p>
+                <>
+                  <p className="text-sm text-muted-foreground">Drag & drop CSV / XLSX here</p>
+                  <p className="text-xs text-muted-foreground mt-1">or click to browse</p>
+                </>
               )}
             </label>
           </CardContent>
@@ -333,7 +376,7 @@ function PriceUploadTab() {
           </CardHeader>
           <CardContent>
             <div className="max-h-60 overflow-y-auto mb-4 text-xs font-mono bg-muted rounded p-3 space-y-1">
-              {(preview.rows ?? []).slice(0, 10).map((row: any, i: number) => (
+              {(preview.rows ?? []).slice(0, 10).map((row: Record<string, string | number | null>, i: number) => (
                 <div key={i} className="flex gap-2">
                   <span className="text-muted-foreground w-4">{i + 1}</span>
                   <span>{JSON.stringify(row)}</span>
@@ -417,7 +460,7 @@ function ModelEditorTab() {
       toast({ title: "Draft saved" });
       setNotes("");
     },
-    onError: (e: any) => toast({ title: e?.message ?? "Failed", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed"), variant: "destructive" }),
   });
 
   const submitMutation = useMutation({
@@ -426,7 +469,7 @@ function ModelEditorTab() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/model-versions"] });
       toast({ title: "Version submitted for approval" });
     },
-    onError: (e: any) => toast({ title: e?.message ?? "Failed", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed"), variant: "destructive" }),
   });
 
   const activateMutation = useMutation({
@@ -435,7 +478,7 @@ function ModelEditorTab() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/model-versions"] });
       toast({ title: "Model version activated" });
     },
-    onError: (e: any) => toast({ title: e?.message ?? "Failed", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed"), variant: "destructive" }),
   });
 
   const total = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -572,7 +615,7 @@ function DividendsTab() {
       toast({ title: "Dividend added" });
       setSecId(""); setExDate(""); setPayDate(""); setAmount(""); setNotes("");
     },
-    onError: (e: any) => toast({ title: e?.message ?? "Failed", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed"), variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -711,7 +754,7 @@ function SignalsTab() {
       toast({ title: "Signal published" });
       setTicker(""); setHeadline(""); setBody("");
     },
-    onError: (e: any) => toast({ title: e?.message ?? "Failed", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed"), variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
@@ -831,7 +874,7 @@ function RevenueTab() {
           { label: "Active Subscribers", value: rev?.subscriberCount ?? 0, icon: Users, color: "text-blue-600" },
           { label: "Active Pro", value: rev?.proCount ?? 0, icon: Star, color: "text-purple-600" },
           { label: "Monthly Recurring Revenue", value: `₦${mrr.toLocaleString()}`, icon: DollarSign, color: "text-green-600" },
-          { label: "Churn (last 30d)", value: rev?.churnLast30Days ?? 0, icon: Activity, color: "text-amber-600" },
+          { label: "Churn Rate (30d)", value: rev ? `${rev.churnRatePct.toFixed(1)}%` : "0.0%", icon: Activity, color: "text-amber-600" },
         ].map((m, i) => (
           <Card key={i} data-testid={`card-revenue-metric-${i}`}>
             <CardContent className="p-4 flex items-center gap-4">

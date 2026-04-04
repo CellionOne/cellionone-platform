@@ -743,6 +743,11 @@ export function registerCieAdminRoutes(app: Express): void {
         .where(and(eq(cieSubscriptions.status, "active"), gte(cieSubscriptions.currentPeriodEnd, now)))
         .orderBy(cieSubscriptions.currentPeriodEnd);
 
+      // Churn rate: churned / (currently active + churned) * 100
+      const churnRatePct = (totalActive + churnLast30Days) > 0
+        ? +((churnLast30Days / (totalActive + churnLast30Days)) * 100).toFixed(1)
+        : 0;
+
       res.json({
         subscriberCount,
         proCount,
@@ -750,6 +755,7 @@ export function registerCieAdminRoutes(app: Express): void {
         mrrKobo,
         mrrNaira: mrrKobo / 100,
         churnLast30Days,
+        churnRatePct,
         subscribers: activeWithUsers.map(s => ({
           id: s.id,
           userId: s.userId,

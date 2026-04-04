@@ -47,7 +47,7 @@ export default function CieSubscribe() {
         toast({ title: "Subscription initiated — check your email to complete payment" });
       }
     },
-    onError: (e: any) => toast({ title: e?.message ?? "Failed to initiate subscription", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: err instanceof Error ? err.message : "Failed to initiate subscription", variant: "destructive" }),
   });
 
   const cancelMutation = useMutation({
@@ -59,7 +59,7 @@ export default function CieSubscribe() {
       queryClient.invalidateQueries({ queryKey: ["/api/cie-portal/status"] });
       toast({ title: "Subscription will cancel at end of billing period" });
     },
-    onError: (e: any) => toast({ title: e?.message ?? "Failed to cancel", variant: "destructive" }),
+    onError: (err: unknown) => toast({ title: err instanceof Error ? err.message : "Failed to cancel", variant: "destructive" }),
   });
 
   if (statusLoading) {

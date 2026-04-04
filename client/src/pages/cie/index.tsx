@@ -4,7 +4,7 @@ import { CieLayout } from "./layout";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Activity, BarChart3, Zap, Key } from "lucide-react";
+import { Activity, BarChart3, Zap, Key, Sparkles } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
 interface StatusData { tier: "free" | "subscriber" | "pro"; isPaid: boolean; subscription: unknown }
@@ -12,7 +12,7 @@ interface PulseData {
   available: boolean; message?: string;
   asiIndex?: number | null; asiDailyChangePct?: number | null;
   brentCrudeUsd?: number | null; ngnPerUsd?: number | null;
-  source?: string; updatedAt?: string;
+  source?: string; updatedAt?: string; commentary?: string | null;
 }
 
 function formatDate(d?: string | null) {
@@ -163,6 +163,21 @@ export default function CieMarketPulse() {
                 </Card>
               ))}
             </div>
+
+            {data?.commentary && (
+              <Card data-testid="card-ai-commentary">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                    <span className="text-xs font-medium text-primary">AI Market Commentary</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{formatDate(data?.updatedAt)}</span>
+                  </div>
+                  <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap" data-testid="text-ai-commentary">
+                    {data.commentary}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardContent className="p-4">

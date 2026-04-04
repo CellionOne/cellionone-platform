@@ -184,6 +184,202 @@ export interface DocumentQualityCheck {
   recommendations: string[];
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// CIE Score Narrative (Feature A)
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface CieScoreNarrative {
+  headline: string;
+  body: string;
+  keyPoints: string[];
+  caveats: string;
+}
+
+export async function generateCieScoreNarrative(context: {
+  ticker: string;
+  name: string;
+  sector: string;
+  ias: number;
+  rs: number;
+  cs: number;
+  recommendation: string;
+  pillarBreakdown: Record<string, number> | null;
+  latestPriceNaira: number | null;
+  scoreDate: string;
+}): Promise<CieScoreNarrative | null> {
+  const systemPrompt = `You are a Nigerian equity research analyst at Cellion Intelligence Engine (CIE). 
+Write a concise analyst narrative for a Nigerian Exchange Group (NGX) listed security based on its CIE quantitative scores.
+
+Scores range 0–100:
+- IAS (Integrated Aggregate Score): overall quality and value
+- RS (Relative Score): performance vs sector peers
+- CS (Composite Score): blended momentum and fundamentals
+
+Recommendation tiers: Strong Buy (IAS≥80), Accumulate (IAS≥65), Hold (IAS≥50), Reduce (IAS≥35), Sell (<35)
+
+Return JSON with:
+- headline: one-sentence punchy headline (max 15 words)
+- body: 2–3 paragraph narrative in professional Nigerian equity research tone (max 200 words total)
+- keyPoints: array of 3 bullet-point observations (each max 20 words)
+- caveats: one-sentence risk/caveat (max 25 words)`;
+
+  const pillarLines = context.pillarBreakdown
+    ? Object.entries(context.pillarBreakdown)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `  ${k.replace(/_/g, " ")}: ${v.toFixed(1)}`)
+        .join("\n")
+    : "  (not available)";
+
+  const userPrompt = `Security: ${context.ticker} — ${context.name}
+Sector: ${context.sector}
+Score Date: ${context.scoreDate}
+${context.latestPriceNaira != null ? `Latest Price: ₦${context.latestPriceNaira.toFixed(2)}` : ""}
+
+Scores:
+  IAS: ${context.ias.toFixed(1)} / 100
+  RS: ${context.rs.toFixed(1)} / 100
+  CS: ${context.cs.toFixed(1)} / 100
+  Recommendation: ${context.recommendation}
+
+Pillar Breakdown:
+${pillarLines}
+
+Write the analyst narrative.`;
+
+  try {
+    const openai = await getOpenAI();
+    const response = await openai.chat.completions.create({
+      model: MODEL_NAME,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.4,
+    });
+
+    const content = response.choices[0]?.message?.content || "{}";
+    const parsed = JSON.parse(content) as CieScoreNarrative;
+    return parsed;
+  } catch (error) {
+    console.error("[AI] CIE score narrative error:", error);
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CIE Market Commentary (Feature B)
+// ──────────────────────────────────────────────────────────────────────────────
+
+export async function generateCieMarketCommentary(context: {
+  asiIndex: number | null;
+  asiChangePct: number | null;
+  brentCrudeUsd: number | null;
+  ngnPerUsd: number | null;
+  topSecurities: Array<{ ticker: string; name: string; ias: number; recommendation: string; sector: string }>;
+  scoreDate: string;
+}): Promise<string | null> {
+  const systemPrompt = `You are a Nigerian financial markets commentator at Cellion Intelligence Engine (CIE).
+Write a daily market commentary for the Nigerian Exchange Group (NGX) based on the latest quantitative data.
+Keep it professional, concise, and data-driven. Max 150 words.
+Write in plain text — no markdown, no headers. Two short paragraphs.`;
+
+  const topList = context.topSecurities.slice(0, 5)
+    .map(s => `${s.ticker} (${s.sector}, IAS ${s.ias.toFixed(1)}, ${s.recommendation})`)
+    .join("; ");
+
+  const userPrompt = `Market Data for ${context.scoreDate}:
+NGX ASI: ${context.asiIndex != null ? context.asiIndex.toLocaleString() : "N/A"}
+Day Change: ${context.asiChangePct != null ? (context.asiChangePct >= 0 ? "+" : "") + context.asiChangePct.toFixed(2) + "%" : "N/A"}
+Brent Crude: ${context.brentCrudeUsd != null ? `$${context.brentCrudeUsd.toFixed(2)}/bbl` : "N/A"}
+USD/NGN: ${context.ngnPerUsd != null ? `₦${context.ngnPerUsd.toFixed(2)}` : "N/A"}
+
+Top-rated securities today: ${topList || "N/A"}
+
+Write the daily market commentary.`;
+
+  try {
+    const openai = await getOpenAI();
+    const response = await openai.chat.completions.create({
+      model: MODEL_NAME,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.6,
+    });
+
+    return response.choices[0]?.message?.content?.trim() ?? null;
+  } catch (error) {
+    console.error("[AI] CIE market commentary error:", error);
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CIE Signal Draft (Feature C)
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface CieSignalDraft {
+  content: string;
+  suggestedType: "trade_call" | "news" | "rumour" | "sector_rotation";
+  suggestedSentiment: "bullish" | "bearish" | "neutral";
+  suggestedCredibility: 1 | 2 | 3 | 4 | 5;
+  suggestedTags: string[];
+}
+
+export async function generateCieSignalDraft(context: {
+  prompt: string;
+  ticker?: string | null;
+  sector?: string | null;
+  currentIas?: number | null;
+  currentRecommendation?: string | null;
+}): Promise<CieSignalDraft | null> {
+  const systemPrompt = `You are a senior Nigerian equity analyst at Cellion Intelligence Engine (CIE).
+Draft a professional analyst signal based on the analyst's brief notes.
+Signals are published to Pro-tier subscribers on the CIE platform.
+
+Return JSON with:
+- content: the full signal text (100–400 words, professional Nigerian equity research tone)
+- suggestedType: one of "trade_call" | "news" | "rumour" | "sector_rotation"
+- suggestedSentiment: one of "bullish" | "bearish" | "neutral"
+- suggestedCredibility: integer 1–5 (1=very low, 5=very high)
+- suggestedTags: array of 2–5 relevant tags (e.g. ["FMCG", "dividend", "Q1 results"])
+
+Be specific, reference Nigerian market context where relevant.`;
+
+  const contextLines = [
+    context.ticker ? `Ticker: ${context.ticker}` : "",
+    context.sector ? `Sector: ${context.sector}` : "",
+    context.currentIas != null ? `Current IAS: ${context.currentIas.toFixed(1)}` : "",
+    context.currentRecommendation ? `Current Recommendation: ${context.currentRecommendation}` : "",
+  ].filter(Boolean).join("\n");
+
+  const userPrompt = `${contextLines ? contextLines + "\n\n" : ""}Analyst notes: ${context.prompt}
+
+Draft the analyst signal.`;
+
+  try {
+    const openai = await getOpenAI();
+    const response = await openai.chat.completions.create({
+      model: MODEL_NAME,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.5,
+    });
+
+    const raw = response.choices[0]?.message?.content || "{}";
+    const parsed = JSON.parse(raw) as CieSignalDraft;
+    return parsed;
+  } catch (error) {
+    console.error("[AI] CIE signal draft error:", error);
+    return null;
+  }
+}
+
 export async function analyzeDocumentQuality(
   applicationId: number,
   actorUserId: string,

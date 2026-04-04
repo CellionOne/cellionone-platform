@@ -33,6 +33,7 @@ import {
   generateDataEntryGuide,
 } from "../services/cieDataIngestionService";
 import { triggerImmediateScoreRun } from "../services/cieScheduler";
+import { generateCieSignalDraft, generateCieMarketCommentary } from "../services/aiService";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -587,6 +588,69 @@ export function registerCieAdminRoutes(app: Express): void {
       const id = parseInt(req.params.id as string);
       await storage.deleteCieSignal(id);
       res.json({ success: true });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** POST /api/admin/cie/signals/ai-draft — generate AI signal draft */
+  app.post("/api/admin/cie/signals/ai-draft", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const schema = z.object({
+        prompt: z.string().min(10).max(2000),
+        ticker: z.string().optional(),
+        sector: z.string().optional(),
+      });
+      const { prompt, ticker, sector } = schema.parse(req.body);
+
+      // Optionally enrich with score data for the ticker
+      let currentIas: number | null = null;
+      let currentRecommendation: string | null = null;
+      if (ticker) {
+        const security = await storage.getCieSecurityBySymbol(ticker.toUpperCase());
+        if (security) {
+          const score = await storage.getLatestCieScore(security.id);
+          if (score) {
+            currentIas = score.ias;
+            currentRecommendation = score.recommendation;
+          }
+        }
+      }
+
+      const draft = await generateCieSignalDraft({ prompt, ticker: ticker ?? null, sector: sector ?? null, currentIas, currentRecommendation });
+      if (!draft) return res.status(503).json({ error: "AI signal draft generation failed. Please try again." });
+
+      res.json({ draft });
+    } catch (e: unknown) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** POST /api/admin/cie/market-pulse/ai-commentary — regenerate AI market commentary on demand */
+  app.post("/api/admin/cie/market-pulse/ai-commentary", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const pulse = await storage.getLatestCieMarketPulse();
+      const scores = await storage.getLatestCieScores();
+      const topSecurities = [...scores]
+        .filter(s => s.ias != null)
+        .sort((a, b) => (b.ias ?? 0) - (a.ias ?? 0))
+        .slice(0, 5)
+        .map(s => ({ ticker: s.symbol, name: s.name, ias: s.ias ?? 0, recommendation: s.recommendation ?? "", sector: s.sector }));
+      const today = new Date().toISOString().slice(0, 10);
+      const commentary = await generateCieMarketCommentary({
+        asiIndex: pulse?.asiIndex != null ? pulse.asiIndex / 100 : null,
+        asiChangePct: pulse?.asiChange != null ? pulse.asiChange / 10000 : null,
+        brentCrudeUsd: pulse?.brentCrudeUsdCents != null ? pulse.brentCrudeUsdCents / 100 : null,
+        ngnPerUsd: pulse?.ngnPerUsd != null ? pulse.ngnPerUsd / 100 : null,
+        topSecurities,
+        scoreDate: today,
+      });
+      if (!commentary) return res.status(503).json({ error: "AI commentary generation failed. Please try again." });
+      await storage.updateLatestCieMarketPulseCommentary(commentary);
+      res.json({ commentary });
     } catch (e: unknown) {
       res.status(500).json({ error: errMsg(e) });
     }

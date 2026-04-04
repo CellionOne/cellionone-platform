@@ -437,6 +437,7 @@ export interface IStorage {
   // CIE Market Pulse
   getLatestCieMarketPulse(): Promise<CieMarketPulse | undefined>;
   upsertCieMarketPulse(data: InsertCieMarketPulse): Promise<CieMarketPulse>;
+  updateLatestCieMarketPulseCommentary(commentary: string): Promise<void>;
 
   // CIE Ingestion Logs
   createCieIngestionLog(data: InsertCieIngestionLog): Promise<CieIngestionLog>;
@@ -2230,6 +2231,18 @@ export class DatabaseStorage implements IStorage {
   async upsertCieMarketPulse(data: InsertCieMarketPulse): Promise<CieMarketPulse> {
     const [pulse] = await db.insert(cieMarketPulse).values(data).returning();
     return pulse;
+  }
+
+  async updateLatestCieMarketPulseCommentary(commentary: string): Promise<void> {
+    const [latest] = await db.select({ id: cieMarketPulse.id })
+      .from(cieMarketPulse)
+      .orderBy(desc(cieMarketPulse.createdAt))
+      .limit(1);
+    if (latest) {
+      await db.update(cieMarketPulse)
+        .set({ commentary })
+        .where(eq(cieMarketPulse.id, latest.id));
+    }
   }
 
   // ============== CIE Ingestion Logs ==============

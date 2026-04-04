@@ -19,7 +19,7 @@ import {
   BarChart3, Upload, Settings2, Banknote, Zap, TrendingUp,
   RefreshCw, Plus, Trash2, CheckCircle2,
   Users, DollarSign, Activity, Star, ArrowUpDown,
-  Save, Send, Power, Handshake, Copy, Check, KeyRound, Edit2,
+  Save, Send, Power, Handshake, Copy, Check, KeyRound, Edit2, Sparkles,
 } from "lucide-react";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -286,6 +286,15 @@ function PriceUploadTab() {
     onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed to trigger recomputation"), variant: "destructive" }),
   });
 
+  const aiCommentaryMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/cie/market-pulse/ai-commentary", {});
+      return res.json() as Promise<{ commentary: string }>;
+    },
+    onSuccess: () => toast({ title: "AI market commentary regenerated" }),
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "AI commentary failed"), variant: "destructive" }),
+  });
+
   const uploadFile = useCallback(async (file: File) => {
     setIsUploading(true);
     try {
@@ -387,7 +396,7 @@ function PriceUploadTab() {
             <CardTitle className="text-sm">Score Engine</CardTitle>
             <CardDescription className="text-xs">Manually trigger a full IAS/RS/CS recomputation across all active securities</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-2">
             <Button
               className="w-full gap-2" variant="outline"
               onClick={() => scoreMutation.mutate()}
@@ -396,6 +405,15 @@ function PriceUploadTab() {
             >
               {scoreMutation.isPending ? <LoadingSpinner size="sm" /> : <RefreshCw className="h-4 w-4" />}
               Recompute All Scores
+            </Button>
+            <Button
+              className="w-full gap-2" variant="outline"
+              onClick={() => aiCommentaryMutation.mutate()}
+              disabled={aiCommentaryMutation.isPending}
+              data-testid="button-regenerate-commentary"
+            >
+              {aiCommentaryMutation.isPending ? <LoadingSpinner size="sm" /> : <Sparkles className="h-4 w-4 text-primary" />}
+              Regenerate AI Commentary
             </Button>
           </CardContent>
         </Card>
@@ -772,12 +790,26 @@ function DividendsTab() {
 
 // ─── Signals Tab ──────────────────────────────────────────────────────────────
 
+interface CieSignalDraft {
+  content: string;
+  suggestedType: string;
+  suggestedSentiment: string;
+  suggestedCredibility: number;
+  suggestedTags: string[];
+}
+
 function SignalsTab() {
   const { toast } = useToast();
   const [type, setType] = useState("trade_call");
   const [sentiment, setSentiment] = useState("bullish");
   const [credibility, setCredibility] = useState("3");
   const [content, setContent] = useState("");
+
+  // AI draft state
+  const [showAiPanel, setShowAiPanel] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiTicker, setAiTicker] = useState("");
+  const [aiDraft, setAiDraft] = useState<CieSignalDraft | null>(null);
 
   const { data: signalsData, isLoading } = useQuery<{ signals: Signal[] }>({
     queryKey: ["/api/admin/cie/signals"],
@@ -802,14 +834,127 @@ function SignalsTab() {
     onError: () => toast({ title: "Failed to delete", variant: "destructive" }),
   });
 
+  const aiDraftMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/cie/signals/ai-draft", {
+        prompt: aiPrompt,
+        ticker: aiTicker || undefined,
+      });
+      return res.json() as Promise<{ draft: CieSignalDraft }>;
+    },
+    onSuccess: (res) => {
+      setAiDraft(res.draft);
+    },
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "AI draft failed"), variant: "destructive" }),
+  });
+
+  function applyAiDraft() {
+    if (!aiDraft) return;
+    setContent(aiDraft.content);
+    if (["trade_call", "news", "rumour", "sector_rotation"].includes(aiDraft.suggestedType)) {
+      setType(aiDraft.suggestedType);
+    }
+    if (["bullish", "bearish", "neutral"].includes(aiDraft.suggestedSentiment)) {
+      setSentiment(aiDraft.suggestedSentiment);
+    }
+    if (aiDraft.suggestedCredibility >= 1 && aiDraft.suggestedCredibility <= 5) {
+      setCredibility(String(aiDraft.suggestedCredibility));
+    }
+    setShowAiPanel(false);
+    setAiDraft(null);
+    toast({ title: "AI draft applied — review before publishing" });
+  }
+
   const sentimentColor: Record<string, string> = {
     bullish: "text-green-600", bearish: "text-red-500", neutral: "text-muted-foreground",
   };
 
   return (
     <div className="space-y-6">
+      {showAiPanel && (
+        <Card className="border-primary/30 bg-primary/5" data-testid="card-ai-draft-panel">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                AI Signal Writing Assistant
+              </CardTitle>
+              <Button size="sm" variant="ghost" onClick={() => { setShowAiPanel(false); setAiDraft(null); }} className="h-7 text-xs">
+                Close
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <Label className="text-xs text-muted-foreground mb-1 block">Brief / Notes for the signal</Label>
+                <Textarea
+                  placeholder="e.g. Q3 earnings beat for GTCO — strong NIR growth, dividend increase expected"
+                  value={aiPrompt}
+                  onChange={e => setAiPrompt(e.target.value)}
+                  rows={3}
+                  data-testid="textarea-ai-prompt"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Ticker (optional)</Label>
+                <Input
+                  placeholder="e.g. GTCO"
+                  value={aiTicker}
+                  onChange={e => setAiTicker(e.target.value.toUpperCase())}
+                  data-testid="input-ai-ticker"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">Enriches with CIE score data if available</p>
+              </div>
+            </div>
+            <Button
+              onClick={() => aiDraftMutation.mutate()}
+              disabled={aiPrompt.length < 10 || aiDraftMutation.isPending}
+              size="sm"
+              className="gap-2"
+              data-testid="button-generate-ai-draft"
+            >
+              {aiDraftMutation.isPending ? <><LoadingSpinner className="h-3 w-3" /> Generating…</> : <><Sparkles className="h-3 w-3" /> Generate Draft</>}
+            </Button>
+
+            {aiDraft && (
+              <div className="mt-3 space-y-3 border rounded-lg p-3 bg-background">
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className="bg-muted px-2 py-0.5 rounded capitalize">{aiDraft.suggestedType.replace("_", " ")}</span>
+                  <span className={`px-2 py-0.5 rounded capitalize font-medium ${aiDraft.suggestedSentiment === "bullish" ? "text-green-700 bg-green-50 dark:bg-green-900/20" : aiDraft.suggestedSentiment === "bearish" ? "text-red-700 bg-red-50 dark:bg-red-900/20" : "bg-muted text-muted-foreground"}`}>
+                    {aiDraft.suggestedSentiment}
+                  </span>
+                  <span className="bg-muted px-2 py-0.5 rounded">Credibility {aiDraft.suggestedCredibility}/5</span>
+                  {aiDraft.suggestedTags?.map(tag => (
+                    <span key={tag} className="bg-primary/10 text-primary px-2 py-0.5 rounded">{tag}</span>
+                  ))}
+                </div>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap" data-testid="text-ai-draft-content">{aiDraft.content}</p>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={applyAiDraft} className="gap-1.5 text-xs" data-testid="button-apply-ai-draft">
+                    <Check className="h-3 w-3" /> Apply to Form
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => aiDraftMutation.mutate()} disabled={aiDraftMutation.isPending} className="gap-1.5 text-xs" data-testid="button-regenerate-ai-draft">
+                    <RefreshCw className="h-3 w-3" /> Regenerate
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
-        <CardHeader><CardTitle className="text-sm">Publish Analyst Signal</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm">Publish Analyst Signal</CardTitle>
+            {!showAiPanel && (
+              <Button size="sm" variant="outline" onClick={() => setShowAiPanel(true)} className="gap-1.5 text-xs h-7" data-testid="button-open-ai-draft">
+                <Sparkles className="h-3 w-3 text-primary" /> AI Draft
+              </Button>
+            )}
+          </div>
+        </CardHeader>
         <CardContent>
           <div className="grid sm:grid-cols-3 gap-3 mb-3">
             <Select value={type} onValueChange={setType}>

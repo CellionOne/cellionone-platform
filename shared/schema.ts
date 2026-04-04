@@ -2180,6 +2180,7 @@ export const cieMarketPulse = pgTable("cie_market_pulse", {
   ngnPerUsd: integer("ngn_per_usd"), // Naira per USD ×100
   asiChange: integer("asi_change"), // daily change ×100 (basis points)
   source: varchar("source", { length: 50 }).default("manual"),
+  commentary: text("commentary"), // AI-generated daily market commentary
   updatedAt: timestamp("updated_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });

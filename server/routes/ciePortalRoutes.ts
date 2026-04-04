@@ -22,6 +22,7 @@ import { z } from "zod";
 import crypto from "crypto";
 import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
+import { generateCieScoreNarrative } from "../services/aiService";
 import {
   cieSubscriptions,
   cieScores,
@@ -196,6 +197,7 @@ export function registerCiePortalRoutes(app: Express): void {
         brentCrudeUsd: pulse.brentCrudeUsdCents != null ? pulse.brentCrudeUsdCents / 100 : null,
         ngnPerUsd: pulse.ngnPerUsd != null ? pulse.ngnPerUsd / 100 : null,
         source: pulse.source ?? "manual",
+        commentary: pulse.commentary ?? null,
         updatedAt: pulse.updatedAt,
       });
     } catch (err: unknown) {
@@ -504,4 +506,46 @@ export function registerCiePortalRoutes(app: Express): void {
       res.status(500).json({ error: errMsg(err) });
     }
   });
+
+  // ── GET /api/cie-portal/securities/:ticker/ai-narrative ──────────────────
+  // On-demand AI score narrative for a security — Subscriber+
+  app.get(
+    "/api/cie-portal/securities/:ticker/ai-narrative",
+    isAuthenticated,
+    requireCieTierSession("subscriber"),
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const ticker = (req.params.ticker as string).toUpperCase();
+        const security = await storage.getCieSecurityBySymbol(ticker);
+        if (!security) return res.status(404).json({ error: `Security '${ticker}' not found` });
+
+        const score = await storage.getLatestCieScore(security.id);
+        if (!score) return res.status(404).json({ error: "No score data available for this security" });
+
+        const latestPrice = await storage.getLatestCiePrice(security.id);
+        const latestPriceNaira = latestPrice?.closeKobo != null ? latestPrice.closeKobo / 100 : null;
+
+        const narrative = await generateCieScoreNarrative({
+          ticker: security.symbol,
+          name: security.name,
+          sector: security.sector,
+          ias: score.ias ?? 0,
+          rs: score.rs ?? 0,
+          cs: score.cs ?? 0,
+          recommendation: score.recommendation ?? "",
+          pillarBreakdown: (score.pillarBreakdown as Record<string, number> | null) ?? null,
+          latestPriceNaira,
+          scoreDate: score.scoreDate,
+        });
+
+        if (!narrative) {
+          return res.status(503).json({ error: "AI narrative generation failed. Please try again." });
+        }
+
+        res.json({ ticker, narrative });
+      } catch (err: unknown) {
+        res.status(500).json({ error: errMsg(err) });
+      }
+    },
+  );
 }

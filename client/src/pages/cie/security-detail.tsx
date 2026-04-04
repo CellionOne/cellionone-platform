@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useParams } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { CieLayout } from "./layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,10 +9,19 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { Star, ArrowLeft } from "lucide-react";
+import { Star, ArrowLeft, Sparkles, RefreshCw } from "lucide-react";
 import { Link } from "wouter";
+import { apiRequest } from "@/lib/queryClient";
 
 interface StatusData { tier: "free" | "subscriber" | "pro"; isPaid: boolean; subscription: unknown }
+
+interface CieScoreNarrative {
+  headline: string;
+  body: string;
+  keyPoints: string[];
+  caveats: string;
+}
+
 interface SecurityDetail {
   ticker: string; name: string; sector: string; exchange: string | null;
   latestPrice: { date: string; closeNaira: number | null; volume: number } | null;
@@ -75,6 +85,91 @@ function MomentumDots({ m }: { m: Momentum }) {
         );
       })}
     </span>
+  );
+}
+
+function AiInsightCard({ ticker }: { ticker: string }) {
+  const [narrative, setNarrative] = useState<CieScoreNarrative | null>(null);
+  const [hasRequested, setHasRequested] = useState(false);
+
+  const narrativeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("GET", `/api/cie-portal/securities/${ticker}/ai-narrative`);
+      const json = await res.json() as { ticker: string; narrative: CieScoreNarrative };
+      return json.narrative;
+    },
+    onSuccess: (data) => {
+      setNarrative(data);
+      setHasRequested(true);
+    },
+  });
+
+  return (
+    <Card data-testid="card-ai-insight">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            AI Analyst Insight
+          </CardTitle>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 h-7 text-xs"
+            onClick={() => narrativeMutation.mutate()}
+            disabled={narrativeMutation.isPending}
+            data-testid="button-generate-ai-insight"
+          >
+            {narrativeMutation.isPending ? (
+              <><LoadingSpinner className="h-3 w-3" /> Generating…</>
+            ) : hasRequested ? (
+              <><RefreshCw className="h-3 w-3" /> Regenerate</>
+            ) : (
+              <><Sparkles className="h-3 w-3" /> Generate</>
+            )}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {narrativeMutation.isError && (
+          <p className="text-sm text-destructive">Failed to generate insight. Please try again.</p>
+        )}
+        {!hasRequested && !narrativeMutation.isPending && !narrativeMutation.isError && (
+          <p className="text-sm text-muted-foreground">
+            Click <strong>Generate</strong> to get an AI-powered analyst narrative for this security based on its CIE scores and pillar breakdown.
+          </p>
+        )}
+        {narrativeMutation.isPending && (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+            <LoadingSpinner className="h-4 w-4" />
+            Analysing scores with GPT-4o…
+          </div>
+        )}
+        {narrative && (
+          <div className="space-y-4">
+            <p className="font-semibold text-sm" data-testid="text-ai-headline">{narrative.headline}</p>
+            <div className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap" data-testid="text-ai-body">
+              {narrative.body}
+            </div>
+            {narrative.keyPoints?.length > 0 && (
+              <ul className="space-y-1.5" data-testid="list-ai-keypoints">
+                {narrative.keyPoints.map((pt, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm">
+                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                    {pt}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {narrative.caveats && (
+              <p className="text-xs text-muted-foreground border-t pt-3 italic" data-testid="text-ai-caveats">
+                {narrative.caveats}
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -261,6 +356,10 @@ export default function CieSecurityDetail() {
               ))}
             </CardContent>
           </Card>
+        )}
+
+        {data.scores && (
+          <AiInsightCard ticker={data.ticker} />
         )}
 
         {data.history.length > 0 && (

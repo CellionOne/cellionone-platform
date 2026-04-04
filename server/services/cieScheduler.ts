@@ -9,6 +9,7 @@
  */
 
 import { computeAndPersistScores } from "./cieScoreEngine";
+import { generateCieMarketCommentary } from "./aiService";
 import { storage } from "../storage";
 
 const WAT_OFFSET_HOURS = 1; // WAT = UTC+1
@@ -96,8 +97,47 @@ async function runScoreComputation(): Promise<void> {
       entityId: new Date().toISOString().slice(0, 10),
       details: { scored: result.scored, skipped: result.skipped },
     });
+
+    // Generate AI market commentary after scoring
+    await runMarketCommentary();
   } catch (err: any) {
     console.error("[CIEScheduler] Score computation error:", err.message);
+  }
+}
+
+async function runMarketCommentary(): Promise<void> {
+  try {
+    const pulse = await storage.getLatestCieMarketPulse();
+    const scores = await storage.getLatestCieScores();
+
+    const topSecurities = [...scores]
+      .filter(s => s.ias != null)
+      .sort((a, b) => (b.ias ?? 0) - (a.ias ?? 0))
+      .slice(0, 5)
+      .map(s => ({
+        ticker: s.symbol,
+        name: s.name,
+        ias: s.ias ?? 0,
+        recommendation: s.recommendation ?? "",
+        sector: s.sector,
+      }));
+
+    const today = new Date().toISOString().slice(0, 10);
+    const commentary = await generateCieMarketCommentary({
+      asiIndex: pulse?.asiIndex != null ? pulse.asiIndex / 100 : null,
+      asiChangePct: pulse?.asiChange != null ? pulse.asiChange / 10000 : null,
+      brentCrudeUsd: pulse?.brentCrudeUsdCents != null ? pulse.brentCrudeUsdCents / 100 : null,
+      ngnPerUsd: pulse?.ngnPerUsd != null ? pulse.ngnPerUsd / 100 : null,
+      topSecurities,
+      scoreDate: today,
+    });
+
+    if (commentary) {
+      await storage.updateLatestCieMarketPulseCommentary(commentary);
+      console.log("[CIEScheduler] AI market commentary generated and stored");
+    }
+  } catch (err: any) {
+    console.error("[CIEScheduler] Market commentary generation error:", err.message);
   }
 }
 

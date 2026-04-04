@@ -36,6 +36,7 @@ import {
   Users,
   Terminal,
   Fingerprint,
+  BarChart3,
 } from "lucide-react";
 import { PublicNav } from "@/components/public-nav";
 import { PublicFooter } from "@/components/public-footer";
@@ -112,6 +113,14 @@ const platformSolutions = [
     description: "Hold and release funds programmatically for any transaction your platform handles. Auto-generates Paystack payment links and delivers webhook confirmations on every status change.",
     cta: "Read the Docs",
     href: "/api-docs",
+  },
+  {
+    icon: BarChart3,
+    title: "CIE — NGX Equity Intelligence",
+    description: "Real-time equity scores, analyst signals, dividend calendars, and model-driven recommendations for every security listed on the Nigerian Exchange Group. Subscribe for instant access.",
+    price: "From ₦5,000/month",
+    cta: "Explore CIE",
+    href: "/cie-intelligence",
   },
 ];
 

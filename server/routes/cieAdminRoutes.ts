@@ -10,7 +10,10 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import multer from "multer";
+import { db } from "../db";
+import { eq, and, gte, count, sql } from "drizzle-orm";
 import type { InsertCieSignal } from "../../shared/schema";
+import { cieSubscriptions, users } from "../../shared/schema";
 import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import {
@@ -672,6 +675,85 @@ export function registerCieAdminRoutes(app: Express): void {
       const id = parseInt(req.params.id);
       await storage.deleteCieDividend(id);
       res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ================================================================
+  // REVENUE & SUBSCRIBER METRICS
+  // ================================================================
+
+  /**
+   * GET /api/admin/cie/revenue
+   * Subscription counts by tier, MRR, churn rate, and full subscriber list.
+   */
+  app.get("/api/admin/cie/revenue", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      // Active subscriptions by tier
+      const active = await db.select()
+        .from(cieSubscriptions)
+        .where(and(eq(cieSubscriptions.status, "active"), gte(cieSubscriptions.currentPeriodEnd, now)));
+
+      const subscriberCount = active.filter(s => s.tier === "subscriber").length;
+      const proCount = active.filter(s => s.tier === "pro").length;
+      const totalActive = active.length;
+
+      // MRR: ₦5,000 per subscriber, ₦10,000 per pro
+      const mrrKobo = subscriberCount * 500_000 + proCount * 1_000_000;
+
+      // Churn: subscriptions that were cancelled/expired in last 30 days
+      const churned = await db.select({ id: cieSubscriptions.id })
+        .from(cieSubscriptions)
+        .where(and(
+          sql`${cieSubscriptions.status} IN ('cancelled', 'expired')`,
+          gte(cieSubscriptions.cancelledAt, thirtyDaysAgo),
+        ));
+      const churnLast30Days = churned.length;
+
+      // Full subscriber list with user emails
+      const activeWithUsers = await db.select({
+        id: cieSubscriptions.id,
+        userId: cieSubscriptions.userId,
+        orgId: cieSubscriptions.orgId,
+        tier: cieSubscriptions.tier,
+        status: cieSubscriptions.status,
+        currentPeriodEnd: cieSubscriptions.currentPeriodEnd,
+        paystackCustomerCode: cieSubscriptions.paystackCustomerCode,
+        cancelAtPeriodEnd: cieSubscriptions.cancelAtPeriodEnd,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+      })
+        .from(cieSubscriptions)
+        .leftJoin(users, eq(cieSubscriptions.userId, users.id))
+        .where(and(eq(cieSubscriptions.status, "active"), gte(cieSubscriptions.currentPeriodEnd, now)))
+        .orderBy(cieSubscriptions.currentPeriodEnd);
+
+      res.json({
+        subscriberCount,
+        proCount,
+        totalActive,
+        mrrKobo,
+        mrrNaira: mrrKobo / 100,
+        churnLast30Days,
+        subscribers: activeWithUsers.map(s => ({
+          id: s.id,
+          userId: s.userId,
+          orgId: s.orgId,
+          tier: s.tier,
+          email: s.email,
+          name: [s.firstName, s.lastName].filter(Boolean).join(" ") || "—",
+          renewalDate: s.currentPeriodEnd,
+          cancelAtPeriodEnd: s.cancelAtPeriodEnd,
+          paystackCustomerCode: s.paystackCustomerCode,
+        })),
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

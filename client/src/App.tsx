@@ -48,6 +48,9 @@ import AdminRegisteredOffices from "@/pages/admin/registered-offices";
 import AdminSecurity from "@/pages/admin/security";
 import AdminEscrowDashboard from "@/pages/admin/escrow-dashboard";
 import AdminBankingPartners from "@/pages/admin/banking-partners";
+import AdminCieCockpit from "@/pages/admin/cie";
+import CiePortal from "@/pages/cie/index";
+import CieIntelligencePage from "@/pages/cie-intelligence";
 import PlatformOverview from "@/pages/platform-overview";
 import WhyCellionOne from "@/pages/why-cellion-one";
 import ApiDocsPage from "@/pages/api-docs";
@@ -346,7 +349,17 @@ function Router() {
       <Route path="/admin/banking-partners">
         <ProtectedRoute component={AdminBankingPartners} roles={["admin"]} />
       </Route>
-      
+      <Route path="/admin/cie">
+        <ProtectedRoute component={AdminCieCockpit} roles={["admin"]} />
+      </Route>
+
+      <Route path="/cie">
+        <ProtectedRoute component={CiePortal} />
+      </Route>
+      <Route path="/cie-intelligence">
+        <CieIntelligencePage />
+      </Route>
+
       <Route path="/building-manager/dashboard">
         <ProtectedRoute component={BuildingManagerDashboard} roles={["building_manager"]} />
       </Route>

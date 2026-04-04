@@ -24,7 +24,7 @@ Key architectural decisions and features include:
 -   **User Management:** Personal profile system with encrypted NIN/BVN storage, document uploads, and Director/Shareholder management with individual verification.
 -   **Procurement Marketplace:** A full RFQ/Bid/Contract/Invoice system for verified organizations with escrow payments.
 -   **Escrow-as-a-Service API:** Public REST API for third-party platforms to manage escrow transactions.
--   **CIE (Cellion Intelligence Engine):** A subscription API serving NGX equity intelligence with tiered access and integrated billing.
+-   **CIE (Cellion Intelligence Engine):** A subscription API serving NGX equity intelligence with tiered access and integrated billing. Includes: Admin Cockpit (`/admin/cie`) with 6 tabs (Securities, Price Upload, Model Editor, Dividends, Signals, Revenue); Subscriber Portal (`/cie`) with tier-gated tabs (Market Pulse free, Securities/API Keys subscriber+, Signals pro+); Public marketing page (`/cie-intelligence`); and a landing page card under "For Platforms & Developers".
 -   **Notification Centre:** In-app notification system.
 -   **Digital Signature Pad:** For signature specimens.
 -   **SEO & Structured Data:** Open Graph, Twitter Cards, Schema.org JSON-LD, `robots.txt`, `sitemap.xml`, and a `usePageMeta` hook for dynamic SEO.

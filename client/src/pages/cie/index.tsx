@@ -62,7 +62,7 @@ function CiePublicLanding() {
             { icon: Activity, title: "Market Pulse", desc: "Daily NGX ASI index, Brent crude, and USD/NGN — free for all users.", badge: "Free" },
             { icon: BarChart3, title: "Security Scores", desc: "IAS, RS, and CS scores for every NGX-listed security with star ratings and recommendations.", badge: "Subscriber" },
             { icon: Zap, title: "Analyst Signals", desc: "Proprietary analyst signals with entry/exit levels, sector momentum, and conviction ratings.", badge: "Pro" },
-            { icon: Key, title: "Developer API", desc: "Programmatic access to NGX intelligence via REST API with JWT auth and tiered rate limits.", badge: "Subscriber+" },
+            { icon: Key, title: "Developer API", desc: "Programmatic access to NGX intelligence via REST API with X-API-Key authentication and tiered rate limits.", badge: "Subscriber+" },
           ].map(({ icon: Icon, title, desc, badge }) => (
             <Card key={title} data-testid={`card-cie-feature-${title.toLowerCase().replace(/\s/g, "-")}`}>
               <CardContent className="p-5">

@@ -333,10 +333,10 @@ Write the daily market commentary.`;
 // ── Zod schemas for AI JSON output validation ─────────────────────────────────
 
 const CieScoreNarrativeSchema = z.object({
-  headline: z.string().max(200).default(""),
-  body: z.string().max(2000).default(""),
+  headline: z.string().min(3).max(200),
+  body: z.string().min(20).max(2000),
   keyPoints: z.array(z.string()).max(10).default([]),
-  caveats: z.string().max(500).default(""),
+  caveats: z.string().max(500).optional().default(""),
 });
 
 const CieSignalDraftSchema = z.object({

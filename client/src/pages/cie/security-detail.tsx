@@ -108,10 +108,11 @@ function AiInsightCard({ ticker }: { ticker: string }) {
     retry: false,
   });
 
-  // Gracefully hide the entire card when AI is unavailable
-  if (aiStatus?.available === false) return null;
-
   const narrative = narrativeData?.narrative ?? null;
+
+  // Gracefully hide the entire card when AI is unavailable or fetch has permanently failed
+  if (aiStatus?.available === false) return null;
+  if (isError && !narrative) return null;
 
   return (
     <Card data-testid="card-ai-insight">
@@ -121,7 +122,7 @@ function AiInsightCard({ ticker }: { ticker: string }) {
             <Sparkles className="h-4 w-4 text-primary" />
             AI Analyst Insight
           </CardTitle>
-          {!isLoading && !isError && (
+          {narrative && (
             <Button
               size="sm"
               variant="ghost"
@@ -144,9 +145,6 @@ function AiInsightCard({ ticker }: { ticker: string }) {
             <Skeleton className="h-3 w-5/6" />
             <Skeleton className="h-3 w-4/5" />
           </div>
-        )}
-        {isError && !narrative && (
-          <p className="text-sm text-muted-foreground italic">AI insight currently unavailable for this security.</p>
         )}
         {narrative && (
           <div className="space-y-4">

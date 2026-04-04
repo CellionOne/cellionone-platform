@@ -1,119 +1,32 @@
 /**
  * CIE Intelligence Engine — Public REST API
- *
  * Base path: /api/v1/cie
- *
- * Authentication: X-API-Key header with `cie:read` scope.
- *
- * Tier gating (encoded as API key permissions):
- *   free       → only `cie:read`          — market pulse
- *   subscriber → `cie:read` + `cie:subscriber` — scores, history, dividends
- *   pro        → `cie:read` + `cie:subscriber` + `cie:pro` — signals, sector-rotation
+ * Authentication: X-API-Key (cie:read scope)
+ * Tiers: free | subscriber | pro — resolved from cieSubscriptions table via apiKeyAuth middleware
  */
 
 import type { Express, Response, NextFunction } from "express";
 import { z } from "zod";
 import { storage } from "../storage";
-import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth";
-
-// ─── Tier constants ────────────────────────────────────────────────────────────
-//
-// CIE tier hierarchy (additive):
-//   free       → only cie:read scope — market pulse only
-//   subscriber → cie:subscriber scope — scores, history, dividends
-//   pro        → cie:pro scope — signals, sector-rotation
-//
-// AUTHORITATIVE SOURCE (Task #31): The cieSubscriptions table is the runtime
-// source of truth for tier access, checked per API call with a 5-minute
-// in-memory cache (keyed by orgId). API key permissions serve as fallback
-// for keys issued before subscription billing was deployed.
+import { authenticateApiKey, invalidateCieApiKeyTierCache, type ApiKeyRequest } from "../middleware/apiKeyAuth";
 
 type CieTier = "free" | "subscriber" | "pro";
 const TIER_ORDER: Record<CieTier, number> = { free: 0, subscriber: 1, pro: 2 };
 
-// ─── 5-minute in-memory tier cache ────────────────────────────────────────────
-const TIER_CACHE_TTL_MS = 5 * 60 * 1000;
-interface TierCacheEntry { tier: CieTier; fetchedAt: number }
-const tierCache = new Map<number, TierCacheEntry>();
-
-/** Called by webhook handler to force a fresh DB lookup on next request. */
-export function invalidateCieOrgTierCache(orgId: number): void {
-  tierCache.delete(orgId);
-}
-
 /**
- * Determine the effective CIE tier for an organisation.
- *
- * Resolution order (subscription table is authoritative):
- *   1. If org has an ACTIVE subscription → use that tier.
- *      "Most current active" = highest currentPeriodEnd among active rows.
- *      A new pending record created during checkout does NOT shadow an active one.
- *   2. If org has NO active subscription but DOES have other subscription history
- *      (e.g. past_due, cancelled, expired, pending) → force "free".
- *      Lapsed/cancelled organisations are immediately downgraded.
- *   3. If org has NO subscription history at all → fall back to API key permissions
- *      for backward compatibility with keys issued before billing was deployed.
- *
- * Result is cached per orgId for 5 minutes; evicted by invalidateCieOrgTierCache().
+ * Invalidate the CIE tier cache for an org.
+ * Called by webhook handler after subscription state changes.
  */
-async function resolveOrgTier(orgId: number, permissions: string[]): Promise<CieTier> {
-  const cached = tierCache.get(orgId);
-  if (cached && Date.now() - cached.fetchedAt < TIER_CACHE_TTL_MS) {
-    return cached.tier;
-  }
-
-  let tier: CieTier = "free";
-  try {
-    const { db } = await import("../db");
-    const { cieSubscriptions } = await import("@shared/schema");
-    const { eq, desc, and } = await import("drizzle-orm");
-
-    // Step 1: look for the current active subscription (most recent period end wins)
-    const [activeSub] = await db.select()
-      .from(cieSubscriptions)
-      .where(and(eq(cieSubscriptions.orgId, orgId), eq(cieSubscriptions.status, "active")))
-      .orderBy(desc(cieSubscriptions.currentPeriodEnd))
-      .limit(1);
-
-    if (activeSub) {
-      // Active subscription wins — pending/other records are irrelevant
-      tier = activeSub.tier as CieTier;
-    } else {
-      // Step 2: check whether any subscription history exists at all
-      const [anySub] = await db.select({ id: cieSubscriptions.id })
-        .from(cieSubscriptions)
-        .where(eq(cieSubscriptions.orgId, orgId))
-        .limit(1);
-
-      if (anySub) {
-        // History exists but no active row → downgrade; do NOT fall back to key perms
-        tier = "free";
-      } else {
-        // No history at all → backward-compat fallback to API key permissions
-        if (permissions.includes("cie:pro")) tier = "pro";
-        else if (permissions.includes("cie:subscriber")) tier = "subscriber";
-        else tier = "free";
-      }
-    }
-  } catch (err) {
-    console.error("[CIE] resolveOrgTier DB error — failing safe to free:", err);
-    tier = "free";
-  }
-
-  tierCache.set(orgId, { tier, fetchedAt: Date.now() });
-  return tier;
+export function invalidateCieOrgTierCache(orgId: number): void {
+  invalidateCieApiKeyTierCache(orgId);
 }
 
 /**
- * Middleware factory that enforces a minimum CIE tier.
- * Must be placed after authenticateApiKey so apiKeyContext is populated.
- * Resolves tier from cieSubscriptions table (authoritative) with 5-min cache.
+ * Enforces a minimum CIE tier. Reads resolved tier from apiKeyContext (set by authenticateApiKey).
  */
 function requireCieTier(minTier: CieTier) {
-  return async (req: ApiKeyRequest, res: Response, next: NextFunction) => {
-    const orgId = req.apiKeyContext!.orgId;
-    const perms = req.apiKeyContext?.permissions ?? [];
-    const effective = await resolveOrgTier(orgId, perms);
+  return (req: ApiKeyRequest, res: Response, next: NextFunction) => {
+    const effective = (req.apiKeyContext?.cieTier ?? "free") as CieTier;
     if (TIER_ORDER[effective] < TIER_ORDER[minTier]) {
       return res.status(403).json({
         error: `This endpoint requires CIE ${minTier} tier or higher`,

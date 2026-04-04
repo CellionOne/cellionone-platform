@@ -1,35 +1,21 @@
 /**
- * CIE Subscription Billing Routes
+ * CIE Subscription Billing — session-authenticated routes
  *
- * Session-authenticated (Cellion user account). Manages Paystack recurring
- * subscriptions for CIE tier access (Free / Subscriber / Pro).
+ * GET  /api/cie-billing/status     - current subscription state
+ * POST /api/cie-billing/subscribe  - initiate payment for a tier
+ * POST /api/cie-billing/cancel     - cancel at period end
+ * POST /api/cie-billing/upgrade    - Subscriber → Pro
+ * POST /api/cie-billing/downgrade  - Pro → Subscriber
  *
- * Routes:
- *   GET  /api/cie-billing/status     — current tier + subscription state
- *   POST /api/cie-billing/subscribe  — initiate payment for a new tier
- *   POST /api/cie-billing/cancel     — cancel at period end
- *   POST /api/cie-billing/upgrade    — switch Subscriber → Pro
- *   POST /api/cie-billing/downgrade  — switch Pro → Subscriber
+ * Subscriptions are org-scoped when the user belongs to a KYC organisation
+ * (as creator or accepted member); personal otherwise.
  *
- * Subscription ownership model:
- *   Subscriptions are org-scoped when the user belongs to a KYC organisation
- *   (as creator OR as an accepted member). Any org member can view/manage the
- *   org's CIE subscription. Individual users without an org have personal
- *   subscriptions keyed by userId only.
+ * Paystack plan codes:
+ *   PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE - ₦5,000/month
+ *   PAYSTACK_CIE_PRO_PLAN_CODE        - ₦10,000/month
  *
- * Paystack flow:
- *   1. POST /transaction/initialize with { plan, email, metadata }
- *      Subscription record created with status='pending'.
- *   2. Redirect user to authorizationUrl
- *   3. On charge.success webhook (metadata.type = 'cie_subscription'):
- *      → Update subscription to status='active'; set Paystack codes + period dates.
- *      → If previousSubscriptionId in metadata → mark previous as 'expired'.
- *   4. On subscription.disable webhook → status='cancelled'
- *   5. On invoice.payment_failed webhook → status='past_due'
- *
- * Pricing (task spec):
- *   Subscriber: ₦5,000/month  (500,000 kobo)
- *   Pro:        ₦10,000/month (1,000,000 kobo)
+ * Webhook (charge.success, subscription.disable, invoice.payment_failed) in
+ * paystackWebhookHandler.ts drives all state transitions.
  */
 
 import type { Express, Response } from "express";
@@ -42,7 +28,7 @@ import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import type { CieSubscription } from "@shared/schema";
 
-const PAYSTACK_API_BASE = "https://api.paystack.co";
+const PAYSTACK_BASE = "https://api.paystack.co";
 
 type CieTier = "free" | "subscriber" | "pro";
 
@@ -52,179 +38,117 @@ const TIER_LABELS: Record<CieTier, string> = {
   pro: "CIE Pro",
 };
 
-// Monthly amounts in kobo (NGN). Display only — Paystack plan amount governs actual charge.
-const TIER_AMOUNTS_KOBO: Record<Exclude<CieTier, "free">, number> = {
+const TIER_AMOUNTS_KOBO: Record<"subscriber" | "pro", number> = {
   subscriber: 500_000,   // ₦5,000/month
   pro: 1_000_000,        // ₦10,000/month
 };
 
-function getPaystackSecretKey(): string {
-  const key = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_TEST_SECRET_KEY;
-  if (!key) throw new Error("PAYSTACK_SECRET_KEY is not configured");
-  return key;
+function paystackKey(): string {
+  const k = process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_TEST_SECRET_KEY;
+  if (!k) throw new Error("PAYSTACK_SECRET_KEY not configured");
+  return k;
 }
 
-async function paystackRequest<T>(
-  endpoint: string,
+async function paystackReq<T>(
+  path: string,
   method: "GET" | "POST" | "PUT" = "GET",
   body?: Record<string, unknown>,
 ): Promise<T> {
-  const secretKey = getPaystackSecretKey();
-  const response = await fetch(`${PAYSTACK_API_BASE}${endpoint}`, {
+  const r = await fetch(`${PAYSTACK_BASE}${path}`, {
     method,
-    headers: {
-      Authorization: `Bearer ${secretKey}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${paystackKey()}`, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const data = await response.json();
-  if (!response.ok || !data.status) {
-    throw new Error(data.message || `Paystack API error: ${response.status}`);
-  }
-  return data.data;
+  const d = await r.json();
+  if (!r.ok || !d.status) throw new Error(d.message || `Paystack error ${r.status}`);
+  return d.data;
 }
 
-function getPlanCode(tier: "subscriber" | "pro"): string | null {
-  if (tier === "subscriber") return process.env.PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE || null;
-  if (tier === "pro") return process.env.PAYSTACK_CIE_PRO_PLAN_CODE || null;
-  return null;
+function planCode(tier: "subscriber" | "pro"): string | null {
+  return tier === "subscriber"
+    ? (process.env.PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE ?? null)
+    : (process.env.PAYSTACK_CIE_PRO_PLAN_CODE ?? null);
 }
 
 /**
  * CIE Tier Plan Definitions
  *
- * Three tiers; only paid tiers have Paystack plans.
- * Free is the default tier — no plan code needed, no billing.
- *
- * Tier       | Paystack Plan | Amount         | Features
- * -----------|---------------|----------------|-----------------------------------
- * free        | none (default)| ₦0/month       | 2 securities, no analytics
- * subscriber  | PLN_xxx       | ₦5,000/month   | 20 securities, basic analytics
- * pro         | PLN_xxx       | ₦10,000/month  | Unlimited securities + full suite
+ * Tier       | Paystack Plan | Amount         | Default for
+ * -----------|---------------|----------------|-------------
+ * free        | none          | ₦0             | all users with no subscription
+ * subscriber  | PLN_xxx       | ₦5,000/month   | paid subscriber access
+ * pro         | PLN_xxx       | ₦10,000/month  | full access
  */
 export const CIE_PLAN_CONFIG = [
-  {
-    tier: "free" as const,
-    paystackPlanCode: null,
-    amountKobo: 0,
-    name: "CIE Free",
-    description: "Default access tier — no subscription required",
-  },
+  { tier: "free" as const, paystackPlanCode: null, amountKobo: 0, name: "CIE Free" },
   {
     tier: "subscriber" as const,
     paystackPlanCode: process.env.PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE ?? null,
     amountKobo: TIER_AMOUNTS_KOBO.subscriber,
     name: "CIE Subscriber — Monthly",
-    description: "CIE Subscriber tier, monthly subscription",
   },
   {
     tier: "pro" as const,
     paystackPlanCode: process.env.PAYSTACK_CIE_PRO_PLAN_CODE ?? null,
     amountKobo: TIER_AMOUNTS_KOBO.pro,
     name: "CIE Pro — Monthly",
-    description: "CIE Pro tier, monthly subscription",
   },
 ] as const;
 
-/**
- * Seed Paystack CIE plans for the two paid tiers (Subscriber and Pro).
- * Free tier is the platform default — it does not require a Paystack plan.
- * Also updates existing plans if the amount differs from the spec.
- * Called on startup — logs plan codes for admin to copy into env vars.
- */
 export async function seedCiePlans(): Promise<void> {
   if (!process.env.PAYSTACK_SECRET_KEY && !process.env.PAYSTACK_TEST_SECRET_KEY) {
-    console.log("[CIE Billing] Paystack not configured — skipping CIE plan seeding");
+    console.log("[CIE Billing] Paystack not configured — skipping plan seeding");
     return;
   }
+  console.log("[CIE Billing] Free tier: default access, no Paystack plan");
 
-  console.log("[CIE Billing] Free tier: default access (no Paystack plan)");
+  const paidPlans = [
+    { envKey: "PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE", name: "CIE Subscriber — Monthly", amount: TIER_AMOUNTS_KOBO.subscriber },
+    { envKey: "PAYSTACK_CIE_PRO_PLAN_CODE",        name: "CIE Pro — Monthly",        amount: TIER_AMOUNTS_KOBO.pro },
+  ];
 
-  const plans = CIE_PLAN_CONFIG
-    .filter((p) => p.tier !== "free")
-    .map((p) => ({
-      tier: p.tier as "subscriber" | "pro",
-      envKey: p.tier === "subscriber" ? "PAYSTACK_CIE_SUBSCRIBER_PLAN_CODE" : "PAYSTACK_CIE_PRO_PLAN_CODE",
-      name: p.name,
-      amount: p.amountKobo,
-    }));
-
-  for (const plan of plans) {
-    const envCode = process.env[plan.envKey];
+  for (const p of paidPlans) {
+    const configured = process.env[p.envKey];
     try {
-      const listResult = await paystackRequest<any[]>("/plan?perPage=100");
-      const planList: any[] = Array.isArray(listResult) ? listResult : [];
-      const existing = planList.find((p: any) => p.name === plan.name);
-
-      if (existing) {
-        if (existing.amount !== plan.amount) {
-          await paystackRequest(`/plan/${existing.plan_code}`, "PUT", {
-            amount: plan.amount,
-            interval: "monthly",
-          });
-          console.log(`[CIE Billing] Updated plan "${plan.name}" amount to ${plan.amount} kobo`);
+      const list = await paystackReq<any[]>("/plan?perPage=100");
+      const plans: any[] = Array.isArray(list) ? list : [];
+      const found = plans.find((x: any) => x.name === p.name);
+      if (found) {
+        if (found.amount !== p.amount) {
+          await paystackReq(`/plan/${found.plan_code}`, "PUT", { amount: p.amount, interval: "monthly" });
+          console.log(`[CIE Billing] Updated plan "${p.name}" → ${p.amount} kobo`);
         }
-        if (!envCode) {
-          console.log(`[CIE Billing] Plan "${plan.name}" exists: ${existing.plan_code}`);
-          console.log(`[CIE Billing] ⚠️  Set env var: ${plan.envKey}=${existing.plan_code}`);
-        } else {
-          console.log(`[CIE Billing] ${plan.envKey} configured (${envCode})`);
-        }
+        if (!configured) console.log(`[CIE Billing] ⚠️  Set ${p.envKey}=${found.plan_code}`);
+        else console.log(`[CIE Billing] ${p.envKey} OK (${configured})`);
       } else {
-        const created = await paystackRequest<{ plan_code: string }>("/plan", "POST", {
-          name: plan.name,
-          amount: plan.amount,
-          interval: "monthly",
-          description: plan.name,
+        const c = await paystackReq<{ plan_code: string }>("/plan", "POST", {
+          name: p.name, amount: p.amount, interval: "monthly",
         });
-        console.log(`[CIE Billing] Created plan "${plan.name}": ${created.plan_code}`);
-        console.log(`[CIE Billing] ⚠️  Set env var: ${plan.envKey}=${created.plan_code}`);
+        console.log(`[CIE Billing] Created plan "${p.name}": ${c.plan_code}`);
+        console.log(`[CIE Billing] ⚠️  Set ${p.envKey}=${c.plan_code}`);
       }
     } catch (err: any) {
-      console.warn(`[CIE Billing] Failed to seed plan "${plan.name}": ${err.message}`);
+      console.warn(`[CIE Billing] Failed to seed "${p.name}": ${err.message}`);
     }
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Org resolution helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Org resolution ────────────────────────────────────────────────────────────
 
-/**
- * Find the KYC organisation a user belongs to — either as the creator
- * (via kycOrganisations.createdByUserId) or as an accepted member
- * (via kycOrgMembers). Returns null if the user has no org.
- */
 async function resolveOrgForUser(userId: string): Promise<number | null> {
   try {
-    // Check if user created an org
-    const [creatorOrg] = await db.select({ id: kycOrganisations.id })
-      .from(kycOrganisations)
-      .where(eq(kycOrganisations.createdByUserId, userId))
-      .limit(1);
-    if (creatorOrg) return creatorOrg.id;
+    const [creator] = await db.select({ id: kycOrganisations.id })
+      .from(kycOrganisations).where(eq(kycOrganisations.createdByUserId, userId)).limit(1);
+    if (creator) return creator.id;
 
-    // Check accepted org membership
-    const [memberRow] = await db.select({ orgId: kycOrgMembers.orgId })
+    const [member] = await db.select({ orgId: kycOrgMembers.orgId })
       .from(kycOrgMembers)
-      .where(and(
-        eq(kycOrgMembers.userId, userId),
-        eq(kycOrgMembers.inviteStatus, "accepted"),
-      ))
+      .where(and(eq(kycOrgMembers.userId, userId), eq(kycOrgMembers.inviteStatus, "accepted")))
       .limit(1);
-    return memberRow?.orgId ?? null;
-  } catch {
-    return null;
-  }
+    return member?.orgId ?? null;
+  } catch { return null; }
 }
 
-/**
- * Resolve the current ACTIVE CIE subscription for a user.
- * If the user belongs to an org → look up by orgId (org-scoped).
- * Otherwise → look up by userId (personal subscription).
- * Returns both the resolved orgId and the active subscription.
- */
 async function resolveUserCieBilling(userId: string): Promise<{
   orgId: number | null;
   activeSub: CieSubscription | undefined;
@@ -236,15 +160,66 @@ async function resolveUserCieBilling(userId: string): Promise<{
   return { orgId, activeSub };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared checkout helper — used by subscribe / upgrade / downgrade
-// Returns the checkout data object; callers are responsible for res.json().
-// ─────────────────────────────────────────────────────────────────────────────
-type CieCheckoutResult =
+// ─── Plan-switch helpers ───────────────────────────────────────────────────────
+
+/**
+ * Create a new Paystack subscription directly using a stored authorization code.
+ * This avoids a new checkout page and prevents double-billing.
+ * start_date defaults to the current period end of the old subscription if available.
+ */
+async function createPaystackSubscriptionDirect(params: {
+  customerCode: string;
+  authorizationCode: string;
+  planCode: string;
+  startDate?: Date;
+}): Promise<{ subscriptionCode: string; customerCode: string } | null> {
+  try {
+    const body: Record<string, unknown> = {
+      customer: params.customerCode,
+      plan: params.planCode,
+      authorization: params.authorizationCode,
+    };
+    if (params.startDate) body.start_date = params.startDate.toISOString();
+    const result = await paystackReq<any>("/subscription", "POST", body);
+    return {
+      subscriptionCode: result.subscription_code,
+      customerCode: result.customer?.customer_code || params.customerCode,
+    };
+  } catch (err: any) {
+    console.warn("[CIE Billing] Direct subscription creation failed:", err.message);
+    return null;
+  }
+}
+
+/**
+ * Attempt to disable a Paystack subscription.
+ * Paystack requires an email token for customer-initiated cancellations,
+ * but platform-initiated disable (with secret key) works with subscription code only
+ * on some plan types. Returns true if successful.
+ */
+async function disablePaystackSubscription(subscriptionCode: string): Promise<boolean> {
+  try {
+    await paystackReq("/subscription/disable", "POST", { code: subscriptionCode });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getPaystackManagementLink(subscriptionCode: string): Promise<string | null> {
+  try {
+    const r = await paystackReq<{ link: string }>(`/subscription/${subscriptionCode}/manage/link`);
+    return r.link;
+  } catch { return null; }
+}
+
+// ─── Checkout helper ───────────────────────────────────────────────────────────
+
+type CheckoutResult =
   | { ok: true; data: Record<string, unknown> }
   | { ok: false; status: number; error: string; code?: string };
 
-async function buildCieCheckout(params: {
+async function buildCheckout(params: {
   req: any;
   userId: string;
   userEmail: string;
@@ -252,105 +227,71 @@ async function buildCieCheckout(params: {
   tier: "subscriber" | "pro";
   previousSubscriptionId?: number;
   actionLabel: string;
-}): Promise<CieCheckoutResult> {
+}): Promise<CheckoutResult> {
   const { req, userId, userEmail, orgId, tier, previousSubscriptionId, actionLabel } = params;
-
-  const planCode = getPlanCode(tier);
-  if (!planCode) {
-    return {
-      ok: false,
-      status: 503,
-      error: `CIE ${tier} plan is not yet configured. Please contact support.`,
-      code: "PLAN_NOT_CONFIGURED",
-    };
-  }
+  const code = planCode(tier);
+  if (!code) return { ok: false, status: 503, error: `CIE ${tier} plan not configured`, code: "PLAN_NOT_CONFIGURED" };
 
   const reference = `cie_sub_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
-  const baseUrl = req.headers.origin ||
+  const base = req.headers.origin ||
     (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "https://cellionone.com");
 
-  const txResult = await paystackRequest<{
-    authorization_url: string;
-    access_code: string;
-    reference: string;
-  }>("/transaction/initialize", "POST", {
-    email: userEmail,
-    amount: TIER_AMOUNTS_KOBO[tier],
-    reference,
-    plan: planCode,
-    currency: "NGN",
-    callback_url: `${baseUrl}/cie/subscribe/success?reference=${reference}`,
-    metadata: {
-      type: "cie_subscription",
-      userId,
-      tier,
-      orgId: orgId ?? null,
-      ...(previousSubscriptionId ? { previousSubscriptionId } : {}),
-      custom_fields: [
-        { display_name: "CIE Tier", variable_name: "cie_tier", value: tier },
-        { display_name: "User ID", variable_name: "user_id", value: userId },
-      ],
+  const tx = await paystackReq<{ authorization_url: string; reference: string }>(
+    "/transaction/initialize", "POST", {
+      email: userEmail,
+      amount: TIER_AMOUNTS_KOBO[tier],
+      reference, plan: code, currency: "NGN",
+      callback_url: `${base}/cie/subscribe/success?reference=${reference}`,
+      metadata: {
+        type: "cie_subscription", userId, tier, orgId: orgId ?? null,
+        ...(previousSubscriptionId ? { previousSubscriptionId } : {}),
+        custom_fields: [
+          { display_name: "CIE Tier", variable_name: "cie_tier", value: tier },
+          { display_name: "User ID",  variable_name: "user_id",  value: userId },
+        ],
+      },
     },
-  });
+  );
 
-  const pendingSub = await storage.createCieSubscription({
-    userId,
-    orgId: orgId ?? undefined,
-    tier,
-    status: "pending",
-    paystackEmail: userEmail,
-    paystackPlanCode: planCode,
-    paystackReference: reference,
+  const pending = await storage.createCieSubscription({
+    userId, orgId: orgId ?? undefined, tier, status: "pending",
+    paystackEmail: userEmail, paystackPlanCode: code, paystackReference: reference,
   });
 
   await storage.createAuditLog({
-    actorUserId: userId,
-    action: actionLabel,
-    entityType: "cie_subscription",
-    entityId: String(pendingSub.id),
-    details: { tier, reference, planCode, orgId, previousSubscriptionId },
+    actorUserId: userId, action: actionLabel,
+    entityType: "cie_subscription", entityId: String(pending.id),
+    details: { tier, reference, planCode: code, orgId, previousSubscriptionId },
   });
 
-  return {
-    ok: true,
-    data: {
-      authorizationUrl: txResult.authorization_url,
-      reference,
-      subscriptionId: pendingSub.id,
-      tier,
-      amountNaira: TIER_AMOUNTS_KOBO[tier] / 100,
-      currency: "NGN",
-    },
-  };
+  return { ok: true, data: { authorizationUrl: tx.authorization_url, reference, subscriptionId: pending.id, tier, amountNaira: TIER_AMOUNTS_KOBO[tier] / 100, currency: "NGN" } };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Route registration
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Routes ────────────────────────────────────────────────────────────────────
+
 export function registerCieBillingRoutes(app: Express): void {
-  // ──────────────────────────────────────────────────────────────────────────
+
   // GET /api/cie-billing/status
-  // ──────────────────────────────────────────────────────────────────────────
   app.get("/api/cie-billing/status", isAuthenticated, async (req: any, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
       const { orgId, activeSub } = await resolveUserCieBilling(userId);
-
       return res.json({
         id: activeSub?.id,
-        tier: activeSub ? activeSub.tier : "free",
-        status: activeSub ? activeSub.status : "none",
+        tier: activeSub?.tier ?? "free",
+        status: activeSub?.status ?? "none",
         orgId: orgId ?? undefined,
         currentPeriodStart: activeSub?.currentPeriodStart,
         currentPeriodEnd: activeSub?.currentPeriodEnd,
-        cancelAtPeriodEnd: activeSub?.cancelAtPeriodEnd,
+        renewalDate: activeSub?.currentPeriodEnd ?? null,
+        nextAmount: activeSub ? TIER_AMOUNTS_KOBO[activeSub.tier as "subscriber" | "pro"] / 100 : 0,
+        cancelAtPeriodEnd: activeSub?.cancelAtPeriodEnd ?? false,
         paystackSubscriptionCode: activeSub?.paystackSubscriptionCode,
         plans: {
-          free: { amountNaira: 0, interval: "none" },
-          subscriber: { amountNaira: TIER_AMOUNTS_KOBO.subscriber / 100, interval: "monthly" },
-          pro: { amountNaira: TIER_AMOUNTS_KOBO.pro / 100, interval: "monthly" },
+          free:       { amountNaira: 0,                                    interval: "none" },
+          subscriber: { amountNaira: TIER_AMOUNTS_KOBO.subscriber / 100,   interval: "monthly" },
+          pro:        { amountNaira: TIER_AMOUNTS_KOBO.pro / 100,          interval: "monthly" },
         },
         currency: "NGN",
       });
@@ -360,62 +301,34 @@ export function registerCieBillingRoutes(app: Express): void {
     }
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
   // POST /api/cie-billing/subscribe
-  // Initiate a new CIE subscription (subscriber or pro).
-  // ──────────────────────────────────────────────────────────────────────────
   app.post("/api/cie-billing/subscribe", isAuthenticated, async (req: any, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
       const { tier } = z.object({ tier: z.enum(["subscriber", "pro"]) }).parse(req.body);
 
-      const cieEnabled = await storage.getFeatureFlag("enable_cie_service");
-      if (!cieEnabled?.isEnabled) {
-        return res.status(503).json({ error: "CIE service is not currently available" });
-      }
+      const flag = await storage.getFeatureFlag("enable_cie_service");
+      if (!flag?.isEnabled) return res.status(503).json({ error: "CIE service is not currently available" });
 
       const user = await storage.getUser(userId);
       if (!user?.email) return res.status(400).json({ error: "User email is required" });
 
       const { orgId, activeSub } = await resolveUserCieBilling(userId);
-
-      // Reject if already on this tier or a higher tier
-      if (activeSub) {
-        if (activeSub.tier === tier) {
-          return res.status(409).json({
-            error: `Already on an active CIE ${TIER_LABELS[tier]} subscription`,
-            subscriptionId: activeSub.id,
-          });
-        }
-        if (activeSub.tier === "pro" && tier === "subscriber") {
-          return res.status(409).json({
-            error: "Already on a higher CIE Pro plan. Use /downgrade to switch.",
-            subscriptionId: activeSub.id,
-          });
-        }
+      if (activeSub?.tier === tier) return res.status(409).json({ error: `Already on active CIE ${TIER_LABELS[tier]}`, subscriptionId: activeSub.id });
+      if (activeSub?.tier === "pro" && tier === "subscriber") {
+        return res.status(409).json({ error: "Already on CIE Pro. Use /downgrade to switch.", subscriptionId: activeSub.id });
       }
 
-      // Reject duplicate pending record for the same tier
-      const latestSub = orgId
-        ? (await db.select().from(cieSubscriptions)
-            .where(and(eq(cieSubscriptions.orgId, orgId), eq(cieSubscriptions.status, "pending")))
-            .orderBy(desc(cieSubscriptions.createdAt))
-            .limit(1))[0]
+      // Prevent duplicate pending record for same tier
+      const latestPending = orgId
+        ? (await db.select().from(cieSubscriptions).where(and(eq(cieSubscriptions.orgId, orgId), eq(cieSubscriptions.status, "pending"))).orderBy(desc(cieSubscriptions.createdAt)).limit(1))[0]
         : await storage.getLatestCieSubscriptionByUserId(userId);
-
-      if (latestSub?.status === "pending" && latestSub.tier === tier) {
-        return res.status(409).json({
-          error: `A pending CIE ${tier} subscription already exists. Complete checkout or wait for it to expire.`,
-          subscriptionId: latestSub.id,
-        });
+      if (latestPending?.status === "pending" && latestPending.tier === tier) {
+        return res.status(409).json({ error: `Pending CIE ${tier} subscription exists. Complete checkout or wait for it to expire.`, subscriptionId: latestPending.id });
       }
 
-      const result = await buildCieCheckout({
-        req, userId, userEmail: user.email, orgId, tier,
-        actionLabel: "cie_subscription_initiated",
-      });
+      const result = await buildCheckout({ req, userId, userEmail: user.email, orgId, tier, actionLabel: "cie_subscription_initiated" });
       return result.ok ? res.json(result.data) : res.status(result.status).json({ error: result.error, code: result.code });
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: err.errors });
@@ -424,52 +337,48 @@ export function registerCieBillingRoutes(app: Express): void {
     }
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
   // POST /api/cie-billing/cancel
-  // Cancel the current active subscription at period end.
-  // ──────────────────────────────────────────────────────────────────────────
+  // Disables the Paystack subscription from the platform and marks our record as pending cancel.
+  // Falls back to a management link if Paystack disable requires user interaction.
   app.post("/api/cie-billing/cancel", isAuthenticated, async (req: any, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
       const { orgId, activeSub: sub } = await resolveUserCieBilling(userId);
-      if (!sub) return res.status(404).json({ error: "No active CIE subscription found" });
+      if (!sub) return res.status(404).json({ error: "No active CIE subscription" });
 
-      await storage.updateCieSubscription(sub.id, { cancelAtPeriodEnd: true });
-
-      let managementLink: string | null = null;
+      // Attempt platform-initiated Paystack disable
+      let paystackCancelled = false;
       if (sub.paystackSubscriptionCode) {
-        try {
-          const linkResult = await paystackRequest<{ link: string }>(
-            `/subscription/${sub.paystackSubscriptionCode}/manage/link`,
-          );
-          managementLink = linkResult.link;
-        } catch (e: any) {
-          console.warn("[CIE Billing] Failed to get Paystack management link:", e.message);
-        }
+        paystackCancelled = await disablePaystackSubscription(sub.paystackSubscriptionCode);
       }
 
+      await storage.updateCieSubscription(sub.id, {
+        cancelAtPeriodEnd: true,
+        ...(paystackCancelled ? { cancelledAt: new Date() } : {}),
+      });
+
+      const managementLink = sub.paystackSubscriptionCode && !paystackCancelled
+        ? await getPaystackManagementLink(sub.paystackSubscriptionCode)
+        : null;
+
       await storage.createAuditLog({
-        actorUserId: userId,
-        action: "cie_subscription_cancel_requested",
-        entityType: "cie_subscription",
-        entityId: String(sub.id),
-        details: { tier: sub.tier, orgId, cancelAtPeriodEnd: true },
+        actorUserId: userId, action: "cie_subscription_cancel_requested",
+        entityType: "cie_subscription", entityId: String(sub.id),
+        details: { tier: sub.tier, orgId, paystackCancelled, cancelAtPeriodEnd: true },
       });
 
       await storage.createNotification({
-        userId,
-        title: "CIE Subscription Cancellation Requested",
-        message: `Your CIE ${TIER_LABELS[sub.tier as CieTier]} subscription will cancel at the end of the billing period.`,
-        type: "info",
-        linkUrl: "/cie/subscribe",
+        userId, title: "CIE Subscription Cancellation Requested",
+        message: `Your ${TIER_LABELS[sub.tier as CieTier]} subscription will cancel at period end.`,
+        type: "info", linkUrl: "/cie/subscribe",
       });
 
       return res.json({
-        message: "Subscription set to cancel at period end",
+        message: paystackCancelled ? "Subscription cancelled on Paystack" : "Subscription set to cancel at period end",
         currentPeriodEnd: sub.currentPeriodEnd,
         cancelAtPeriodEnd: true,
+        paystackCancelled,
         managementLink,
       });
     } catch (err: any) {
@@ -478,27 +387,59 @@ export function registerCieBillingRoutes(app: Express): void {
     }
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // POST /api/cie-billing/upgrade
-  // Upgrade Subscriber → Pro.
-  // ──────────────────────────────────────────────────────────────────────────
+  // POST /api/cie-billing/upgrade  (Subscriber → Pro)
+  // Uses stored Paystack authorization code for a direct plan switch where available.
+  // Falls back to checkout page if authorization code not yet stored.
   app.post("/api/cie-billing/upgrade", isAuthenticated, async (req: any, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
       const { orgId, activeSub } = await resolveUserCieBilling(userId);
       if (!activeSub) return res.status(404).json({ error: "No active CIE subscription to upgrade" });
-      if (activeSub.tier === "pro") return res.status(409).json({ error: "Already on the CIE Pro tier" });
+      if (activeSub.tier === "pro") return res.status(409).json({ error: "Already on CIE Pro" });
 
       const user = await storage.getUser(userId);
-      if (!user?.email) return res.status(400).json({ error: "User email is required" });
+      if (!user?.email) return res.status(400).json({ error: "User email required" });
 
-      const result = await buildCieCheckout({
-        req, userId, userEmail: user.email, orgId, tier: "pro",
-        previousSubscriptionId: activeSub.id,
-        actionLabel: "cie_subscription_upgrade_initiated",
-      });
+      const proPlanCode = planCode("pro");
+      if (!proPlanCode) return res.status(503).json({ error: "CIE Pro plan not configured", code: "PLAN_NOT_CONFIGURED" });
+
+      // Direct plan switch using stored authorization code (no new checkout; avoids double-billing)
+      if (activeSub.paystackAuthorizationCode && activeSub.paystackCustomerCode) {
+        const newPs = await createPaystackSubscriptionDirect({
+          customerCode: activeSub.paystackCustomerCode,
+          authorizationCode: activeSub.paystackAuthorizationCode,
+          planCode: proPlanCode,
+          startDate: activeSub.currentPeriodEnd ?? undefined,
+        });
+
+        if (newPs) {
+          // Disable old subscription, create new active DB record, expire old
+          if (activeSub.paystackSubscriptionCode) {
+            await disablePaystackSubscription(activeSub.paystackSubscriptionCode);
+          }
+          const periodStart = activeSub.currentPeriodEnd ?? new Date();
+          const periodEnd = new Date(periodStart); periodEnd.setDate(periodEnd.getDate() + 30);
+
+          const newSub = await storage.createCieSubscription({
+            userId, orgId: orgId ?? undefined, tier: "pro", status: "active",
+            paystackSubscriptionCode: newPs.subscriptionCode,
+            paystackCustomerCode: newPs.customerCode,
+            paystackAuthorizationCode: activeSub.paystackAuthorizationCode,
+            paystackEmail: user.email, paystackPlanCode: proPlanCode,
+            currentPeriodStart: periodStart, currentPeriodEnd: periodEnd,
+          });
+          await storage.updateCieSubscription(activeSub.id, { status: "expired", cancelledAt: new Date() });
+          if (orgId) { try { const { invalidateCieApiKeyTierCache } = await import("../middleware/apiKeyAuth"); invalidateCieApiKeyTierCache(orgId); } catch {} }
+
+          await storage.createAuditLog({ actorUserId: userId, action: "cie_subscription_upgraded_direct", entityType: "cie_subscription", entityId: String(newSub.id), details: { from: "subscriber", to: "pro", previousId: activeSub.id } });
+          await storage.createNotification({ userId, title: "Upgraded to CIE Pro", message: `Your CIE Pro subscription starts ${periodStart.toLocaleDateString("en-NG")}.`, type: "success", linkUrl: "/cie/subscribe" });
+          return res.json({ subscriptionId: newSub.id, tier: "pro", amountNaira: TIER_AMOUNTS_KOBO.pro / 100, directSwitch: true, currency: "NGN" });
+        }
+      }
+
+      // Fallback: checkout page if no authorization code stored yet
+      const result = await buildCheckout({ req, userId, userEmail: user.email, orgId, tier: "pro", previousSubscriptionId: activeSub.id, actionLabel: "cie_subscription_upgrade_initiated" });
       return result.ok ? res.json(result.data) : res.status(result.status).json({ error: result.error, code: result.code });
     } catch (err: any) {
       console.error("[CIE Billing] Upgrade error:", err);
@@ -506,59 +447,62 @@ export function registerCieBillingRoutes(app: Express): void {
     }
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // POST /api/cie-billing/downgrade
-  // Downgrade Pro → Subscriber.
-  // Creates a new pending Subscriber subscription with a checkout payment.
-  // When charge.success fires, the Pro subscription is marked expired and the
-  // Subscriber subscription becomes active.
-  // The caller also receives a Paystack management link to disable the Pro
-  // recurring plan on Paystack's side.
-  // ──────────────────────────────────────────────────────────────────────────
+  // POST /api/cie-billing/downgrade  (Pro → Subscriber)
+  // Direct plan switch where authorization code is available. Checkout fallback otherwise.
   app.post("/api/cie-billing/downgrade", isAuthenticated, async (req: any, res: Response) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
       const { orgId, activeSub } = await resolveUserCieBilling(userId);
       if (!activeSub) return res.status(404).json({ error: "No active CIE subscription to downgrade" });
-      if (activeSub.tier !== "pro") {
-        return res.status(409).json({
-          error: `Current tier is "${activeSub.tier}" — downgrade is only applicable from Pro`,
-        });
-      }
+      if (activeSub.tier !== "pro") return res.status(409).json({ error: `Current tier is "${activeSub.tier}". Downgrade only applies to Pro.` });
 
       const user = await storage.getUser(userId);
-      if (!user?.email) return res.status(400).json({ error: "User email is required" });
+      if (!user?.email) return res.status(400).json({ error: "User email required" });
 
-      // Mark the current Pro subscription as pending cancellation
-      await storage.updateCieSubscription(activeSub.id, { cancelAtPeriodEnd: true });
+      const subPlanCode = planCode("subscriber");
+      if (!subPlanCode) return res.status(503).json({ error: "CIE Subscriber plan not configured", code: "PLAN_NOT_CONFIGURED" });
 
-      // Obtain a Paystack management link so the user can disable the Pro recurring plan
-      let managementLink: string | null = null;
-      if (activeSub.paystackSubscriptionCode) {
-        try {
-          const linkResult = await paystackRequest<{ link: string }>(
-            `/subscription/${activeSub.paystackSubscriptionCode}/manage/link`,
-          );
-          managementLink = linkResult.link;
-        } catch (e: any) {
-          console.warn("[CIE Billing] Failed to get management link for downgrade:", e.message);
+      if (activeSub.paystackAuthorizationCode && activeSub.paystackCustomerCode) {
+        const newPs = await createPaystackSubscriptionDirect({
+          customerCode: activeSub.paystackCustomerCode,
+          authorizationCode: activeSub.paystackAuthorizationCode,
+          planCode: subPlanCode,
+          startDate: activeSub.currentPeriodEnd ?? undefined,
+        });
+
+        if (newPs) {
+          if (activeSub.paystackSubscriptionCode) {
+            await disablePaystackSubscription(activeSub.paystackSubscriptionCode);
+          }
+          const periodStart = activeSub.currentPeriodEnd ?? new Date();
+          const periodEnd = new Date(periodStart); periodEnd.setDate(periodEnd.getDate() + 30);
+
+          const newSub = await storage.createCieSubscription({
+            userId, orgId: orgId ?? undefined, tier: "subscriber", status: "active",
+            paystackSubscriptionCode: newPs.subscriptionCode,
+            paystackCustomerCode: newPs.customerCode,
+            paystackAuthorizationCode: activeSub.paystackAuthorizationCode,
+            paystackEmail: user.email, paystackPlanCode: subPlanCode,
+            currentPeriodStart: periodStart, currentPeriodEnd: periodEnd,
+          });
+          await storage.updateCieSubscription(activeSub.id, { status: "expired", cancelledAt: new Date() });
+          if (orgId) { try { const { invalidateCieApiKeyTierCache } = await import("../middleware/apiKeyAuth"); invalidateCieApiKeyTierCache(orgId); } catch {} }
+
+          await storage.createAuditLog({ actorUserId: userId, action: "cie_subscription_downgraded_direct", entityType: "cie_subscription", entityId: String(newSub.id), details: { from: "pro", to: "subscriber", previousId: activeSub.id } });
+          await storage.createNotification({ userId, title: "Downgraded to CIE Subscriber", message: `Your CIE Subscriber plan starts ${periodStart.toLocaleDateString("en-NG")}.`, type: "info", linkUrl: "/cie/subscribe" });
+          return res.json({ subscriptionId: newSub.id, tier: "subscriber", amountNaira: TIER_AMOUNTS_KOBO.subscriber / 100, directSwitch: true, currency: "NGN" });
         }
       }
 
-      // Initiate the new Subscriber checkout; webhook will expire the Pro on success
-      const result = await buildCieCheckout({
-        req, userId, userEmail: user.email, orgId, tier: "subscriber",
-        previousSubscriptionId: activeSub.id,
-        actionLabel: "cie_subscription_downgrade_initiated",
-      });
+      // Fallback: checkout page + management link for old plan
+      await storage.updateCieSubscription(activeSub.id, { cancelAtPeriodEnd: true });
+      const managementLink = activeSub.paystackSubscriptionCode
+        ? await getPaystackManagementLink(activeSub.paystackSubscriptionCode)
+        : null;
 
-      if (!result.ok) {
-        return res.status(result.status).json({ error: result.error, code: result.code });
-      }
-
-      // Include the Paystack management link so the user can also disable the Pro plan
+      const result = await buildCheckout({ req, userId, userEmail: user.email, orgId, tier: "subscriber", previousSubscriptionId: activeSub.id, actionLabel: "cie_subscription_downgrade_initiated" });
+      if (!result.ok) return res.status(result.status).json({ error: result.error, code: result.code });
       return res.json({ ...result.data, managementLink });
     } catch (err: any) {
       console.error("[CIE Billing] Downgrade error:", err);

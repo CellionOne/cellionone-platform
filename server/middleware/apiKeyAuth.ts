@@ -1,21 +1,75 @@
 import type { Request, Response, NextFunction } from "express";
 import { validateApiKey, checkRateLimit, logApiUsage } from "../services/kycApiKeyService";
 import { db } from "../db";
-import { eq } from "drizzle-orm";
-import { kycBillingAccounts, kycCreditTransactions } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+import { kycBillingAccounts, kycCreditTransactions, cieSubscriptions } from "@shared/schema";
 import { sql } from "drizzle-orm";
+
+type CieTier = "free" | "subscriber" | "pro";
 
 export interface ApiKeyRequest extends Request {
   apiKeyContext?: {
     apiKeyId: number;
     orgId: number;
     permissions: string[];
+    /** Resolved CIE tier — populated when skipBillingCheck is true (CIE routes). */
+    cieTier?: CieTier;
   };
 }
 
 export interface ApiKeyAuthOptions {
-  /** When true, skip the KYC billing account check. Use for non-KYC APIs (e.g. CIE). */
+  /** When true, skip the KYC billing account check and resolve CIE subscription tier. */
   skipBillingCheck?: boolean;
+}
+
+/** 5-minute in-memory cache keyed by orgId. Invalidated by invalidateCieOrgTierCache(). */
+const cieTierCache = new Map<number, { tier: CieTier; fetchedAt: number }>();
+const CIE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+export function invalidateCieApiKeyTierCache(orgId: number): void {
+  cieTierCache.delete(orgId);
+}
+
+async function resolveCieTier(orgId: number, permissions: string[]): Promise<CieTier> {
+  const cached = cieTierCache.get(orgId);
+  if (cached && Date.now() - cached.fetchedAt < CIE_CACHE_TTL_MS) {
+    return cached.tier;
+  }
+
+  let tier: CieTier = "free";
+  try {
+    // Step 1: Look for the current active subscription
+    const [activeSub] = await db.select({ tier: cieSubscriptions.tier })
+      .from(cieSubscriptions)
+      .where(and(eq(cieSubscriptions.orgId, orgId), eq(cieSubscriptions.status, "active")))
+      .orderBy(desc(cieSubscriptions.currentPeriodEnd))
+      .limit(1);
+
+    if (activeSub) {
+      tier = activeSub.tier as CieTier;
+    } else {
+      // Step 2: Check if any subscription history exists
+      const [anySub] = await db.select({ id: cieSubscriptions.id })
+        .from(cieSubscriptions)
+        .where(eq(cieSubscriptions.orgId, orgId))
+        .limit(1);
+
+      if (anySub) {
+        // History exists but no active row → downgraded to free
+        tier = "free";
+      } else {
+        // No history → fall back to API key permission flags (backward compat)
+        if (permissions.includes("cie:pro")) tier = "pro";
+        else if (permissions.includes("cie:subscriber")) tier = "subscriber";
+      }
+    }
+  } catch (err) {
+    console.error("[apiKeyAuth] CIE tier resolution error — defaulting to free:", err);
+    tier = "free";
+  }
+
+  cieTierCache.set(orgId, { tier, fetchedAt: Date.now() });
+  return tier;
 }
 
 /**
@@ -138,10 +192,16 @@ export function authenticateApiKey(requiredPermission?: string | string[], optio
       }
     }
 
+    // Resolve CIE subscription tier for CIE API routes (skipBillingCheck = true)
+    const cieTier = options?.skipBillingCheck
+      ? await resolveCieTier(orgId, permissions)
+      : undefined;
+
     req.apiKeyContext = {
       apiKeyId: keyRecord.id,
       orgId,
       permissions,
+      cieTier,
     };
 
     res.on("finish", () => {

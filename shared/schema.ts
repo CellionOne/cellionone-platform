@@ -2226,6 +2226,7 @@ export const cieSubscriptions = pgTable("cie_subscriptions", {
   status: varchar("status", { length: 20 }).notNull().default("active"), // active | cancelled | expired | past_due
   paystackSubscriptionCode: varchar("paystack_subscription_code", { length: 100 }),
   paystackCustomerCode: varchar("paystack_customer_code", { length: 100 }),
+  paystackAuthorizationCode: varchar("paystack_authorization_code", { length: 100 }),
   paystackPlanCode: varchar("paystack_plan_code", { length: 100 }),
   paystackEmail: varchar("paystack_email", { length: 255 }),
   paystackReference: varchar("paystack_reference", { length: 255 }),

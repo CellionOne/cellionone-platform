@@ -755,6 +755,8 @@ async function handleCieSubscriptionSuccess(data: PaystackWebhookEvent['data']):
   //    (the reference we set when calling POST /transaction/initialize)
   let targetSub = await storage.getCieSubscriptionByReference(paystackReference);
 
+  const authorizationCode = (data as any).authorization?.authorization_code || null;
+
   if (targetSub) {
     // Activate the pending record
     await storage.updateCieSubscription(targetSub.id, {
@@ -763,6 +765,7 @@ async function handleCieSubscriptionSuccess(data: PaystackWebhookEvent['data']):
       orgId: orgId || targetSub.orgId || undefined,
       paystackSubscriptionCode: subscriptionCode || targetSub.paystackSubscriptionCode,
       paystackCustomerCode: customerCode || targetSub.paystackCustomerCode,
+      paystackAuthorizationCode: authorizationCode || targetSub.paystackAuthorizationCode,
       paystackEmail: data.customer?.email || targetSub.paystackEmail,
       paystackPlanCode: planData?.plan_code || targetSub.paystackPlanCode,
       paystackReference,
@@ -814,6 +817,7 @@ async function handleCieSubscriptionSuccess(data: PaystackWebhookEvent['data']):
       status: 'active',
       paystackSubscriptionCode: subscriptionCode,
       paystackCustomerCode: customerCode,
+      paystackAuthorizationCode: authorizationCode,
       paystackEmail: data.customer?.email || undefined,
       paystackPlanCode: planData?.plan_code || undefined,
       paystackReference,

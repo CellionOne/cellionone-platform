@@ -295,7 +295,7 @@ export function registerCieBillingRoutes(app: Express): void {
   // GET /api/cie-billing/status
   app.get("/api/cie-billing/status", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       const { orgId, activeSub } = await resolveUserCieBilling(userId);
       return res.json({
@@ -325,7 +325,7 @@ export function registerCieBillingRoutes(app: Express): void {
   // POST /api/cie-billing/subscribe
   app.post("/api/cie-billing/subscribe", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       const { tier } = z.object({ tier: z.enum(["subscriber", "pro"]) }).parse(req.body);
 
@@ -363,7 +363,7 @@ export function registerCieBillingRoutes(app: Express): void {
   // Falls back to a management link if Paystack disable requires user interaction.
   app.post("/api/cie-billing/cancel", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       const { orgId, activeSub: sub } = await resolveUserCieBilling(userId);
       if (!sub) return res.status(404).json({ error: "No active CIE subscription" });
@@ -413,7 +413,7 @@ export function registerCieBillingRoutes(app: Express): void {
   // Falls back to checkout page if authorization code not yet stored.
   app.post("/api/cie-billing/upgrade", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       const { orgId, activeSub } = await resolveUserCieBilling(userId);
       if (!activeSub) return res.status(404).json({ error: "No active CIE subscription to upgrade" });
@@ -472,7 +472,7 @@ export function registerCieBillingRoutes(app: Express): void {
   // Direct plan switch where authorization code is available. Checkout fallback otherwise.
   app.post("/api/cie-billing/downgrade", isAuthenticated, async (req: AuthBillingRequest, res: Response) => {
     try {
-      const userId = req.user?.id;
+      const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       const { orgId, activeSub } = await resolveUserCieBilling(userId);
       if (!activeSub) return res.status(404).json({ error: "No active CIE subscription to downgrade" });

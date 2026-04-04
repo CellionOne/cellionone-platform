@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
-import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts, cieSecurities, cieModelVersions, cieMarketPulse } from "@shared/schema";
+import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts, cieSecurities, cieModelVersions, cieMarketPulse, ciePartners, kycApiKeys } from "@shared/schema";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
@@ -429,6 +429,45 @@ export async function seedDatabase() {
       await seedCiePlans();
     } catch (planErr: any) {
       console.warn("[Seed] CIE plan seeding skipped:", planErr.message);
+    }
+
+    // Provision Icon eTrade as the first CIE partner (idempotent)
+    try {
+      const [existingPartner] = await db.select().from(ciePartners)
+        .where(eq(ciePartners.orgName, "Icon eTrade")).limit(1);
+
+      if (!existingPartner) {
+        const [partner] = await db.insert(ciePartners).values({
+          orgName: "Icon eTrade",
+          contactName: null,
+          contactEmail: null,
+          cellionRevenueSharePct: 60,
+          tier: "pro",
+          status: "active",
+          notes: "White-label reseller. Revenue share: 60% Cellion / 40% Icon eTrade. Pro tier (1,000 req/min). Contact details to be provided.",
+        }).returning();
+
+        // Generate CIE partner API key for Icon eTrade
+        const randomPart = crypto.randomBytes(16).toString("hex");
+        const fullKey = `co_live_${randomPart}`;
+        const keyPrefix = fullKey.slice(0, 12);
+        const keyHash = crypto.createHash("sha256").update(fullKey).digest("hex");
+
+        await db.insert(kycApiKeys).values({
+          ciePartnerId: partner.id,
+          keyPrefix,
+          keyHash,
+          name: `CIE Partner — ${partner.orgName}`,
+          permissions: ["cie:read"],
+          rateLimitPerMinute: 1000,
+          isActive: true,
+        });
+
+        console.log(`[Seed] Provisioned CIE partner: ${partner.orgName} (Pro, 60% Cellion share) — key prefix: ${keyPrefix}…`);
+        console.log(`[Seed] NOTE: Icon eTrade API key was generated. Retrieve via Admin → CIE → Partners tab → Regenerate Key if needed.`);
+      }
+    } catch (partnerErr: any) {
+      console.warn("[Seed] Icon eTrade partner provisioning skipped:", partnerErr.message);
     }
 
     console.log("Database seeding complete");

@@ -793,18 +793,22 @@ export function registerCieAdminRoutes(app: Express): void {
       const now = new Date();
       const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-      // Enrich each partner with their active key prefix and MTD call count
+      // Enrich each partner with their active key prefix and MTD call count.
+      // MTD calls are aggregated across ALL keys for the partner (active + revoked)
+      // so that calls made before a key rotation are not lost from reporting.
       const enriched = await Promise.all(partners.map(async (p) => {
-        const [activeKey] = await db.select({ id: kycApiKeys.id, keyPrefix: kycApiKeys.keyPrefix })
+        const allKeys = await db.select({ id: kycApiKeys.id, keyPrefix: kycApiKeys.keyPrefix, isActive: kycApiKeys.isActive })
           .from(kycApiKeys)
-          .where(and(eq(kycApiKeys.ciePartnerId, p.id), eq(kycApiKeys.isActive, true)))
-          .limit(1);
+          .where(eq(kycApiKeys.ciePartnerId, p.id));
 
+        const activeKey = allKeys.find(k => k.isActive) ?? null;
         let mtdCalls = 0;
-        if (activeKey) {
+
+        if (allKeys.length > 0) {
+          const keyIds = allKeys.map(k => k.id);
           const [usage] = await db.select({ cnt: count() }).from(kycApiUsageLogs)
             .where(and(
-              eq(kycApiUsageLogs.apiKeyId, activeKey.id),
+              sql`${kycApiUsageLogs.apiKeyId} IN (${sql.join(keyIds.map(id => sql`${id}`), sql`, `)})`,
               gte(kycApiUsageLogs.createdAt, mtdStart),
             ));
           mtdCalls = Number(usage?.cnt ?? 0);
@@ -897,6 +901,16 @@ export function registerCieAdminRoutes(app: Express): void {
       // Invalidate tier cache if tier or status changed
       if (parsed.data.tier !== undefined || parsed.data.status !== undefined) {
         invalidateCieApiKeyTierCache(null, null, id);
+      }
+
+      // If tier changed, immediately update rateLimitPerMinute on all active keys
+      // so the new rate limit takes effect without requiring key regeneration.
+      if (parsed.data.tier !== undefined) {
+        const PARTNER_RATE_LIMITS: Record<string, number> = { subscriber: 500, pro: 1000 };
+        const newRateLimit = PARTNER_RATE_LIMITS[parsed.data.tier] ?? 500;
+        await db.update(kycApiKeys)
+          .set({ rateLimitPerMinute: newRateLimit })
+          .where(and(eq(kycApiKeys.ciePartnerId, id), eq(kycApiKeys.isActive, true)));
       }
 
       res.json(updated);

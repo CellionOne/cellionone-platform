@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, boolean, timestamp, json, jsonb, serial, index, uniqueIndex, check } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, boolean, timestamp, json, jsonb, serial, index, uniqueIndex, check, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1310,8 +1310,8 @@ export const kycApiKeys = pgTable("kyc_api_keys", {
   id: serial("id").primaryKey(),
   organisationId: integer("organisation_id"),
   userId: varchar("user_id", { length: 255 }),
-  /** FK to cie_partners.id — set when this key is a CIE Partner key */
-  ciePartnerId: integer("cie_partner_id"),
+  /** FK to cie_partners.id — set when this key is a CIE Partner key (lazy ref avoids circular dependency) */
+  ciePartnerId: integer("cie_partner_id").references((): AnyPgColumn => ciePartners.id, { onDelete: "set null" }),
   keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
   keyHash: varchar("key_hash", { length: 128 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),

@@ -183,10 +183,8 @@ export const subscriptionScheduler = {
         .set({ status: newStatus, updatedAt: new Date() })
         .where(eq(cieSubscriptions.id, sub.id));
 
-      // Invalidate tier cache so next API call picks up Free tier
-      if (sub.orgId) {
-        try { invalidateCieApiKeyTierCache(sub.orgId); } catch {}
-      }
+      // Invalidate tier cache so next API call picks up Free tier (org-scoped and personal)
+      try { invalidateCieApiKeyTierCache(sub.orgId ?? null, sub.userId); } catch {}
 
       const message = sub.cancelAtPeriodEnd
         ? 'Your CIE subscription has ended. You now have free-tier access.'

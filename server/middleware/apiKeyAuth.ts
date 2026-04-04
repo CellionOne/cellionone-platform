@@ -10,7 +10,10 @@ type CieTier = "free" | "subscriber" | "pro";
 export interface ApiKeyRequest extends Request {
   apiKeyContext?: {
     apiKeyId: number;
-    orgId: number;
+    /** Org-scoped key owner. Null for personal CIE subscriber keys. */
+    orgId: number | null;
+    /** Personal key owner. Null for org-scoped keys. */
+    userId: string | null;
     permissions: string[];
     /** Resolved CIE tier — populated when skipBillingCheck is true (CIE routes). */
     cieTier?: CieTier;
@@ -22,16 +25,26 @@ export interface ApiKeyAuthOptions {
   skipBillingCheck?: boolean;
 }
 
-/** 5-minute in-memory cache keyed by orgId. Invalidated by invalidateCieOrgTierCache(). */
-const cieTierCache = new Map<number, { tier: CieTier; fetchedAt: number }>();
+/**
+ * 5-minute in-memory cache.
+ * Keyed as "org:<orgId>" for org-scoped keys or "user:<userId>" for personal keys.
+ * Invalidated by invalidateCieApiKeyTierCache().
+ */
+const cieTierCache = new Map<string, { tier: CieTier; fetchedAt: number }>();
 const CIE_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export function invalidateCieApiKeyTierCache(orgId: number): void {
-  cieTierCache.delete(orgId);
+export function invalidateCieApiKeyTierCache(orgId: number | null, userId?: string | null): void {
+  if (orgId !== null && orgId !== undefined) cieTierCache.delete(`org:${orgId}`);
+  if (userId) cieTierCache.delete(`user:${userId}`);
 }
 
-async function resolveCieTier(orgId: number, permissions: string[]): Promise<CieTier> {
-  const cached = cieTierCache.get(orgId);
+async function resolveCieTier(
+  orgId: number | null,
+  userId: string | null,
+  permissions: string[],
+): Promise<CieTier> {
+  const cacheKey = orgId !== null ? `org:${orgId}` : `user:${userId}`;
+  const cached = cieTierCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < CIE_CACHE_TTL_MS) {
     return cached.tier;
   }
@@ -40,12 +53,18 @@ async function resolveCieTier(orgId: number, permissions: string[]): Promise<Cie
   try {
     const now = new Date();
 
+    // Build the subscription ownership filter.
+    // Org-scoped keys match on orgId; personal keys match on userId.
+    const ownerFilter = orgId !== null
+      ? eq(cieSubscriptions.orgId, orgId)
+      : eq(cieSubscriptions.userId, userId as string);
+
     // Step 1: Look for an active, non-expired subscription
     // Requires status='active' AND currentPeriodEnd > now to prevent stale rows from granting access
     const [activeSub] = await db.select({ tier: cieSubscriptions.tier })
       .from(cieSubscriptions)
       .where(and(
-        eq(cieSubscriptions.orgId, orgId),
+        ownerFilter,
         eq(cieSubscriptions.status, "active"),
         gte(cieSubscriptions.currentPeriodEnd, now),
       ))
@@ -58,7 +77,7 @@ async function resolveCieTier(orgId: number, permissions: string[]): Promise<Cie
       // Step 2: Check if any subscription history exists
       const [anySub] = await db.select({ id: cieSubscriptions.id })
         .from(cieSubscriptions)
-        .where(eq(cieSubscriptions.orgId, orgId))
+        .where(ownerFilter)
         .limit(1);
 
       if (anySub) {
@@ -79,7 +98,7 @@ async function resolveCieTier(orgId: number, permissions: string[]): Promise<Cie
     tier = "free";
   }
 
-  cieTierCache.set(orgId, { tier, fetchedAt: Date.now() });
+  cieTierCache.set(cacheKey, { tier, fetchedAt: Date.now() });
   return tier;
 }
 
@@ -110,7 +129,7 @@ export function authenticateApiKey(requiredPermission?: string | string[], optio
       return res.status(401).json({ error: "Invalid or expired API key" });
     }
 
-    const { apiKey: keyRecord, orgId, permissions } = result;
+    const { apiKey: keyRecord, orgId, userId, permissions } = result;
 
     if (requiredPermission) {
       const required = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
@@ -145,6 +164,10 @@ export function authenticateApiKey(requiredPermission?: string | string[], optio
     }
 
     if (!options?.skipBillingCheck) {
+      // Personal CIE keys have no org and always use skipBillingCheck=true; reject defensively here.
+      if (orgId === null) {
+        return res.status(402).json({ error: "No billing account. Personal keys require a CIE subscription." });
+      }
       const [billingAccount] = await db.select().from(kycBillingAccounts)
         .where(eq(kycBillingAccounts.organisationId, orgId));
 
@@ -205,12 +228,13 @@ export function authenticateApiKey(requiredPermission?: string | string[], optio
 
     // Resolve CIE subscription tier for CIE API routes (skipBillingCheck = true)
     const cieTier = options?.skipBillingCheck
-      ? await resolveCieTier(orgId, permissions)
+      ? await resolveCieTier(orgId, userId, permissions)
       : undefined;
 
     req.apiKeyContext = {
       apiKeyId: keyRecord.id,
       orgId,
+      userId,
       permissions,
       cieTier,
     };

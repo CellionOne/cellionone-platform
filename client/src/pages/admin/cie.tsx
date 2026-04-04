@@ -188,6 +188,7 @@ function SecuritiesTab() {
                     <TableHead>Sector</TableHead>
                     <TableHead className="text-center">IAS</TableHead>
                     <TableHead className="text-center">RS</TableHead>
+                    <TableHead className="text-center">CS</TableHead>
                     <TableHead>Recommendation</TableHead>
                     <TableHead>Score Date</TableHead>
                     <TableHead>Status</TableHead>
@@ -204,6 +205,7 @@ function SecuritiesTab() {
                         <TableCell className="text-xs text-muted-foreground">{s.sector}</TableCell>
                         <TableCell className="text-center text-sm">{sc?.ias?.toFixed(1) ?? "—"}</TableCell>
                         <TableCell className="text-center text-sm">{sc?.rs?.toFixed(1) ?? "—"}</TableCell>
+                        <TableCell className="text-center text-sm">{sc?.cs?.toFixed(1) ?? "—"}</TableCell>
                         <TableCell>{recoBadge(sc?.recommendation ?? null)}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{formatDate(sc?.scoreDate)}</TableCell>
                         <TableCell>

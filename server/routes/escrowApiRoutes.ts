@@ -160,7 +160,7 @@ export function registerEscrowApiRoutes(app: Express): void {
       });
 
       const body = schema.parse(req.body);
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const reference = generateEscrowReference();
       const paystackRef = `co_esc_api_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 
@@ -254,7 +254,7 @@ export function registerEscrowApiRoutes(app: Express): void {
    */
   app.get("/api/v1/escrow/transactions", authenticateApiKey(["escrow:read", "escrow:write"]), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const status = req.query.status as string | undefined;
       const txs = await storage.listEscrowApiTransactions(orgId, status);
       res.json({
@@ -290,7 +290,7 @@ export function registerEscrowApiRoutes(app: Express): void {
    */
   app.get("/api/v1/escrow/transactions/:reference", authenticateApiKey(["escrow:read", "escrow:write"]), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const tx = await storage.getEscrowApiTransaction(req.params.reference);
       if (!tx || tx.orgId !== orgId) {
         return res.status(404).json({ error: "Escrow transaction not found" });
@@ -329,7 +329,7 @@ export function registerEscrowApiRoutes(app: Express): void {
    */
   app.post("/api/v1/escrow/transactions/:reference/release", authenticateApiKey("escrow:write"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const tx = await storage.getEscrowApiTransaction(req.params.reference);
       if (!tx || tx.orgId !== orgId) {
         return res.status(404).json({ error: "Escrow transaction not found" });
@@ -378,7 +378,7 @@ export function registerEscrowApiRoutes(app: Express): void {
    */
   app.post("/api/v1/escrow/transactions/:reference/dispute", authenticateApiKey("escrow:write"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const tx = await storage.getEscrowApiTransaction(req.params.reference);
       if (!tx || tx.orgId !== orgId) {
         return res.status(404).json({ error: "Escrow transaction not found" });

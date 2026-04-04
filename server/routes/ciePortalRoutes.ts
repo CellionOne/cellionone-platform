@@ -425,7 +425,7 @@ export function registerCiePortalRoutes(app: Express): void {
       const { label } = z.object({ label: z.string().min(1).max(100) }).parse(req.body);
       const orgId = await resolveUserOrg(userId);
 
-      const rawKey = `cie_${crypto.randomBytes(32).toString("hex")}`;
+      const rawKey = `co_live_${crypto.randomBytes(16).toString("hex")}`;
       const keyHash = crypto.createHash("sha256").update(rawKey).digest("hex");
       const keyPrefix = rawKey.substring(0, 12);
       const rateLimitPerMinute = tier === "pro" ? 1000 : 500;

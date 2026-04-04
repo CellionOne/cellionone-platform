@@ -67,7 +67,7 @@ async function handleIdLookup(
   idNumber: string,
   lookupFn: (id: string, ref: string) => Promise<smileId.IdLookupResult>,
 ) {
-  const orgId = req.apiKeyContext!.orgId;
+  const orgId = req.apiKeyContext!.orgId!;
 
   const hasCred = await billingService.hasCredits(orgId, "identity_only");
   if (!hasCred) {
@@ -262,7 +262,7 @@ export function registerKycApiRoutes(app: Express) {
         dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateOfBirth must be YYYY-MM-DD").optional(),
         nationality: z.string().max(3).optional(),
       }).parse(req.body);
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
 
       const hasCred = await billingService.hasCredits(orgId, "identity_only");
       if (!hasCred) {
@@ -334,7 +334,7 @@ export function registerKycApiRoutes(app: Express) {
   // POST /api/v1/kyc/verify/individual
   app.post("/api/v1/kyc/verify/individual", authenticateApiKey("verify:individual"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
 
       const schema = z.object({
         subjectEmail: z.string().email(),
@@ -421,7 +421,7 @@ export function registerKycApiRoutes(app: Express) {
   // POST /api/v1/kyc/verify/supplier
   app.post("/api/v1/kyc/verify/supplier", authenticateApiKey("verify:supplier"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
 
       const schema = z.object({
         subjectEmail: z.string().email(),
@@ -562,7 +562,7 @@ export function registerKycApiRoutes(app: Express) {
   // GET /api/v1/kyc/requests/:requestId
   app.get("/api/v1/kyc/requests/:requestId", authenticateApiKey(), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const requestId = parseInt(req.params.requestId as string);
       if (isNaN(requestId)) return res.status(400).json({ error: "Invalid request ID" });
 
@@ -657,7 +657,7 @@ export function registerKycApiRoutes(app: Express) {
   // GET /api/v1/kyc/requests
   app.get("/api/v1/kyc/requests", authenticateApiKey(), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const { status, type, page = "1", limit = "20" } = req.query as Record<string, string>;
 
       const pageNum = Math.max(1, parseInt(page) || 1);
@@ -709,7 +709,7 @@ export function registerKycApiRoutes(app: Express) {
   // GET /api/v1/kyc/requests/:requestId/certificate
   app.get("/api/v1/kyc/requests/:requestId/certificate", authenticateApiKey(), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const requestId = parseInt(req.params.requestId as string);
       if (isNaN(requestId)) return res.status(400).json({ error: "Invalid request ID" });
 
@@ -859,7 +859,7 @@ export function registerKycApiRoutes(app: Express) {
   // GET /api/v1/kyc/templates
   app.get("/api/v1/kyc/templates", authenticateApiKey(), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
 
       const templates = await db.select().from(kycVerificationTemplates)
         .where(eq(kycVerificationTemplates.orgId, orgId))
@@ -886,7 +886,7 @@ export function registerKycApiRoutes(app: Express) {
   // GET /api/v1/kyc/document-requirements/:templateId
   app.get("/api/v1/kyc/document-requirements/:templateId", authenticateApiKey(), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const templateId = parseInt(req.params.templateId as string);
       if (isNaN(templateId)) return res.status(400).json({ error: "Invalid template ID" });
 
@@ -938,7 +938,7 @@ export function registerKycApiRoutes(app: Express) {
   // POST /api/v1/kyc/sessions — create a hosted verification session
   app.post("/api/v1/kyc/sessions", authenticateApiKey("verify:individual"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
 
       const prefillSchema = z.object({
         firstName: z.string().max(100).optional(),
@@ -1059,7 +1059,7 @@ export function registerKycApiRoutes(app: Express) {
   // GET /api/v1/kyc/sessions — list sessions for the org
   app.get("/api/v1/kyc/sessions", authenticateApiKey("verify:individual"), async (req: ApiKeyRequest, res: Response) => {
     try {
-      const orgId = req.apiKeyContext!.orgId;
+      const orgId = req.apiKeyContext!.orgId!;
       const sessions = await db.select().from(kycSessions)
         .where(eq(kycSessions.orgId, orgId))
         .orderBy(desc(kycSessions.createdAt))

@@ -39,7 +39,7 @@ export async function generateApiKey(
 
 export async function validateApiKey(
   key: string
-): Promise<{ apiKey: KycApiKey; orgId: number; permissions: string[] } | null> {
+): Promise<{ apiKey: KycApiKey; orgId: number | null; userId: string | null; permissions: string[] } | null> {
   const keyHash = hashKey(key);
 
   const [apiKey] = await db.select().from(kycApiKeys)
@@ -57,7 +57,8 @@ export async function validateApiKey(
 
   return {
     apiKey,
-    orgId: apiKey.organisationId,
+    orgId: apiKey.organisationId ?? null,
+    userId: apiKey.userId ?? null,
     permissions: apiKey.permissions || [],
   };
 }

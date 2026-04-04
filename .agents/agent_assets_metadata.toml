@@ -12,3 +12,9 @@ id = "_gn3WbbH9cTrWU5aqxu5W"
 uri = "file://public/cie-api-docs.md"
 type = "text"
 title = "CIE API Reference — Cellion Intelligence Engine"
+
+[[outputs]]
+id = "v9rcYYYcs0GV-ldGEUzq3"
+uri = "file://Cellion_One_VaaS_Proposal.docx"
+type = "word_document"
+title = "Cellion One – Verification as a Service Proposal"

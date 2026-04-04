@@ -30,6 +30,7 @@ import {
   Download,
   Zap,
   GitCompare,
+  BarChart2,
 } from "lucide-react";
 
 function CodeBlock({ code, language = "bash" }: { code: string; language?: string }) {
@@ -138,6 +139,14 @@ const sidebarSections = [
   { id: "status-lifecycle", label: "Status Lifecycle" },
   { id: "attestation", label: "Verification Attestation" },
   { id: "escrow-api", label: "Escrow-as-a-Service" },
+  {
+    id: "cie-api",
+    label: "CIE Intelligence Engine",
+    children: [
+      { id: "cie-tiers", label: "Tiers & Scopes" },
+      { id: "cie-endpoints", label: "Endpoints" },
+    ],
+  },
   { id: "webhooks", label: "Webhooks" },
   { id: "errors", label: "Error Codes" },
   { id: "examples", label: "Code Examples" },
@@ -1936,6 +1945,320 @@ export default function ApiDocsPage() {
   }
 }`}
               />
+            </div>
+          </section>
+
+          <Separator />
+
+          {/* ═══════════════════════════════════════════════════════════════
+              CIE — Cellion Intelligence Engine
+          ════════════════════════════════════════════════════════════════ */}
+          <section id="cie-api" className="space-y-6 scroll-mt-24">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-cie-api">
+                <BarChart2 className="h-5 w-5" />
+                CIE Intelligence Engine
+              </h2>
+              <p className="text-muted-foreground leading-relaxed mt-2">
+                The <strong>Cellion Intelligence Engine (CIE)</strong> is a subscription API that delivers
+                NGX equity intelligence — IAS/RS/CS scores, ranked recommendations, dividend calendars,
+                analyst signals, and sector-rotation insights — to stockbroking firms, fintechs, and wealth
+                managers. All endpoints are served under <code className="bg-muted px-1 rounded">/api/v1/cie</code>.
+              </p>
+              <div className="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-200">
+                <strong>Authentication:</strong> Include your API key in the{" "}
+                <code className="bg-muted px-1 rounded">X-API-Key</code> header. CIE uses a
+                subscription-based billing model — separate from KYC credits. Contact{" "}
+                <a href="mailto:api@cellionone.com" className="underline">api@cellionone.com</a> to
+                activate a CIE subscription.
+              </div>
+            </div>
+
+            {/* ── Tiers & Scopes ─────────────────────────────────────────── */}
+            <div id="cie-tiers" className="scroll-mt-24 space-y-3">
+              <h3 className="text-lg font-semibold">Tiers &amp; Scopes</h3>
+              <p className="text-sm text-muted-foreground">
+                CIE access is gated by the permissions encoded in your API key. Each tier is additive —
+                Pro keys include all Subscriber capabilities.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border rounded-lg overflow-hidden">
+                  <thead>
+                    <tr className="bg-muted/60 text-left">
+                      <th className="px-4 py-3 font-medium">Tier</th>
+                      <th className="px-4 py-3 font-medium">Required Scope(s)</th>
+                      <th className="px-4 py-3 font-medium">Endpoints</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    <tr>
+                      <td className="px-4 py-3 font-medium">Free</td>
+                      <td className="px-4 py-3 font-mono text-xs">cie:read</td>
+                      <td className="px-4 py-3 text-muted-foreground">/pulse</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-3 font-medium">Subscriber</td>
+                      <td className="px-4 py-3 font-mono text-xs">cie:read + cie:subscriber</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        /pulse, /securities, /securities/:ticker, /securities/:ticker/history, /dividends
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-3 font-medium">Pro</td>
+                      <td className="px-4 py-3 font-mono text-xs">cie:read + cie:subscriber + cie:pro</td>
+                      <td className="px-4 py-3 text-muted-foreground">All endpoints, including /signals and /sector-rotation</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                When an endpoint requires a higher tier than your key holds, you'll receive a <code className="bg-muted px-1 rounded">403</code> response:
+              </p>
+              <CodeBlock code={`{
+  "error": "This endpoint requires CIE subscriber tier or higher",
+  "currentTier": "free",
+  "requiredTier": "subscriber",
+  "upgradeUrl": "https://cellionone.com/cie/subscribe",
+  "code": "INSUFFICIENT_CIE_TIER"
+}`} />
+            </div>
+
+            {/* ── Endpoints ──────────────────────────────────────────────── */}
+            <div id="cie-endpoints" className="scroll-mt-24 space-y-6">
+              <h3 className="text-lg font-semibold">Endpoints</h3>
+
+              {/* Market Pulse */}
+              <EndpointSection
+                method="GET"
+                path="/api/v1/cie/pulse"
+                badge="cie:read"
+                description="Snapshot of Nigerian market macro indicators — ASI index, daily % change, Brent crude price, and Naira/USD rate. Available on all CIE tiers."
+              >
+                <h4 className="text-sm font-semibold">Response</h4>
+                <CodeBlock language="json" code={`{
+  "available": true,
+  "asiIndex": 98752.34,
+  "asiDailyChangePct": 0.0042,
+  "brentCrudeUsd": 85.12,
+  "ngnPerUsd": 1610.50,
+  "source": "ngx_official",
+  "updatedAt": "2026-04-04T07:30:00.000Z"
+}`} />
+              </EndpointSection>
+
+              {/* Securities list */}
+              <EndpointSection
+                method="GET"
+                path="/api/v1/cie/securities"
+                badge="cie:subscriber"
+                description="Paginated list of all NGX securities with their latest IAS/RS/CS scores and recommendations. Requires Subscriber tier."
+              >
+                <ParamTable
+                  title="Query Parameters"
+                  params={[
+                    { field: "page",   type: "integer", required: "No", description: "Page number (default 1)" },
+                    { field: "limit",  type: "integer", required: "No", description: "Results per page, 1–100 (default 50)" },
+                    { field: "sector", type: "string",  required: "No", description: "Filter by NGX sector name (case-insensitive)" },
+                  ]}
+                />
+                <h4 className="text-sm font-semibold mt-4">Response</h4>
+                <CodeBlock language="json" code={`{
+  "securities": [
+    {
+      "ticker": "DANGCEM",
+      "name": "Dangote Cement PLC",
+      "sector": "Industrial Goods",
+      "ias": 74,
+      "rs": 28,
+      "cs": 82,
+      "recommendation": "Accumulate",
+      "scoreDate": "2026-04-04",
+      "updatedAt": "2026-04-04T08:00:00.000Z"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 50, "total": 148, "pages": 3 }
+}`} />
+              </EndpointSection>
+
+              {/* Security detail */}
+              <EndpointSection
+                method="GET"
+                path="/api/v1/cie/securities/:ticker"
+                badge="cie:subscriber"
+                description="Full score detail for a single NGX security, including pillar breakdown and latest OHLCV price data. Requires Subscriber tier."
+              >
+                <h4 className="text-sm font-semibold">Response</h4>
+                <CodeBlock language="json" code={`{
+  "ticker": "DANGCEM",
+  "name": "Dangote Cement PLC",
+  "sector": "Industrial Goods",
+  "isin": "NGDANGCEM0008",
+  "listingDate": "2010-10-26",
+  "sharesOutstanding": 17040507405,
+  "latestPrice": {
+    "date": "2026-04-04",
+    "closeNaira": 512.00,
+    "openNaira": 508.50,
+    "highNaira": 515.00,
+    "lowNaira": 507.00,
+    "volume": 1250000
+  },
+  "scores": {
+    "scoreDate": "2026-04-04",
+    "ias": 74,
+    "rs": 28,
+    "cs": 82,
+    "recommendation": "Accumulate",
+    "pillarBreakdown": {
+      "momentum": 68,
+      "liquidity": 72,
+      "valuation": 80,
+      "quality": 76,
+      "growth": 71,
+      "financialStrength": 79
+    },
+    "dataPointsUsed": 46,
+    "updatedAt": "2026-04-04T08:00:00.000Z"
+  }
+}`} />
+              </EndpointSection>
+
+              {/* Score history */}
+              <EndpointSection
+                method="GET"
+                path="/api/v1/cie/securities/:ticker/history"
+                badge="cie:subscriber"
+                description="IAS/RS/CS score time series for up to 90 days. Useful for trend analysis and portfolio rebalancing triggers. Requires Subscriber tier."
+              >
+                <ParamTable
+                  title="Query Parameters"
+                  params={[
+                    { field: "days", type: "integer", required: "No", description: "Lookback window, 1–90 (default 30)" },
+                  ]}
+                />
+                <h4 className="text-sm font-semibold mt-4">Response</h4>
+                <CodeBlock language="json" code={`{
+  "ticker": "DANGCEM",
+  "name": "Dangote Cement PLC",
+  "days": 30,
+  "count": 22,
+  "history": [
+    { "date": "2026-04-04", "ias": 74, "rs": 28, "cs": 82, "recommendation": "Accumulate" },
+    { "date": "2026-04-03", "ias": 71, "rs": 30, "cs": 80, "recommendation": "Accumulate" }
+  ]
+}`} />
+              </EndpointSection>
+
+              {/* Dividends */}
+              <EndpointSection
+                method="GET"
+                path="/api/v1/cie/dividends"
+                badge="cie:subscriber"
+                description="NGX ex-dividend calendar with urgency flags. Returns upcoming dividend events sorted by ex-dividend date. Requires Subscriber tier."
+              >
+                <ParamTable
+                  title="Query Parameters"
+                  params={[
+                    { field: "upcomingOnly", type: "boolean", required: "No", description: "Filter to only future ex-dates (default: true)" },
+                  ]}
+                />
+                <h4 className="text-sm font-semibold mt-4">Response</h4>
+                <CodeBlock language="json" code={`{
+  "count": 3,
+  "dividends": [
+    {
+      "ticker": "ZENITHBANK",
+      "name": "Zenith Bank PLC",
+      "exDividendDate": "2026-04-10",
+      "paymentDate": "2026-04-25",
+      "amountPerShareNaira": 3.50,
+      "urgency": "urgent",
+      "notes": "Final dividend FY2025"
+    }
+  ]
+}`} />
+                <p className="text-xs text-muted-foreground italic mt-2">
+                  urgency values: <code className="bg-muted px-1 rounded">urgent</code> (≤7 days),{" "}
+                  <code className="bg-muted px-1 rounded">soon</code> (≤21 days),{" "}
+                  <code className="bg-muted px-1 rounded">upcoming</code> (&gt;21 days)
+                </p>
+              </EndpointSection>
+
+              {/* Signals (Pro) */}
+              <EndpointSection
+                method="GET"
+                path="/api/v1/cie/signals"
+                badge="cie:pro"
+                description="Published analyst intelligence signals — rumours, news, trade calls, and market-wide commentary. Pro tier only."
+              >
+                <ParamTable
+                  title="Query Parameters"
+                  params={[
+                    { field: "limit", type: "integer", required: "No", description: "Max signals returned, 1–50 (default 20)" },
+                    { field: "type",  type: "string",  required: "No", description: "Filter: rumour | news | trade_call | sector_rotation | all (default: all)" },
+                  ]}
+                />
+                <h4 className="text-sm font-semibold mt-4">Response</h4>
+                <CodeBlock language="json" code={`{
+  "count": 5,
+  "signals": [
+    {
+      "id": 12,
+      "ticker": "MTNN",
+      "type": "trade_call",
+      "sentiment": "bullish",
+      "credibility": 4,
+      "content": "MTN Nigeria is likely to beat Q1 consensus on ARPU recovery...",
+      "tags": ["telecom", "earnings"],
+      "publishedAt": "2026-04-04T09:00:00.000Z",
+      "expiresAt": "2026-04-11T09:00:00.000Z"
+    }
+  ]
+}`} />
+              </EndpointSection>
+
+              {/* Sector Rotation (Pro) */}
+              <EndpointSection
+                method="GET"
+                path="/api/v1/cie/sector-rotation"
+                badge="cie:pro"
+                description="Cross-sectional sector rankings derived from average IAS scores. Returns momentum direction and top-3 securities per sector. Pro tier only."
+              >
+                <h4 className="text-sm font-semibold">Response</h4>
+                <CodeBlock language="json" code={`{
+  "scoreDate": "2026-04-04",
+  "totalSecurities": 148,
+  "sectors": [
+    {
+      "sector": "Banking",
+      "avgIas": 71,
+      "maxIas": 88,
+      "minIas": 45,
+      "count": 22,
+      "momentum": "bullish",
+      "top3": [
+        { "ticker": "ZENITHBANK", "name": "Zenith Bank PLC", "ias": 88, "recommendation": "Strong Buy" },
+        { "ticker": "GTCO", "name": "Guaranty Trust Holding Company", "ias": 82, "recommendation": "Accumulate" },
+        { "ticker": "ACCESS", "name": "Access Holdings PLC", "ias": 78, "recommendation": "Accumulate" }
+      ]
+    },
+    {
+      "sector": "Oil & Gas",
+      "avgIas": 34,
+      "maxIas": 51,
+      "minIas": 18,
+      "count": 11,
+      "momentum": "bearish",
+      "top3": []
+    }
+  ]
+}`} />
+                <p className="text-xs text-muted-foreground italic mt-2">
+                  momentum: <code className="bg-muted px-1 rounded">bullish</code> (avg IAS ≥ 60),{" "}
+                  <code className="bg-muted px-1 rounded">neutral</code> (36–59),{" "}
+                  <code className="bg-muted px-1 rounded">bearish</code> (≤ 35)
+                </p>
+              </EndpointSection>
             </div>
           </section>
 

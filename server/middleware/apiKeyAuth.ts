@@ -13,6 +13,11 @@ export interface ApiKeyRequest extends Request {
   };
 }
 
+export interface ApiKeyAuthOptions {
+  /** When true, skip the KYC billing account check. Use for non-KYC APIs (e.g. CIE). */
+  skipBillingCheck?: boolean;
+}
+
 /**
  * Authenticate an API key and optionally enforce a required permission.
  *
@@ -20,8 +25,9 @@ export interface ApiKeyRequest extends Request {
  *   - String: the key must have that exact scope.
  *   - Array: the key must have at least ONE of the listed scopes (OR logic).
  *   - Omitted / undefined: any valid, active API key is accepted.
+ * @param options - Optional configuration flags (e.g. skipBillingCheck for CIE API).
  */
-export function authenticateApiKey(requiredPermission?: string | string[]) {
+export function authenticateApiKey(requiredPermission?: string | string[], options?: ApiKeyAuthOptions) {
   return async (req: ApiKeyRequest, res: Response, next: NextFunction) => {
     const startTime = Date.now();
     const apiKey = req.headers["x-api-key"] as string;
@@ -73,25 +79,11 @@ export function authenticateApiKey(requiredPermission?: string | string[]) {
       });
     }
 
-    const [billingAccount] = await db.select().from(kycBillingAccounts)
-      .where(eq(kycBillingAccounts.organisationId, orgId));
+    if (!options?.skipBillingCheck) {
+      const [billingAccount] = await db.select().from(kycBillingAccounts)
+        .where(eq(kycBillingAccounts.organisationId, orgId));
 
-    if (!billingAccount || !billingAccount.isActive) {
-      await logApiUsage(
-        keyRecord.id,
-        req.path,
-        req.method,
-        402,
-        req.ip || null,
-        Date.now() - startTime
-      );
-      return res.status(402).json({
-        error: "No active billing account. Please set up billing before using the API.",
-      });
-    }
-
-    if (billingAccount.billingMode === "prepaid") {
-      if (billingAccount.creditBalance <= 0) {
+      if (!billingAccount || !billingAccount.isActive) {
         await logApiUsage(
           keyRecord.id,
           req.path,
@@ -101,32 +93,48 @@ export function authenticateApiKey(requiredPermission?: string | string[]) {
           Date.now() - startTime
         );
         return res.status(402).json({
-          error: "Insufficient credits. Please purchase more credits to continue.",
-          creditBalance: billingAccount.creditBalance,
+          error: "No active billing account. Please set up billing before using the API.",
         });
       }
-    } else if (billingAccount.billingMode === "invoiced") {
-      const creditLimit = billingAccount.creditLimit || 0;
-      const [usageResult] = await db.select({
-        totalUsed: sql<number>`COALESCE(SUM(ABS(${kycCreditTransactions.amount})) FILTER (WHERE ${kycCreditTransactions.type} = 'usage'), 0)`,
-      }).from(kycCreditTransactions)
-        .where(eq(kycCreditTransactions.billingAccountId, billingAccount.id));
 
-      const totalUsed = Number(usageResult?.totalUsed ?? 0);
-      if (creditLimit > 0 && totalUsed >= creditLimit) {
-        await logApiUsage(
-          keyRecord.id,
-          req.path,
-          req.method,
-          402,
-          req.ip || null,
-          Date.now() - startTime
-        );
-        return res.status(402).json({
-          error: "Credit limit reached. Please contact support to increase your limit.",
-          creditLimit,
-          totalUsed,
-        });
+      if (billingAccount.billingMode === "prepaid") {
+        if (billingAccount.creditBalance <= 0) {
+          await logApiUsage(
+            keyRecord.id,
+            req.path,
+            req.method,
+            402,
+            req.ip || null,
+            Date.now() - startTime
+          );
+          return res.status(402).json({
+            error: "Insufficient credits. Please purchase more credits to continue.",
+            creditBalance: billingAccount.creditBalance,
+          });
+        }
+      } else if (billingAccount.billingMode === "invoiced") {
+        const creditLimit = billingAccount.creditLimit || 0;
+        const [usageResult] = await db.select({
+          totalUsed: sql<number>`COALESCE(SUM(ABS(${kycCreditTransactions.amount})) FILTER (WHERE ${kycCreditTransactions.type} = 'usage'), 0)`,
+        }).from(kycCreditTransactions)
+          .where(eq(kycCreditTransactions.billingAccountId, billingAccount.id));
+
+        const totalUsed = Number(usageResult?.totalUsed ?? 0);
+        if (creditLimit > 0 && totalUsed >= creditLimit) {
+          await logApiUsage(
+            keyRecord.id,
+            req.path,
+            req.method,
+            402,
+            req.ip || null,
+            Date.now() - startTime
+          );
+          return res.status(402).json({
+            error: "Credit limit reached. Please contact support to increase your limit.",
+            creditLimit,
+            totalUsed,
+          });
+        }
       }
     }
 

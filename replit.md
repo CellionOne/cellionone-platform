@@ -53,6 +53,8 @@ Key architectural decisions and features include:
   - `usePageMeta` hook (`client/src/hooks/use-page-meta.ts`) for per-page title, meta description, OG tags, Twitter tags, and canonical URL updates. Applied to: landing, why-cellion-one, api-docs, terms, privacy, apply-lawyer, partner-with-us, login, register.
   - Canonical domain: `https://cellionone.com`.
 
+- **CIE — Cellion Intelligence Engine:** Subscription API serving NGX equity intelligence to stockbroking firms, fintechs, and wealth managers. Endpoints under `/api/v1/cie/`. Uses `kycApiKeys` table for authentication (`X-API-Key`) with three permission tiers: `cie:read` (free — market pulse only), `cie:subscriber` (scores/history/dividends), `cie:pro` (signals/sector-rotation). The `authenticateApiKey` middleware accepts `{ skipBillingCheck: true }` to bypass KYC credit billing for subscription-based CIE access. Routes in `server/routes/cieApiRoutes.ts`. Score engine writes to `cieScores` table; ingestion via PDF/Excel upload or AI extraction. Admin cockpit at `/admin/cie/*`. Full API documentation section in `client/src/pages/api-docs.tsx`.
+
 ## External Dependencies
 - **PostgreSQL:** Primary database, hosted via Neon.
 - **OpenAI GPT-4o:** Powers the AI Legal Assistant.

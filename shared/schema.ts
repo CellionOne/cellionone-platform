@@ -2187,6 +2187,7 @@ export type InsertCieMarketPulse = z.infer<typeof insertCieMarketPulseSchema>;
 // ============== CIE INGESTION LOGS ==============
 export const cieIngestionLogs = pgTable("cie_ingestion_logs", {
   id: serial("id").primaryKey(),
+  uploadId: varchar("upload_id", { length: 36 }), // UUID for the preview session (links preview → confirm)
   format: varchar("format", { length: 20 }).notNull(), // csv, xlsx, pdf
   dataType: varchar("data_type", { length: 30 }).notNull(), // prices, dividends, signals, market_pulse
   filename: varchar("filename", { length: 255 }),
@@ -2194,11 +2195,14 @@ export const cieIngestionLogs = pgTable("cie_ingestion_logs", {
   rowsAccepted: integer("rows_accepted").default(0),
   rowsRejected: integer("rows_rejected").default(0),
   rowsFlagged: integer("rows_flagged").default(0),
+  rowsAnalystApproved: integer("rows_analyst_approved").default(0),
   status: varchar("status", { length: 20 }).default("pending"), // pending, previewed, committed, failed
   errorSummary: text("error_summary"),
   uploadedByUserId: varchar("uploaded_by_user_id"),
+  confirmedByUserId: varchar("confirmed_by_user_id"),
   triggeredRecomputation: boolean("triggered_recomputation").default(false),
   createdAt: timestamp("created_at").defaultNow(),
+  previewedAt: timestamp("previewed_at"),
   committedAt: timestamp("committed_at"),
 }, (table) => [
   index("idx_cie_ingest_type").on(table.dataType),

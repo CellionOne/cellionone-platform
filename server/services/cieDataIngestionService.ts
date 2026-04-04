@@ -1,19 +1,25 @@
 /**
- * CIE Data Ingestion Service
+ * CIE Data Ingestion Service — Cellion Intelligence Engine
  *
  * Parses price data from three formats:
  *   CSV   — standard OHLCV (Symbol, Date, Open, High, Low, Close, Volume)
  *   Excel — .xlsx, same column structure
- *   PDF   — NGX daily official list, extracted via GPT-4o vision
+ *   PDF   — NGX daily official list, extracted via GPT-4o vision with per-row confidence
  *
- * Two-step flow:
- *   1. preview() — parse & validate, return rows + counts, NO DB write
- *   2. commit()  — write accepted rows, create ingestion log, trigger score recomputation
+ * Strict two-step analyst flow:
+ *   1. buildPreview()        — parse & validate, return rows + counts + previewToken, NO DB write
+ *   2. commitFromToken()     — analyst submits {previewToken, acceptedRowIndices}, ONLY those rows committed
+ *
+ * Preview tokens expire after 30 minutes. The in-memory store is cleaned lazily.
  */
 
 import * as XLSX from "xlsx";
+import { randomUUID } from "crypto";
 import { storage } from "../storage";
 
+// ============================================================
+// OpenAI lazy initialisation
+// ============================================================
 let openaiClient: any = null;
 async function getOpenAI(): Promise<any> {
   if (!openaiClient) {
@@ -23,7 +29,48 @@ async function getOpenAI(): Promise<any> {
   return openaiClient;
 }
 
+// ============================================================
+// Preview token store (in-memory, 30-minute TTL)
+// ============================================================
+interface StoredPreview {
+  result: IngestPreviewResult;
+  expiresAt: number; // Unix ms
+}
+
+const previewStore = new Map<string, StoredPreview>();
+const PREVIEW_TTL_MS = 30 * 60 * 1000;
+
+function storePreview(result: IngestPreviewResult): string {
+  const token = randomUUID();
+  // Lazy cleanup of expired entries
+  const now = Date.now();
+  for (const [k, v] of previewStore) {
+    if (v.expiresAt < now) previewStore.delete(k);
+  }
+  previewStore.set(token, { result, expiresAt: now + PREVIEW_TTL_MS });
+  return token;
+}
+
+export function getStoredPreview(token: string): IngestPreviewResult | null {
+  const entry = previewStore.get(token);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    previewStore.delete(token);
+    return null;
+  }
+  return entry.result;
+}
+
+export function deleteStoredPreview(token: string): void {
+  previewStore.delete(token);
+}
+
+// ============================================================
+// Types
+// ============================================================
+
 export interface PriceRow {
+  rowIndex: number;    // 0-based index within acceptedRows list (for analyst selection)
   symbol: string;
   date: string;        // YYYY-MM-DD
   open?: number;       // Naira
@@ -31,78 +78,87 @@ export interface PriceRow {
   low?: number;
   close: number;       // Naira (required)
   volume?: number;
-  error?: string;      // set if row was rejected
+  confidence: number;  // 0–1: data extraction confidence (1.0 for CSV/XLSX, GPT-assigned for PDF)
+  lowConfidence: boolean; // true when confidence < 0.7
+  source: "csv" | "xlsx" | "pdf";
+  error?: string;      // set if row was rejected during parsing
+}
+
+export interface RejectedRow {
+  rawSymbol: string;
+  rawDate: string;
+  rawClose: string;
+  reason: string;
+  source: "csv" | "xlsx" | "pdf";
 }
 
 export interface IngestPreviewResult {
+  previewToken: string;
   format: "csv" | "xlsx" | "pdf";
+  filename: string;
   rowsExtracted: number;
   rowsAccepted: number;
   rowsRejected: number;
   rowsFlagged: number;
+  lowConfidenceCount: number;
   acceptedRows: PriceRow[];
-  rejectedRows: PriceRow[];
+  rejectedRows: RejectedRow[];
   flaggedSymbols: string[];  // symbols not in the securities master list
-  preview: PriceRow[];       // first 20 accepted rows for UI preview
+  previewRows: PriceRow[];   // first 20 accepted rows for UI preview
+  expiresAt: string;         // ISO timestamp when preview token expires
 }
 
-/** Parse a date string in various formats → YYYY-MM-DD */
-function normaliseDate(raw: string | number): string | null {
-  if (!raw) return null;
+// ============================================================
+// Date / number parsing helpers
+// ============================================================
 
-  // Handle Excel serial date number
+function normaliseDate(raw: string | number): string | null {
+  if (!raw && raw !== 0) return null;
+
   if (typeof raw === "number") {
-    const date = XLSX.SSF.parse_date_code(raw);
-    if (date) {
-      const y = date.y;
-      const m = String(date.m).padStart(2, "0");
-      const d = String(date.d).padStart(2, "0");
-      return `${y}-${m}-${d}`;
-    }
+    try {
+      const date = XLSX.SSF.parse_date_code(raw);
+      if (date) {
+        const y = date.y;
+        const m = String(date.m).padStart(2, "0");
+        const d = String(date.d).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+    } catch { /* ignore */ }
     return null;
   }
 
   const s = String(raw).trim();
-
-  // Try ISO format first (YYYY-MM-DD)
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-  // DD/MM/YYYY or DD-MM-YYYY
   const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (dmy) {
     const [, d, m, y] = dmy;
     return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
 
-  // MM/DD/YYYY
   const mdy = s.match(/^(\d{1,2})[\/](\d{1,2})[\/](\d{4})$/);
   if (mdy) {
     const [, m, d, y] = mdy;
     return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
 
-  // Try native Date parse for strings like "April 03, 2026"
   const parsed = new Date(s);
-  if (!isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
-  }
+  if (!isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
 
   return null;
 }
 
-/** Convert Naira decimal to kobo integer */
 function nairaToKobo(val: number): number {
   return Math.round(val * 100);
 }
 
-/** Parse a numeric value from a cell (handles strings with commas) */
 function parseNumber(val: any): number | undefined {
   if (val === undefined || val === null || val === "") return undefined;
   const n = typeof val === "number" ? val : parseFloat(String(val).replace(/,/g, ""));
   return isNaN(n) ? undefined : n;
 }
 
-/** Detect column headers case-insensitively */
 function findCol(headers: string[], ...candidates: string[]): number {
   for (const c of candidates) {
     const idx = headers.findIndex(h => h.toLowerCase().includes(c.toLowerCase()));
@@ -111,7 +167,11 @@ function findCol(headers: string[], ...candidates: string[]): number {
   return -1;
 }
 
-function parseSheetRows(sheet: XLSX.WorkSheet): PriceRow[] {
+// ============================================================
+// CSV / Excel parsing
+// ============================================================
+
+function parseSheetRows(sheet: XLSX.WorkSheet, source: "csv" | "xlsx"): PriceRow[] {
   const json = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: "" });
   if (json.length < 2) return [];
 
@@ -128,23 +188,35 @@ function parseSheetRows(sheet: XLSX.WorkSheet): PriceRow[] {
 
   for (let i = 1; i < json.length; i++) {
     const row = json[i] as any[];
-
     if (!row || row.every(c => c === "" || c === null || c === undefined)) continue;
 
-    const symbol = symCol >= 0 ? String(row[symCol] ?? "").trim().toUpperCase() : "";
-    const rawDate = dateCol >= 0 ? row[dateCol] : "";
+    const symbol   = symCol >= 0 ? String(row[symCol] ?? "").trim().toUpperCase() : "";
+    const rawDate  = dateCol >= 0 ? row[dateCol] : "";
     const rawClose = closeCol >= 0 ? row[closeCol] : "";
 
-    if (!symbol) { rows.push({ symbol: "", date: "", close: 0, error: `Row ${i + 1}: missing symbol` }); continue; }
-    if (!rawDate) { rows.push({ symbol, date: "", close: 0, error: `Row ${i + 1}: missing date` }); continue; }
+    if (!symbol) {
+      rows.push({ rowIndex: -1, symbol: "", date: "", close: 0, confidence: 0, lowConfidence: true, source, error: `Row ${i + 1}: missing symbol` });
+      continue;
+    }
+    if (!rawDate) {
+      rows.push({ rowIndex: -1, symbol, date: "", close: 0, confidence: 0, lowConfidence: true, source, error: `Row ${i + 1}: missing date` });
+      continue;
+    }
 
     const date = normaliseDate(rawDate);
-    if (!date) { rows.push({ symbol, date: "", close: 0, error: `Row ${i + 1}: invalid date '${rawDate}'` }); continue; }
+    if (!date) {
+      rows.push({ rowIndex: -1, symbol, date: "", close: 0, confidence: 0, lowConfidence: true, source, error: `Row ${i + 1}: invalid date '${rawDate}'` });
+      continue;
+    }
 
     const close = parseNumber(rawClose);
-    if (close === undefined || close <= 0) { rows.push({ symbol, date, close: 0, error: `Row ${i + 1}: invalid close price '${rawClose}'` }); continue; }
+    if (close === undefined || close <= 0) {
+      rows.push({ rowIndex: -1, symbol, date, close: 0, confidence: 0, lowConfidence: true, source, error: `Row ${i + 1}: invalid close price '${rawClose}'` });
+      continue;
+    }
 
     rows.push({
+      rowIndex: -1, // set later in buildPreview
       symbol,
       date,
       close,
@@ -152,41 +224,46 @@ function parseSheetRows(sheet: XLSX.WorkSheet): PriceRow[] {
       high:   highCol  >= 0 ? parseNumber(row[highCol])  : undefined,
       low:    lowCol   >= 0 ? parseNumber(row[lowCol])   : undefined,
       volume: volCol   >= 0 ? parseNumber(row[volCol])   : undefined,
+      confidence: 1.0,   // Structured file: full confidence
+      lowConfidence: false,
+      source,
     });
   }
 
   return rows;
 }
 
-/** Parse CSV buffer */
 export function parseCsvBuffer(buffer: Buffer): PriceRow[] {
   const wb = XLSX.read(buffer, { type: "buffer", raw: false, cellDates: false });
   const sheet = wb.Sheets[wb.SheetNames[0]];
-  return parseSheetRows(sheet);
+  return parseSheetRows(sheet, "csv");
 }
 
-/** Parse Excel buffer */
 export function parseXlsxBuffer(buffer: Buffer): PriceRow[] {
   const wb = XLSX.read(buffer, { type: "buffer", raw: false, cellDates: false });
   const sheet = wb.Sheets[wb.SheetNames[0]];
-  return parseSheetRows(sheet);
+  return parseSheetRows(sheet, "xlsx");
 }
 
-/** Extract price data from PDF using GPT-4o vision */
+// ============================================================
+// PDF extraction via GPT-4o (with per-row confidence)
+// ============================================================
+
 export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise<PriceRow[]> {
   const base64 = buffer.toString("base64");
 
-  const systemPrompt = `You are a financial data extraction engine. 
-Extract NGX (Nigerian Exchange Group) equity price data from the provided document image.
-Return ONLY a JSON array of objects with these fields:
-  symbol (string, NGX ticker),
-  date (string, YYYY-MM-DD),
-  open (number, Naira, optional),
-  high (number, Naira, optional),
-  low (number, Naira, optional),
-  close (number, Naira, required),
-  volume (integer, number of shares, optional)
-Return [] if no price data found. No markdown, no explanation — pure JSON array.`;
+  const systemPrompt = `You are a financial data extraction engine.
+Extract NGX (Nigerian Exchange Group) equity price data from the document.
+Return ONLY a JSON object with a "rows" array. Each item must have:
+  symbol    (string, NGX ticker code, required)
+  date      (string, YYYY-MM-DD, required)
+  open      (number, Naira, optional)
+  high      (number, Naira, optional)
+  low       (number, Naira, optional)
+  close     (number, Naira, required)
+  volume    (integer, shares, optional)
+  confidence (number 0-1: 1.0 = clearly readable, 0.5 = partially obscured, 0.2 = low quality/guess)
+Return {"rows":[]} if no price data found. No markdown. Pure JSON only.`;
 
   try {
     const openai = await getOpenAI();
@@ -220,19 +297,32 @@ Return [] if no price data found. No markdown, no explanation — pure JSON arra
       return [];
     }
 
-    // GPT may return { rows: [...] } or { data: [...] } or just an array wrapped in an object
-    const arr: any[] = Array.isArray(parsed) ? parsed : (parsed.rows ?? parsed.data ?? parsed.prices ?? []);
+    const arr: any[] = Array.isArray(parsed)
+      ? parsed
+      : (parsed.rows ?? parsed.data ?? parsed.prices ?? []);
 
-    return arr.filter(Boolean).map((r: any) => {
+    return arr.filter(Boolean).map((r: any): PriceRow => {
       const symbol = String(r.symbol ?? "").trim().toUpperCase();
       const date = normaliseDate(r.date ?? "") ?? "";
       const close = parseNumber(r.close);
+      const rawConfidence = typeof r.confidence === "number" ? Math.min(1, Math.max(0, r.confidence)) : 0.7;
 
       if (!symbol || !date || close === undefined || close <= 0) {
-        return { symbol, date, close: 0, error: `GPT row invalid: ${JSON.stringify(r)}` };
+        return {
+          rowIndex: -1,
+          symbol,
+          date,
+          close: 0,
+          confidence: rawConfidence,
+          lowConfidence: true,
+          source: "pdf",
+          error: `GPT row invalid: missing symbol/date/close`,
+        };
       }
 
+      const lowConfidence = rawConfidence < 0.7;
       return {
+        rowIndex: -1,
         symbol,
         date,
         close,
@@ -240,6 +330,9 @@ Return [] if no price data found. No markdown, no explanation — pure JSON arra
         high:   parseNumber(r.high),
         low:    parseNumber(r.low),
         volume: r.volume !== undefined ? Math.round(parseNumber(r.volume) ?? 0) : undefined,
+        confidence: rawConfidence,
+        lowConfidence,
+        source: "pdf",
       };
     });
   } catch (err: any) {
@@ -248,20 +341,20 @@ Return [] if no price data found. No markdown, no explanation — pure JSON arra
   }
 }
 
-/**
- * Build a preview result from parsed rows.
- * Validates dates, checks symbols against master list, deduplicates.
- */
+// ============================================================
+// Build preview (step 1) — stores in memory, returns token
+// ============================================================
+
 export async function buildPreview(
   format: "csv" | "xlsx" | "pdf",
-  rows: PriceRow[]
+  rows: PriceRow[],
+  filename: string
 ): Promise<IngestPreviewResult> {
-  // Load master securities list for symbol validation
   const securities = await storage.listCieSecurities(false);
   const knownSymbols = new Set(securities.map(s => s.symbol));
 
   const acceptedRows: PriceRow[] = [];
-  const rejectedRows: PriceRow[] = [];
+  const rejectedRows: RejectedRow[] = [];
   const flaggedSymbols = new Set<string>();
 
   // Deduplicate by symbol+date (latest row wins)
@@ -269,60 +362,107 @@ export async function buildPreview(
 
   for (const row of rows) {
     if (row.error) {
-      rejectedRows.push(row);
+      rejectedRows.push({
+        rawSymbol: row.symbol,
+        rawDate: row.date,
+        rawClose: String(row.close),
+        reason: row.error,
+        source: row.source,
+      });
       continue;
     }
 
     if (!row.symbol || !row.date || row.close <= 0) {
-      rejectedRows.push({ ...row, error: "Missing required fields (symbol, date, or close price)" });
+      rejectedRows.push({
+        rawSymbol: row.symbol,
+        rawDate: row.date,
+        rawClose: String(row.close),
+        reason: "Missing required fields (symbol, date, or close price)",
+        source: row.source,
+      });
       continue;
     }
 
-    // Flag unknown symbols but still accept (admin may want to add security)
     if (!knownSymbols.has(row.symbol)) {
       flaggedSymbols.add(row.symbol);
     }
 
     const key = `${row.symbol}::${row.date}`;
-    seen.set(key, row); // last occurrence wins for same symbol+date
+    seen.set(key, row);
   }
 
-  acceptedRows.push(...seen.values());
+  let rowIndex = 0;
+  for (const [, row] of seen) {
+    row.rowIndex = rowIndex++;
+    acceptedRows.push(row);
+  }
 
-  return {
+  const lowConfidenceCount = acceptedRows.filter(r => r.lowConfidence).length;
+  const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS).toISOString();
+
+  const result: IngestPreviewResult = {
+    previewToken: "", // will be set after storing
     format,
+    filename,
     rowsExtracted: rows.length,
     rowsAccepted: acceptedRows.length,
     rowsRejected: rejectedRows.length,
     rowsFlagged: flaggedSymbols.size,
+    lowConfidenceCount,
     acceptedRows,
     rejectedRows,
     flaggedSymbols: [...flaggedSymbols],
-    preview: acceptedRows.slice(0, 20),
+    previewRows: acceptedRows.slice(0, 20),
+    expiresAt,
   };
+
+  const token = storePreview(result);
+  result.previewToken = token;
+
+  return result;
 }
 
-/**
- * Commit accepted rows to the database.
- * Only writes rows for known symbols (flags are informational).
- * Returns the ingestion log ID.
- */
-export async function commitRows(
-  preview: IngestPreviewResult,
+// ============================================================
+// Commit from token (step 2) — analyst supplies approved indices
+// ============================================================
+
+export async function commitFromToken(
+  previewToken: string,
+  acceptedRowIndices: number[] | null, // null = accept all
   uploadedByUserId: string,
-  filename?: string
-): Promise<{ logId: number; committed: number; skipped: number }> {
-  // Create ingestion log (pending → committed)
+  confirmedByUserId: string
+): Promise<{
+  logId: number;
+  committed: number;
+  skipped: number;
+  uploadId: string;
+}> {
+  const preview = getStoredPreview(previewToken);
+  if (!preview) {
+    throw new Error("Preview token not found or expired. Please re-upload the file.");
+  }
+
+  // Determine which rows the analyst approved
+  const rowsToCommit = acceptedRowIndices !== null
+    ? preview.acceptedRows.filter(r => acceptedRowIndices.includes(r.rowIndex))
+    : preview.acceptedRows;
+
+  const analystApproved = rowsToCommit.length;
+
   const log = await storage.createCieIngestionLog({
+    uploadId: previewToken, // use the preview token as the upload session ID
     format: preview.format,
     dataType: "prices",
-    filename: filename ?? null,
+    filename: preview.filename ?? null,
     rowsExtracted: preview.rowsExtracted,
     rowsAccepted: preview.rowsAccepted,
     rowsRejected: preview.rowsRejected,
     rowsFlagged: preview.rowsFlagged,
+    rowsAnalystApproved: analystApproved,
     status: "committing",
     uploadedByUserId,
+    confirmedByUserId,
+    previewedAt: new Date(),
   });
 
   const securities = await storage.listCieSecurities(false);
@@ -331,7 +471,7 @@ export async function commitRows(
   let committed = 0;
   let skipped = 0;
 
-  for (const row of preview.acceptedRows) {
+  for (const row of rowsToCommit) {
     const secId = symbolToId.get(row.symbol);
     if (!secId) {
       skipped++;
@@ -359,9 +499,102 @@ export async function commitRows(
     status: "committed",
     rowsAccepted: committed,
     rowsRejected: preview.rowsRejected + skipped,
+    rowsAnalystApproved: analystApproved,
     committedAt: new Date(),
     triggeredRecomputation: true,
   });
 
-  return { logId: log.id, committed, skipped };
+  // Invalidate the preview token after a successful commit
+  deleteStoredPreview(previewToken);
+
+  return { logId: log.id, committed, skipped, uploadId: previewToken };
+}
+
+// ============================================================
+// Data entry templates (in-memory CSV generation)
+// ============================================================
+
+export function generatePricesTemplate(): string {
+  return [
+    "Symbol,Date,Open,High,Low,Close,Volume",
+    "DANGCEM,2026-04-03,620.00,625.00,618.00,622.00,1500000",
+    "GTCO,2026-04-03,47.50,48.00,47.00,47.80,3200000",
+    "ZENITHBANK,2026-04-03,35.00,35.50,34.80,35.20,2800000",
+  ].join("\r\n");
+}
+
+export function generateDividendsTemplate(): string {
+  return [
+    "Symbol,ExDividendDate,PaymentDate,AmountPerShare",
+    "DANGCEM,2026-04-10,2026-04-25,10.00",
+    "GTCO,2026-04-15,2026-04-30,1.50",
+  ].join("\r\n");
+}
+
+export function generateSignalsTemplate(): string {
+  return [
+    "Symbol,Type,Sentiment,Credibility,Content,Tags",
+    "MTNN,news,bullish,4,\"MTN Nigeria reports 22% growth in data subscribers\",\"telecom;earnings\"",
+    "SEPLAT,sector_rotation,neutral,3,\"Oil sector rotation expected on crude price recovery\",\"oil;macro\"",
+  ].join("\r\n");
+}
+
+export function generateDataEntryGuide(): object {
+  return {
+    version: "1.0",
+    updatedAt: new Date().toISOString().slice(0, 10),
+    templates: {
+      prices: {
+        url: "/api/admin/cie/templates/prices",
+        format: "CSV",
+        requiredColumns: ["Symbol", "Date", "Close"],
+        optionalColumns: ["Open", "High", "Low", "Volume"],
+        notes: [
+          "Symbol must match an existing NGX security ticker (e.g. DANGCEM, GTCO).",
+          "Date accepts: YYYY-MM-DD, DD/MM/YYYY, or Excel serial dates.",
+          "Close, Open, High, Low are in Nigerian Naira (decimal). e.g. 622.00",
+          "Volume is the number of shares traded (integer).",
+          "Duplicate symbol+date rows: last occurrence is kept.",
+          "Rows with unknown symbols are flagged but NOT rejected — analyst reviews them.",
+        ],
+      },
+      dividends: {
+        url: "/api/admin/cie/templates/dividends",
+        format: "CSV",
+        requiredColumns: ["Symbol", "ExDividendDate", "AmountPerShare"],
+        optionalColumns: ["PaymentDate"],
+        notes: [
+          "AmountPerShare is in Naira (decimal). Internally stored in Kobo.",
+          "ExDividendDate format: YYYY-MM-DD.",
+        ],
+      },
+      signals: {
+        url: "/api/admin/cie/templates/signals",
+        format: "CSV",
+        requiredColumns: ["Symbol", "Type", "Content"],
+        optionalColumns: ["Sentiment", "Credibility", "Tags"],
+        notes: [
+          "Type: rumour | news | trade_call | sector_rotation",
+          "Sentiment: bullish | bearish | neutral",
+          "Credibility: 1 (low) to 5 (high)",
+          "Tags: semicolon-separated list",
+        ],
+      },
+    },
+    pdfIngestion: {
+      description: "PDF uploads use GPT-4o vision to extract price data.",
+      confidenceThreshold: 0.7,
+      notes: [
+        "Rows with confidence < 0.70 are flagged as low-confidence and highlighted in the preview.",
+        "Analyst should manually verify low-confidence rows before confirming.",
+        "Best results: NGX daily official price list PDFs (not scanned/image-only).",
+        "Multi-page PDFs are fully supported.",
+      ],
+    },
+    twoStepWorkflow: {
+      step1: "POST /api/admin/cie/ingest/preview — Upload file. Returns previewToken + all accepted rows with rowIndex.",
+      step2: "POST /api/admin/cie/ingest/confirm — Submit previewToken + acceptedRowIndices (or omit to accept all). Only selected rows are written to the database.",
+      tokenTTL: "30 minutes",
+    },
+  };
 }

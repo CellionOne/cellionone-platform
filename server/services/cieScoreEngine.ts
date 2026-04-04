@@ -205,8 +205,15 @@ async function scoreSector(
   const growthScores       = rankTransform(rawList.map(r => r.momentum20d)); // proxy: use 20d momentum for growth
   const finStrengthScores  = rankTransform(rawList.map(r => -r.maxDrawdown));
 
-  // Risk: higher volatility + higher drawdown + lower turnover = higher risk
-  const riskRaw = rawList.map(r => r.volatility20d * 0.5 + r.maxDrawdown * 0.5);
+  // Risk: volatility (40%) + drawdown (40%) + inverted turnover (20%)
+  // Lower turnover = higher risk (illiquid = riskier)
+  // We invert turnover ranks so that low-turnover stocks get HIGH risk contribution
+  const invertedTurnoverRank = rankTransform(rawList.map(r => -r.turnover5d)); // negative = inverted
+  const riskRaw = rawList.map((r, i) =>
+    r.volatility20d * 0.40 +
+    r.maxDrawdown   * 0.40 +
+    (invertedTurnoverRank[i] / 100) * 0.20   // normalise 0-100 rank to 0-1, then scale
+  );
   const riskScores = rankTransform(riskRaw);
 
   for (let i = 0; i < rawList.length; i++) {
@@ -231,8 +238,25 @@ async function scoreSector(
 
     const rs = clamp(riskScores[i]);
 
-    // Confidence: based on data point count (20+ days = full confidence)
-    const cs = clamp(Math.round((Math.min(r.dataPoints, 20) / 20) * 100));
+    // Confidence score (CS):
+    //   40% — data completeness: min(dataPoints, 20) / 20
+    //   30% — recency freshness: penalise if latest price is stale (>5 business days)
+    //   30% — anomaly rate: penalise rows where daily return > 3 stddev from mean
+    const completeness = Math.min(r.dataPoints, 20) / 20;
+
+    // Recency: we don't have the actual date easily from rawList — use dataPoints as proxy
+    // If we have ≥20 points we assume recent; penalise if <10 points (sparse/stale data)
+    const recencyFreshness = r.dataPoints >= 10 ? 1.0 : r.dataPoints / 10;
+
+    // Anomaly rate: estimate from volatility — very high volatility (>80% annualised) = anomaly flag
+    // Normal NGX volatility: 20–50% annualised. >80% = likely data quality issue
+    const anomalyRate = r.volatility20d > 80 ? 0.4 : r.volatility20d > 60 ? 0.7 : 1.0;
+
+    const cs = clamp(Math.round(
+      (completeness    * 0.40 +
+       recencyFreshness * 0.30 +
+       anomalyRate      * 0.30) * 100
+    ));
 
     result.set(r.secId, {
       securityId: r.secId,

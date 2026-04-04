@@ -2,8 +2,9 @@
  * CIE Admin Routes — Cellion Intelligence Engine
  *
  * All endpoints require admin authentication.
- * Handles securities management, price ingestion, model versions,
- * score management, signals, and market pulse.
+ * Implements the two-step analyst ingestion workflow:
+ *   POST /ingest/preview  → parse + validate, return previewToken + full row set
+ *   POST /ingest/confirm  → submit previewToken + acceptedRowIndices, commit approved rows only
  */
 
 import type { Express, Request, Response } from "express";
@@ -16,8 +17,11 @@ import {
   parseXlsxBuffer,
   parsePdfBuffer,
   buildPreview,
-  commitRows,
-  type IngestPreviewResult,
+  commitFromToken,
+  generatePricesTemplate,
+  generateDividendsTemplate,
+  generateSignalsTemplate,
+  generateDataEntryGuide,
 } from "../services/cieDataIngestionService";
 import { triggerImmediateScoreRun } from "../services/cieScheduler";
 
@@ -35,6 +39,50 @@ function getUserId(req: Request): string {
 }
 
 export function registerCieAdminRoutes(app: Express): void {
+
+  // ================================================================
+  // DATA ENTRY GUIDE & TEMPLATES
+  // ================================================================
+
+  /** GET /api/admin/cie/data-entry-guide — full JSON guide with field specs and workflow */
+  app.get("/api/admin/cie/data-entry-guide", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      res.json(generateDataEntryGuide());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /** GET /api/admin/cie/templates/:type — download CSV template (prices | dividends | signals) */
+  app.get("/api/admin/cie/templates/:type", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const { type } = req.params;
+
+      let csv: string;
+      let filename: string;
+
+      if (type === "prices") {
+        csv = generatePricesTemplate();
+        filename = "cie-prices-template.csv";
+      } else if (type === "dividends") {
+        csv = generateDividendsTemplate();
+        filename = "cie-dividends-template.csv";
+      } else if (type === "signals") {
+        csv = generateSignalsTemplate();
+        filename = "cie-signals-template.csv";
+      } else {
+        return res.status(404).json({ error: `Unknown template type '${type}'. Use: prices | dividends | signals` });
+      }
+
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(csv);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   // ================================================================
   // SECURITIES MANAGEMENT
@@ -106,13 +154,20 @@ export function registerCieAdminRoutes(app: Express): void {
   });
 
   // ================================================================
-  // PRICE DATA INGESTION — TWO-STEP FLOW
+  // PRICE DATA INGESTION — TWO-STEP ANALYST FLOW
   // ================================================================
 
   /**
-   * POST /api/admin/cie/ingest/preview
-   * Step 1: Upload file, parse it, return a preview with row counts.
-   * No data is written to the database.
+   * POST /api/admin/cie/ingest/preview  (Step 1)
+   *
+   * Parse an uploaded file (CSV / XLSX / PDF) and return:
+   *   - previewToken   — UUID valid for 30 minutes
+   *   - acceptedRows   — all validated price rows with rowIndex + confidence flags
+   *   - rejectedRows   — parsing failures with reason
+   *   - flaggedSymbols — symbols not in the master securities list
+   *   - lowConfidenceCount — rows where confidence < 0.70 (PDF only)
+   *
+   * NO data is written to the database at this step.
    */
   app.post("/api/admin/cie/ingest/preview", isAuthenticated, upload.single("file"), async (req: Request, res: Response) => {
     try {
@@ -124,7 +179,7 @@ export function registerCieAdminRoutes(app: Express): void {
       const mime = file.mimetype.toLowerCase();
       const filename = file.originalname.toLowerCase();
       let format: "csv" | "xlsx" | "pdf";
-      let rows: ReturnType<typeof parseCsvBuffer>;
+      let rows;
 
       if (filename.endsWith(".csv") || mime.includes("csv")) {
         format = "csv";
@@ -139,15 +194,23 @@ export function registerCieAdminRoutes(app: Express): void {
         return res.status(400).json({ error: "Unsupported file type. Upload CSV, XLSX, or PDF." });
       }
 
-      const preview = await buildPreview(format, rows);
+      const preview = await buildPreview(format, rows, file.originalname);
 
       res.json({
-        ...preview,
-        filename: file.originalname,
+        previewToken: preview.previewToken,
+        format: preview.format,
+        filename: preview.filename,
         fileSize: file.size,
-        // Omit full row lists from response to keep payload small
-        acceptedRows: undefined,
-        rejectedRows: preview.rejectedRows.slice(0, 20), // show first 20 rejections
+        rowsExtracted: preview.rowsExtracted,
+        rowsAccepted: preview.rowsAccepted,
+        rowsRejected: preview.rowsRejected,
+        rowsFlagged: preview.rowsFlagged,
+        lowConfidenceCount: preview.lowConfidenceCount,
+        flaggedSymbols: preview.flaggedSymbols,
+        acceptedRows: preview.acceptedRows,              // full list with rowIndex + confidence
+        rejectedRows: preview.rejectedRows.slice(0, 50), // cap at 50 for response size
+        previewRows: preview.previewRows,                // first 20 for quick display
+        expiresAt: preview.expiresAt,
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -155,60 +218,62 @@ export function registerCieAdminRoutes(app: Express): void {
   });
 
   /**
-   * POST /api/admin/cie/ingest/commit
-   * Step 2: Re-parse and commit the file to the database.
-   * Triggers score recomputation after commit.
+   * POST /api/admin/cie/ingest/confirm  (Step 2)
+   *
+   * Analyst submits their decision: which rows from the preview to commit.
+   * Body: { previewToken: string, acceptedRowIndices?: number[] }
+   *   - If acceptedRowIndices is omitted, ALL accepted rows from preview are committed.
+   *   - If acceptedRowIndices is provided, ONLY those rowIndex values are committed.
+   *
+   * After commit, triggers immediate score recomputation.
    */
-  app.post("/api/admin/cie/ingest/commit", isAuthenticated, upload.single("file"), async (req: Request, res: Response) => {
+  app.post("/api/admin/cie/ingest/confirm", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
-      const file = req.file;
-      if (!file) return res.status(400).json({ error: "No file uploaded" });
-
-      const filename = file.originalname.toLowerCase();
-      let format: "csv" | "xlsx" | "pdf";
-      let rows: ReturnType<typeof parseCsvBuffer>;
-
-      if (filename.endsWith(".csv") || file.mimetype.includes("csv")) {
-        format = "csv";
-        rows = parseCsvBuffer(file.buffer);
-      } else if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
-        format = "xlsx";
-        rows = parseXlsxBuffer(file.buffer);
-      } else if (filename.endsWith(".pdf") || file.mimetype.includes("pdf")) {
-        format = "pdf";
-        rows = await parsePdfBuffer(file.buffer, file.originalname);
-      } else {
-        return res.status(400).json({ error: "Unsupported file type" });
-      }
-
-      const preview = await buildPreview(format, rows);
-      const result = await commitRows(preview, getUserId(req), file.originalname);
-
-      await storage.createAuditLog({
-        actorUserId: getUserId(req),
-        action: "cie_price_data_committed",
-        entityType: "cie_ingestion_log",
-        entityId: String(result.logId),
-        details: { format, filename: file.originalname, committed: result.committed, skipped: result.skipped },
+      const schema = z.object({
+        previewToken: z.string().uuid("previewToken must be a valid UUID"),
+        acceptedRowIndices: z.array(z.number().int().nonnegative()).optional(),
       });
 
-      // Trigger immediate score recomputation in the background
+      const body = schema.parse(req.body);
+      const userId = getUserId(req);
+
+      const result = await commitFromToken(
+        body.previewToken,
+        body.acceptedRowIndices ?? null, // null = commit all accepted rows
+        userId,
+        userId
+      );
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "cie_price_data_confirmed",
+        entityType: "cie_ingestion_log",
+        entityId: String(result.logId),
+        details: {
+          uploadId: result.uploadId,
+          committed: result.committed,
+          skipped: result.skipped,
+          analystSelectedRows: body.acceptedRowIndices?.length ?? "all",
+        },
+      });
+
+      // Background score recomputation
       triggerImmediateScoreRun().catch(err => {
-        console.error("[CIEAdmin] Score recomputation after ingest failed:", err.message);
+        console.error("[CIEAdmin] Score recomputation after confirm failed:", err.message);
       });
 
       res.json({
         logId: result.logId,
+        uploadId: result.uploadId,
         committed: result.committed,
         skipped: result.skipped,
-        rowsExtracted: preview.rowsExtracted,
-        rowsRejected: preview.rowsRejected,
-        flaggedSymbols: preview.flaggedSymbols,
         message: `${result.committed} price rows committed. Score recomputation triggered.`,
       });
     } catch (e: any) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      if (e.message?.includes("Preview token")) return res.status(410).json({ error: e.message });
       res.status(500).json({ error: e.message });
     }
   });
@@ -257,7 +322,7 @@ export function registerCieAdminRoutes(app: Express): void {
         notes: z.string().max(500).optional(),
       }).refine(data => {
         const sum = Object.values(data.weights).reduce((a, b) => a + b, 0);
-        return Math.abs(sum - 1) < 0.001; // must sum to ~1.0
+        return Math.abs(sum - 1) < 0.001;
       }, { message: "Pillar weights must sum to 1.0" });
 
       const body = schema.parse(req.body);
@@ -300,7 +365,6 @@ export function registerCieAdminRoutes(app: Express): void {
         details: { versionLabel: mv.versionLabel },
       });
 
-      // Trigger immediate recomputation with new model
       triggerImmediateScoreRun().catch(err => {
         console.error("[CIEAdmin] Score recomputation after model activation failed:", err.message);
       });
@@ -358,7 +422,7 @@ export function registerCieAdminRoutes(app: Express): void {
   });
 
   // ================================================================
-  // SIGNALS (analyst intel)
+  // SIGNALS
   // ================================================================
 
   /** GET /api/admin/cie/signals — list all signals */
@@ -470,10 +534,10 @@ export function registerCieAdminRoutes(app: Express): void {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const schema = z.object({
-        asiIndex: z.number().int().positive(),         // ASI ×100
-        brentCrudeUsdCents: z.number().int().positive(), // Brent crude cents
-        ngnPerUsd: z.number().int().positive(),         // NGN per USD ×100
-        asiChange: z.number().int().optional(),         // daily change bps
+        asiIndex: z.number().int().positive(),
+        brentCrudeUsdCents: z.number().int().positive(),
+        ngnPerUsd: z.number().int().positive(),
+        asiChange: z.number().int().optional(),
         source: z.string().max(50).optional(),
       });
       const body = schema.parse(req.body);
@@ -503,7 +567,7 @@ export function registerCieAdminRoutes(app: Express): void {
   // DIVIDENDS
   // ================================================================
 
-  /** GET /api/admin/cie/dividends — list all upcoming dividends */
+  /** GET /api/admin/cie/dividends — list all dividends */
   app.get("/api/admin/cie/dividends", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });

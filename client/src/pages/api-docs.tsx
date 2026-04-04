@@ -1955,10 +1955,21 @@ export default function ApiDocsPage() {
           ════════════════════════════════════════════════════════════════ */}
           <section id="cie-api" className="space-y-6 scroll-mt-24">
             <div>
-              <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-cie-api">
-                <BarChart2 className="h-5 w-5" />
-                CIE Intelligence Engine
-              </h2>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-cie-api">
+                  <BarChart2 className="h-5 w-5" />
+                  CIE Intelligence Engine
+                </h2>
+                <a
+                  href="/cie-api-docs.md"
+                  download="cellion-cie-api-reference.md"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-border bg-muted hover:bg-muted/70 transition-colors shrink-0"
+                  data-testid="button-download-cie-docs"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download API Reference
+                </a>
+              </div>
               <p className="text-muted-foreground leading-relaxed mt-2">
                 The <strong>Cellion Intelligence Engine (CIE)</strong> is a subscription API that delivers
                 NGX equity intelligence — IAS/RS/CS scores, ranked recommendations, dividend calendars,

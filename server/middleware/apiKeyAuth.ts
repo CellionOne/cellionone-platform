@@ -201,12 +201,10 @@ export function authenticateApiKey(requiredPermission?: string | string[], optio
       });
     }
 
-    if (!options?.skipBillingCheck) {
-      // Partner keys are free-access; skip billing for them.
-      if (ciePartnerId !== null) {
-        // Partner keys always use CIE routes (skipBillingCheck=true) so this branch
-        // should never be reached in normal flow, but guard defensively.
-      } else if (orgId === null) {
+    if (!options?.skipBillingCheck && ciePartnerId === null) {
+      // Partner keys bypass billing entirely (their access is governed by cie_partners.status).
+      // This guard only applies to KYC org keys and personal keys.
+      if (orgId === null) {
         // Personal CIE keys have no org and always use skipBillingCheck=true; reject defensively here.
         return res.status(402).json({ error: "No billing account. Personal keys require a CIE subscription." });
       }

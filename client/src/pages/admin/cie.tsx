@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -400,6 +401,8 @@ const PILLAR_LABELS: Record<string, string> = {
 
 function ModelEditorTab() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isSuperAdmin = (user?.roles ?? []).includes("super_admin");
   const [weights, setWeights] = useState<Record<string, number>>(DEFAULT_WEIGHTS);
   const [notes, setNotes] = useState("");
 
@@ -514,10 +517,13 @@ function ModelEditorTab() {
                             <Send className="h-3 w-3 mr-1" /> Submit
                           </Button>
                         )}
-                        {v.status === "pending" && (
+                        {v.status === "pending" && isSuperAdmin && (
                           <Button size="sm" onClick={() => activateMutation.mutate(v.id)} disabled={activateMutation.isPending} data-testid={`button-activate-${v.id}`}>
                             <Power className="h-3 w-3 mr-1" /> Activate
                           </Button>
+                        )}
+                        {v.status === "pending" && !isSuperAdmin && (
+                          <span className="text-xs text-muted-foreground italic" title="Super-admin required to activate">Super-admin required</span>
                         )}
                       </div>
                     </TableCell>

@@ -412,7 +412,7 @@ function Router() {
         <CieTierRoute component={CieSecurities} minTier="subscriber" />
       </Route>
       <Route path="/cie">
-        <ProtectedRoute component={CiePortal} />
+        <CiePortal />
       </Route>
       <Route path="/cie-intelligence">
         <CieIntelligencePage />

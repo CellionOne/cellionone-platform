@@ -50,6 +50,13 @@ async function isAdmin(req: AuthenticatedRequest): Promise<boolean> {
   return roles.includes("admin");
 }
 
+async function isSuperAdmin(req: AuthenticatedRequest): Promise<boolean> {
+  const userId = req.user?.claims?.sub;
+  if (!userId) return false;
+  const roles = await storage.getUserRoles(userId);
+  return roles.includes("super_admin");
+}
+
 function getUserId(req: AuthenticatedRequest): string {
   return req.user?.claims?.sub ?? "system";
 }
@@ -412,10 +419,11 @@ export function registerCieAdminRoutes(app: Express): void {
     }
   });
 
-  /** POST /api/admin/cie/model-versions/:id/activate — activate a pending model version (pending → active) */
+  /** POST /api/admin/cie/model-versions/:id/activate — activate a pending model version (pending → active)
+   * Requires SUPER ADMIN — standard admins may only submit (draft → pending); activation is a governance boundary. */
   app.post("/api/admin/cie/model-versions/:id/activate", isAuthenticated, async (req: Request, res: Response) => {
     try {
-      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      if (!await isSuperAdmin(req)) return res.status(403).json({ error: "Forbidden: super-admin required to activate model versions" });
       const id = parseInt(req.params.id as string);
       const mv = await storage.activateCieModelVersion(id, getUserId(req));
       if (!mv) return res.status(409).json({ error: "Model version not found or not in pending status — submit for review first" });

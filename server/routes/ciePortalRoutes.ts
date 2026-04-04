@@ -128,37 +128,40 @@ export function registerCiePortalRoutes(app: Express): void {
       const tier = await resolveUserTier(userId);
       const now = new Date();
 
-      // Find the subscription that actually grants the current tier:
-      // 1. Look for a personal subscription first
-      const [personalSub] = await db.select()
-        .from(cieSubscriptions)
-        .where(and(
-          eq(cieSubscriptions.userId, userId),
-          eq(cieSubscriptions.status, "active"),
-          gte(cieSubscriptions.currentPeriodEnd, now),
-        ))
-        .orderBy(desc(cieSubscriptions.currentPeriodEnd))
-        .limit(1);
+      // Find the subscription that actually grants the current tier.
+      // Must mirror resolveUserTier() precedence: org-scoped first, personal second.
+      let activeSub: typeof cieSubscriptions.$inferSelect | null = null;
 
-      // 2. If no personal sub, look for org-scoped subscription
-      let activeSub = personalSub ?? null;
+      // 1. Check org-scoped subscriptions (matches resolveUserTier order)
+      const memberships = await db.select({ orgId: kycOrgMembers.orgId })
+        .from(kycOrgMembers)
+        .where(and(eq(kycOrgMembers.userId, userId), eq(kycOrgMembers.inviteStatus, "accepted")))
+        .limit(5);
+      for (const { orgId } of memberships) {
+        const [orgSub] = await db.select()
+          .from(cieSubscriptions)
+          .where(and(
+            eq(cieSubscriptions.orgId, orgId),
+            eq(cieSubscriptions.status, "active"),
+            gte(cieSubscriptions.currentPeriodEnd, now),
+          ))
+          .orderBy(desc(cieSubscriptions.currentPeriodEnd))
+          .limit(1);
+        if (orgSub) { activeSub = orgSub; break; }
+      }
+
+      // 2. Fall back to personal subscription if no org sub found
       if (!activeSub) {
-        const memberships = await db.select({ orgId: kycOrgMembers.orgId })
-          .from(kycOrgMembers)
-          .where(and(eq(kycOrgMembers.userId, userId), eq(kycOrgMembers.inviteStatus, "accepted")))
-          .limit(5);
-        for (const { orgId } of memberships) {
-          const [orgSub] = await db.select()
-            .from(cieSubscriptions)
-            .where(and(
-              eq(cieSubscriptions.orgId, orgId),
-              eq(cieSubscriptions.status, "active"),
-              gte(cieSubscriptions.currentPeriodEnd, now),
-            ))
-            .orderBy(desc(cieSubscriptions.currentPeriodEnd))
-            .limit(1);
-          if (orgSub) { activeSub = orgSub; break; }
-        }
+        const [personalSub] = await db.select()
+          .from(cieSubscriptions)
+          .where(and(
+            eq(cieSubscriptions.userId, userId),
+            eq(cieSubscriptions.status, "active"),
+            gte(cieSubscriptions.currentPeriodEnd, now),
+          ))
+          .orderBy(desc(cieSubscriptions.currentPeriodEnd))
+          .limit(1);
+        if (personalSub) activeSub = personalSub;
       }
 
       res.json({

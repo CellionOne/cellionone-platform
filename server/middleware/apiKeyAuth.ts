@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { validateApiKey, checkRateLimit, logApiUsage } from "../services/kycApiKeyService";
 import { db } from "../db";
 import { eq, and, desc, gte } from "drizzle-orm";
-import { kycBillingAccounts, kycCreditTransactions, cieSubscriptions } from "@shared/schema";
+import { kycBillingAccounts, kycCreditTransactions, cieSubscriptions, ciePartners } from "@shared/schema";
 import { sql } from "drizzle-orm";
 
 type CieTier = "free" | "subscriber" | "pro";
@@ -14,6 +14,8 @@ export interface ApiKeyRequest extends Request {
     orgId: number | null;
     /** Personal key owner. Null for org-scoped keys. */
     userId: string | null;
+    /** CIE Partner id — set when this key belongs to a partner programme. */
+    ciePartnerId: number | null;
     permissions: string[];
     /** Resolved CIE tier — populated when skipBillingCheck is true (CIE routes). */
     cieTier?: CieTier;
@@ -27,22 +29,58 @@ export interface ApiKeyAuthOptions {
 
 /**
  * 5-minute in-memory cache.
- * Keyed as "org:<orgId>" for org-scoped keys or "user:<userId>" for personal keys.
+ * Keyed as:
+ *   "partner:<ciePartnerId>" for CIE partner keys
+ *   "org:<orgId>"           for org-scoped keys
+ *   "user:<userId>"         for personal keys
  * Invalidated by invalidateCieApiKeyTierCache().
  */
 const cieTierCache = new Map<string, { tier: CieTier; fetchedAt: number }>();
 const CIE_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export function invalidateCieApiKeyTierCache(orgId: number | null, userId?: string | null): void {
+export function invalidateCieApiKeyTierCache(
+  orgId: number | null,
+  userId?: string | null,
+  ciePartnerId?: number | null,
+): void {
   if (orgId !== null && orgId !== undefined) cieTierCache.delete(`org:${orgId}`);
   if (userId) cieTierCache.delete(`user:${userId}`);
+  if (ciePartnerId) cieTierCache.delete(`partner:${ciePartnerId}`);
 }
 
 async function resolveCieTier(
   orgId: number | null,
   userId: string | null,
   permissions: string[],
+  ciePartnerId?: number | null,
 ): Promise<CieTier> {
+  // ── Partner programme fast-path ──────────────────────────────────────────
+  // Partner keys bypass cie_subscriptions entirely; their tier comes from cie_partners.
+  if (ciePartnerId !== null && ciePartnerId !== undefined) {
+    const cacheKey = `partner:${ciePartnerId}`;
+    const cached = cieTierCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < CIE_CACHE_TTL_MS) {
+      return cached.tier;
+    }
+    let partnerTier: CieTier = "subscriber";
+    try {
+      const [partner] = await db.select({ tier: ciePartners.tier, status: ciePartners.status })
+        .from(ciePartners)
+        .where(eq(ciePartners.id, ciePartnerId))
+        .limit(1);
+      if (partner && partner.status === "active") {
+        partnerTier = partner.tier as CieTier;
+      } else {
+        partnerTier = "free"; // suspended / inactive partner loses access
+      }
+    } catch (err) {
+      console.error("[apiKeyAuth] Partner tier resolution error:", err);
+    }
+    cieTierCache.set(cacheKey, { tier: partnerTier, fetchedAt: Date.now() });
+    return partnerTier;
+  }
+
+  // ── Standard subscription resolution ─────────────────────────────────────
   const cacheKey = orgId !== null ? `org:${orgId}` : `user:${userId}`;
   const cached = cieTierCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < CIE_CACHE_TTL_MS) {
@@ -129,7 +167,7 @@ export function authenticateApiKey(requiredPermission?: string | string[], optio
       return res.status(401).json({ error: "Invalid or expired API key" });
     }
 
-    const { apiKey: keyRecord, orgId, userId, permissions } = result;
+    const { apiKey: keyRecord, orgId, userId, ciePartnerId, permissions } = result;
 
     if (requiredPermission) {
       const required = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
@@ -164,8 +202,12 @@ export function authenticateApiKey(requiredPermission?: string | string[], optio
     }
 
     if (!options?.skipBillingCheck) {
-      // Personal CIE keys have no org and always use skipBillingCheck=true; reject defensively here.
-      if (orgId === null) {
+      // Partner keys are free-access; skip billing for them.
+      if (ciePartnerId !== null) {
+        // Partner keys always use CIE routes (skipBillingCheck=true) so this branch
+        // should never be reached in normal flow, but guard defensively.
+      } else if (orgId === null) {
+        // Personal CIE keys have no org and always use skipBillingCheck=true; reject defensively here.
         return res.status(402).json({ error: "No billing account. Personal keys require a CIE subscription." });
       }
       const [billingAccount] = await db.select().from(kycBillingAccounts)
@@ -228,13 +270,14 @@ export function authenticateApiKey(requiredPermission?: string | string[], optio
 
     // Resolve CIE subscription tier for CIE API routes (skipBillingCheck = true)
     const cieTier = options?.skipBillingCheck
-      ? await resolveCieTier(orgId, userId, permissions)
+      ? await resolveCieTier(orgId, userId, permissions, ciePartnerId)
       : undefined;
 
     req.apiKeyContext = {
       apiKeyId: keyRecord.id,
       orgId,
       userId,
+      ciePartnerId: ciePartnerId ?? null,
       permissions,
       cieTier,
     };

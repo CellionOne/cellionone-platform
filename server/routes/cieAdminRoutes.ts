@@ -11,9 +11,11 @@ import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import multer from "multer";
 import { db } from "../db";
-import { eq, and, gte, count, sql } from "drizzle-orm";
+import { eq, and, gte, count, desc, sql } from "drizzle-orm";
 import type { InsertCieSignal } from "../../shared/schema";
-import { cieSubscriptions, users } from "../../shared/schema";
+import { cieSubscriptions, ciePartners, kycApiKeys, kycApiUsageLogs, users } from "../../shared/schema";
+import { generatePartnerApiKey } from "../services/kycApiKeyService";
+import { invalidateCieApiKeyTierCache } from "../middleware/apiKeyAuth";
 import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import {
@@ -773,6 +775,207 @@ export function registerCieAdminRoutes(app: Express): void {
           paystackCustomerCode: s.paystackCustomerCode,
         })),
       });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  // ================================================================
+  // CIE PARTNER PROGRAMME — /api/admin/cie/partners
+  // ================================================================
+
+  /** GET /api/admin/cie/partners — list all partners with MTD call counts */
+  app.get("/api/admin/cie/partners", isAuthenticated, async (req: AuthenticatedRequest, res: Response) => {
+    if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+    try {
+      const partners = await db.select().from(ciePartners).orderBy(desc(ciePartners.createdAt));
+
+      const now = new Date();
+      const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      // Enrich each partner with their active key prefix and MTD call count
+      const enriched = await Promise.all(partners.map(async (p) => {
+        const [activeKey] = await db.select({ id: kycApiKeys.id, keyPrefix: kycApiKeys.keyPrefix })
+          .from(kycApiKeys)
+          .where(and(eq(kycApiKeys.ciePartnerId, p.id), eq(kycApiKeys.isActive, true)))
+          .limit(1);
+
+        let mtdCalls = 0;
+        if (activeKey) {
+          const [usage] = await db.select({ cnt: count() }).from(kycApiUsageLogs)
+            .where(and(
+              eq(kycApiUsageLogs.apiKeyId, activeKey.id),
+              gte(kycApiUsageLogs.createdAt, mtdStart),
+            ));
+          mtdCalls = Number(usage?.cnt ?? 0);
+        }
+
+        return {
+          ...p,
+          activeKeyPrefix: activeKey?.keyPrefix ?? null,
+          mtdCalls,
+        };
+      }));
+
+      res.json(enriched);
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** POST /api/admin/cie/partners — create a new partner + generate API key */
+  app.post("/api/admin/cie/partners", isAuthenticated, async (req: AuthenticatedRequest, res: Response) => {
+    if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+    const schema = z.object({
+      orgName: z.string().min(2).max(255),
+      contactName: z.string().max(255).optional(),
+      contactEmail: z.string().email().max(255).optional(),
+      cellionRevenueSharePct: z.number().int().min(0).max(100).default(60),
+      tier: z.enum(["subscriber", "pro"]).default("subscriber"),
+      notes: z.string().max(2000).optional(),
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    const data = parsed.data;
+    try {
+      const [partner] = await db.insert(ciePartners).values({
+        orgName: data.orgName,
+        contactName: data.contactName ?? null,
+        contactEmail: data.contactEmail ?? null,
+        cellionRevenueSharePct: data.cellionRevenueSharePct,
+        tier: data.tier,
+        status: "active",
+        notes: data.notes ?? null,
+      }).returning();
+
+      const { key: plaintext, apiKey } = await generatePartnerApiKey(partner.id, partner.orgName, partner.tier);
+
+      res.status(201).json({
+        partner,
+        apiKeyId: apiKey.id,
+        keyPrefix: apiKey.keyPrefix,
+        /** Returned once — never stored in plaintext */
+        plaintextKey: plaintext,
+      });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** PATCH /api/admin/cie/partners/:id — update partner details */
+  app.patch("/api/admin/cie/partners/:id", isAuthenticated, async (req: AuthenticatedRequest, res: Response) => {
+    if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid partner id" });
+
+    const schema = z.object({
+      orgName: z.string().min(2).max(255).optional(),
+      contactName: z.string().max(255).nullable().optional(),
+      contactEmail: z.string().email().max(255).nullable().optional(),
+      cellionRevenueSharePct: z.number().int().min(0).max(100).optional(),
+      tier: z.enum(["subscriber", "pro"]).optional(),
+      status: z.enum(["active", "inactive", "suspended"]).optional(),
+      notes: z.string().max(2000).nullable().optional(),
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    try {
+      const [existing] = await db.select().from(ciePartners).where(eq(ciePartners.id, id)).limit(1);
+      if (!existing) return res.status(404).json({ error: "Partner not found" });
+
+      const [updated] = await db.update(ciePartners)
+        .set({ ...parsed.data, updatedAt: new Date() })
+        .where(eq(ciePartners.id, id))
+        .returning();
+
+      // Invalidate tier cache if tier or status changed
+      if (parsed.data.tier !== undefined || parsed.data.status !== undefined) {
+        invalidateCieApiKeyTierCache(null, null, id);
+      }
+
+      res.json(updated);
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** POST /api/admin/cie/partners/:id/regenerate-key — revoke old key and issue new one */
+  app.post("/api/admin/cie/partners/:id/regenerate-key", isAuthenticated, async (req: AuthenticatedRequest, res: Response) => {
+    if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid partner id" });
+
+    try {
+      const [partner] = await db.select().from(ciePartners).where(eq(ciePartners.id, id)).limit(1);
+      if (!partner) return res.status(404).json({ error: "Partner not found" });
+
+      // Revoke all existing active keys for this partner
+      await db.update(kycApiKeys)
+        .set({ isActive: false })
+        .where(and(eq(kycApiKeys.ciePartnerId, id), eq(kycApiKeys.isActive, true)));
+
+      // Generate a new key
+      const { key: plaintext, apiKey } = await generatePartnerApiKey(partner.id, partner.orgName, partner.tier);
+
+      // Invalidate cached tier
+      invalidateCieApiKeyTierCache(null, null, id);
+
+      res.json({
+        apiKeyId: apiKey.id,
+        keyPrefix: apiKey.keyPrefix,
+        /** Returned once — never stored in plaintext */
+        plaintextKey: plaintext,
+      });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** GET /api/admin/cie/partners/revenue — partner revenue summary for Revenue tab */
+  app.get("/api/admin/cie/partners/revenue", isAuthenticated, async (req: AuthenticatedRequest, res: Response) => {
+    if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+    try {
+      const now = new Date();
+      const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const partners = await db.select().from(ciePartners)
+        .where(eq(ciePartners.status, "active"))
+        .orderBy(ciePartners.orgName);
+
+      const result = await Promise.all(partners.map(async (p) => {
+        const keys = await db.select({ id: kycApiKeys.id })
+          .from(kycApiKeys)
+          .where(eq(kycApiKeys.ciePartnerId, p.id));
+
+        let mtdCalls = 0;
+        if (keys.length > 0) {
+          const keyIds = keys.map(k => k.id);
+          const [usage] = await db.select({ cnt: count() }).from(kycApiUsageLogs)
+            .where(and(
+              sql`${kycApiUsageLogs.apiKeyId} IN (${sql.join(keyIds.map(id => sql`${id}`), sql`, `)})`,
+              gte(kycApiUsageLogs.createdAt, mtdStart),
+            ));
+          mtdCalls = Number(usage?.cnt ?? 0);
+        }
+
+        return {
+          partnerId: p.id,
+          orgName: p.orgName,
+          tier: p.tier,
+          cellionRevenueSharePct: p.cellionRevenueSharePct,
+          partnerRevenueSharePct: 100 - p.cellionRevenueSharePct,
+          mtdCalls,
+        };
+      }));
+
+      res.json(result);
     } catch (e: unknown) {
       res.status(500).json({ error: errMsg(e) });
     }

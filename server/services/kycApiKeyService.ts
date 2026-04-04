@@ -7,6 +7,12 @@ import {
   type KycApiKey,
 } from "@shared/schema";
 
+/** Rate limits for CIE partner tiers */
+const PARTNER_RATE_LIMITS: Record<string, number> = {
+  subscriber: 500,
+  pro: 1000,
+};
+
 const API_KEY_PREFIX = "co_live_";
 
 function hashKey(key: string): string {
@@ -37,9 +43,41 @@ export async function generateApiKey(
   return { key: fullKey, apiKey };
 }
 
+/**
+ * Generate a CIE Partner API key (no org association).
+ * Rate limit is set based on partner tier.
+ */
+export async function generatePartnerApiKey(
+  ciePartnerId: number,
+  partnerName: string,
+  tier: string,
+  dbOrTx: typeof db = db
+): Promise<{ key: string; apiKey: KycApiKey }> {
+  const randomPart = crypto.randomBytes(16).toString("hex");
+  const fullKey = `${API_KEY_PREFIX}${randomPart}`;
+  const keyPrefix = fullKey.slice(0, 12);
+  const keyHash = hashKey(fullKey);
+  const rateLimit = PARTNER_RATE_LIMITS[tier] ?? 500;
+  // CIE partner keys use "cie:read" as the base permission — tier is resolved
+  // dynamically from the cie_partners table by the auth middleware.
+  const permissions = ["cie:read"];
+
+  const [apiKey] = await dbOrTx.insert(kycApiKeys).values({
+    ciePartnerId,
+    keyPrefix,
+    keyHash,
+    name: `CIE Partner — ${partnerName}`,
+    permissions,
+    rateLimitPerMinute: rateLimit,
+    isActive: true,
+  }).returning();
+
+  return { key: fullKey, apiKey };
+}
+
 export async function validateApiKey(
   key: string
-): Promise<{ apiKey: KycApiKey; orgId: number | null; userId: string | null; permissions: string[] } | null> {
+): Promise<{ apiKey: KycApiKey; orgId: number | null; userId: string | null; ciePartnerId: number | null; permissions: string[] } | null> {
   const keyHash = hashKey(key);
 
   const [apiKey] = await db.select().from(kycApiKeys)
@@ -59,6 +97,7 @@ export async function validateApiKey(
     apiKey,
     orgId: apiKey.organisationId ?? null,
     userId: apiKey.userId ?? null,
+    ciePartnerId: apiKey.ciePartnerId ?? null,
     permissions: apiKey.permissions || [],
   };
 }

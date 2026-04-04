@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -18,7 +19,7 @@ import {
   BarChart3, Upload, Settings2, Banknote, Zap, TrendingUp,
   RefreshCw, Plus, Trash2, CheckCircle2,
   Users, DollarSign, Activity, Star, ArrowUpDown,
-  Save, Send, Power,
+  Save, Send, Power, Handshake, Copy, Check, KeyRound, Edit2,
 } from "lucide-react";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,35 @@ interface PreviewResult {
   rowsAccepted: number;
   acceptedRows: Array<{ rowIndex: number; [key: string]: string | number | null }>;
   previewRows: Array<Record<string, string | number | null>>;
+}
+
+interface CiePartner {
+  id: number;
+  orgName: string;
+  contactName: string | null;
+  contactEmail: string | null;
+  cellionRevenueSharePct: number;
+  tier: string;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+  activeKeyPrefix: string | null;
+  mtdCalls: number;
+}
+
+interface PartnerRevenue {
+  partnerId: number;
+  orgName: string;
+  tier: string;
+  cellionRevenueSharePct: number;
+  partnerRevenueSharePct: number;
+  mtdCalls: number;
+}
+
+interface KeyRevealState {
+  open: boolean;
+  partnerName: string;
+  plaintextKey: string;
 }
 
 function toErrorMessage(err: unknown, fallback = "An error occurred"): string {
@@ -863,11 +893,290 @@ function SignalsTab() {
   );
 }
 
+// ─── Key Reveal Dialog ────────────────────────────────────────────────────────
+
+function KeyRevealDialog({ state, onClose }: { state: KeyRevealState; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(state.plaintextKey).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      toast({ title: "Copied!", description: "API key copied to clipboard." });
+    });
+  };
+
+  return (
+    <Dialog open={state.open} onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <KeyRound className="h-5 w-5 text-primary" />
+            API Key Generated — {state.partnerName}
+          </DialogTitle>
+          <DialogDescription>
+            This key is shown <strong>once only</strong>. Copy it now and hand it securely to the partner. It cannot be retrieved again.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-2 p-3 bg-muted rounded-md font-mono text-xs break-all border border-border">
+          {state.plaintextKey}
+        </div>
+        <div className="flex gap-2 mt-2">
+          <Button onClick={handleCopy} className="flex-1 gap-2" data-testid="button-copy-partner-key">
+            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            {copied ? "Copied!" : "Copy Key"}
+          </Button>
+          <Button variant="outline" onClick={onClose} data-testid="button-close-key-reveal">
+            Close
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Partners Tab ─────────────────────────────────────────────────────────────
+
+function statusBadge(status: string) {
+  const cfg: Record<string, string> = {
+    active: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+    inactive: "bg-muted text-muted-foreground",
+    suspended: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  };
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cfg[status] ?? cfg.inactive}`}>{status}</span>;
+}
+
+function PartnersTab() {
+  const { toast } = useToast();
+  const { data: partners = [], isLoading } = useQuery<CiePartner[]>({
+    queryKey: ["/api/admin/cie/partners"],
+  });
+
+  const [showForm, setShowForm] = useState(false);
+  const [editPartner, setEditPartner] = useState<CiePartner | null>(null);
+  const [keyReveal, setKeyReveal] = useState<KeyRevealState>({ open: false, partnerName: "", plaintextKey: "" });
+
+  // Form state
+  const [orgName, setOrgName] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [cellionShare, setCellionShare] = useState("60");
+  const [tier, setTier] = useState("subscriber");
+  const [notes, setNotes] = useState("");
+  const [editStatus, setEditStatus] = useState("active");
+
+  function resetForm() {
+    setOrgName(""); setContactName(""); setContactEmail("");
+    setCellionShare("60"); setTier("subscriber"); setNotes(""); setEditStatus("active");
+    setEditPartner(null); setShowForm(false);
+  }
+
+  function openEdit(p: CiePartner) {
+    setOrgName(p.orgName);
+    setContactName(p.contactName ?? "");
+    setContactEmail(p.contactEmail ?? "");
+    setCellionShare(String(p.cellionRevenueSharePct));
+    setTier(p.tier);
+    setNotes(p.notes ?? "");
+    setEditStatus(p.status);
+    setEditPartner(p);
+    setShowForm(true);
+  }
+
+  const createMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/cie/partners", {
+      orgName, contactName: contactName || undefined, contactEmail: contactEmail || undefined,
+      cellionRevenueSharePct: parseInt(cellionShare), tier, notes: notes || undefined,
+    }),
+    onSuccess: async (res) => {
+      const data = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/partners"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/partners/revenue"] });
+      resetForm();
+      setKeyReveal({ open: true, partnerName: data.partner.orgName, plaintextKey: data.plaintextKey });
+    },
+    onError: (err) => toast({ title: "Error", description: toErrorMessage(err), variant: "destructive" }),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: () => apiRequest("PATCH", `/api/admin/cie/partners/${editPartner!.id}`, {
+      orgName, contactName: contactName || null, contactEmail: contactEmail || null,
+      cellionRevenueSharePct: parseInt(cellionShare), tier, status: editStatus, notes: notes || null,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/partners"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/partners/revenue"] });
+      resetForm();
+      toast({ title: "Partner updated" });
+    },
+    onError: (err) => toast({ title: "Error", description: toErrorMessage(err), variant: "destructive" }),
+  });
+
+  const regenMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("POST", `/api/admin/cie/partners/${id}/regenerate-key`, {}),
+    onSuccess: async (res, id) => {
+      const data = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/partners"] });
+      const p = partners.find(x => x.id === id);
+      setKeyReveal({ open: true, partnerName: p?.orgName ?? "Partner", plaintextKey: data.plaintextKey });
+    },
+    onError: (err) => toast({ title: "Error", description: toErrorMessage(err), variant: "destructive" }),
+  });
+
+  if (isLoading) return <div className="flex items-center justify-center py-16"><LoadingSpinner /></div>;
+
+  return (
+    <div className="space-y-6">
+      <KeyRevealDialog state={keyReveal} onClose={() => setKeyReveal(s => ({ ...s, open: false }))} />
+
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Partner Programme</h2>
+          <p className="text-xs text-muted-foreground">White-label resellers with revenue-share API access</p>
+        </div>
+        <Button size="sm" className="gap-2" onClick={() => { resetForm(); setShowForm(s => !s); }} data-testid="button-add-partner">
+          <Plus className="h-4 w-4" />{showForm && !editPartner ? "Cancel" : "Add Partner"}
+        </Button>
+      </div>
+
+      {showForm && (
+        <Card data-testid="card-partner-form">
+          <CardHeader>
+            <CardTitle className="text-sm">{editPartner ? `Edit — ${editPartner.orgName}` : "New Partner"}</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label>Organisation Name *</Label>
+              <Input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="e.g. Icon eTrade" data-testid="input-partner-org-name" />
+            </div>
+            <div className="space-y-1">
+              <Label>Contact Name</Label>
+              <Input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="e.g. Emeka Obi" data-testid="input-partner-contact-name" />
+            </div>
+            <div className="space-y-1">
+              <Label>Contact Email</Label>
+              <Input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="e.g. api@iconetrade.com" data-testid="input-partner-contact-email" />
+            </div>
+            <div className="space-y-1">
+              <Label>Cellion Revenue Share %</Label>
+              <Input type="number" min={0} max={100} value={cellionShare} onChange={e => setCellionShare(e.target.value)} data-testid="input-partner-revenue-share" />
+              <p className="text-xs text-muted-foreground">Partner retains {100 - (parseInt(cellionShare) || 0)}%</p>
+            </div>
+            <div className="space-y-1">
+              <Label>Access Tier</Label>
+              <Select value={tier} onValueChange={setTier}>
+                <SelectTrigger data-testid="select-partner-tier"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="subscriber">Subscriber (500 req/min)</SelectItem>
+                  <SelectItem value="pro">Pro (1,000 req/min)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {editPartner && (
+              <div className="space-y-1">
+                <Label>Status</Label>
+                <Select value={editStatus} onValueChange={setEditStatus}>
+                  <SelectTrigger data-testid="select-partner-status"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-1 sm:col-span-2">
+              <Label>Notes</Label>
+              <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Optional internal notes" data-testid="textarea-partner-notes" />
+            </div>
+            <div className="sm:col-span-2 flex gap-2 justify-end">
+              <Button variant="outline" onClick={resetForm} data-testid="button-partner-cancel">Cancel</Button>
+              <Button
+                onClick={() => editPartner ? updateMutation.mutate() : createMutation.mutate()}
+                disabled={!orgName.trim() || createMutation.isPending || updateMutation.isPending}
+                className="gap-2"
+                data-testid="button-partner-save"
+              >
+                <Save className="h-4 w-4" />
+                {editPartner ? "Save Changes" : "Create Partner & Generate Key"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Organisation</TableHead>
+                <TableHead>Tier</TableHead>
+                <TableHead className="text-center">Cellion Share</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">MTD Calls</TableHead>
+                <TableHead>Key Prefix</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {partners.map(p => (
+                <TableRow key={p.id} data-testid={`row-partner-${p.id}`}>
+                  <TableCell>
+                    <div>
+                      <p className="text-sm font-medium">{p.orgName}</p>
+                      {p.contactEmail && <p className="text-xs text-muted-foreground">{p.contactEmail}</p>}
+                    </div>
+                  </TableCell>
+                  <TableCell>{tierBadge(p.tier)}</TableCell>
+                  <TableCell className="text-center text-sm">{p.cellionRevenueSharePct}%</TableCell>
+                  <TableCell>{statusBadge(p.status)}</TableCell>
+                  <TableCell className="text-right text-sm font-mono">{p.mtdCalls.toLocaleString()}</TableCell>
+                  <TableCell className="text-xs font-mono text-muted-foreground">{p.activeKeyPrefix ? `${p.activeKeyPrefix}…` : "—"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{formatDate(p.createdAt)}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-1 justify-end">
+                      <Button size="icon" variant="ghost" onClick={() => openEdit(p)} title="Edit partner" data-testid={`button-edit-partner-${p.id}`}>
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon" variant="ghost"
+                        onClick={() => regenMutation.mutate(p.id)}
+                        disabled={regenMutation.isPending}
+                        title="Regenerate API key"
+                        data-testid={`button-regen-key-${p.id}`}
+                      >
+                        <KeyRound className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {partners.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8 text-sm">
+                    No partners yet. Click "Add Partner" to onboard the first reseller.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Revenue Tab ──────────────────────────────────────────────────────────────
 
 function RevenueTab() {
   const { data: rev, isLoading } = useQuery<Revenue>({
     queryKey: ["/api/admin/cie/revenue"],
+  });
+  const { data: partnerRevenue = [] } = useQuery<PartnerRevenue[]>({
+    queryKey: ["/api/admin/cie/partners/revenue"],
   });
 
   if (isLoading) return <div className="flex items-center justify-center py-16"><LoadingSpinner /></div>;
@@ -938,6 +1247,48 @@ function RevenueTab() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Partner Revenue */}
+      <Card data-testid="card-partner-revenue">
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Handshake className="h-4 w-4 text-primary" />
+            Partner Revenue — Month to Date
+          </CardTitle>
+          <CardDescription className="text-xs">
+            API call volume per active partner. Revenue share is estimated based on agreed Cellion %.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Partner</TableHead>
+                <TableHead>Tier</TableHead>
+                <TableHead className="text-right">MTD API Calls</TableHead>
+                <TableHead className="text-center">Cellion Share</TableHead>
+                <TableHead className="text-center">Partner Share</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {partnerRevenue.map(p => (
+                <TableRow key={p.partnerId} data-testid={`row-partner-revenue-${p.partnerId}`}>
+                  <TableCell className="text-sm font-medium">{p.orgName}</TableCell>
+                  <TableCell>{tierBadge(p.tier)}</TableCell>
+                  <TableCell className="text-right font-mono text-sm">{p.mtdCalls.toLocaleString()}</TableCell>
+                  <TableCell className="text-center text-sm">{p.cellionRevenueSharePct}%</TableCell>
+                  <TableCell className="text-center text-sm">{p.partnerRevenueSharePct}%</TableCell>
+                </TableRow>
+              ))}
+              {partnerRevenue.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8 text-sm">No active partners</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -965,6 +1316,7 @@ export default function AdminCieCockpit() {
             <TabsTrigger value="model" className="gap-2" data-testid="tab-model"><Settings2 className="h-4 w-4" />Model Editor</TabsTrigger>
             <TabsTrigger value="dividends" className="gap-2" data-testid="tab-dividends"><Banknote className="h-4 w-4" />Dividends</TabsTrigger>
             <TabsTrigger value="signals" className="gap-2" data-testid="tab-signals"><Zap className="h-4 w-4" />Signals</TabsTrigger>
+            <TabsTrigger value="partners" className="gap-2" data-testid="tab-partners"><Handshake className="h-4 w-4" />Partners</TabsTrigger>
             <TabsTrigger value="revenue" className="gap-2" data-testid="tab-revenue"><TrendingUp className="h-4 w-4" />Revenue</TabsTrigger>
           </TabsList>
 
@@ -973,6 +1325,7 @@ export default function AdminCieCockpit() {
           <TabsContent value="model"><ModelEditorTab /></TabsContent>
           <TabsContent value="dividends"><DividendsTab /></TabsContent>
           <TabsContent value="signals"><SignalsTab /></TabsContent>
+          <TabsContent value="partners"><PartnersTab /></TabsContent>
           <TabsContent value="revenue"><RevenueTab /></TabsContent>
         </Tabs>
       </div>

@@ -1310,6 +1310,8 @@ export const kycApiKeys = pgTable("kyc_api_keys", {
   id: serial("id").primaryKey(),
   organisationId: integer("organisation_id"),
   userId: varchar("user_id", { length: 255 }),
+  /** FK to cie_partners.id — set when this key is a CIE Partner key */
+  ciePartnerId: integer("cie_partner_id"),
   keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
   keyHash: varchar("key_hash", { length: 128 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),
@@ -1322,6 +1324,7 @@ export const kycApiKeys = pgTable("kyc_api_keys", {
 }, (table) => [
   index("idx_kyc_ak_org").on(table.organisationId),
   index("idx_kyc_ak_hash").on(table.keyHash),
+  index("idx_kyc_ak_partner").on(table.ciePartnerId),
 ]);
 
 export const insertKycApiKeySchema = createInsertSchema(kycApiKeys).omit({ id: true, createdAt: true });
@@ -2253,4 +2256,29 @@ export const cieSubscriptions = pgTable("cie_subscriptions", {
 export const insertCieSubscriptionSchema = createInsertSchema(cieSubscriptions).omit({ id: true, createdAt: true, updatedAt: true });
 export type CieSubscription = typeof cieSubscriptions.$inferSelect;
 export type InsertCieSubscription = z.infer<typeof insertCieSubscriptionSchema>;
+
+// ============== CIE PARTNER PROGRAMME ==============
+// Partners receive free API access under a revenue-share model.
+// Their API tier is resolved from this table, bypassing cie_subscriptions.
+export const ciePartners = pgTable("cie_partners", {
+  id: serial("id").primaryKey(),
+  orgName: varchar("org_name", { length: 255 }).notNull(),
+  contactName: varchar("contact_name", { length: 255 }),
+  contactEmail: varchar("contact_email", { length: 255 }),
+  /** Cellion's revenue share percentage (e.g. 60 means Cellion keeps 60%) */
+  cellionRevenueSharePct: integer("cellion_revenue_share_pct").notNull().default(60),
+  /** CIE access tier granted to this partner */
+  tier: varchar("tier", { length: 20 }).notNull().default("subscriber"), // subscriber | pro
+  /** Partner programme status */
+  status: varchar("status", { length: 20 }).notNull().default("active"), // active | inactive | suspended
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_cie_partners_status").on(table.status),
+]);
+
+export const insertCiePartnerSchema = createInsertSchema(ciePartners).omit({ id: true, createdAt: true, updatedAt: true });
+export type CiePartner = typeof ciePartners.$inferSelect;
+export type InsertCiePartner = z.infer<typeof insertCiePartnerSchema>;
 

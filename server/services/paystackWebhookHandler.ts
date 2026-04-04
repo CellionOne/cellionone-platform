@@ -547,6 +547,15 @@ async function handleChargeFailed(data: PaystackWebhookEvent['data'], rawPayload
     }
   }
 
+  // CIE pending subscription reconciliation:
+  // If the failed reference matches a pending CIE subscription, mark it as 'failed'
+  // so the user can re-initiate without hitting the duplicate-pending check.
+  const ciePending = await storage.getCieSubscriptionByReference(reference);
+  if (ciePending && ciePending.status === 'pending') {
+    await storage.updateCieSubscription(ciePending.id, { status: 'failed' });
+    console.log(`[Paystack Webhook] Marked pending CIE subscription ${ciePending.id} as failed for reference ${reference}`);
+  }
+
   console.log(`[Paystack Webhook] Payment failed for reference: ${reference}`);
 }
 

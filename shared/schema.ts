@@ -2223,7 +2223,14 @@ export const cieSubscriptions = pgTable("cie_subscriptions", {
   userId: varchar("user_id").notNull(),
   orgId: integer("org_id").references(() => kycOrganisations.id),
   tier: varchar("tier", { length: 20 }).notNull().default("free"), // free | subscriber | pro
-  status: varchar("status", { length: 20 }).notNull().default("active"), // active | cancelled | expired | past_due
+  // Status lifecycle:
+  //   pending    — checkout initiated; awaiting charge.success webhook
+  //   active     — subscription live; access granted while currentPeriodEnd > now
+  //   past_due   — invoice.payment_failed; Paystack will retry; access continues briefly
+  //   cancelled  — subscription.disable received; cancelAtPeriodEnd transitions via scheduler
+  //   expired    — period ended without renewal; scheduler-driven
+  //   failed     — charge.failed on initial checkout; user may re-initiate
+  status: varchar("status", { length: 20 }).notNull().default("active"), // pending | active | past_due | cancelled | expired | failed
   paystackSubscriptionCode: varchar("paystack_subscription_code", { length: 100 }),
   paystackCustomerCode: varchar("paystack_customer_code", { length: 100 }),
   paystackAuthorizationCode: varchar("paystack_authorization_code", { length: 100 }),

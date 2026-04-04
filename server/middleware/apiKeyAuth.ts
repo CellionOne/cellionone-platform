@@ -65,7 +65,11 @@ async function resolveCieTier(orgId: number, permissions: string[]): Promise<Cie
         // History exists but no active row → downgraded to free
         tier = "free";
       } else {
-        // No history → fall back to API key permission flags (backward compat)
+        // No subscription history → fall back to API key permission flags.
+        // This is a backward-compatibility bridge for API keys issued before the
+        // subscription system was introduced (Task #31). Once all existing paid
+        // API key holders have been migrated to subscriptions, remove this block
+        // and let entitlement flow exclusively through the cieSubscriptions table.
         if (permissions.includes("cie:pro")) tier = "pro";
         else if (permissions.includes("cie:subscriber")) tier = "subscriber";
       }

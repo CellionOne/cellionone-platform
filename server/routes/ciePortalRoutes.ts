@@ -242,7 +242,7 @@ export function registerCiePortalRoutes(app: Express): void {
           ticker: security.symbol,
           name: security.name,
           sector: security.sector,
-          isin: security.isin,
+          exchange: security.exchange,
           latestPrice: latestPrice ? {
             date: latestPrice.tradeDate,
             closeNaira: latestPrice.closeKobo != null ? latestPrice.closeKobo / 100 : null,
@@ -298,7 +298,7 @@ export function registerCiePortalRoutes(app: Express): void {
 
       const keys = await db.select()
         .from(kycApiKeys)
-        .where(and(eq(kycApiKeys.orgId, orgId), eq(kycApiKeys.isActive, true)))
+        .where(and(eq(kycApiKeys.organisationId, orgId), eq(kycApiKeys.isActive, true)))
         .orderBy(desc(kycApiKeys.createdAt));
 
       // Filter for cie:read keys
@@ -313,13 +313,12 @@ export function registerCiePortalRoutes(app: Express): void {
           .where(eq(kycApiUsageLogs.apiKeyId, k.id));
         return {
           id: k.id,
-          label: k.label,
-          keyPrefix: k.keyHash.substring(0, 8) + "••••••••",
+          label: k.name,
+          keyPrefix: k.keyPrefix,
           permissions: k.permissions,
-          rateLimit: k.rateLimit,
+          rateLimit: k.rateLimitPerMinute,
           isActive: k.isActive,
           createdAt: k.createdAt,
-          lastUsedAt: usage?.lastUsedAt ?? null,
           totalCalls: Number(usage?.totalCalls ?? 0),
         };
       }));
@@ -344,14 +343,16 @@ export function registerCiePortalRoutes(app: Express): void {
 
       const rawKey = `cie_${crypto.randomBytes(32).toString("hex")}`;
       const keyHash = crypto.createHash("sha256").update(rawKey).digest("hex");
-      const rateLimit = tier === "pro" ? 1000 : 500;
+      const keyPrefix = rawKey.substring(0, 12);
+      const rateLimitPerMinute = tier === "pro" ? 1000 : 500;
 
       await db.insert(kycApiKeys).values({
-        orgId,
-        label,
+        organisationId: orgId,
+        name: label,
+        keyPrefix,
         keyHash,
         permissions: ["cie:read"],
-        rateLimit,
+        rateLimitPerMinute,
         isActive: true,
       });
 
@@ -368,7 +369,7 @@ export function registerCiePortalRoutes(app: Express): void {
         message: "Store this key securely — it will not be shown again.",
         label,
         permissions: ["cie:read"],
-        rateLimit,
+        rateLimit: rateLimitPerMinute,
       });
     } catch (e: any) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
@@ -386,7 +387,7 @@ export function registerCiePortalRoutes(app: Express): void {
 
       const [key] = await db.select()
         .from(kycApiKeys)
-        .where(and(eq(kycApiKeys.id, keyId), eq(kycApiKeys.orgId, orgId ?? -1)));
+        .where(and(eq(kycApiKeys.id, keyId), eq(kycApiKeys.organisationId, orgId ?? -1)));
       if (!key) return res.status(404).json({ error: "Key not found" });
 
       await db.update(kycApiKeys).set({ isActive: false }).where(eq(kycApiKeys.id, keyId));
@@ -396,7 +397,7 @@ export function registerCiePortalRoutes(app: Express): void {
         action: "cie_api_key_revoked",
         entityType: "kyc_api_key",
         entityId: String(keyId),
-        details: { orgId, label: key.label },
+        details: { orgId, label: key.name },
       });
 
       res.json({ success: true });

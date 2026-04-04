@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { Link } from "wouter";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types matching the actual API response shapes ────────────────────────────
 
 interface StatusData {
   tier: "free" | "subscriber" | "pro";
@@ -46,7 +46,7 @@ interface SecurityItem {
 interface SecurityDetail {
   ticker: string; name: string; sector: string; isin: string | null;
   latestPrice: { date: string; closeNaira: number | null; volume: number } | null;
-  scores: { scoreDate: string; ias: number; rs: number; cs: number; recommendation: string; pillarBreakdown: any } | null;
+  scores: { scoreDate: string; ias: number; rs: number; cs: number; recommendation: string } | null;
   history: Array<{ date: string; ias: number; rs: number; cs: number }>;
   dividendAlert: { exDividendDate: string; amountPerShareNaira: number | null; daysUntil: number } | null;
 }
@@ -56,9 +56,14 @@ interface Signal {
   credibility: string; headline: string; body: string | null; publishedAt: string | null;
 }
 
+// API Keys match the portal route response: label/keyPrefix/permissions/rateLimit/totalCalls
 interface ApiKey {
-  id: number; name: string; prefix: string; scopes: string[];
-  createdAt: string; lastUsedAt: string | null; isActive: boolean;
+  id: number;
+  label: string;
+  keyPrefix: string;
+  permissions: string[];
+  rateLimit: number;
+  totalCalls: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -87,6 +92,28 @@ function recoBadge(rec: string | null) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[rec] ?? "bg-muted text-muted-foreground"}`}>{rec}</span>;
 }
 
+function starRating(ias: number | null) {
+  if (ias === null) return null;
+  const stars = ias >= 80 ? 5 : ias >= 65 ? 4 : ias >= 50 ? 3 : ias >= 35 ? 2 : 1;
+  return (
+    <span className="inline-flex gap-0.5" title={`IAS ${ias?.toFixed(1)}`}>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <Star
+          key={i}
+          className={`h-3 w-3 ${i < stars ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`}
+        />
+      ))}
+    </span>
+  );
+}
+
+function momentumDot(ias: number | null, rs: number | null) {
+  if (ias === null || rs === null) return null;
+  const combined = (ias + rs) / 2;
+  const color = combined >= 70 ? "bg-green-500" : combined >= 50 ? "bg-amber-500" : "bg-red-500";
+  return <span className={`inline-block h-2 w-2 rounded-full ${color}`} title={`RS: ${rs?.toFixed(1)}`} />;
+}
+
 // ─── Upgrade Gate ─────────────────────────────────────────────────────────────
 
 function UpgradeGate({ requiredTier, currentTier }: { requiredTier: string; currentTier: string }) {
@@ -100,10 +127,14 @@ function UpgradeGate({ requiredTier, currentTier }: { requiredTier: string; curr
         <h3 className="text-lg font-semibold mb-2">Upgrade Required</h3>
         <p className="text-sm text-muted-foreground max-w-xs">
           This section requires a <strong>{map[requiredTier] ?? requiredTier}</strong> plan.
-          You are currently on the <strong className="capitalize">{currentTier}</strong> plan.
+          You are on the <strong className="capitalize">{currentTier}</strong> plan.
         </p>
       </div>
-      <Button className="gap-2" onClick={() => document.querySelector<HTMLButtonElement>("[data-testid='tab-subscribe']")?.click()} data-testid="button-upgrade-cta">
+      <Button
+        className="gap-2"
+        onClick={() => document.querySelector<HTMLButtonElement>("[data-testid='tab-subscribe']")?.click()}
+        data-testid="button-upgrade-cta"
+      >
         Upgrade Now <ArrowRight className="h-4 w-4" />
       </Button>
     </div>
@@ -131,7 +162,8 @@ function MarketPulseTab() {
     );
   }
 
-  const changeColor = (v?: number | null) => !v ? "text-foreground" : v >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400";
+  const changeColor = (v?: number | null) =>
+    v == null ? "text-foreground" : v >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400";
 
   const metrics = [
     { label: "NGX ASI", value: data.asiIndex?.toLocaleString() ?? "—", color: "" },
@@ -143,7 +175,7 @@ function MarketPulseTab() {
       color: changeColor(data.asiDailyChangePct),
     },
     { label: "Brent Crude", value: data.brentCrudeUsd != null ? `$${data.brentCrudeUsd.toFixed(2)}` : "—", color: "" },
-    { label: "USD/NGN", value: data.ngnPerUsd != null ? `₦${data.ngnPerUsd.toFixed(2)}` : "—", color: "" },
+    { label: "USD / NGN", value: data.ngnPerUsd != null ? `₦${data.ngnPerUsd.toFixed(2)}` : "—", color: "" },
   ];
 
   return (
@@ -161,12 +193,13 @@ function MarketPulseTab() {
 
       <Card>
         <CardContent className="p-4">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="h-2 w-2 rounded-full bg-green-500"></span>
-            Live — last updated {formatDate(data.updatedAt)} · Source: {data.source ?? "manual"}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+            <span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
+            Last updated: {formatDate(data.updatedAt)} · Source: {data.source ?? "manual"}
           </div>
-          <p className="text-sm mt-3 leading-relaxed text-muted-foreground">
-            Upgrade to <strong>Subscriber</strong> or <strong>Pro</strong> to access individual security scores, analyst recommendations, dividend calendars, and the full NGX intelligence suite.
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Upgrade to <strong>Subscriber</strong> or <strong>Pro</strong> to access individual security scores,
+            analyst recommendations, dividend calendars, and the full NGX intelligence suite.
           </p>
         </CardContent>
       </Card>
@@ -178,9 +211,10 @@ function MarketPulseTab() {
 
 function SecuritiesTab({ tier }: { tier: string }) {
   const [search, setSearch] = useState("");
+  const [recFilter, setRecFilter] = useState("all");
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery<{ securities: SecurityItem[]; count: number; sectors: string[] }>({
+  const { data, isLoading } = useQuery<{ securities: SecurityItem[]; count: number }>({
     queryKey: ["/api/cie-portal/securities"],
     enabled: tier !== "free",
   });
@@ -188,48 +222,56 @@ function SecuritiesTab({ tier }: { tier: string }) {
   const { data: detail, isLoading: detailLoading } = useQuery<SecurityDetail>({
     queryKey: ["/api/cie-portal/securities", selectedTicker],
     enabled: selectedTicker !== null,
+    queryFn: async () => {
+      const res = await fetch(`/api/cie-portal/securities/${selectedTicker}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load security");
+      return res.json();
+    },
   });
 
   if (tier === "free") return <UpgradeGate requiredTier="subscriber" currentTier="free" />;
 
-  const filtered = (data?.securities ?? []).filter(s =>
-    search === "" ||
-    s.ticker.toLowerCase().includes(search.toLowerCase()) ||
-    s.name.toLowerCase().includes(search.toLowerCase()),
-  );
+  const allRecs = ["all", "Strong Buy", "Accumulate", "Hold", "Reduce", "Sell"];
+
+  const filtered = (data?.securities ?? []).filter(s => {
+    const matchSearch = search === "" ||
+      s.ticker.toLowerCase().includes(search.toLowerCase()) ||
+      s.name.toLowerCase().includes(search.toLowerCase());
+    const matchRec = recFilter === "all" || s.recommendation === recFilter;
+    return matchSearch && matchRec;
+  });
 
   if (selectedTicker !== null) {
     return (
       <div className="space-y-6">
-        <Button variant="ghost" size="sm" className="gap-2 -ml-2" onClick={() => setSelectedTicker(null)} data-testid="button-back-securities">
+        <Button variant="ghost" size="sm" className="-ml-2 gap-2" onClick={() => setSelectedTicker(null)} data-testid="button-back-securities">
           ← Back to Securities
         </Button>
         {detailLoading || !detail ? (
           <div className="flex items-center justify-center py-16"><LoadingSpinner /></div>
         ) : (
           <>
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
-                <h2 className="text-2xl font-bold font-mono text-primary" data-testid="text-security-symbol">{detail.ticker}</h2>
-                <p className="text-muted-foreground">{detail.name}</p>
-                <p className="text-xs text-muted-foreground mt-1">{detail.sector}</p>
+                <h2 className="text-3xl font-bold font-mono text-primary" data-testid="text-security-symbol">{detail.ticker}</h2>
+                <p className="text-muted-foreground text-sm mt-1">{detail.name}</p>
+                <p className="text-xs text-muted-foreground">{detail.sector}</p>
               </div>
-              {detail.scores && (
-                <div className="text-right">
-                  {recoBadge(detail.scores.recommendation)}
-                  <p className="text-xs text-muted-foreground mt-1">{formatDate(detail.scores.scoreDate)}</p>
-                </div>
-              )}
+              <div className="text-right flex flex-col items-end gap-2">
+                {detail.scores && recoBadge(detail.scores.recommendation)}
+                {detail.scores && starRating(detail.scores.ias)}
+                {detail.scores && <p className="text-xs text-muted-foreground">{formatDate(detail.scores.scoreDate)}</p>}
+              </div>
             </div>
 
             {detail.dividendAlert && (
-              <Card className="border-amber-500/40 bg-amber-50/30 dark:bg-amber-900/10" data-testid="card-dividend-alert">
+              <Card className="border-amber-400/40 bg-amber-50/30 dark:bg-amber-900/10" data-testid="card-dividend-alert">
                 <CardContent className="p-4 flex items-center gap-3">
-                  <Star className="h-5 w-5 text-amber-600 shrink-0" />
+                  <Star className="h-5 w-5 text-amber-500 shrink-0" />
                   <p className="text-sm">
-                    <strong>Dividend Alert:</strong> Ex-dividend date is {detail.dividendAlert.exDividendDate}
+                    <strong>Dividend Alert:</strong> Ex-dividend {detail.dividendAlert.exDividendDate}
                     {detail.dividendAlert.amountPerShareNaira != null && ` — ₦${detail.dividendAlert.amountPerShareNaira.toFixed(2)}/share`}
-                    {` (${detail.dividendAlert.daysUntil} days away)`}
+                    &nbsp;({detail.dividendAlert.daysUntil} days away)
                   </p>
                 </CardContent>
               </Card>
@@ -238,14 +280,16 @@ function SecuritiesTab({ tier }: { tier: string }) {
             {detail.scores && (
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  { label: "IAS", value: detail.scores.ias },
-                  { label: "RS", value: detail.scores.rs },
-                  { label: "CS", value: detail.scores.cs },
-                ].map((m, i) => (
-                  <Card key={i} data-testid={`card-score-${m.label.toLowerCase()}`}>
+                  { label: "Integrated Aggregate Score", abbr: "IAS", value: detail.scores.ias },
+                  { label: "Relative Score (sector)", abbr: "RS", value: detail.scores.rs },
+                  { label: "Composite Score", abbr: "CS", value: detail.scores.cs },
+                ].map(m => (
+                  <Card key={m.abbr} data-testid={`card-score-${m.abbr.toLowerCase()}`}>
                     <CardContent className="p-4 text-center">
-                      <p className="text-xs text-muted-foreground mb-1">{m.label}</p>
-                      <p className={`text-3xl font-bold ${iasColor(m.value)}`}>{m.value.toFixed(1)}</p>
+                      <p className="text-xs text-muted-foreground mb-1">{m.abbr}</p>
+                      <p className={`text-4xl font-bold ${iasColor(m.value)}`}>{m.value.toFixed(1)}</p>
+                      <p className="text-xs text-muted-foreground mt-1 hidden sm:block">{m.label}</p>
+                      <div className="mt-2">{m.abbr === "IAS" && starRating(m.value)}</div>
                     </CardContent>
                   </Card>
                 ))}
@@ -254,19 +298,20 @@ function SecuritiesTab({ tier }: { tier: string }) {
 
             {detail.latestPrice && (
               <Card>
-                <CardContent className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <CardHeader className="pb-2"><CardTitle className="text-sm">Latest Trading Data</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div>
-                    <p className="text-xs text-muted-foreground mb-1">Latest Close</p>
+                    <p className="text-xs text-muted-foreground">Close</p>
                     <p className="text-xl font-bold">
                       {detail.latestPrice.closeNaira != null ? `₦${detail.latestPrice.closeNaira.toFixed(2)}` : "—"}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground mb-1">Volume</p>
+                    <p className="text-xs text-muted-foreground">Volume</p>
                     <p className="text-xl font-bold">{detail.latestPrice.volume.toLocaleString()}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground mb-1">Trade Date</p>
+                    <p className="text-xs text-muted-foreground">Trade Date</p>
                     <p className="text-base font-medium">{detail.latestPrice.date}</p>
                   </div>
                 </CardContent>
@@ -285,15 +330,17 @@ function SecuritiesTab({ tier }: { tier: string }) {
                           <TableHead className="text-center">IAS</TableHead>
                           <TableHead className="text-center">RS</TableHead>
                           <TableHead className="text-center">CS</TableHead>
+                          <TableHead>Momentum</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {detail.history.slice(0, 10).map((h, i) => (
+                        {detail.history.slice(0, 15).map((h, i) => (
                           <TableRow key={i} data-testid={`row-history-${i}`}>
                             <TableCell className="text-sm">{h.date}</TableCell>
                             <TableCell className={`text-center text-sm ${iasColor(h.ias)}`}>{h.ias?.toFixed(1)}</TableCell>
                             <TableCell className="text-center text-sm">{h.rs?.toFixed(1)}</TableCell>
                             <TableCell className="text-center text-sm">{h.cs?.toFixed(1)}</TableCell>
+                            <TableCell>{momentumDot(h.ias, h.rs)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -310,15 +357,29 @@ function SecuritiesTab({ tier }: { tier: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Input
-          placeholder="Search ticker or name…"
+          placeholder="Search ticker or company…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="max-w-sm"
+          className="max-w-xs"
           data-testid="input-search-securities"
         />
-        <span className="text-sm text-muted-foreground">{filtered.length} securities</span>
+        <div className="flex gap-1 flex-wrap">
+          {allRecs.map(r => (
+            <button
+              key={r}
+              onClick={() => setRecFilter(r)}
+              className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                recFilter === r ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
+              }`}
+              data-testid={`filter-rec-${r}`}
+            >
+              {r === "all" ? "All" : r}
+            </button>
+          ))}
+        </div>
+        <span className="text-sm text-muted-foreground ml-auto">{filtered.length} securities</span>
       </div>
 
       <Card>
@@ -333,8 +394,9 @@ function SecuritiesTab({ tier }: { tier: string }) {
                     <TableHead>Ticker</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Sector</TableHead>
+                    <TableHead>Momentum</TableHead>
                     <TableHead className="text-center">IAS</TableHead>
-                    <TableHead className="text-center">RS</TableHead>
+                    <TableHead>Rating</TableHead>
                     <TableHead>Recommendation</TableHead>
                     <TableHead />
                   </TableRow>
@@ -348,17 +410,22 @@ function SecuritiesTab({ tier }: { tier: string }) {
                       data-testid={`row-security-${s.ticker}`}
                     >
                       <TableCell className="font-mono font-bold text-primary">{s.ticker}</TableCell>
-                      <TableCell className="text-sm">{s.name}</TableCell>
+                      <TableCell className="text-sm max-w-[140px] truncate">{s.name}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{s.sector}</TableCell>
-                      <TableCell className={`text-center text-sm ${iasColor(s.ias)}`}>{s.ias?.toFixed(1) ?? "—"}</TableCell>
-                      <TableCell className="text-center text-sm">{s.rs?.toFixed(1) ?? "—"}</TableCell>
+                      <TableCell>{momentumDot(s.ias, s.rs)}</TableCell>
+                      <TableCell className={`text-center text-sm font-medium ${iasColor(s.ias)}`}>
+                        {s.ias?.toFixed(1) ?? "—"}
+                      </TableCell>
+                      <TableCell>{starRating(s.ias)}</TableCell>
                       <TableCell>{recoBadge(s.recommendation)}</TableCell>
                       <TableCell><ArrowRight className="h-4 w-4 text-muted-foreground" /></TableCell>
                     </TableRow>
                   ))}
                   {filtered.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8 text-sm">No securities match your search</TableCell>
+                      <TableCell colSpan={8} className="text-center text-muted-foreground py-8 text-sm">
+                        No securities match your filters
+                      </TableCell>
                     </TableRow>
                   )}
                 </TableBody>
@@ -382,7 +449,9 @@ function SignalsTab({ tier }: { tier: string }) {
   if (tier !== "pro") return <UpgradeGate requiredTier="pro" currentTier={tier} />;
 
   const credColor: Record<string, string> = {
-    high: "text-green-600", medium: "text-amber-600", low: "text-muted-foreground",
+    high: "text-green-600 dark:text-green-400",
+    medium: "text-amber-600 dark:text-amber-400",
+    low: "text-muted-foreground",
   };
   const sentimentEl = (s: string) => {
     if (s === "bullish") return <TrendingUp className="h-4 w-4 text-green-500" />;
@@ -406,7 +475,9 @@ function SignalsTab({ tier }: { tier: string }) {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       {s.ticker && <span className="font-mono text-primary font-semibold text-sm">{s.ticker}</span>}
                       <span className="text-xs capitalize bg-muted rounded px-1.5 py-0.5">{s.type.replace("_", " ")}</span>
-                      <span className={`text-xs font-medium capitalize ${credColor[s.credibility]}`}>● {s.credibility} credibility</span>
+                      <span className={`text-xs font-medium capitalize ${credColor[s.credibility] ?? ""}`}>
+                        ● {s.credibility} credibility
+                      </span>
                     </div>
                     <p className="text-sm font-medium mb-1">{s.headline}</p>
                     {s.body && <p className="text-xs text-muted-foreground">{s.body}</p>}
@@ -431,7 +502,7 @@ function SignalsTab({ tier }: { tier: string }) {
 
 function ApiKeysTab({ tier }: { tier: string }) {
   const { toast } = useToast();
-  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyLabel, setNewKeyLabel] = useState("");
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<{ keys: ApiKey[] }>({
@@ -440,18 +511,24 @@ function ApiKeysTab({ tier }: { tier: string }) {
   });
 
   const createMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/cie-portal/api-keys", { name: newKeyName }),
-    onSuccess: (res: any) => {
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/cie-portal/api-keys", { label: newKeyLabel });
+      return res.json() as Promise<{ apiKey: string; label: string; permissions: string[]; rateLimit: number }>;
+    },
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/cie-portal/api-keys"] });
-      if (res?.apiKey) setRevealedKey(res.apiKey);
+      if (data?.apiKey) setRevealedKey(data.apiKey);
       toast({ title: "API key created — copy it now, it won't be shown again" });
-      setNewKeyName("");
+      setNewKeyLabel("");
     },
     onError: (e: any) => toast({ title: e?.message ?? "Failed to create key", variant: "destructive" }),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/cie-portal/api-keys/${id}`, undefined),
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/cie-portal/api-keys/${id}`, undefined);
+      return res.json();
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cie-portal/api-keys"] });
       toast({ title: "API key deleted" });
@@ -470,12 +547,20 @@ function ApiKeysTab({ tier }: { tier: string }) {
               <CheckCircle2 className="h-4 w-4" /> New API key — copy it now, it won't be shown again
             </p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 bg-background border rounded px-3 py-2 text-sm font-mono break-all" data-testid="text-new-api-key">{revealedKey}</code>
-              <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(revealedKey); toast({ title: "Copied!" }); }} data-testid="button-copy-api-key">
+              <code className="flex-1 bg-background border rounded px-3 py-2 text-sm font-mono break-all" data-testid="text-new-api-key">
+                {revealedKey}
+              </code>
+              <Button
+                size="sm" variant="outline"
+                onClick={() => { navigator.clipboard.writeText(revealedKey!); toast({ title: "Copied!" }); }}
+                data-testid="button-copy-api-key"
+              >
                 <Copy className="h-4 w-4" />
               </Button>
             </div>
-            <Button size="sm" variant="ghost" className="mt-2" onClick={() => setRevealedKey(null)} data-testid="button-dismiss-key">Dismiss</Button>
+            <Button size="sm" variant="ghost" className="mt-2" onClick={() => setRevealedKey(null)} data-testid="button-dismiss-key">
+              Dismiss
+            </Button>
           </CardContent>
         </Card>
       )}
@@ -483,18 +568,25 @@ function ApiKeysTab({ tier }: { tier: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Create New API Key</CardTitle>
-          <CardDescription className="text-xs">Keys are scoped to your subscription tier. Subscriber: read-only, 100 req/min. Pro: includes signals, 300 req/min.</CardDescription>
+          <CardDescription className="text-xs">
+            Keys are scoped to your subscription tier. Subscriber: read-only, 500 req/min. Pro: 1,000 req/min.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex gap-3">
             <Input
-              placeholder="Key name (e.g. my-trading-app)"
-              value={newKeyName}
-              onChange={e => setNewKeyName(e.target.value)}
+              placeholder="Key label (e.g. my-trading-app)"
+              value={newKeyLabel}
+              onChange={e => setNewKeyLabel(e.target.value)}
               className="max-w-xs"
-              data-testid="input-new-key-name"
+              data-testid="input-new-key-label"
             />
-            <Button onClick={() => createMutation.mutate()} disabled={!newKeyName || createMutation.isPending} className="gap-2" data-testid="button-create-api-key">
+            <Button
+              onClick={() => createMutation.mutate()}
+              disabled={!newKeyLabel || createMutation.isPending}
+              className="gap-2"
+              data-testid="button-create-api-key"
+            >
               <Plus className="h-4 w-4" /> Create
             </Button>
           </div>
@@ -510,24 +602,29 @@ function ApiKeysTab({ tier }: { tier: string }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
+                  <TableHead>Label</TableHead>
                   <TableHead>Key Prefix</TableHead>
-                  <TableHead>Scopes</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Last Used</TableHead>
+                  <TableHead>Permissions</TableHead>
+                  <TableHead>Rate Limit</TableHead>
+                  <TableHead>Total Calls</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(data?.keys ?? []).map(k => (
                   <TableRow key={k.id} data-testid={`row-api-key-${k.id}`}>
-                    <TableCell className="text-sm font-medium">{k.name}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{k.prefix}…</TableCell>
-                    <TableCell className="text-xs">{k.scopes.join(", ")}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDate(k.createdAt)}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{k.lastUsedAt ? formatDate(k.lastUsedAt) : "Never"}</TableCell>
+                    <TableCell className="text-sm font-medium">{k.label}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{k.keyPrefix}</TableCell>
+                    <TableCell className="text-xs">{k.permissions.join(", ")}</TableCell>
+                    <TableCell className="text-xs">{k.rateLimit?.toLocaleString()} req/min</TableCell>
+                    <TableCell className="text-xs">{k.totalCalls?.toLocaleString() ?? 0}</TableCell>
                     <TableCell>
-                      <Button size="sm" variant="ghost" onClick={() => deleteMutation.mutate(k.id)} disabled={deleteMutation.isPending} data-testid={`button-delete-key-${k.id}`}>
+                      <Button
+                        size="sm" variant="ghost"
+                        onClick={() => deleteMutation.mutate(k.id)}
+                        disabled={deleteMutation.isPending}
+                        data-testid={`button-delete-key-${k.id}`}
+                      >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </TableCell>
@@ -535,7 +632,9 @@ function ApiKeysTab({ tier }: { tier: string }) {
                 ))}
                 {!data?.keys?.length && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8 text-sm">No API keys yet. Create one to get started.</TableCell>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8 text-sm">
+                      No API keys yet. Create one to get started.
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -556,15 +655,23 @@ function SubscriptionTab({ status }: { status?: StatusData }) {
   const expiresLabel = sub?.currentPeriodEnd ? formatDate(sub.currentPeriodEnd) : null;
 
   const subscribeMutation = useMutation({
-    mutationFn: (plan: "subscriber" | "pro") => apiRequest("POST", "/api/cie-billing/subscribe", { plan }),
-    onSuccess: (data: any) => {
-      if (data?.paymentUrl) window.location.href = data.paymentUrl;
+    mutationFn: async (newTier: "subscriber" | "pro") => {
+      const res = await apiRequest("POST", "/api/cie-billing/subscribe", { tier: newTier });
+      return res.json() as Promise<{ ok: boolean; data: { authorizationUrl: string; reference: string } }>;
+    },
+    onSuccess: (data) => {
+      const url = data?.data?.authorizationUrl;
+      if (url) window.location.href = url;
+      else toast({ title: "Subscription initiated — check email to complete payment" });
     },
     onError: (e: any) => toast({ title: e?.message ?? "Failed to initiate subscription", variant: "destructive" }),
   });
 
   const cancelMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/cie-billing/cancel", {}),
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/cie-billing/cancel", {});
+      return res.json();
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cie-portal/status"] });
       toast({ title: "Subscription will cancel at period end" });
@@ -602,17 +709,30 @@ function SubscriptionTab({ status }: { status?: StatusData }) {
 
       {([
         {
-          plan: "subscriber" as const,
+          tier: "subscriber" as const,
           name: "Subscriber",
-          price: "₦5,000/month",
-          features: ["Security-level IAS & RS scores", "Analyst recommendations", "Dividend calendar", "API access (100 req/min)"],
+          price: "₦5,000 / month",
+          features: [
+            "Security-level IAS & RS scores for all NGX-listed securities",
+            "Analyst recommendations (Strong Buy → Sell)",
+            "Star ratings and momentum indicators",
+            "Dividend calendar & corporate actions",
+            "API access (500 req/min)",
+          ],
           highlight: false,
         },
         {
-          plan: "pro" as const,
+          tier: "pro" as const,
           name: "Pro",
-          price: "₦10,000/month",
-          features: ["Everything in Subscriber", "Analyst signals feed", "Sector rotation alerts", "Priority API (300 req/min)"],
+          price: "₦10,000 / month",
+          features: [
+            "Everything in Subscriber",
+            "Analyst trade calls & signals",
+            "Sector rotation alerts",
+            "Credibility-rated intelligence feed",
+            "Priority API access (1,000 req/min)",
+            "Dedicated support channel",
+          ],
           highlight: true,
         },
       ] as const).map((t, i) => (
@@ -625,13 +745,15 @@ function SubscriptionTab({ status }: { status?: StatusData }) {
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
                 <h3 className="font-semibold">{t.name}</h3>
-                {t.highlight && <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">Most Popular</span>}
+                {t.highlight && (
+                  <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">Most Popular</span>
+                )}
               </div>
               <p className="text-lg font-bold text-primary mb-3">{t.price}</p>
-              <ul className="space-y-1">
+              <ul className="space-y-1.5">
                 {t.features.map((f, j) => (
-                  <li key={j} className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />{f}
+                  <li key={j} className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />{f}
                   </li>
                 ))}
               </ul>
@@ -639,11 +761,11 @@ function SubscriptionTab({ status }: { status?: StatusData }) {
             <Button
               className="shrink-0"
               variant={t.highlight ? "default" : "outline"}
-              disabled={tier === t.plan || subscribeMutation.isPending}
-              onClick={() => subscribeMutation.mutate(t.plan)}
-              data-testid={`button-subscribe-${t.plan}`}
+              disabled={tier === t.tier || subscribeMutation.isPending}
+              onClick={() => subscribeMutation.mutate(t.tier)}
+              data-testid={`button-subscribe-${t.tier}`}
             >
-              {tier === t.plan ? "Current Plan" : "Subscribe"}
+              {tier === t.tier ? "Current Plan" : "Subscribe"}
             </Button>
           </CardContent>
         </Card>
@@ -661,9 +783,9 @@ export default function CiePortal() {
 
   const tier = status?.tier ?? "free";
 
-  const tierBadgeEl = (
+  const tierBadge = (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ml-2 ${
+      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ml-2 ${
         tier === "pro"
           ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
           : tier === "subscriber"
@@ -684,8 +806,8 @@ export default function CiePortal() {
             <BarChart3 className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-xl font-bold flex items-center" data-testid="text-cie-portal-heading">
-              NGX Intelligence Portal {tierBadgeEl}
+            <h1 className="text-xl font-bold flex items-center flex-wrap gap-1" data-testid="text-cie-portal-heading">
+              NGX Intelligence Portal {tierBadge}
             </h1>
             <p className="text-sm text-muted-foreground">
               Equity scores, signals, dividends, and API access for the Nigerian Exchange Group
@@ -700,15 +822,15 @@ export default function CiePortal() {
             </TabsTrigger>
             <TabsTrigger value="securities" className="gap-2" data-testid="tab-securities-portal">
               <BarChart3 className="h-4 w-4" />Securities
-              {tier === "free" && <Lock className="h-3 w-3 ml-0.5 text-muted-foreground" />}
+              {tier === "free" && <Lock className="h-3 w-3 opacity-60" />}
             </TabsTrigger>
             <TabsTrigger value="signals" className="gap-2" data-testid="tab-signals-portal">
               <Zap className="h-4 w-4" />Signals
-              {tier !== "pro" && <Lock className="h-3 w-3 ml-0.5 text-muted-foreground" />}
+              {tier !== "pro" && <Lock className="h-3 w-3 opacity-60" />}
             </TabsTrigger>
             <TabsTrigger value="api-keys" className="gap-2" data-testid="tab-api-keys">
               <Key className="h-4 w-4" />API Keys
-              {tier === "free" && <Lock className="h-3 w-3 ml-0.5 text-muted-foreground" />}
+              {tier === "free" && <Lock className="h-3 w-3 opacity-60" />}
             </TabsTrigger>
             <TabsTrigger value="subscribe" className="gap-2" data-testid="tab-subscribe">
               <Star className="h-4 w-4" />Subscription

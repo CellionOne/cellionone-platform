@@ -178,7 +178,7 @@ export function registerCieAdminRoutes(app: Express): void {
   app.put("/api/admin/cie/securities/:id", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       const schema = z.object({
         name: z.string().min(2).max(255).optional(),
         sector: z.string().min(2).max(100).optional(),
@@ -394,7 +394,7 @@ export function registerCieAdminRoutes(app: Express): void {
   app.post("/api/admin/cie/model-versions/:id/submit", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       const mv = await storage.submitCieModelVersion(id);
       if (!mv) return res.status(409).json({ error: "Model version not found or not in draft status" });
 
@@ -416,7 +416,7 @@ export function registerCieAdminRoutes(app: Express): void {
   app.post("/api/admin/cie/model-versions/:id/activate", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       const mv = await storage.activateCieModelVersion(id, getUserId(req));
       if (!mv) return res.status(409).json({ error: "Model version not found or not in pending status — submit for review first" });
 
@@ -457,7 +457,7 @@ export function registerCieAdminRoutes(app: Express): void {
   app.get("/api/admin/cie/scores/:securityId/history", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
-      const securityId = parseInt(req.params.securityId);
+      const securityId = parseInt(req.params.securityId as string);
       const days = Math.min(parseInt(String(req.query.days ?? "30")), 365);
       const history = await storage.listCieScoreHistory(securityId, days);
       res.json({ history, count: history.length });
@@ -543,7 +543,7 @@ export function registerCieAdminRoutes(app: Express): void {
   app.patch("/api/admin/cie/signals/:id", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       const schema = z.object({
         content: z.string().min(10).max(5000).optional(),
         sentiment: z.enum(["bullish", "bearish", "neutral"]).optional(),
@@ -569,7 +569,7 @@ export function registerCieAdminRoutes(app: Express): void {
   app.delete("/api/admin/cie/signals/:id", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       await storage.deleteCieSignal(id);
       res.json({ success: true });
     } catch (e: any) {
@@ -672,7 +672,7 @@ export function registerCieAdminRoutes(app: Express): void {
   app.delete("/api/admin/cie/dividends/:id", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
-      const id = parseInt(req.params.id);
+      const id = parseInt(req.params.id as string);
       await storage.deleteCieDividend(id);
       res.json({ success: true });
     } catch (e: any) {

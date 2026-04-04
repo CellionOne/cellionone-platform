@@ -159,7 +159,7 @@ export function registerCieApiRoutes(app: Express): void {
     requireCieTier("subscriber"),
     async (req: ApiKeyRequest, res: Response) => {
       try {
-        const ticker = req.params.ticker.toUpperCase();
+        const ticker = (req.params.ticker as string).toUpperCase();
         const security = await storage.getCieSecurityBySymbol(ticker);
         if (!security) {
           return res.status(404).json({ error: `Security '${ticker}' not found` });
@@ -169,12 +169,10 @@ export function registerCieApiRoutes(app: Express): void {
         const latestPrice = await storage.getLatestCiePrice(security.id);
 
         return res.json({
-          ticker:         security.symbol,
-          name:           security.name,
-          sector:         security.sector,
-          isin:           security.isin,
-          listingDate:    security.listingDate,
-          sharesOutstanding: security.sharesOutstanding,
+          ticker:   security.symbol,
+          name:     security.name,
+          sector:   security.sector,
+          exchange: security.exchange,
           latestPrice:    latestPrice
             ? {
                 date:        latestPrice.tradeDate,
@@ -215,7 +213,7 @@ export function registerCieApiRoutes(app: Express): void {
     requireCieTier("subscriber"),
     async (req: ApiKeyRequest, res: Response) => {
       try {
-        const ticker = req.params.ticker.toUpperCase();
+        const ticker = (req.params.ticker as string).toUpperCase();
         const { days } = z.object({
           days: z.coerce.number().int().min(1).max(90).default(30),
         }).parse(req.query);

@@ -97,7 +97,6 @@ export default function CieIntelligencePage() {
   usePageMeta({
     title: "CIE — NGX Equity Intelligence | Cellion One",
     description: "Access institutional-grade equity research for every NGX-listed security. Scores, signals, dividend calendars, and API access — from ₦5,000/month.",
-    ogImage: "/og-cie.png",
   });
 
   return (

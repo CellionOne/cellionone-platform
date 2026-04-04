@@ -50,6 +50,7 @@ import AdminEscrowDashboard from "@/pages/admin/escrow-dashboard";
 import AdminBankingPartners from "@/pages/admin/banking-partners";
 import AdminCieCockpit from "@/pages/admin/cie";
 import CiePortal from "@/pages/cie/index";
+import CieSubscribeSuccess from "@/pages/cie/subscribe-success";
 import CieIntelligencePage from "@/pages/cie-intelligence";
 import PlatformOverview from "@/pages/platform-overview";
 import WhyCellionOne from "@/pages/why-cellion-one";
@@ -353,6 +354,9 @@ function Router() {
         <ProtectedRoute component={AdminCieCockpit} roles={["admin"]} />
       </Route>
 
+      <Route path="/cie/subscribe/success">
+        <ProtectedRoute component={CieSubscribeSuccess} />
+      </Route>
       <Route path="/cie">
         <ProtectedRoute component={CiePortal} />
       </Route>

@@ -109,6 +109,7 @@ function AiInsightCard({ ticker }: { ticker: string }) {
   });
 
   const narrative = narrativeData?.narrative ?? null;
+  const aiStatusLoading = aiStatus === undefined; // still resolving
 
   // Gracefully hide the entire card when AI is unavailable or fetch has permanently failed
   if (aiStatus?.available === false) return null;
@@ -138,7 +139,7 @@ function AiInsightCard({ ticker }: { ticker: string }) {
         </div>
       </CardHeader>
       <CardContent>
-        {(isLoading || (isFetching && !narrative)) && (
+        {(aiStatusLoading || isLoading || (isFetching && !narrative)) && (
           <div className="space-y-3" data-testid="skeleton-ai-insight">
             <Skeleton className="h-4 w-3/4" />
             <Skeleton className="h-3 w-full" />

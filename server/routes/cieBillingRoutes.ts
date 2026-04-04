@@ -27,6 +27,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import type { CieSubscription } from "@shared/schema";
+import { invalidateCieApiKeyTierCache } from "../middleware/apiKeyAuth";
 
 const PAYSTACK_BASE = "https://api.paystack.co";
 
@@ -430,7 +431,7 @@ export function registerCieBillingRoutes(app: Express): void {
             currentPeriodStart: periodStart, currentPeriodEnd: periodEnd,
           });
           await storage.updateCieSubscription(activeSub.id, { status: "expired", cancelledAt: new Date() });
-          if (orgId) { try { const { invalidateCieApiKeyTierCache } = await import("../middleware/apiKeyAuth"); invalidateCieApiKeyTierCache(orgId); } catch {} }
+          if (orgId) invalidateCieApiKeyTierCache(orgId);
 
           await storage.createAuditLog({ actorUserId: userId, action: "cie_subscription_upgraded_direct", entityType: "cie_subscription", entityId: String(newSub.id), details: { from: "subscriber", to: "pro", previousId: activeSub.id } });
           await storage.createNotification({ userId, title: "Upgraded to CIE Pro", message: `Your CIE Pro subscription starts ${periodStart.toLocaleDateString("en-NG")}.`, type: "success", linkUrl: "/cie/subscribe" });
@@ -487,7 +488,7 @@ export function registerCieBillingRoutes(app: Express): void {
             currentPeriodStart: periodStart, currentPeriodEnd: periodEnd,
           });
           await storage.updateCieSubscription(activeSub.id, { status: "expired", cancelledAt: new Date() });
-          if (orgId) { try { const { invalidateCieApiKeyTierCache } = await import("../middleware/apiKeyAuth"); invalidateCieApiKeyTierCache(orgId); } catch {} }
+          if (orgId) invalidateCieApiKeyTierCache(orgId);
 
           await storage.createAuditLog({ actorUserId: userId, action: "cie_subscription_downgraded_direct", entityType: "cie_subscription", entityId: String(newSub.id), details: { from: "pro", to: "subscriber", previousId: activeSub.id } });
           await storage.createNotification({ userId, title: "Downgraded to CIE Subscriber", message: `Your CIE Subscriber plan starts ${periodStart.toLocaleDateString("en-NG")}.`, type: "info", linkUrl: "/cie/subscribe" });

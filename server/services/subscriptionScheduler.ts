@@ -2,9 +2,11 @@ import { db } from "../db";
 import { eq, and, lt, lte, gte } from "drizzle-orm";
 import { 
   registeredOfficeSubscriptions,
+  cieSubscriptions,
   notifications,
   auditLogs,
 } from "@shared/schema";
+import { invalidateCieApiKeyTierCache } from "../middleware/apiKeyAuth";
 
 // Scheduler for subscription expiry and renewal nudges
 // Runs daily checks for expiring/expired subscriptions
@@ -159,13 +161,69 @@ export const subscriptionScheduler = {
     return { sent30d, sent7d };
   },
 
+  // Expire CIE subscriptions that have passed their period end
+  // Handles two cases:
+  // 1. cancelAtPeriodEnd=true (user cancelled — access ends at period end)
+  // 2. status='active' but currentPeriodEnd has passed without a renewal (safety net)
+  async processCieExpiredSubscriptions(): Promise<number> {
+    const now = new Date();
+
+    const expiredCie = await db.select()
+      .from(cieSubscriptions)
+      .where(and(
+        eq(cieSubscriptions.status, 'active'),
+        lt(cieSubscriptions.currentPeriodEnd, now),
+      ));
+
+    let count = 0;
+    for (const sub of expiredCie) {
+      const newStatus = sub.cancelAtPeriodEnd ? 'cancelled' : 'expired';
+
+      await db.update(cieSubscriptions)
+        .set({ status: newStatus, updatedAt: new Date() })
+        .where(eq(cieSubscriptions.id, sub.id));
+
+      // Invalidate tier cache so next API call picks up Free tier
+      if (sub.orgId) {
+        try { invalidateCieApiKeyTierCache(sub.orgId); } catch {}
+      }
+
+      const message = sub.cancelAtPeriodEnd
+        ? 'Your CIE subscription has ended. You now have free-tier access.'
+        : 'Your CIE subscription has expired due to non-renewal. You now have free-tier access.';
+
+      await db.insert(notifications).values({
+        userId: sub.userId,
+        title: 'CIE Subscription Ended',
+        message,
+        type: 'info',
+        linkUrl: '/cie/subscribe',
+      });
+
+      await db.insert(auditLogs).values({
+        actorUserId: sub.userId,
+        action: 'cie_subscription_expired',
+        entityType: 'cie_subscription',
+        entityId: String(sub.id),
+        details: { newStatus, orgId: sub.orgId },
+      });
+
+      count++;
+    }
+
+    return count;
+  },
+
   // Run all scheduled tasks
   async runDailyTasks(): Promise<void> {
     console.log("[Scheduler] Running daily subscription tasks...");
     
     try {
       const expiredCount = await this.processExpiredSubscriptions();
-      console.log(`[Scheduler] Processed ${expiredCount} expired subscriptions`);
+      console.log(`[Scheduler] Processed ${expiredCount} expired registered office subscriptions`);
+
+      const cieExpiredCount = await this.processCieExpiredSubscriptions();
+      console.log(`[Scheduler] Processed ${cieExpiredCount} expired CIE subscriptions`);
 
       const { sent30d, sent7d } = await this.sendRenewalNudges();
       console.log(`[Scheduler] Sent ${sent30d} 30-day notices, ${sent7d} 7-day notices`);

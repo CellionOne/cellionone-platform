@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { validateApiKey, checkRateLimit, logApiUsage } from "../services/kycApiKeyService";
 import { db } from "../db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, gte } from "drizzle-orm";
 import { kycBillingAccounts, kycCreditTransactions, cieSubscriptions } from "@shared/schema";
 import { sql } from "drizzle-orm";
 
@@ -38,10 +38,17 @@ async function resolveCieTier(orgId: number, permissions: string[]): Promise<Cie
 
   let tier: CieTier = "free";
   try {
-    // Step 1: Look for the current active subscription
+    const now = new Date();
+
+    // Step 1: Look for an active, non-expired subscription
+    // Requires status='active' AND currentPeriodEnd > now to prevent stale rows from granting access
     const [activeSub] = await db.select({ tier: cieSubscriptions.tier })
       .from(cieSubscriptions)
-      .where(and(eq(cieSubscriptions.orgId, orgId), eq(cieSubscriptions.status, "active")))
+      .where(and(
+        eq(cieSubscriptions.orgId, orgId),
+        eq(cieSubscriptions.status, "active"),
+        gte(cieSubscriptions.currentPeriodEnd, now),
+      ))
       .orderBy(desc(cieSubscriptions.currentPeriodEnd))
       .limit(1);
 

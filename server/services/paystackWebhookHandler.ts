@@ -751,14 +751,21 @@ async function handleCieSubscriptionSuccess(data: PaystackWebhookEvent['data']):
     day: 'numeric', month: 'long', year: 'numeric',
   });
 
-  // 1. Find the PENDING subscription by the Paystack transaction reference
-  //    (the reference we set when calling POST /transaction/initialize)
-  let targetSub = await storage.getCieSubscriptionByReference(paystackReference);
-
   const authorizationCode = (data as any).authorization?.authorization_code || null;
 
+  // Lookup order:
+  // 1. By subscription code (Paystack recurring renewal — same sub code, new reference each cycle)
+  // 2. By transaction reference (initial payment creating pending→active)
+  let targetSub = subscriptionCode
+    ? await storage.getCieSubscriptionByPaystackCode(subscriptionCode)
+    : undefined;
+
+  if (!targetSub) {
+    targetSub = await storage.getCieSubscriptionByReference(paystackReference);
+  }
+
   if (targetSub) {
-    // Activate the pending record
+    // Update: activate (initial) or renew (recurring) the subscription record
     await storage.updateCieSubscription(targetSub.id, {
       status: 'active',
       tier,
@@ -771,7 +778,7 @@ async function handleCieSubscriptionSuccess(data: PaystackWebhookEvent['data']):
       paystackReference,
       currentPeriodStart: periodStart,
       currentPeriodEnd: periodEnd,
-      cancelAtPeriodEnd: false,
+      cancelAtPeriodEnd: false,  // Renewal clears any pending cancel flag
     });
 
     const effectiveOrgId = orgId || (targetSub.orgId ? Number(targetSub.orgId) : null);
@@ -900,19 +907,34 @@ async function handleCieSubscriptionDisable(data: any): Promise<void> {
     return;
   }
 
+  // Keep status='active' so access continues until currentPeriodEnd.
+  // The daily subscription scheduler will transition to 'cancelled' when the period expires.
+  // Only invalidate the tier cache immediately if the period has already ended.
+  const now = new Date();
+  const periodAlreadyEnded = sub.currentPeriodEnd ? sub.currentPeriodEnd <= now : true;
+
   await storage.updateCieSubscription(sub.id, {
-    status: 'cancelled',
-    cancelledAt: new Date(),
+    ...(periodAlreadyEnded ? { status: 'cancelled' } : {}),
+    cancelAtPeriodEnd: true,
+    cancelledAt: new Date(),  // Records when Paystack fired the disable event
   });
 
-  if (sub.orgId) {
+  if (sub.orgId && periodAlreadyEnded) {
     try { invalidateCieOrgTierCache(sub.orgId); } catch {}
   }
+
+  const periodEndStr = sub.currentPeriodEnd
+    ? sub.currentPeriodEnd.toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' })
+    : 'the end of your billing period';
+
+  const message = periodAlreadyEnded
+    ? 'Your CIE subscription has been cancelled. You now have free-tier access.'
+    : `Your CIE subscription has been cancelled and will expire on ${periodEndStr}. You retain paid access until then.`;
 
   await storage.createNotification({
     userId: sub.userId,
     title: 'CIE Subscription Cancelled',
-    message: 'Your CIE subscription has been cancelled. You now have free-tier access.',
+    message,
     type: 'info',
     linkUrl: '/cie/subscribe',
   });

@@ -1,6 +1,8 @@
 import type { Express } from "express";
 import multer from "multer";
 import { createServer, type Server } from "http";
+import fs from "fs";
+import path from "path";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replit_integrations/auth";
 import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_integrations/object_storage";
@@ -231,6 +233,17 @@ export async function registerRoutes(
   // ============================================================
   await setupAuth(app);
   console.log("Auth routes initialised – custom role-aware endpoint active");
+
+  // Temporary public download endpoint for the VaaS proposal document
+  app.get("/downloads/vaas-proposal", (_req, res) => {
+    const filePath = path.resolve(process.cwd(), "Cellion_One_VaaS_Proposal.docx");
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Document not found" });
+    }
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", 'attachment; filename="Cellion_One_VaaS_Proposal.docx"');
+    res.sendFile(filePath);
+  });
   
   // Session timeout middleware (after auth initialization)
   const { sessionTimeout, validateFileUploadMiddleware, csrfProtection, generateCsrfToken } = await import("./middleware/security");

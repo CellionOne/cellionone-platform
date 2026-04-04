@@ -409,6 +409,8 @@ export interface IStorage {
   upsertCieScore(data: InsertCieScore): Promise<CieScore>;
   getLatestCieScore(securityId: number): Promise<CieScore | undefined>;
   listLatestCieScores(): Promise<(CieScore & { symbol: string; name: string; sector: string })[]>;
+  /** Alias matching the task contract — same as listLatestCieScores */
+  getLatestCieScores(): Promise<(CieScore & { symbol: string; name: string; sector: string })[]>;
   listCieScoreHistory(securityId: number, days?: number): Promise<CieScore[]>;
 
   // CIE Model Versions
@@ -2063,6 +2065,11 @@ export class DatabaseStorage implements IStorage {
       if (row) results.push(row);
     }
     return results.sort((a, b) => (b.ias ?? 0) - (a.ias ?? 0));
+  }
+
+  /** Task-spec alias: same as listLatestCieScores */
+  async getLatestCieScores(): Promise<(CieScore & { symbol: string; name: string; sector: string })[]> {
+    return this.listLatestCieScores();
   }
 
   async listCieScoreHistory(securityId: number, days = 30): Promise<CieScore[]> {

@@ -16,12 +16,13 @@
 import * as XLSX from "xlsx";
 import { randomUUID } from "crypto";
 import { storage } from "../storage";
+import type { OpenAI as OpenAIClient } from "openai";
 
 // ============================================================
 // OpenAI lazy initialisation
 // ============================================================
-let openaiClient: any = null;
-async function getOpenAI(): Promise<any> {
+let openaiClient: OpenAIClient | null = null;
+async function getOpenAI(): Promise<OpenAIClient> {
   if (!openaiClient) {
     const { OpenAI } = await import("openai");
     openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -153,7 +154,7 @@ function nairaToKobo(val: number): number {
   return Math.round(val * 100);
 }
 
-function parseNumber(val: any): number | undefined {
+function parseNumber(val: unknown): number | undefined {
   if (val === undefined || val === null || val === "") return undefined;
   const n = typeof val === "number" ? val : parseFloat(String(val).replace(/,/g, ""));
   return isNaN(n) ? undefined : n;
@@ -183,7 +184,7 @@ function detectPriceSheet(wb: XLSX.WorkBook): XLSX.WorkSheet {
 
   for (const name of wb.SheetNames) {
     const sheet = wb.Sheets[name];
-    const json = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: "", range: 0 });
+    const json = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", range: 0 });
     const headerRow: string[] = (json[0] as string[] ?? []).map(h => String(h ?? "").trim().toLowerCase());
 
     let score = 0;
@@ -211,7 +212,7 @@ function detectPriceSheet(wb: XLSX.WorkBook): XLSX.WorkSheet {
 // ============================================================
 
 function parseSheetRows(sheet: XLSX.WorkSheet, source: "csv" | "xlsx"): PriceRow[] {
-  const json = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: "" });
+  const json = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
   if (json.length < 2) return [];
 
   const rawHeaders = (json[0] as string[]).map(h => String(h ?? "").trim());
@@ -226,7 +227,7 @@ function parseSheetRows(sheet: XLSX.WorkSheet, source: "csv" | "xlsx"): PriceRow
   const rows: PriceRow[] = [];
 
   for (let i = 1; i < json.length; i++) {
-    const row = json[i] as any[];
+    const row = json[i] as unknown[];
     if (!row || row.every(c => c === "" || c === null || c === undefined)) continue;
 
     const symbol   = symCol >= 0 ? String(row[symCol] ?? "").trim().toUpperCase() : "";
@@ -328,19 +329,37 @@ Return {"rows":[]} if no price data found. No markdown. Pure JSON only.`;
     });
 
     const content = response.choices[0]?.message?.content ?? "{}";
-    let parsed: any;
+
+    // GPT response payload shape (unvalidated JSON from the model)
+    interface GptPriceRow {
+      symbol?: unknown;
+      date?: unknown;
+      open?: unknown;
+      high?: unknown;
+      low?: unknown;
+      close?: unknown;
+      volume?: unknown;
+      confidence?: unknown;
+    }
+    interface GptResponsePayload {
+      rows?: GptPriceRow[];
+      data?: GptPriceRow[];
+      prices?: GptPriceRow[];
+    }
+
+    let parsed: GptResponsePayload | GptPriceRow[];
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(content) as GptResponsePayload | GptPriceRow[];
     } catch {
       console.error("[CIEIngest] GPT-4o returned invalid JSON for PDF");
       return [];
     }
 
-    const arr: any[] = Array.isArray(parsed)
-      ? parsed
-      : (parsed.rows ?? parsed.data ?? parsed.prices ?? []);
+    const arr: GptPriceRow[] = Array.isArray(parsed)
+      ? (parsed as GptPriceRow[])
+      : ((parsed as GptResponsePayload).rows ?? (parsed as GptResponsePayload).data ?? (parsed as GptResponsePayload).prices ?? []);
 
-    return arr.filter(Boolean).map((r: any): PriceRow => {
+    return arr.filter(Boolean).map((r: GptPriceRow): PriceRow => {
       const symbol = String(r.symbol ?? "").trim().toUpperCase();
       const date = normaliseDate(r.date ?? "") ?? "";
       const close = parseNumber(r.close);
@@ -355,7 +374,7 @@ Return {"rows":[]} if no price data found. No markdown. Pure JSON only.`;
           confidence: rawConfidence,
           lowConfidence: true,
           source: "pdf",
-          error: `GPT row invalid: missing symbol/date/close`,
+          error: "GPT row invalid: missing symbol/date/close",
         };
       }
 
@@ -374,8 +393,9 @@ Return {"rows":[]} if no price data found. No markdown. Pure JSON only.`;
         source: "pdf",
       };
     });
-  } catch (err: any) {
-    console.error("[CIEIngest] PDF extraction failed:", err.message);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[CIEIngest] PDF extraction failed:", errMsg);
     return [];
   }
 }
@@ -528,8 +548,9 @@ export async function commitFromToken(
         volume: row.volume !== undefined ? Math.round(row.volume) : null,
       });
       committed++;
-    } catch (err: any) {
-      console.error(`[CIEIngest] Error committing row ${row.symbol} ${row.date}:`, err.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[CIEIngest] Error committing row ${row.symbol} ${row.date}:`, errMsg);
       skipped++;
     }
   }

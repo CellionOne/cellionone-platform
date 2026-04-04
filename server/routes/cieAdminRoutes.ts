@@ -10,6 +10,7 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import multer from "multer";
+import type { InsertCieSignal } from "../../shared/schema";
 import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import {
@@ -30,15 +31,24 @@ import { triggerImmediateScoreRun } from "../services/cieScheduler";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-async function isAdmin(req: Request): Promise<boolean> {
-  const userId = (req as any).user?.claims?.sub;
+/** Express Request extended with Replit Auth user claims */
+interface AuthenticatedRequest extends Request {
+  user?: {
+    claims?: {
+      sub?: string;
+    };
+  };
+}
+
+async function isAdmin(req: AuthenticatedRequest): Promise<boolean> {
+  const userId = req.user?.claims?.sub;
   if (!userId) return false;
   const roles = await storage.getUserRoles(userId);
   return roles.includes("admin");
 }
 
-function getUserId(req: Request): string {
-  return (req as any).user?.claims?.sub ?? "system";
+function getUserId(req: AuthenticatedRequest): string {
+  return req.user?.claims?.sub ?? "system";
 }
 
 export function registerCieAdminRoutes(app: Express): void {
@@ -518,7 +528,7 @@ export function registerCieAdminRoutes(app: Express): void {
       });
       const body = schema.parse(req.body);
 
-      const updates: Record<string, any> = { ...body };
+      const updates: Partial<InsertCieSignal> = { ...body };
       if (body.isPublished === true) updates.publishedAt = new Date();
 
       const sig = await storage.updateCieSignal(id, updates);

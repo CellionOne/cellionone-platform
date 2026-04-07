@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getQueryFn } from "../lib/queryClient";
+import { getQueryFn, clearCsrfToken } from "../lib/queryClient";
 
 export interface AuthUser {
   id: string;
@@ -26,6 +26,7 @@ export function useAuth(): AuthContextValue {
   });
 
   const logout = async () => {
+    clearCsrfToken();
     try {
       await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch (e) {

@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, setCsrfToken } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -64,6 +64,7 @@ export default function LoginPage() {
       return res.json();
     },
     onSuccess: (data) => {
+      if (data.csrfToken) setCsrfToken(data.csrfToken);
       if (data.requiresTwoFactor) {
         setTwoFactorState({ userId: data.userId, message: data.message });
         return;
@@ -91,6 +92,7 @@ export default function LoginPage() {
       return res.json();
     },
     onSuccess: (data) => {
+      if (data.csrfToken) setCsrfToken(data.csrfToken);
       if (data.success) {
         toast({ title: "Welcome back!", description: "You have been logged in successfully." });
         queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });

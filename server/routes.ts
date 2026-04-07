@@ -962,6 +962,10 @@ export async function registerRoutes(
         
         console.log("[Login] Success - sessionID:", req.sessionID, "isAuth:", req.isAuthenticated(), "proto:", req.protocol, "secure:", req.secure);
         
+        // Generate a fresh CSRF token for this new session and embed it
+        // so every authenticated session has a token from the very first request.
+        const freshCsrfToken = generateCsrfToken(req);
+        
         // Log login event
         storage.createAuditLog({
           actorUserId: user.id,
@@ -1029,7 +1033,10 @@ export async function registerRoutes(
           }
         })();
         
-        res.json({ message: result.message, user });
+        // Save session with the CSRF token before responding
+        req.session.save(() => {
+          res.json({ message: result.message, user, csrfToken: freshCsrfToken });
+        });
       });
     } catch (error) {
       console.error("Login error:", error);
@@ -1524,7 +1531,10 @@ export async function registerRoutes(
             ipAddress: req.ip,
           });
 
-          res.json({ success: true, message: "Verification successful", user });
+          const fresh2faCsrfToken = generateCsrfToken(req);
+          req.session.save(() => {
+            res.json({ success: true, message: "Verification successful", user, csrfToken: fresh2faCsrfToken });
+          });
         });
       }
     } catch (error) {

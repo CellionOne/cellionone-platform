@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, getCsrfToken } from "@/lib/queryClient";
 import {
   BarChart3, Upload, Settings2, Banknote, Zap, TrendingUp,
   RefreshCw, Plus, Trash2, CheckCircle2,
@@ -306,10 +306,12 @@ function PriceUploadTab() {
     try {
       const form = new FormData();
       form.append("file", file);
+      const csrfToken = await getCsrfToken();
       const res = await fetch("/api/admin/cie/ingest/preview", {
         method: "POST",
         body: form,
         credentials: "include",
+        headers: { "X-CSRF-Token": csrfToken },
       });
       const data: PreviewResult & { error?: string } = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed");

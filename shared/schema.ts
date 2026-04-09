@@ -162,6 +162,14 @@ export const companyApplications = pgTable("company_applications", {
     postalCode?: string;
     country?: string;
   }>(),
+  operatingAddress: json("operating_address").$type<{
+    line1?: string;
+    line2?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  }>(),
   directorsData: json("directors_data").$type<any[]>(),
   shareholdersData: json("shareholders_data").$type<any[]>(),
   assignedLawyerUserId: varchar("assigned_lawyer_user_id"),

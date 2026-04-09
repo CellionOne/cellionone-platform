@@ -424,6 +424,23 @@ function OverviewTab({
                 </p>
               </div>
             ) : null}
+            {(application as any).operatingAddress && (
+              <div className="mt-3 pt-3 border-t">
+                <Label className="text-muted-foreground text-sm">Operating Address</Label>
+                <p className="font-medium">
+                  {[
+                    (application as any).operatingAddress.line1,
+                    (application as any).operatingAddress.line2,
+                    (application as any).operatingAddress.city,
+                    (application as any).operatingAddress.state,
+                    (application as any).operatingAddress.postalCode,
+                  ].filter(Boolean).join(", ")}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Cross-reference the uploaded Proof of Operating Address against this address.
+                </p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

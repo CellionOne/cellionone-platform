@@ -432,6 +432,21 @@ export default function ApplicationDetailsPage() {
                           )}
                         </div>
                       </div>
+                      {item.key === "address_proof" && application.operatingAddress && (
+                        <div className="mt-2 ml-11 flex items-start gap-1.5 rounded-md bg-muted/50 px-3 py-2" data-testid="operating-address-hint">
+                          <MapPin className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                          <p className="text-xs text-muted-foreground">
+                            <span className="font-medium text-foreground">Match this address: </span>
+                            {[
+                              application.operatingAddress.line1,
+                              application.operatingAddress.line2,
+                              application.operatingAddress.city,
+                              application.operatingAddress.state,
+                              application.operatingAddress.postalCode,
+                            ].filter(Boolean).join(", ")}
+                          </p>
+                        </div>
+                      )}
                       {(item.status === "missing" || item.status === "rejected") && (
                         <p className="text-xs text-muted-foreground mt-1 ml-11">
                           PDF, JPEG, PNG, DOC or DOCX &middot; max 10 MB
@@ -464,7 +479,7 @@ export default function ApplicationDetailsPage() {
                   {application.registeredAddress && (
                     <div className="sm:col-span-2">
                       <Label className="text-muted-foreground">Registered Address</Label>
-                      <p className="font-medium">
+                      <p className="font-medium" data-testid="text-registered-address">
                         {[
                           application.registeredAddress.line1,
                           application.registeredAddress.line2,
@@ -472,6 +487,24 @@ export default function ApplicationDetailsPage() {
                           application.registeredAddress.state,
                           application.registeredAddress.postalCode
                         ].filter(Boolean).join(", ")}
+                      </p>
+                    </div>
+                  )}
+                  {application.operatingAddress && (
+                    <div className="sm:col-span-2">
+                      <Label className="text-muted-foreground">Operating Address</Label>
+                      <p className="font-medium" data-testid="text-operating-address">
+                        {[
+                          application.operatingAddress.line1,
+                          application.operatingAddress.line2,
+                          application.operatingAddress.city,
+                          application.operatingAddress.state,
+                          application.operatingAddress.postalCode,
+                        ].filter(Boolean).join(", ")}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                        <MapPin className="h-3 w-3" />
+                        Match your Proof of Operating Address document to this address
                       </p>
                     </div>
                   )}

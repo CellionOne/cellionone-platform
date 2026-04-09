@@ -122,6 +122,14 @@ export default function NewApplicationPage() {
       postalCode: "",
       country: "Nigeria",
     },
+    operatingAddress: {
+      line1: "",
+      line2: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      country: "Nigeria",
+    },
     useRegisteredOffice: false,
     registeredOfficeTier: "" as "" | "office_only" | "office_plus_mail",
   });
@@ -159,6 +167,17 @@ export default function NewApplicationPage() {
       if (restoredCountry && restoredCountry !== "Nigeria" && !countries.includes(restoredCountry)) {
         setUseCustomCountry(true);
       }
+      let restoredOperatingAddress = { line1: "", line2: "", city: "", state: "", postalCode: "", country: "Nigeria" };
+      if (savedDraft.data.operatingAddress) {
+        try {
+          restoredOperatingAddress = typeof savedDraft.data.operatingAddress === 'string'
+            ? JSON.parse(savedDraft.data.operatingAddress)
+            : savedDraft.data.operatingAddress;
+        } catch {
+          // keep default
+        }
+      }
+
       setFormData(prev => ({
         ...prev,
         applicationType: savedDraft.data.applicationType || prev.applicationType,
@@ -168,6 +187,7 @@ export default function NewApplicationPage() {
         companyName3: savedDraft.data.companyName3 || prev.companyName3,
         businessDescription: savedDraft.data.businessDescription || prev.businessDescription,
         registeredAddress: mergedAddress,
+        operatingAddress: restoredOperatingAddress,
       }));
       setCurrentStep(savedDraft.step);
       toast({
@@ -209,6 +229,7 @@ export default function NewApplicationPage() {
         companyName3: formData.companyName3,
         businessDescription: formData.businessDescription,
         registeredAddress: JSON.stringify(formData.registeredAddress),
+        operatingAddress: JSON.stringify(formData.operatingAddress),
       },
       updatedAt: new Date().toISOString(),
       synced: false,
@@ -246,6 +267,7 @@ export default function NewApplicationPage() {
         companyName3: data.companyName3,
         businessDescription: data.businessDescription,
         registeredAddress: data.useRegisteredOffice ? null : data.registeredAddress,
+        operatingAddress: data.operatingAddress,
       });
       const app = await response.json();
       
@@ -354,6 +376,16 @@ export default function NewApplicationPage() {
     }));
   };
 
+  const updateOperatingAddress = (field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      operatingAddress: {
+        ...prev.operatingAddress,
+        [field]: value,
+      },
+    }));
+  };
+
   const canProceed = () => {
     switch (currentStep) {
       case 1:
@@ -369,11 +401,13 @@ export default function NewApplicationPage() {
         if (hasShareholderRoles) return Math.abs(totalSharePercentage - 100) < 0.01;
         return true;
       }
-      case 5:
+      case 5: {
+        const hasOperatingAddress = !!formData.operatingAddress.line1 && !!formData.operatingAddress.city && !!formData.operatingAddress.state;
         if (formData.useRegisteredOffice) {
-          return !!formData.registeredOfficeTier;
+          return !!formData.registeredOfficeTier && hasOperatingAddress;
         }
-        return !!formData.registeredAddress.country && !!formData.registeredAddress.line1 && !!formData.registeredAddress.city && !!formData.registeredAddress.state;
+        return !!formData.registeredAddress.country && !!formData.registeredAddress.line1 && !!formData.registeredAddress.city && !!formData.registeredAddress.state && hasOperatingAddress;
+      }
       default:
         return false;
     }
@@ -982,6 +1016,77 @@ export default function NewApplicationPage() {
                     </div>
                   </div>
                 )}
+
+                <div className="space-y-4 border-t pt-6">
+                  <div>
+                    <Label className="text-base font-medium flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-primary" />
+                      Operating Address *
+                    </Label>
+                    <p className="text-sm text-muted-foreground mt-1 flex items-start gap-1.5">
+                      <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary/70" />
+                      The actual location where your business operates. This is the address you will need to prove with a utility bill or bank statement — it may be the same as your registered address or different.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="op-line1">Street Address *</Label>
+                    <Input
+                      id="op-line1"
+                      placeholder="123 Business Street"
+                      value={formData.operatingAddress.line1}
+                      onChange={(e) => updateOperatingAddress("line1", e.target.value)}
+                      data-testid="input-operating-address-line1"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="op-line2">Address Line 2</Label>
+                    <Input
+                      id="op-line2"
+                      placeholder="Suite, floor, building name (optional)"
+                      value={formData.operatingAddress.line2}
+                      onChange={(e) => updateOperatingAddress("line2", e.target.value)}
+                      data-testid="input-operating-address-line2"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="op-city">City *</Label>
+                      <Input
+                        id="op-city"
+                        placeholder="Lagos"
+                        value={formData.operatingAddress.city}
+                        onChange={(e) => updateOperatingAddress("city", e.target.value)}
+                        data-testid="input-operating-address-city"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="op-state">State *</Label>
+                      <Select
+                        value={formData.operatingAddress.state}
+                        onValueChange={(v) => updateOperatingAddress("state", v)}
+                      >
+                        <SelectTrigger data-testid="select-operating-address-state">
+                          <SelectValue placeholder="Select state" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {nigerianStates.map((state) => (
+                            <SelectItem key={state} value={state}>{state}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="op-postal">Postal Code</Label>
+                    <Input
+                      id="op-postal"
+                      placeholder="e.g. 100001"
+                      value={formData.operatingAddress.postalCode}
+                      onChange={(e) => updateOperatingAddress("postalCode", e.target.value)}
+                      data-testid="input-operating-address-postal"
+                    />
+                  </div>
+                </div>
               </div>
             )}
 

@@ -35,6 +35,7 @@ const createApplicationSchema = insertCompanyApplicationSchema.pick({
   companyName3: true,
   businessDescription: true,
   registeredAddress: true,
+  operatingAddress: true,
 });
 
 const updateApplicationSchema = insertCompanyApplicationSchema.partial();
@@ -183,20 +184,41 @@ function requireRole(...requiredRoles: string[]) {
 }
 
 // Create default checklist items for new application
-async function createDefaultChecklist(applicationId: number) {
+async function createDefaultChecklist(applicationId: number, operatingAddress?: {
+  line1?: string;
+  line2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+} | null) {
+  const formattedAddress = operatingAddress
+    ? [operatingAddress.line1, operatingAddress.line2, operatingAddress.city, operatingAddress.state, operatingAddress.postalCode, operatingAddress.country]
+        .filter(Boolean)
+        .join(", ")
+    : null;
+
   const items = [
-    { key: "passport_photo", label: "Passport Photograph", required: true },
-    { key: "id_document", label: "Government ID (NIN, Passport, or Driver's License)", required: true },
-    { key: "address_proof", label: "Proof of Address", required: true },
-    { key: "director_id", label: "Director's ID Document", required: true },
-    { key: "shareholder_details", label: "Shareholder Information Form", required: true },
+    { key: "passport_photo", label: "Passport Photograph", required: true, reviewerNotes: null as string | null },
+    { key: "id_document", label: "Government ID (NIN, Passport, or Driver's License)", required: true, reviewerNotes: null as string | null },
+    {
+      key: "address_proof",
+      label: "Proof of Operating Address",
+      required: true,
+      reviewerNotes: formattedAddress ? `Operating address declared: ${formattedAddress}` : null,
+    },
+    { key: "director_id", label: "Director's ID Document", required: true, reviewerNotes: null as string | null },
+    { key: "shareholder_details", label: "Shareholder Information Form", required: true, reviewerNotes: null as string | null },
   ];
   
   for (const item of items) {
     await storage.createChecklistItem({
       applicationId,
-      ...item,
+      key: item.key,
+      label: item.label,
+      required: item.required,
       status: "missing",
+      reviewerNotes: item.reviewerNotes,
     });
   }
 }
@@ -3963,7 +3985,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
       }
       
-      const { applicationType, companyType, companyName1, companyName2, companyName3, businessDescription, registeredAddress } = parsed.data;
+      const { applicationType, companyType, companyName1, companyName2, companyName3, businessDescription, registeredAddress, operatingAddress } = parsed.data;
       
       const application = await storage.createApplication({
         founderUserId: userId,
@@ -3974,10 +3996,11 @@ export async function registerRoutes(
         companyName3,
         businessDescription,
         registeredAddress,
+        operatingAddress,
         status: "draft",
       });
       
-      await createDefaultChecklist(application.id);
+      await createDefaultChecklist(application.id, operatingAddress);
       
       await storage.createAuditLog({
         actorUserId: userId,

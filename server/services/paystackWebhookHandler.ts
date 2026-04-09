@@ -545,12 +545,15 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 console.error(`[Webhook] Director AML check failed (director ${idx}): ${e.message}`);
               }
               // Update director entry with verification statuses (encrypted PII preserved as-is)
+              // biometricStatus: 'pending_selfie' — director must complete biometric via selfie app
+              // (Job Type 4 biometric requires an active selfie capture not available in this web flow)
               updatedDirectors[idx] = {
                 ...director,
                 bvnVerified: bvnVerified !== undefined ? bvnVerified : director.bvnVerified,
                 ninVerified: ninVerified !== undefined ? ninVerified : director.ninVerified,
                 amlIsHit: amlIsHit !== undefined ? amlIsHit : director.amlIsHit,
                 amlHitTypes: amlHitTypes !== undefined ? amlHitTypes : director.amlHitTypes,
+                biometricStatus: 'pending_selfie',
               };
             }
             // Persist updated director verification statuses to profile
@@ -558,6 +561,19 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               await db.update(companyProfiles)
                 .set({ directors: updatedDirectors, updatedAt: new Date() })
                 .where(eq(companyProfiles.id, profile.id));
+              // Notify directors with email to complete biometric selfie
+              // Smile ID Job Type 4 (biometric) requires a selfie capture — web flow cannot collect this.
+              // Directors are invited asynchronously via email to complete the biometric step.
+              const { sendEmail } = await import('./emailService');
+              for (const director of updatedDirectors) {
+                if (director.email) {
+                  sendEmail({
+                    to: director.email,
+                    subject: `Action required: Complete identity verification — ${profile.companyName}`,
+                    html: `<p>Hi ${director.name},</p><p>You have been listed as a director/officer of <strong>${profile.companyName}</strong> on Cellion One.</p><p>To complete your identity verification, you are required to submit a selfie photo for biometric verification. Please <a href="${process.env.APP_URL || 'https://cellionone.com'}/verify-biometric?token=director&company=${profile.id}">click here to start your biometric verification</a>.</p><p>This step is required before the company can be fully verified on Cellion One.</p><p>The Cellion One Compliance Team</p>`,
+                  }).catch((e: Error) => console.error(`[Webhook] Biometric invite email failed for director ${director.name}: ${e.message}`));
+                }
+              }
             }
           } catch (dirErr: any) {
             console.error('[Webhook] Director verification pipeline error:', dirErr.message);

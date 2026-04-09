@@ -439,21 +439,22 @@ export default function ExistingCompanyPage() {
                       </p>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-400">
-                      <Info className="h-4 w-4" />
-                      The registry lookup service is temporarily unavailable. You can proceed manually and our team will verify against the CAC.
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-400">
+                        <AlertCircle className="h-4 w-4" />
+                        CAC registry lookup service is temporarily unavailable
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        The CAC registry must be queried before proceeding. Please try again in a few minutes. If this issue persists, contact{" "}
+                        <a href="mailto:support@cellionone.com" className="underline text-primary">support@cellionone.com</a>.
+                      </p>
                     </div>
                   )}
                 </div>
               )}
 
               <div className="flex items-center justify-between pt-2">
-                {/* Show skip if there's a service error or network error (dev/fallback) */}
-                {kybServiceError ? (
-                  <Button variant="ghost" size="sm" onClick={() => { setKybResult({ found: true }); setStep(2); }} data-testid="button-skip-kyb">
-                    Proceed manually
-                  </Button>
-                ) : <div />}
+                <div />
                 <Button onClick={() => setStep(2)} disabled={!canProceedStep1} data-testid="button-step1-next">
                   Continue
                   <ArrowRight className="h-4 w-4 ml-1.5" />
@@ -582,7 +583,7 @@ export default function ExistingCompanyPage() {
                           <Badge variant="outline" className="text-xs">{d.role}</Badge>
                         </div>
                         <div className="grid grid-cols-2 gap-2 mt-2">
-                          <div>
+                          <div className="col-span-2 sm:col-span-1">
                             <Label className="text-xs">Email</Label>
                             <Input
                               className="h-7 text-xs"
@@ -593,13 +594,23 @@ export default function ExistingCompanyPage() {
                             />
                           </div>
                           <div>
-                            <Label className="text-xs">BVN (for verification)</Label>
+                            <Label className="text-xs">BVN (optional)</Label>
                             <Input
                               className="h-7 text-xs"
                               value={d.bvn}
                               onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, bvn: e.target.value } : dir))}
                               placeholder="11-digit BVN"
                               data-testid={`input-director-bvn-${i}`}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">NIN (optional)</Label>
+                            <Input
+                              className="h-7 text-xs"
+                              value={d.nin}
+                              onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, nin: e.target.value } : dir))}
+                              placeholder="11-digit NIN"
+                              data-testid={`input-director-nin-${i}`}
                             />
                           </div>
                         </div>
@@ -640,7 +651,11 @@ export default function ExistingCompanyPage() {
                 </div>
                 <div>
                   <Label>BVN (optional)</Label>
-                  <Input value={newDir.bvn} onChange={e => setNewDir(prev => ({ ...prev, bvn: e.target.value }))} placeholder="BVN" data-testid="input-new-director-bvn" />
+                  <Input value={newDir.bvn} onChange={e => setNewDir(prev => ({ ...prev, bvn: e.target.value }))} placeholder="11-digit BVN" data-testid="input-new-director-bvn" />
+                </div>
+                <div>
+                  <Label>NIN (optional)</Label>
+                  <Input value={newDir.nin} onChange={e => setNewDir(prev => ({ ...prev, nin: e.target.value }))} placeholder="11-digit NIN" data-testid="input-new-director-nin" />
                 </div>
               </div>
 

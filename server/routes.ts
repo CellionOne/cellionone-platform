@@ -2136,24 +2136,41 @@ export async function registerRoutes(
       const body: Record<string, unknown> = req.body || {};
 
       // Validate Smile ID callback signature — prevents forged callbacks from altering KYB data
+      // Strict: reject missing signatures in production; log warning in dev
       const secKey = String(body.sec_key || '');
       const timestamp = String(body.timestamp || '');
-      if (secKey && timestamp) {
+      const isProduction = process.env.NODE_ENV === 'production';
+      if (!secKey || !timestamp) {
+        if (isProduction) {
+          console.warn('[SmileID Callback] Missing sec_key or timestamp — rejecting unsigned callback in production');
+          return res.status(401).json({ message: "Missing callback signature" });
+        }
+        console.warn('[SmileID Callback] Missing sec_key or timestamp in dev mode — proceeding without signature check');
+      } else {
         try {
           const smileIdentityCore = require('smile-identity-core');
           const API_KEY_CB = process.env.SMILE_ID_API_KEY || '';
           const PARTNER_ID_CB = process.env.SMILE_ID_PARTNER_ID || '';
-          if (API_KEY_CB && PARTNER_ID_CB) {
+          if (!API_KEY_CB || !PARTNER_ID_CB) {
+            if (isProduction) {
+              console.error('[SmileID Callback] SMILE_ID credentials missing in production — rejecting');
+              return res.status(503).json({ message: "KYB callback service misconfigured" });
+            }
+            console.warn('[SmileID Callback] Smile ID credentials not configured — skipping signature check in dev');
+          } else {
             const sig = new smileIdentityCore.Signature(PARTNER_ID_CB, API_KEY_CB);
             const isValid = sig.confirm_signature(timestamp, secKey);
             if (!isValid) {
-              console.warn('[SmileID Callback] Signature validation FAILED — rejecting callback');
+              console.warn('[SmileID Callback] Signature validation FAILED — rejecting forged callback');
               return res.status(401).json({ message: "Invalid callback signature" });
             }
           }
         } catch (sigErr: any) {
-          // If SDK is unavailable, log but allow (dev mode safety)
-          console.warn(`[SmileID Callback] Signature check skipped (SDK error): ${sigErr.message}`);
+          if (isProduction) {
+            console.error(`[SmileID Callback] Signature SDK error in production — rejecting: ${sigErr.message}`);
+            return res.status(500).json({ message: "Signature verification failed" });
+          }
+          console.warn(`[SmileID Callback] Signature check skipped (SDK error in dev): ${sigErr.message}`);
         }
       }
 
@@ -7812,6 +7829,14 @@ Important guidelines:
         .set({ status, reviewerNotes: reviewerNotes || null, updatedAt: new Date() })
         .where(eq(profileChecklistItems.id, itemId))
         .returning();
+
+      // Transition profile to documents_under_review when admin starts reviewing individual documents
+      // This status indicates admin has opened document review but hasn't yet made a final decision
+      if (profile.existingCompanyStatus === 'pending_review') {
+        await db.update(companyProfiles)
+          .set({ existingCompanyStatus: 'documents_under_review', updatedAt: new Date() })
+          .where(eq(companyProfiles.id, profileId));
+      }
 
       await storage.createAuditLog({
         actorUserId: adminId,

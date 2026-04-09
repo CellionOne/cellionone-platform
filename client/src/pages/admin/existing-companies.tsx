@@ -53,6 +53,7 @@ interface DirectorRecord {
   ninVerified?: boolean;
   amlIsHit?: boolean;
   amlHitTypes?: string[];
+  biometricStatus?: 'pending_selfie' | 'completed' | 'failed';
 }
 interface CompanyProfileDetail extends CompanyProfile {
   checklistItems?: ProfileChecklistItem[];
@@ -362,6 +363,15 @@ export default function AdminExistingCompaniesPage() {
                             )}
                             {d.amlIsHit === undefined && (d.bvn || d.nin) && (
                               <Badge variant="outline" className="text-xs">AML Pending</Badge>
+                            )}
+                            {d.biometricStatus === 'completed' && (
+                              <Badge variant="secondary" className="text-xs">Biometric Done</Badge>
+                            )}
+                            {d.biometricStatus === 'pending_selfie' && (
+                              <Badge variant="outline" className="text-xs">Biometric: Awaiting Selfie</Badge>
+                            )}
+                            {d.biometricStatus === 'failed' && (
+                              <Badge variant="destructive" className="text-xs">Biometric Failed</Badge>
                             )}
                           </div>
                         </div>

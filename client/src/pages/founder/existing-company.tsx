@@ -27,11 +27,13 @@ import {
   User,
   CreditCard,
   AlertCircle,
+  ExternalLink,
 } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const VERIFICATION_FEE_NGN = 25000;
+const DIRECTOR_VERIFY_FEE_NGN = 10000;
 
 const STEPS = [
   { id: 1, title: "RC Lookup", description: "Find your company in the CAC registry" },
@@ -41,13 +43,13 @@ const STEPS = [
   { id: 5, title: "Payment", description: "Complete payment to submit for verification" },
 ];
 
-const REQUIRED_DOCS = [
-  { docType: "coi", label: "Certificate of Incorporation (CAC CO2)" },
-  { docType: "memat", label: "Memorandum & Articles of Association (MEMAT)" },
-  { docType: "cac_status", label: "CAC Status Report (current)" },
-  { docType: "tin_cert", label: "TIN Certificate" },
-  { docType: "proof_address", label: "Proof of Operating Address" },
-  { docType: "director_id", label: "Director Government-Issued ID (at least one)" },
+const REQUIRED_DOCS: { key: string; label: string; mandatory: boolean }[] = [
+  { key: "coi", label: "Certificate of Incorporation (CAC CO2)", mandatory: true },
+  { key: "memat", label: "Memorandum & Articles of Association (MEMAT)", mandatory: true },
+  { key: "cac_status", label: "CAC Status Report (current)", mandatory: true },
+  { key: "tin_cert", label: "TIN Certificate", mandatory: true },
+  { key: "proof_address", label: "Proof of Operating Address", mandatory: false },
+  { key: "director_id", label: "Director Government-Issued ID (at least one)", mandatory: false },
 ];
 
 const NIGERIAN_STATES = [
@@ -93,8 +95,7 @@ interface AddressFields {
 }
 
 interface UploadedDoc {
-  docType: string;
-  label: string;
+  key: string;
   fileName: string;
 }
 
@@ -106,27 +107,28 @@ function AddressForm({ title, value, onChange }: {
   onChange: (v: AddressFields) => void;
 }) {
   const set = (field: keyof AddressFields, val: string) => onChange({ ...value, [field]: val });
+  const slug = title.toLowerCase().replace(/\s+/g, "-");
   return (
     <div className="space-y-4">
       <p className="text-sm font-medium">{title}</p>
       <div className="grid gap-3">
         <div>
           <Label>Address Line 1</Label>
-          <Input value={value.line1} onChange={e => set("line1", e.target.value)} placeholder="Street address" data-testid={`input-${title.toLowerCase().replace(/\s+/g, "-")}-line1`} />
+          <Input value={value.line1} onChange={e => set("line1", e.target.value)} placeholder="Street address" data-testid={`input-${slug}-line1`} />
         </div>
         <div>
           <Label>Address Line 2 (optional)</Label>
-          <Input value={value.line2} onChange={e => set("line2", e.target.value)} placeholder="Suite, floor, etc." data-testid={`input-${title.toLowerCase().replace(/\s+/g, "-")}-line2`} />
+          <Input value={value.line2} onChange={e => set("line2", e.target.value)} placeholder="Suite, floor, etc." data-testid={`input-${slug}-line2`} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label>City</Label>
-            <Input value={value.city} onChange={e => set("city", e.target.value)} placeholder="City" data-testid={`input-${title.toLowerCase().replace(/\s+/g, "-")}-city`} />
+            <Input value={value.city} onChange={e => set("city", e.target.value)} placeholder="City" data-testid={`input-${slug}-city`} />
           </div>
           <div>
             <Label>State</Label>
             <Select value={value.state} onValueChange={v => set("state", v)}>
-              <SelectTrigger data-testid={`select-${title.toLowerCase().replace(/\s+/g, "-")}-state`}>
+              <SelectTrigger data-testid={`select-${slug}-state`}>
                 <SelectValue placeholder="Select state" />
               </SelectTrigger>
               <SelectContent>
@@ -151,7 +153,6 @@ export default function ExistingCompanyPage() {
   const [kybResult, setKybResult] = useState<KybResult | null>(null);
   const [kybLoading, setKybLoading] = useState(false);
   const [kybError, setKybError] = useState<string | null>(null);
-  const [kybSkipped, setKybSkipped] = useState(false);
 
   // Step 2 fields
   const [companyName, setCompanyName] = useState("");
@@ -173,8 +174,14 @@ export default function ExistingCompanyPage() {
   const [createdProfileId, setCreatedProfileId] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeDocType, setActiveDocType] = useState<string | null>(null);
-  const [activeDocLabel, setActiveDocLabel] = useState<string | null>(null);
+  const [activeDocKey, setActiveDocKey] = useState<string | null>(null);
+
+  // ── Step 1 validation ────────────────────────────────────────────────────────
+  // KYB spec: only found=true permits advancing; genuine not-found BLOCKS progression
+  // Service error (SDK crash, NOT_CONFIGURED etc) + network error → show warning + skip (dev mode)
+  const kybServiceError = (kybResult?.found === false && !!kybResult?.error) || !!kybError;
+  const kybGenuineNotFound = kybResult?.found === false && !kybResult?.error;
+  const canProceedStep1 = kybResult?.found === true;
 
   // ── KYB Lookup ──────────────────────────────────────────────────────────────
 
@@ -201,20 +208,14 @@ export default function ExistingCompanyPage() {
         }
       }
     } catch {
-      setKybError("The lookup could not be completed. You may proceed manually.");
+      setKybError("The lookup could not be completed. Please check your internet connection and try again.");
     } finally {
       setKybLoading(false);
     }
   };
 
-  const handleSkipKyb = () => {
-    setKybSkipped(true);
-    setStep(2);
-  };
-
-  const canProceedStep1 = kybResult !== null || kybSkipped;
-
-  // ── Create Profile (Step 4 → upload docs) ───────────────────────────────────
+  // ── Create Profile (Step 3 → 4 transition) ──────────────────────────────────
+  // NOTE: smileKybResult is intentionally NOT sent — the server performs KYB authoritatively
 
   const createProfileMutation = useMutation({
     mutationFn: async () => {
@@ -229,95 +230,106 @@ export default function ExistingCompanyPage() {
         operatingAddress,
         directors,
         businessActivities: [],
-        smileKybJobId: kybResult?.smileJobId || undefined,
-        smileKybResult: kybResult ? { found: kybResult.found, companyName: kybResult.companyName, rcNumber: kybResult.rcNumber, companyType: kybResult.companyType } : undefined,
       };
       const res = await apiRequest("POST", "/api/founder/company-profiles/existing", payload);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Failed to create profile" }));
+        throw new Error(err.message);
+      }
       return res.json() as Promise<{ id: number }>;
     },
     onSuccess: (profile) => {
       setCreatedProfileId(profile.id);
       queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles"] });
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to save company profile. Please try again.", variant: "destructive" });
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message || "Failed to save company profile. Please try again.", variant: "destructive" });
     },
   });
 
   const handleEnterDocStep = async () => {
     if (!createdProfileId) {
-      await createProfileMutation.mutateAsync();
+      try {
+        await createProfileMutation.mutateAsync();
+      } catch {
+        return;
+      }
     }
     setStep(4);
   };
 
   // ── Document Upload ──────────────────────────────────────────────────────────
 
-  const handleFileSelect = (docType: string, label: string) => {
-    setActiveDocType(docType);
-    setActiveDocLabel(label);
+  const handleFileSelect = (key: string) => {
+    setActiveDocKey(key);
     fileInputRef.current?.click();
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !activeDocType || !activeDocLabel || !createdProfileId) return;
+    if (!file || !activeDocKey || !createdProfileId) return;
 
-    setUploadingDoc(activeDocType);
+    setUploadingDoc(activeDocKey);
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("docType", activeDocType);
-      formData.append("label", activeDocLabel);
+      formData.append("docKey", activeDocKey);
 
       const res = await fetch(`/api/founder/company-profiles/${createdProfileId}/documents/upload`, {
         method: "POST",
         body: formData,
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Upload failed");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ message: "Upload failed" }));
+        throw new Error(errData.message);
+      }
 
       setUploadedDocs(prev => {
-        const filtered = prev.filter(d => d.docType !== activeDocType);
-        return [...filtered, { docType: activeDocType!, label: activeDocLabel!, fileName: file.name }];
+        const filtered = prev.filter(d => d.key !== activeDocKey);
+        return [...filtered, { key: activeDocKey!, fileName: file.name }];
       });
-      toast({ title: "Document uploaded", description: `${activeDocLabel} has been uploaded.` });
-    } catch {
-      toast({ title: "Upload failed", description: "Please try again.", variant: "destructive" });
+      const docLabel = REQUIRED_DOCS.find(d => d.key === activeDocKey)?.label || activeDocKey;
+      toast({ title: "Document uploaded", description: `${docLabel} has been uploaded.` });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Please try again.";
+      toast({ title: "Upload failed", description: message, variant: "destructive" });
     } finally {
       setUploadingDoc(null);
-      setActiveDocType(null);
-      setActiveDocLabel(null);
+      setActiveDocKey(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  // ── Final Submit ─────────────────────────────────────────────────────────────
+  // ── Checkout (Step 5) — Paystack redirect ─────────────────────────────────
 
-  const submitMutation = useMutation({
+  const checkoutMutation = useMutation({
     mutationFn: async () => {
-      if (!createdProfileId) throw new Error("No profile");
-      const res = await apiRequest("POST", `/api/founder/company-profiles/${createdProfileId}/submit-review`);
-      return res.json();
+      if (!createdProfileId) throw new Error("No company profile found");
+      const res = await apiRequest("POST", `/api/founder/company-profiles/${createdProfileId}/checkout`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Checkout failed" }));
+        throw new Error(err.message);
+      }
+      return res.json() as Promise<{ authorizationUrl: string; reference: string; orderId: number }>;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/founder/dashboard"] });
-      toast({ title: "Submitted for review", description: "Our team will verify your company within 1–2 business days." });
-      navigate("/founder/dashboard");
+      window.location.href = data.authorizationUrl;
     },
-    onError: () => {
-      toast({ title: "Submission failed", description: "Please try again.", variant: "destructive" });
+    onError: (err: Error) => {
+      toast({ title: "Checkout failed", description: err.message || "Please try again.", variant: "destructive" });
     },
   });
 
   // ── Step Validation ──────────────────────────────────────────────────────────
 
   const canProceedStep2 = companyName.trim().length >= 2 && (rcInput.trim() || kybResult?.rcNumber || "").length >= 2 && operatingAddress.line1.trim() && operatingAddress.city.trim() && operatingAddress.state.trim();
-  const canProceedStep3 = true;
-  const mandatoryDocs = REQUIRED_DOCS.slice(0, 4);
-  const uploadedTypes = new Set(uploadedDocs.map(d => d.docType));
-  const allMandatoryUploaded = mandatoryDocs.every(d => uploadedTypes.has(d.docType));
+  const uploadedKeys = new Set(uploadedDocs.map(d => d.key));
+  const mandatoryDocs = REQUIRED_DOCS.filter(d => d.mandatory);
+  const allMandatoryUploaded = mandatoryDocs.every(d => uploadedKeys.has(d.key));
+  const verifiableDirectors = directors.filter(d => d.bvn || d.nin);
+  const totalFee = VERIFICATION_FEE_NGN + verifiableDirectors.length * DIRECTOR_VERIFY_FEE_NGN;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -364,7 +376,7 @@ export default function ExistingCompanyPage() {
               <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription>
-                  We query the CAC registry via Smile ID's KYB service to pre-fill your company details. The lookup takes about 2 seconds.
+                  We query the CAC registry via Smile ID's KYB service to pre-fill your company details. Your company must be registered with the CAC to proceed.
                 </AlertDescription>
               </Alert>
 
@@ -386,6 +398,7 @@ export default function ExistingCompanyPage() {
                 </div>
               </div>
 
+              {/* Network/service error — allow skip in dev mode */}
               {kybError && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
@@ -393,8 +406,9 @@ export default function ExistingCompanyPage() {
                 </Alert>
               )}
 
+              {/* KYB Result */}
               {kybResult && (
-                <div className={`rounded-lg border p-4 space-y-2 ${kybResult.found ? "border-green-500/40 bg-green-500/5" : "border-amber-500/40 bg-amber-500/5"}`}>
+                <div className={`rounded-lg border p-4 space-y-2 ${kybResult.found ? "border-green-500/40 bg-green-500/5" : kybGenuineNotFound ? "border-destructive/40 bg-destructive/5" : "border-amber-500/40 bg-amber-500/5"}`}>
                   {kybResult.found ? (
                     <>
                       <div className="flex items-center gap-2 text-sm font-medium text-green-700 dark:text-green-400">
@@ -412,19 +426,34 @@ export default function ExistingCompanyPage() {
                         )}
                       </div>
                     </>
+                  ) : kybGenuineNotFound ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        Company not found in the CAC registry
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        We could not find a company with RC number <strong>{rcInput}</strong> in the CAC database.
+                        Please double-check the RC number and try again. If you believe this is an error, contact{" "}
+                        <a href="mailto:support@cellionone.com" className="underline text-primary">support@cellionone.com</a>.
+                      </p>
+                    </div>
                   ) : (
                     <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-400">
                       <Info className="h-4 w-4" />
-                      Company not found in the CAC database. You can still proceed and enter details manually — our team will verify against the registry.
+                      The registry lookup service is temporarily unavailable. You can proceed manually and our team will verify against the CAC.
                     </div>
                   )}
                 </div>
               )}
 
               <div className="flex items-center justify-between pt-2">
-                <Button variant="ghost" size="sm" onClick={handleSkipKyb} data-testid="button-skip-kyb">
-                  Skip — enter details manually
-                </Button>
+                {/* Show skip if there's a service error or network error (dev/fallback) */}
+                {kybServiceError ? (
+                  <Button variant="ghost" size="sm" onClick={() => { setKybResult({ found: true }); setStep(2); }} data-testid="button-skip-kyb">
+                    Proceed manually
+                  </Button>
+                ) : <div />}
                 <Button onClick={() => setStep(2)} disabled={!canProceedStep1} data-testid="button-step1-next">
                   Continue
                   <ArrowRight className="h-4 w-4 ml-1.5" />
@@ -535,7 +564,7 @@ export default function ExistingCompanyPage() {
               <CardTitle>Step 3: Directors & Officers</CardTitle>
               <CardDescription>
                 {directors.length > 0 && kybResult?.found
-                  ? "These directors were pre-filled from the CAC registry. You can add more or edit their details."
+                  ? "These directors were pre-filled from the CAC registry. Add BVN for each director you want to verify on Cellion One."
                   : "Add the directors and officers of your company."}
               </CardDescription>
             </CardHeader>
@@ -564,12 +593,12 @@ export default function ExistingCompanyPage() {
                             />
                           </div>
                           <div>
-                            <Label className="text-xs">BVN (optional)</Label>
+                            <Label className="text-xs">BVN (for verification)</Label>
                             <Input
                               className="h-7 text-xs"
                               value={d.bvn}
                               onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, bvn: e.target.value } : dir))}
-                              placeholder="BVN"
+                              placeholder="11-digit BVN"
                               data-testid={`input-director-bvn-${i}`}
                             />
                           </div>
@@ -624,12 +653,14 @@ export default function ExistingCompanyPage() {
                 Add Director
               </Button>
 
-              <Alert>
-                <Info className="h-4 w-4" />
-                <AlertDescription>
-                  Director identity verification (BVN / NIN) will be completed as part of your post-incorporation services. You only need to provide names here.
-                </AlertDescription>
-              </Alert>
+              {verifiableDirectors.length > 0 && (
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    {verifiableDirectors.length} director{verifiableDirectors.length > 1 ? "s" : ""} with BVN will be verified as part of your submission — ₦{DIRECTOR_VERIFY_FEE_NGN.toLocaleString()} per person.
+                  </AlertDescription>
+                </Alert>
+              )}
 
               <div className="flex items-center justify-between pt-2">
                 <Button variant="outline" onClick={() => setStep(2)} data-testid="button-step3-back">
@@ -638,7 +669,7 @@ export default function ExistingCompanyPage() {
                 </Button>
                 <Button
                   onClick={handleEnterDocStep}
-                  disabled={!canProceedStep3 || createProfileMutation.isPending}
+                  disabled={createProfileMutation.isPending}
                   data-testid="button-step3-next"
                 >
                   {createProfileMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
@@ -656,18 +687,17 @@ export default function ExistingCompanyPage() {
             <CardHeader>
               <CardTitle>Step 4: Upload Company Documents</CardTitle>
               <CardDescription>
-                Upload the required documents. The first four are mandatory; the remaining two are strongly recommended.
+                Upload the required documents. The first four are mandatory before proceeding.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={handleFileChange} data-testid="input-file-upload" />
 
-              {REQUIRED_DOCS.map((doc, i) => {
-                const uploaded = uploadedDocs.find(d => d.docType === doc.docType);
-                const isUploading = uploadingDoc === doc.docType;
-                const isMandatory = i < 4;
+              {REQUIRED_DOCS.map((doc) => {
+                const uploaded = uploadedDocs.find(d => d.key === doc.key);
+                const isUploading = uploadingDoc === doc.key;
                 return (
-                  <div key={doc.docType} className={`flex items-center justify-between rounded-lg border p-3 gap-3 ${uploaded ? "border-green-500/40 bg-green-500/5" : ""}`}>
+                  <div key={doc.key} className={`flex items-center justify-between rounded-lg border p-3 gap-3 ${uploaded ? "border-green-500/40 bg-green-500/5" : ""}`}>
                     <div className="flex items-center gap-3 min-w-0">
                       <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${uploaded ? "bg-green-500/10" : "bg-muted"}`}>
                         {uploaded ? <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" /> : <FileText className="h-4 w-4 text-muted-foreground" />}
@@ -675,7 +705,7 @@ export default function ExistingCompanyPage() {
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">
                           {doc.label}
-                          {isMandatory && <span className="text-red-500 ml-1">*</span>}
+                          {doc.mandatory && <span className="text-red-500 ml-1">*</span>}
                         </p>
                         {uploaded && <p className="text-xs text-muted-foreground truncate">{uploaded.fileName}</p>}
                       </div>
@@ -683,10 +713,10 @@ export default function ExistingCompanyPage() {
                     <Button
                       variant={uploaded ? "outline" : "default"}
                       size="sm"
-                      onClick={() => handleFileSelect(doc.docType, doc.label)}
+                      onClick={() => handleFileSelect(doc.key)}
                       disabled={isUploading}
                       className="shrink-0"
-                      data-testid={`button-upload-${doc.docType}`}
+                      data-testid={`button-upload-${doc.key}`}
                     >
                       {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
                       <span className="ml-1.5">{uploaded ? "Replace" : "Upload"}</span>
@@ -701,7 +731,7 @@ export default function ExistingCompanyPage() {
                 <Alert>
                   <Info className="h-4 w-4" />
                   <AlertDescription>
-                    The first 4 documents are required before you can proceed. Documents marked with <span className="text-red-500 font-medium">*</span> are mandatory.
+                    Documents marked with <span className="text-red-500 font-medium">*</span> are required before you can proceed.
                   </AlertDescription>
                 </Alert>
               )}
@@ -724,8 +754,8 @@ export default function ExistingCompanyPage() {
         {step === 5 && (
           <Card>
             <CardHeader>
-              <CardTitle>Step 5: Payment & Submission</CardTitle>
-              <CardDescription>Review the fee summary and submit your company for verification.</CardDescription>
+              <CardTitle>Step 5: Payment</CardTitle>
+              <CardDescription>Review the fee summary then complete payment via Paystack to submit for verification.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="rounded-lg border divide-y">
@@ -736,32 +766,33 @@ export default function ExistingCompanyPage() {
                   </div>
                   <p className="font-semibold">₦{VERIFICATION_FEE_NGN.toLocaleString()}</p>
                 </div>
-                {directors.length > 0 && (
+                {verifiableDirectors.length > 0 && (
                   <div className="flex items-center justify-between px-4 py-3">
                     <div>
                       <p className="font-medium text-sm">Director Identity Verification</p>
-                      <p className="text-xs text-muted-foreground">{directors.length} director{directors.length > 1 ? "s" : ""} × ₦10,000</p>
+                      <p className="text-xs text-muted-foreground">{verifiableDirectors.length} director{verifiableDirectors.length > 1 ? "s" : ""} with BVN × ₦{DIRECTOR_VERIFY_FEE_NGN.toLocaleString()}</p>
                     </div>
-                    <p className="font-semibold">₦{(directors.length * 10000).toLocaleString()}</p>
+                    <p className="font-semibold">₦{(verifiableDirectors.length * DIRECTOR_VERIFY_FEE_NGN).toLocaleString()}</p>
                   </div>
                 )}
                 <div className="flex items-center justify-between px-4 py-3 bg-muted/30">
                   <p className="font-semibold">Total</p>
-                  <p className="font-bold text-lg">₦{(VERIFICATION_FEE_NGN + directors.length * 10000).toLocaleString()}</p>
+                  <p className="font-bold text-lg">₦{totalFee.toLocaleString()}</p>
                 </div>
               </div>
 
               <Alert>
                 <CreditCard className="h-4 w-4" />
                 <AlertDescription>
-                  Payment will be processed securely via Paystack. After payment is confirmed, our legal team will review your documents and verify your company within 1–2 business days. You will receive an email notification once the review is complete.
+                  You will be redirected to Paystack to complete payment securely. Once confirmed, our legal team will review your documents and verify your company within 1–2 business days.
                 </AlertDescription>
               </Alert>
 
               <div className="rounded-lg border p-4 space-y-2">
                 <p className="text-sm font-medium">What happens next</p>
                 <ol className="text-sm text-muted-foreground space-y-1.5 list-decimal list-inside">
-                  <li>Your company profile is submitted to our review queue</li>
+                  <li>You complete payment on Paystack's secure page</li>
+                  <li>Payment is confirmed and your company enters our review queue</li>
                   <li>We cross-check your details against the CAC registry</li>
                   <li>Our legal team reviews your uploaded documents</li>
                   <li>You receive an email once verified — post-inc services unlock immediately</li>
@@ -774,13 +805,12 @@ export default function ExistingCompanyPage() {
                   Back
                 </Button>
                 <Button
-                  onClick={() => submitMutation.mutate()}
-                  disabled={submitMutation.isPending}
-                  data-testid="button-submit-final"
+                  onClick={() => checkoutMutation.mutate()}
+                  disabled={checkoutMutation.isPending}
+                  data-testid="button-pay-now"
                 >
-                  {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-                  Submit for Review
-                  <ArrowRight className="h-4 w-4 ml-1.5" />
+                  {checkoutMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <ExternalLink className="h-4 w-4 mr-1.5" />}
+                  Pay ₦{totalFee.toLocaleString()} via Paystack
                 </Button>
               </div>
             </CardContent>

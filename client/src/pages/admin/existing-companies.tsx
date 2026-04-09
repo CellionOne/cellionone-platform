@@ -32,12 +32,21 @@ import {
   CheckCircle2,
   XCircle,
   Eye,
-  Clock,
   FileText,
   User,
   AlertCircle,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
-import type { CompanyProfile } from "@shared/schema";
+import type { CompanyProfile, ProfileChecklistItem } from "@shared/schema";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface AddressRecord { line1?: string; line2?: string; city?: string; state?: string }
+interface DirectorRecord { name: string; role?: string; email?: string; bvn?: string }
+interface CompanyProfileDetail extends CompanyProfile {
+  checklistItems?: ProfileChecklistItem[];
+}
 
 // ── Status helpers ─────────────────────────────────────────────────────────────
 
@@ -69,9 +78,22 @@ function StatusBadgeLocal({ status }: { status: string | null }) {
   );
 }
 
-// ── Document list ──────────────────────────────────────────────────────────────
+const DOC_STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  missing: "outline",
+  provided: "secondary",
+  accepted: "default",
+  rejected: "destructive",
+};
 
-interface ProfileDoc { docType: string; label: string; filePath?: string; uploadedAt?: string }
+function DocStatusBadge({ status }: { status: string | null }) {
+  const label = status ? status.charAt(0).toUpperCase() + status.slice(1) : "Missing";
+  const variant = DOC_STATUS_VARIANTS[status || "missing"] || "outline";
+  return (
+    <Badge variant={variant} className={status === "accepted" ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 text-xs" : "text-xs"}>
+      {label}
+    </Badge>
+  );
+}
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
@@ -84,6 +106,8 @@ export default function AdminExistingCompaniesPage() {
   const [rejectNotes, setRejectNotes] = useState("");
   const [showApproveDialog, setShowApproveDialog] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [docReviewItemId, setDocReviewItemId] = useState<number | null>(null);
+  const [docReviewNotes, setDocReviewNotes] = useState("");
 
   const queryKey = statusFilter === "all"
     ? ["/api/admin/existing-companies"]
@@ -101,7 +125,7 @@ export default function AdminExistingCompaniesPage() {
     },
   });
 
-  const { data: detail, isLoading: detailLoading } = useQuery<CompanyProfile>({
+  const { data: detail, isLoading: detailLoading } = useQuery<CompanyProfileDetail>({
     queryKey: ["/api/admin/existing-companies", selected?.id],
     enabled: !!selected?.id,
     queryFn: async () => {
@@ -142,7 +166,26 @@ export default function AdminExistingCompaniesPage() {
     onError: () => toast({ title: "Error", description: "Failed to reject.", variant: "destructive" }),
   });
 
+  const docReviewMutation = useMutation({
+    mutationFn: async ({ profileId, itemId, status, reviewerNotes }: { profileId: number; itemId: number; status: string; reviewerNotes?: string }) => {
+      const res = await apiRequest("PATCH", `/api/admin/existing-companies/${profileId}/checklist-items/${itemId}`, { status, reviewerNotes });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Document status updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/existing-companies", selected?.id] });
+      setDocReviewItemId(null);
+      setDocReviewNotes("");
+    },
+    onError: () => toast({ title: "Error", description: "Failed to update document status.", variant: "destructive" }),
+  });
+
   const reviewableStatuses = ["pending_review", "documents_under_review"];
+
+  const formatAddress = (addr: AddressRecord | null | undefined): string => {
+    if (!addr) return "—";
+    return [addr.line1, addr.line2, addr.city, addr.state].filter(Boolean).join(", ") || "—";
+  };
 
   return (
     <DashboardLayout role="admin" breadcrumbs={[{ label: "Admin", href: "/admin/dashboard" }, { label: "Existing Companies" }]}>
@@ -210,7 +253,7 @@ export default function AdminExistingCompaniesPage() {
         </Card>
       </div>
 
-      {/* ── Detail Drawer / Dialog ── */}
+      {/* ── Detail Dialog ── */}
       {selected && (
         <Dialog open={!!selected} onOpenChange={open => !open && setSelected(null)}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -263,63 +306,116 @@ export default function AdminExistingCompaniesPage() {
                   </div>
                 )}
 
-                {/* Registered Address */}
-                {detail.registeredAddress && (
+                {/* Addresses */}
+                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm font-medium mb-1">Registered Address</p>
-                    <p className="text-sm text-muted-foreground">
-                      {[
-                        (detail.registeredAddress as any).line1,
-                        (detail.registeredAddress as any).line2,
-                        (detail.registeredAddress as any).city,
-                        (detail.registeredAddress as any).state,
-                      ].filter(Boolean).join(", ")}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{formatAddress(detail.registeredAddress as AddressRecord)}</p>
                   </div>
-                )}
-
-                {/* Operating Address */}
-                {detail.operatingAddress && (
                   <div>
                     <p className="text-sm font-medium mb-1">Operating Address</p>
-                    <p className="text-sm text-muted-foreground">
-                      {[
-                        (detail.operatingAddress as any).line1,
-                        (detail.operatingAddress as any).line2,
-                        (detail.operatingAddress as any).city,
-                        (detail.operatingAddress as any).state,
-                      ].filter(Boolean).join(", ")}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{formatAddress(detail.operatingAddress as AddressRecord)}</p>
                   </div>
-                )}
+                </div>
 
                 {/* Directors */}
                 {Array.isArray(detail.directors) && detail.directors.length > 0 && (
                   <div>
                     <p className="text-sm font-medium mb-2">Directors / Officers</p>
                     <div className="space-y-2">
-                      {(detail.directors as { name: string; role?: string; email?: string }[]).map((d, i) => (
+                      {(detail.directors as DirectorRecord[]).map((d, i) => (
                         <div key={i} className="flex items-center gap-2 text-sm">
                           <User className="h-3.5 w-3.5 text-muted-foreground" />
                           <span className="font-medium">{d.name}</span>
                           {d.role && <Badge variant="outline" className="text-xs">{d.role}</Badge>}
                           {d.email && <span className="text-muted-foreground text-xs">{d.email}</span>}
+                          {d.bvn && <Badge variant="outline" className="text-xs font-mono">BVN: {d.bvn.replace(/./g, (c, i) => i < 4 || i > 8 ? "*" : c)}</Badge>}
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Uploaded Documents */}
-                {Array.isArray(detail.profileDocuments) && detail.profileDocuments.length > 0 && (
+                {/* Document Checklist — per-doc accept/reject */}
+                {Array.isArray(detail.checklistItems) && detail.checklistItems.length > 0 && (
                   <div>
-                    <p className="text-sm font-medium mb-2">Uploaded Documents</p>
-                    <div className="space-y-1.5">
-                      {(detail.profileDocuments as ProfileDoc[]).map(doc => (
-                        <div key={doc.docType} className="flex items-center gap-2 text-sm">
-                          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span>{doc.label}</span>
-                          <Badge variant="secondary" className="text-xs ml-auto">Uploaded</Badge>
+                    <p className="text-sm font-medium mb-2">Document Checklist</p>
+                    <div className="space-y-2">
+                      {detail.checklistItems.map(item => (
+                        <div key={item.id} className={`rounded-lg border p-3 space-y-2 ${item.status === "accepted" ? "border-green-500/40 bg-green-500/5" : item.status === "rejected" ? "border-destructive/40 bg-destructive/5" : ""}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span className="text-sm font-medium truncate">{item.label}</span>
+                              {item.required && <span className="text-red-500 text-xs">*</span>}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <DocStatusBadge status={item.status} />
+                              {item.filePath && item.status === "provided" && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-green-600 hover:text-green-700"
+                                    onClick={() => docReviewMutation.mutate({ profileId: detail.id, itemId: item.id, status: "accepted" })}
+                                    disabled={docReviewMutation.isPending}
+                                    data-testid={`button-accept-doc-${item.id}`}
+                                  >
+                                    <ThumbsUp className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-destructive hover:text-destructive"
+                                    onClick={() => setDocReviewItemId(item.id)}
+                                    disabled={docReviewMutation.isPending}
+                                    data-testid={`button-reject-doc-${item.id}`}
+                                  >
+                                    <ThumbsDown className="h-3.5 w-3.5" />
+                                  </Button>
+                                </>
+                              )}
+                              {item.status === "accepted" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs text-muted-foreground"
+                                  onClick={() => docReviewMutation.mutate({ profileId: detail.id, itemId: item.id, status: "provided" })}
+                                  disabled={docReviewMutation.isPending}
+                                  data-testid={`button-undo-accept-doc-${item.id}`}
+                                >
+                                  Undo
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                          {item.reviewerNotes && (
+                            <p className="text-xs text-muted-foreground pl-5">{item.reviewerNotes}</p>
+                          )}
+                          {docReviewItemId === item.id && (
+                            <div className="space-y-2 pl-5">
+                              <Textarea
+                                value={docReviewNotes}
+                                onChange={e => setDocReviewNotes(e.target.value)}
+                                placeholder="Reason for rejection (shown to founder)…"
+                                rows={2}
+                                className="text-sm"
+                                data-testid={`input-doc-reject-notes-${item.id}`}
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => docReviewMutation.mutate({ profileId: detail.id, itemId: item.id, status: "rejected", reviewerNotes: docReviewNotes || undefined })}
+                                  disabled={docReviewMutation.isPending}
+                                  data-testid={`button-confirm-reject-doc-${item.id}`}
+                                >
+                                  Confirm Rejection
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => { setDocReviewItemId(null); setDocReviewNotes(""); }}>Cancel</Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -352,7 +448,7 @@ export default function AdminExistingCompaniesPage() {
               <DialogFooter className="gap-2 pt-2">
                 <Button
                   variant="destructive"
-                  onClick={() => { setShowRejectDialog(true); }}
+                  onClick={() => setShowRejectDialog(true)}
                   disabled={approveMutation.isPending || rejectMutation.isPending}
                   data-testid="button-reject-company"
                 >

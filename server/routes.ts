@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne } from "drizzle-orm";
 import * as services from "./services";
@@ -7337,7 +7337,8 @@ Important guidelines:
     }
   });
 
-  // Create / update existing company profile (accepts full wizard payload)
+  // Create existing company profile (wizard Step 2-3 payload)
+  // smileKybJobId / smileKybResult are NOT accepted from client — KYB is authoritative server-side
   app.post("/api/founder/company-profiles/existing", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
@@ -7363,20 +7364,42 @@ Important guidelines:
           percentage: z.number().optional(),
         })).optional(),
         businessActivities: z.array(z.string()).optional(),
-        smileKybJobId: z.string().optional(),
-        smileKybResult: z.record(z.unknown()).optional(),
       }).parse(req.body);
 
-      // Run Smile ID TIN lookup if TIN is provided
+      // Run KYB server-side — authoritative; never trust client-supplied KYB result
+      // If KYB service is unavailable (not configured, SDK error, etc.), proceed without blocking
+      const smileIdService = await import('./services/smileIdService');
+      const kybJobId = `kyb-${userId}-${Date.now()}`;
+      let smileKybJobId: string | undefined;
+      let smileKybResult: Record<string, unknown> | undefined;
+      try {
+        const kybResult = await smileIdService.verifyBusiness(data.rcNumber, userId, kybJobId);
+        if (kybResult.error) {
+          // Service error (NOT_CONFIGURED, SDK crash, etc.) — store nothing, proceed
+          console.log(`[ExistingCo] KYB service error: ${kybResult.error} — proceeding without KYB result`);
+        } else {
+          smileKybJobId = kybResult.smileJobId;
+          const { rawResult: _kybRaw, ...safeKyb } = kybResult;
+          smileKybResult = safeKyb as Record<string, unknown>;
+        }
+      } catch (kybErr: any) {
+        // Unexpected throw — log and proceed
+        console.error(`[ExistingCo] Unexpected KYB error: ${kybErr.message}`);
+      }
+
+      // Run TIN verification server-side if TIN provided
       let smileTinJobId: string | undefined;
       let smileTinResult: Record<string, unknown> | undefined;
       if (data.tinNumber) {
-        const smileIdService = await import('./services/smileIdService');
-        const tinJobId = `tin-${userId}-${Date.now()}`;
-        const tinResult = await smileIdService.verifyTin(data.tinNumber, userId, tinJobId);
-        smileTinJobId = tinResult.smileJobId;
-        const { rawResult: _raw, ...safeTin } = tinResult;
-        smileTinResult = safeTin as Record<string, unknown>;
+        try {
+          const tinJobId = `tin-${userId}-${Date.now()}`;
+          const tinResult = await smileIdService.verifyTin(data.tinNumber, userId, tinJobId);
+          smileTinJobId = tinResult.smileJobId;
+          const { rawResult: _tinRaw, ...safeTin } = tinResult;
+          smileTinResult = safeTin as Record<string, unknown>;
+        } catch (tinErr: any) {
+          if (tinErr?.message !== 'NOT_CONFIGURED') throw tinErr;
+        }
       }
 
       const [newProfile] = await db
@@ -7395,16 +7418,36 @@ Important guidelines:
           businessActivities: data.businessActivities || [],
           shareCapital: data.shareCapital,
           tinNumber: data.tinNumber,
-          smileKybJobId: data.smileKybJobId,
-          smileKybResult: data.smileKybResult,
+          smileKybJobId,
+          smileKybResult,
           smileTinJobId,
           smileTinResult,
           isExistingCompany: true,
-          existingCompanyStatus: "pending_payment",
+          existingCompanyStatus: "draft",
           profileDocuments: [],
         })
         .returning();
 
+      // Seed the 6 required document checklist items
+      const EXISTING_CO_DOCS = [
+        { key: "coi", label: "Certificate of Incorporation", required: true },
+        { key: "memat", label: "MEMAT (Memorandum & Articles of Association)", required: true },
+        { key: "cac_status", label: "CAC Status Report", required: true },
+        { key: "tin_cert", label: "TIN Certificate", required: true },
+        { key: "proof_address", label: "Proof of Business Address", required: true },
+        { key: "director_id", label: "Director(s) Government-Issued ID", required: true },
+      ];
+      for (const doc of EXISTING_CO_DOCS) {
+        await db.insert(profileChecklistItems).values({
+          companyProfileId: newProfile.id,
+          key: doc.key,
+          label: doc.label,
+          required: doc.required,
+          status: "missing",
+        });
+      }
+
+      // Seed post-incorporation tasks
       for (const task of DEFAULT_POST_INC_TASKS) {
         await db.insert(postIncorporationTasks).values({
           companyProfileId: newProfile.id,
@@ -7430,20 +7473,42 @@ Important guidelines:
     }
   });
 
-  // Upload document for an existing company profile (multipart)
+  // Get document checklist items for an existing company profile
+  app.get("/api/founder/company-profiles/:id/profile-checklist", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const items = await db.select().from(profileChecklistItems).where(eq(profileChecklistItems.companyProfileId, profileId));
+      res.json(items);
+    } catch (error: any) {
+      console.error("Error fetching profile checklist:", error);
+      res.status(500).json({ message: "Failed to fetch checklist" });
+    }
+  });
+
+  // Upload document for an existing company profile — updates profileChecklistItems by key
   const existingCoDocUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
   app.post("/api/founder/company-profiles/:id/documents/upload", isAuthenticated, requireRole("founder"), existingCoDocUpload.single("file"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const profileId = parseInt(req.params.id, 10);
-      const { docType, label } = req.body;
+      const { docKey } = req.body;
       const file = req.file;
 
       if (!file) return res.status(400).json({ message: "No file provided" });
-      if (!docType || !label) return res.status(400).json({ message: "docType and label are required" });
+      if (!docKey) return res.status(400).json({ message: "docKey is required" });
 
       const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
       if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      // Verify this checklist item belongs to the profile
+      const [checklistItem] = await db.select().from(profileChecklistItems).where(and(eq(profileChecklistItems.companyProfileId, profileId), eq(profileChecklistItems.key, docKey)));
+      if (!checklistItem) return res.status(404).json({ message: "Document checklist item not found" });
 
       const allowedMime = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png"];
       if (!allowedMime.includes(file.mimetype)) return res.status(400).json({ message: "File type not allowed. Upload PDF, JPEG, PNG, DOC or DOCX." });
@@ -7459,58 +7524,84 @@ Important guidelines:
       });
       if (!uploadResponse.ok) return res.status(500).json({ message: "File upload to storage failed" });
 
-      const existingDocs = (profile.profileDocuments as { docType: string; label: string; filePath?: string; uploadedAt?: string }[]) || [];
-      const updatedDocs = existingDocs.filter(d => d.docType !== docType);
-      updatedDocs.push({ docType, label, filePath: objectPath, uploadedAt: new Date().toISOString() });
-
-      await db.update(companyProfiles).set({ profileDocuments: updatedDocs, updatedAt: new Date() }).where(eq(companyProfiles.id, profileId));
+      const [updatedItem] = await db.update(profileChecklistItems)
+        .set({ filePath: objectPath, status: "provided", uploadedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(profileChecklistItems.companyProfileId, profileId), eq(profileChecklistItems.key, docKey)))
+        .returning();
 
       await storage.createAuditLog({
         actorUserId: userId,
         action: "existing_company_document_uploaded",
         entityType: "company_profile",
         entityId: profileId.toString(),
-        details: { docType, label, filePath: objectPath },
+        details: { docKey, filePath: objectPath },
       });
 
-      res.json({ success: true, docType, filePath: objectPath });
+      res.json({ success: true, docKey, filePath: objectPath, item: updatedItem });
     } catch (error: any) {
       console.error("Error uploading company profile document:", error);
       res.status(500).json({ message: error.message || "Upload failed" });
     }
   });
 
-  // Submit existing company profile for review (transition pending_payment → pending_review)
-  app.post("/api/founder/company-profiles/:id/submit-review", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+  // Checkout: create order + Paystack payment for existing company verification
+  app.post("/api/founder/company-profiles/:id/checkout", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
 
       const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
       if (!profile) return res.status(404).json({ message: "Profile not found" });
       if (!profile.isExistingCompany) return res.status(400).json({ message: "Not an existing company profile" });
-
-      if (!["pending_payment", "draft"].includes(profile.existingCompanyStatus || "")) {
-        return res.status(400).json({ message: "Profile cannot be submitted in its current state" });
+      if (!["draft", "pending_payment"].includes(profile.existingCompanyStatus || "")) {
+        return res.status(400).json({ message: "Profile cannot be checked out in its current state" });
       }
 
-      const [updated] = await db.update(companyProfiles)
-        .set({ existingCompanyStatus: "pending_review", updatedAt: new Date() })
-        .where(eq(companyProfiles.id, profileId))
-        .returning();
+      // Build SKU list: 1× EXISTING_CO_VERIFY + N× VERIFY (per director)
+      const directors = (profile.directors as { name: string; bvn?: string; nin?: string }[]) || [];
+      const verifiableDirectors = directors.filter(d => d.bvn || d.nin);
+      const items: { sku: string; quantity?: number }[] = [{ sku: "EXISTING_CO_VERIFY", quantity: 1 }];
+      if (verifiableDirectors.length > 0) {
+        items.push({ sku: "VERIFY", quantity: verifiableDirectors.length });
+      }
+
+      const orderService = await import('./services/orderService');
+      const { order, items: orderItemRecords } = await orderService.createOrder({ founderId: userId, items });
+
+      const paystackPaymentService = await import('./services/paystackPaymentService');
+      const [founderRow] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+      const founderEmail = founderRow?.email || "";
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const checkoutResult = await paystackPaymentService.initializeSplitTransaction({
+        orderId: order.id,
+        email: founderEmail,
+        totalAmount: order.totalAmount,
+        totalCellionCut: order.totalCellionCut || 0,
+        founderId: userId,
+        itemSkus: items.map(i => i.sku),
+        baseUrl,
+      });
+
+      // Save orderId on profile and mark pending_payment
+      await db.update(companyProfiles)
+        .set({ existingCoVerifyOrderId: order.id, existingCompanyStatus: "pending_payment", updatedAt: new Date() })
+        .where(eq(companyProfiles.id, profileId));
 
       await storage.createAuditLog({
         actorUserId: userId,
-        action: "existing_company_submitted_for_review",
+        action: "existing_company_checkout_initiated",
         entityType: "company_profile",
         entityId: profileId.toString(),
-        details: { companyName: profile.companyName },
+        details: { orderId: order.id, totalAmount: order.totalAmount },
       });
 
-      res.json(updated);
+      res.json({ authorizationUrl: checkoutResult.authorizationUrl, reference: checkoutResult.reference, orderId: order.id });
     } catch (error: any) {
-      console.error("Error submitting company profile for review:", error);
-      res.status(500).json({ message: "Failed to submit for review" });
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("Error initiating existing company checkout:", error);
+      res.status(500).json({ message: "Failed to initiate checkout" });
     }
   });
 
@@ -7539,10 +7630,49 @@ Important guidelines:
       const profileId = parseInt(req.params.id, 10);
       const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
       if (!profile) return res.status(404).json({ message: "Profile not found" });
-      res.json(profile);
+      const checklist = await db.select().from(profileChecklistItems).where(eq(profileChecklistItems.companyProfileId, profileId));
+      res.json({ ...profile, checklistItems: checklist });
     } catch (error: any) {
       console.error("Error fetching existing company:", error);
       res.status(500).json({ message: "Failed to fetch existing company" });
+    }
+  });
+
+  // Admin: per-document accept/reject for existing company verification
+  app.patch("/api/admin/existing-companies/:id/checklist-items/:itemId", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const itemId = parseInt(req.params.itemId, 10);
+      const { status, reviewerNotes } = z.object({
+        status: z.enum(["accepted", "rejected", "provided", "missing"]),
+        reviewerNotes: z.string().optional(),
+      }).parse(req.body);
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const [item] = await db.select().from(profileChecklistItems).where(and(eq(profileChecklistItems.id, itemId), eq(profileChecklistItems.companyProfileId, profileId)));
+      if (!item) return res.status(404).json({ message: "Checklist item not found" });
+
+      const [updated] = await db.update(profileChecklistItems)
+        .set({ status, reviewerNotes: reviewerNotes || null, updatedAt: new Date() })
+        .where(eq(profileChecklistItems.id, itemId))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: `existing_company_document_${status}`,
+        entityType: "profile_checklist_item",
+        entityId: itemId.toString(),
+        details: { profileId, key: item.key, status, reviewerNotes },
+      });
+
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("Error reviewing checklist item:", error);
+      res.status(500).json({ message: "Failed to update document status" });
     }
   });
 
@@ -7577,7 +7707,7 @@ Important guidelines:
 
       // Notify the founder via email (non-blocking)
       const { sendEmail } = await import('./services/emailService');
-      const founderUsers = await db.select().from(users).where(eq(users.id, profile.founderId));
+      const founderUsers = await db.select().from(usersTable).where(eq(usersTable.id, profile.founderId));
       const founderEmail = founderUsers[0]?.email;
       if (founderEmail) {
         sendEmail({
@@ -7625,7 +7755,7 @@ Important guidelines:
       });
 
       const { sendEmail } = await import('./services/emailService');
-      const founderUsers = await db.select().from(users).where(eq(users.id, profile.founderId));
+      const founderUsers = await db.select().from(usersTable).where(eq(usersTable.id, profile.founderId));
       const founderEmail = founderUsers[0]?.email;
       if (founderEmail) {
         sendEmail({

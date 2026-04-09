@@ -766,6 +766,28 @@ export const insertCompanyProfileSchema = createInsertSchema(companyProfiles).om
 export type CompanyProfile = typeof companyProfiles.$inferSelect;
 export type InsertCompanyProfile = z.infer<typeof insertCompanyProfileSchema>;
 
+// ============== PROFILE DOCUMENT CHECKLIST (for existing company onboarding) ==============
+// status: missing | provided | accepted | rejected
+export const profileChecklistItems = pgTable("profile_checklist_items", {
+  id: serial("id").primaryKey(),
+  companyProfileId: integer("company_profile_id").notNull(),
+  key: varchar("key", { length: 100 }).notNull(),
+  label: varchar("label", { length: 255 }).notNull(),
+  required: boolean("required").default(true),
+  status: varchar("status", { length: 50 }).default("missing"),
+  filePath: varchar("file_path", { length: 500 }),
+  uploadedAt: timestamp("uploaded_at"),
+  reviewerNotes: text("reviewer_notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_profile_checklist_profile").on(table.companyProfileId),
+]);
+
+export const insertProfileChecklistItemSchema = createInsertSchema(profileChecklistItems).omit({ id: true, createdAt: true, updatedAt: true });
+export type ProfileChecklistItem = typeof profileChecklistItems.$inferSelect;
+export type InsertProfileChecklistItem = z.infer<typeof insertProfileChecklistItemSchema>;
+
 // ============== POST-INCORPORATION CHECKLIST ==============
 export const postIncorporationTasks = pgTable("post_incorporation_tasks", {
   id: serial("id").primaryKey(),

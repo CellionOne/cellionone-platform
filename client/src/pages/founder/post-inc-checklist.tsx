@@ -122,12 +122,31 @@ export default function PostIncChecklistPage() {
   const activeTasks = tasks?.filter(t => t.status !== "completed" && t.status !== "skipped") || [];
   const completedTasks = tasks?.filter(t => t.status === "completed" || t.status === "skipped") || [];
 
+  // Service gating: existing companies must be verified before accessing post-inc services
+  const isExistingUnverified = selectedProfile?.isExistingCompany && selectedProfile.existingCompanyStatus !== "verified";
+
   return (
     <DashboardLayout role="founder" breadcrumbs={[
       { label: "Company Profiles", href: "/founder/company-profile" },
       { label: selectedProfile?.companyName || "Checklist" },
     ]}>
       <div className="space-y-6" data-testid="post-inc-checklist-page">
+
+        {isExistingUnverified && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30 p-4 flex items-start gap-3" data-testid="banner-service-locked">
+            <Lightbulb className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                Post-incorporation services are locked
+              </p>
+              <p className="text-sm text-amber-700 dark:text-amber-400 mt-0.5">
+                {selectedProfile?.existingCompanyStatus === "pending_review" || selectedProfile?.existingCompanyStatus === "documents_under_review"
+                  ? "Your company is under review. Post-incorporation services will unlock once verification is complete (typically 1–2 business days)."
+                  : "Complete your company verification to unlock post-incorporation services."}
+              </p>
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-semibold" data-testid="text-checklist-title">

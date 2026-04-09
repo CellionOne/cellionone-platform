@@ -1,6 +1,6 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs } from '@shared/schema';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { invalidateCieOrgTierCache } from '../routes/cieApiRoutes';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
@@ -446,6 +446,56 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
         console.log(`[Paystack Webhook] Registered office (${tier}) activated for founder ${order.founderId}`);
       } catch (err) {
         console.error(`[Paystack Webhook] Error activating registered office for ${serviceType}:`, err);
+      }
+    }
+
+    if (serviceType === 'EXISTING_CO_VERIFY') {
+      try {
+        // Find the company profile linked to this order
+        const [profile] = await db.select().from(companyProfiles)
+          .where(eq(companyProfiles.existingCoVerifyOrderId, order.id));
+
+        if (profile) {
+          await db.update(companyProfiles)
+            .set({ existingCompanyStatus: 'pending_review', updatedAt: new Date() })
+            .where(eq(companyProfiles.id, profile.id));
+
+          await storage.createAuditLog({
+            actorUserId: order.founderId,
+            action: 'existing_company_payment_confirmed',
+            entityType: 'company_profile',
+            entityId: String(profile.id),
+            details: { orderId: order.id, companyName: profile.companyName },
+          });
+
+          await storage.createNotification({
+            userId: order.founderId,
+            title: 'Payment Confirmed — Under Review',
+            message: `Payment received for ${profile.companyName}. Your documents are now under review.`,
+            type: 'success',
+            linkUrl: '/founder/existing-company',
+          });
+
+          // Trigger server-side BVN/NIN verification for directors who provided credentials
+          try {
+            const { verifyBvn } = await import('./smileIdService');
+            const directors = (profile.directors as { name: string; bvn?: string; nin?: string }[]) || [];
+            for (const director of directors) {
+              if (director.bvn) {
+                const jobId = `dir-bvn-${profile.id}-${Date.now()}`;
+                await verifyBvn(director.bvn, order.founderId, jobId).catch((e: any) => {
+                  console.error(`[Webhook] Director BVN verification failed: ${e.message}`);
+                });
+              }
+            }
+          } catch (dirErr: any) {
+            console.error('[Webhook] Director verification error:', dirErr.message);
+          }
+
+          console.log(`[Paystack Webhook] Existing company profile ${profile.id} moved to pending_review`);
+        }
+      } catch (err) {
+        console.error('[Paystack Webhook] Error handling EXISTING_CO_VERIFY:', err);
       }
     }
 

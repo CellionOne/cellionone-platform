@@ -144,9 +144,9 @@ export default function FounderDashboard() {
               <p className="text-sm font-medium text-red-800 dark:text-red-300">
                 Company verification was not successful
               </p>
-              {(existingCompanyRejected as any).rejectionReason && (
+              {existingCompanyRejected.rejectionReason && (
                 <p className="text-sm text-red-700 dark:text-red-400 mt-0.5">
-                  Reason: {(existingCompanyRejected as any).rejectionReason}
+                  Reason: {existingCompanyRejected.rejectionReason}
                 </p>
               )}
               <p className="text-sm text-red-700 dark:text-red-400 mt-1">

@@ -4177,7 +4177,14 @@ export async function registerRoutes(
       }
 
       if (checklistItemId) {
-        await storage.updateChecklistItem(parseInt(checklistItemId), { status: "provided" });
+        const parsedChecklistId = parseInt(checklistItemId);
+        // Verify this checklist item belongs to the current application (prevent IDOR)
+        const appChecklistItems = await storage.getChecklistItems(applicationId);
+        const itemBelongsToApp = appChecklistItems.some(i => i.id === parsedChecklistId);
+        if (!itemBelongsToApp) {
+          return res.status(400).json({ message: "Checklist item does not belong to this application" });
+        }
+        await storage.updateChecklistItem(parsedChecklistId, { status: "provided" });
       }
 
       const document = await storage.createDocument({

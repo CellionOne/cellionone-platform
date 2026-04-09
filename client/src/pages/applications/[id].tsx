@@ -169,10 +169,14 @@ export default function ApplicationDetailsPage() {
   const requiredItems = checklist.filter(item => item.required).length;
   const progress = requiredItems > 0 ? (completedItems / requiredItems) * 100 : 0;
 
+  const hasMissingRequired = checklist.some(
+    item => item.required && item.status !== "provided" && item.status !== "accepted"
+  );
+
   const currentStatusIndex = statusTimeline.findIndex(s => s.status === application.status);
 
-  const canSubmit = application.status === "draft" && 
-    progress === 100 && 
+  const canSubmit = application.status === "draft" &&
+    !hasMissingRequired &&
     payment?.status === "success";
 
   return (
@@ -388,7 +392,7 @@ export default function ApplicationDetailsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {progress < 100 && (
+                {hasMissingRequired && (
                   <div className="flex items-start gap-2 mb-3 p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
                     <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                     <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -409,10 +413,10 @@ export default function ApplicationDetailsPage() {
                       </span>
                     </div>
                     {payment.status !== "success" && (
-                      <Button 
-                        className="w-full" 
+                      <Button
+                        className="w-full"
                         onClick={handlePayment}
-                        disabled={progress < 100}
+                        disabled={hasMissingRequired}
                         data-testid="button-pay"
                       >
                         Pay Now
@@ -424,10 +428,10 @@ export default function ApplicationDetailsPage() {
                     <p className="text-sm text-muted-foreground mb-3">
                       Ready to pay for your incorporation
                     </p>
-                    <Button 
-                      className="w-full" 
+                    <Button
+                      className="w-full"
                       onClick={handlePayment}
-                      disabled={progress < 100}
+                      disabled={hasMissingRequired}
                       data-testid="button-initiate-payment"
                     >
                       Pay Now

@@ -70,6 +70,8 @@ export default function FounderDashboard() {
     profiles?.some((p) => p.isExistingCompany && ["pending_review", "documents_under_review"].includes(p.existingCompanyStatus || "")) ?? false;
   const existingCompanyRejected =
     profiles?.find((p) => p.isExistingCompany && p.existingCompanyStatus === "rejected") ?? null;
+  const verifiedExistingCompany =
+    profiles?.find((p) => p.isExistingCompany && p.existingCompanyStatus === "verified") ?? null;
 
   const { data: tasks } = useQuery<PostIncorporationTask[]>({
     queryKey: ["/api/founder/company-profiles", firstProfileId, "checklist"],
@@ -122,6 +124,28 @@ export default function FounderDashboard() {
         </div>
 
         <InvitationBanner />
+
+        {verifiedExistingCompany && (
+          <div className="flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30 px-4 py-3" data-testid="banner-existing-company-verified">
+            <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-green-800 dark:text-green-300">
+                {verifiedExistingCompany.companyName} — Verified
+              </p>
+              <p className="text-sm text-green-700 dark:text-green-400 mt-0.5">
+                Your company is verified on Cellion One. You can now access post-incorporation services including corporate bank account opening.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" className="h-7 border-green-300 text-green-800 dark:text-green-300" asChild data-testid="button-open-bank-account">
+                  <Link href="/founder/service-request?service=BANK_ACCOUNT">Open Bank Account</Link>
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7" asChild data-testid="button-view-post-inc">
+                  <Link href="/founder/post-inc-checklist">View Post-Incorporation Tasks</Link>
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {existingCompanyPendingReview && (
           <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3">

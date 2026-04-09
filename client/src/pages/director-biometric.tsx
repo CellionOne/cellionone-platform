@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,16 +29,18 @@ export default function DirectorBiometricPage() {
   const [selfieBase64, setSelfieBase64] = useState<string>("");
   const selfieInputRef = useRef<HTMLInputElement>(null);
 
-  // Validate invite token on mount
-  useState(() => {
+  // Validate invite token on mount using useEffect (not useState — avoids StrictMode double-invoke issues)
+  useEffect(() => {
     if (!token) {
       setErrorMessage("No verification token provided. Please use the link from your invitation email.");
       setStep("error");
       return;
     }
+    let cancelled = false;
     (async () => {
       try {
         const res = await fetch(`/api/director-biometric/invite?token=${encodeURIComponent(token)}`);
+        if (cancelled) return;
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           setErrorMessage(data.message || "This verification link is invalid or has expired.");
@@ -46,14 +48,18 @@ export default function DirectorBiometricPage() {
           return;
         }
         const data = await res.json();
+        if (cancelled) return;
         setInviteData(data);
         setStep("form");
       } catch {
-        setErrorMessage("Failed to validate your verification link. Please try again.");
-        setStep("error");
+        if (!cancelled) {
+          setErrorMessage("Failed to validate your verification link. Please try again.");
+          setStep("error");
+        }
       }
     })();
-  });
+    return () => { cancelled = true; };
+  }, [token]);
 
   const handleSelfieChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

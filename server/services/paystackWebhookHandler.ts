@@ -605,44 +605,52 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
     }
 
     if (serviceType === 'VERIFY') {
-      try {
-        await db.update(users)
-          .set({ isIdentityVerified: true, identityVerifiedAt: new Date(), updatedAt: new Date() })
-          .where(eq(users.id, order.founderId));
-
-        await storage.createAuditLog({
-          actorUserId: order.founderId,
-          action: 'identity_verification_activated',
-          entityType: 'user',
-          entityId: order.founderId,
-          details: { orderId: order.id, method: 'payment', sku: 'VERIFY' },
-        });
-
-        const founderPeople = await storage.getCompanyPeopleByFounder(order.founderId);
-        const unverifiedPeople = founderPeople.filter(p => !p.isVerified && p.personUserId);
-        for (const person of unverifiedPeople) {
-          await db.update(companyPeople)
-            .set({ isVerified: true, updatedAt: new Date() })
-            .where(eq(companyPeople.id, person.id));
-
-          if (person.personUserId) {
-            await db.update(users)
-              .set({ isIdentityVerified: true, identityVerifiedAt: new Date(), updatedAt: new Date() })
-              .where(eq(users.id, person.personUserId));
-          }
+      // Guard: VERIFY in an EXISTING_CO_VERIFY order represents per-director identity fees,
+      // NOT founder/company-people identity activation. Skip standard VERIFY processing for
+      // existing-company onboarding orders — director BVN/NIN/AML is handled in EXISTING_CO_VERIFY handler.
+      const isExistingCoOrder = items.some(i => i.sku === 'EXISTING_CO_VERIFY');
+      if (isExistingCoOrder) {
+        console.log(`[Paystack Webhook] Skipping standard VERIFY processing for existing-company order #${order.id} — director verification handled by EXISTING_CO_VERIFY handler`);
+      } else {
+        try {
+          await db.update(users)
+            .set({ isIdentityVerified: true, identityVerifiedAt: new Date(), updatedAt: new Date() })
+            .where(eq(users.id, order.founderId));
 
           await storage.createAuditLog({
             actorUserId: order.founderId,
-            action: 'company_person_verification_activated',
-            entityType: 'company_person',
-            entityId: String(person.id),
-            details: { orderId: order.id, personUserId: person.personUserId, role: person.role },
+            action: 'identity_verification_activated',
+            entityType: 'user',
+            entityId: order.founderId,
+            details: { orderId: order.id, method: 'payment', sku: 'VERIFY' },
           });
-        }
 
-        console.log(`[Paystack Webhook] User ${order.founderId} and ${unverifiedPeople.length} company people marked as verified`);
-      } catch (err) {
-        console.error(`[Paystack Webhook] Error marking user as verified:`, err);
+          const founderPeople = await storage.getCompanyPeopleByFounder(order.founderId);
+          const unverifiedPeople = founderPeople.filter(p => !p.isVerified && p.personUserId);
+          for (const person of unverifiedPeople) {
+            await db.update(companyPeople)
+              .set({ isVerified: true, updatedAt: new Date() })
+              .where(eq(companyPeople.id, person.id));
+
+            if (person.personUserId) {
+              await db.update(users)
+                .set({ isIdentityVerified: true, identityVerifiedAt: new Date(), updatedAt: new Date() })
+                .where(eq(users.id, person.personUserId));
+            }
+
+            await storage.createAuditLog({
+              actorUserId: order.founderId,
+              action: 'company_person_verification_activated',
+              entityType: 'company_person',
+              entityId: String(person.id),
+              details: { orderId: order.id, personUserId: person.personUserId, role: person.role },
+            });
+          }
+
+          console.log(`[Paystack Webhook] User ${order.founderId} and ${unverifiedPeople.length} company people marked as verified`);
+        } catch (err) {
+          console.error(`[Paystack Webhook] Error marking user as verified:`, err);
+        }
       }
     }
   }

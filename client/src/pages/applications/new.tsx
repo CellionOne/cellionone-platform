@@ -66,6 +66,29 @@ const nigerianStates = [
   "Yobe", "Zamfara"
 ];
 
+const countries = [
+  "Nigeria",
+  "Ghana", "Kenya", "South Africa", "Ethiopia", "Egypt", "Tanzania", "Uganda", "Rwanda", "Senegal",
+  "Cameroon", "Côte d'Ivoire", "Angola", "Mozambique", "Zambia", "Zimbabwe", "Botswana", "Namibia",
+  "United Kingdom", "United States", "Canada", "Australia", "Germany", "France", "Netherlands",
+  "United Arab Emirates", "Saudi Arabia", "India", "China", "Singapore", "Malaysia",
+];
+
+const shareClassInfo: Record<string, { label: string; description: string }> = {
+  ordinary: {
+    label: "Ordinary",
+    description: "Standard voting shares — the most common type in Nigerian companies. Each share carries one vote and participates equally in dividends and capital.",
+  },
+  preference: {
+    label: "Preference",
+    description: "Preference shares carry a fixed dividend paid before ordinary shareholders receive anything. They usually have limited or no voting rights and are suited to investors who want predictable returns.",
+  },
+  redeemable: {
+    label: "Redeemable",
+    description: "Redeemable shares can be bought back by the company at an agreed price or date, giving the company flexibility to return capital to the holder or restructure ownership.",
+  },
+};
+
 const DRAFT_ID = "new-application-draft";
 
 export default function NewApplicationPage() {
@@ -96,6 +119,7 @@ export default function NewApplicationPage() {
       city: "",
       state: "",
       postalCode: "",
+      country: "Nigeria",
     },
     useRegisteredOffice: false,
     registeredOfficeTier: "" as "" | "office_only" | "office_plus_mail",
@@ -136,7 +160,7 @@ export default function NewApplicationPage() {
         companyName2: savedDraft.data.companyName2 || prev.companyName2,
         companyName3: savedDraft.data.companyName3 || prev.companyName3,
         businessDescription: savedDraft.data.businessDescription || prev.businessDescription,
-        registeredAddress: restoredAddress,
+        registeredAddress: { country: "Nigeria", ...restoredAddress },
       }));
       setCurrentStep(savedDraft.step);
       toast({
@@ -342,7 +366,7 @@ export default function NewApplicationPage() {
         if (formData.useRegisteredOffice) {
           return !!formData.registeredOfficeTier;
         }
-        return !!formData.registeredAddress.line1 && !!formData.registeredAddress.city && !!formData.registeredAddress.state;
+        return !!formData.registeredAddress.country && !!formData.registeredAddress.line1 && !!formData.registeredAddress.city && !!formData.registeredAddress.state;
       default:
         return false;
     }
@@ -682,11 +706,17 @@ export default function NewApplicationPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="ordinary">Ordinary</SelectItem>
-                          <SelectItem value="preference">Preference</SelectItem>
-                          <SelectItem value="redeemable">Redeemable</SelectItem>
+                          {Object.entries(shareClassInfo).map(([value, info]) => (
+                            <SelectItem key={value} value={value}>{info.label}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
+                      {newDirector.shareClass && shareClassInfo[newDirector.shareClass] && (
+                        <p className="text-xs text-muted-foreground flex items-start gap-1.5 pt-0.5">
+                          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary/70" />
+                          {shareClassInfo[newDirector.shareClass].description}
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="dir-shares">Shares Allocated</Label>
@@ -824,6 +854,25 @@ export default function NewApplicationPage() {
                 {!formData.useRegisteredOffice && (
                   <div className="space-y-4">
                     <div className="space-y-2">
+                      <Label htmlFor="country">Country *</Label>
+                      <Select
+                        value={formData.registeredAddress.country || "Nigeria"}
+                        onValueChange={(value) => {
+                          updateAddress("country", value);
+                          updateAddress("state", "");
+                        }}
+                      >
+                        <SelectTrigger id="country" data-testid="select-address-country">
+                          <SelectValue placeholder="Select country" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {countries.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
                       <Label htmlFor="line1">Street Address *</Label>
                       <Input
                         id="line1"
@@ -848,40 +897,65 @@ export default function NewApplicationPage() {
                         <Label htmlFor="city">City *</Label>
                         <Input
                           id="city"
-                          placeholder="Lagos"
+                          placeholder={formData.registeredAddress.country === "Nigeria" ? "Lagos" : "City"}
                           value={formData.registeredAddress.city}
                           onChange={(e) => updateAddress("city", e.target.value)}
                           data-testid="input-address-city"
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="state">State *</Label>
-                        <Select
-                          value={formData.registeredAddress.state}
-                          onValueChange={(value) => updateAddress("state", value)}
-                        >
-                          <SelectTrigger data-testid="select-address-state">
-                            <SelectValue placeholder="Select state" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {nigerianStates.map((state) => (
-                              <SelectItem key={state} value={state}>
-                                {state}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label htmlFor="state">
+                          {formData.registeredAddress.country === "Nigeria" ? "State *" : "State / Region *"}
+                        </Label>
+                        {formData.registeredAddress.country === "Nigeria" ? (
+                          <Select
+                            value={formData.registeredAddress.state}
+                            onValueChange={(value) => updateAddress("state", value)}
+                          >
+                            <SelectTrigger data-testid="select-address-state">
+                              <SelectValue placeholder="Select state" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {nigerianStates.map((state) => (
+                                <SelectItem key={state} value={state}>{state}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            id="state"
+                            placeholder="State, province, or region"
+                            value={formData.registeredAddress.state}
+                            onChange={(e) => updateAddress("state", e.target.value)}
+                            data-testid="input-address-state"
+                          />
+                        )}
                       </div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="postalCode">Postal Code</Label>
                       <Input
                         id="postalCode"
-                        placeholder="100001"
+                        placeholder={formData.registeredAddress.country === "Nigeria" ? "e.g. 100001" : "Postal / ZIP code"}
                         value={formData.registeredAddress.postalCode}
                         onChange={(e) => updateAddress("postalCode", e.target.value)}
                         data-testid="input-address-postal"
                       />
+                      {formData.registeredAddress.country === "Nigeria" && (
+                        <p className="text-xs text-muted-foreground flex items-start gap-1.5" data-testid="text-nipost-helper">
+                          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary/70" />
+                          Nigerian postcodes follow a 6-digit format (e.g. 100001 for Lagos Island).
+                          Look yours up at{" "}
+                          <a
+                            href="https://nipost.gov.ng"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline text-primary hover:text-primary/80"
+                          >
+                            nipost.gov.ng
+                          </a>.
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}

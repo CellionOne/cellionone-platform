@@ -160,6 +160,7 @@ export const companyApplications = pgTable("company_applications", {
     city?: string;
     state?: string;
     postalCode?: string;
+    country?: string;
   }>(),
   directorsData: json("directors_data").$type<any[]>(),
   shareholdersData: json("shareholders_data").$type<any[]>(),

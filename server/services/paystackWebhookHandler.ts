@@ -313,7 +313,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
             const candidateId = await createCandidate({ firstName, lastName, email });
             if (candidateId) {
-              const companyName = app.companyName ?? 'Company';
+              const companyName = app.companyName1 ?? app.companyName2 ?? app.companyName3 ?? 'Company';
               const appUrl = process.env.REPLIT_DEV_DOMAIN
                 ? `https://${process.env.REPLIT_DEV_DOMAIN}`
                 : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;

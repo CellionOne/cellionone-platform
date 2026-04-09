@@ -57,7 +57,7 @@ interface FieldVerificationJob {
     agentPhotoUrl?: string;
     agentSignatureUrl?: string;
     summary?: string;
-    rawPayload?: any;
+    rawPayload?: Record<string, unknown>;
   } | null;
   adminNotes: string | null;
   adminReviewedAt: string | null;
@@ -139,7 +139,7 @@ export default function AdminFieldVerifications() {
   }
 
   function handleSaveReview() {
-    const payload: any = {};
+    const payload: { adminNotes?: string; verdict?: "verified" | "not_verified" } = {};
     if (adminNotes.trim()) payload.adminNotes = adminNotes.trim();
     if (overrideVerdict) payload.verdict = overrideVerdict;
     reviewMutation.mutate(payload);
@@ -148,7 +148,7 @@ export default function AdminFieldVerifications() {
   const detail = jobDetail || selectedJob;
 
   return (
-    <DashboardLayout>
+    <DashboardLayout role="admin">
       <div className="space-y-6 p-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground" data-testid="page-title-field-verifications">

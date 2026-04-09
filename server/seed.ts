@@ -94,6 +94,8 @@ export async function seedDatabase() {
       { sku: "ADD_DIR", name: "Add Director to Company", category: "post_incorporation", priceNgn: 7500000, cellionCutNgn: 2000000, metadata: { note: "Post-incorporation service to formally appoint a new director at the Corporate Affairs Commission (CAC). Includes Form CAC 7 filing and board resolution preparation." } },
       { sku: "OFFICE_ONLY", name: "Registered Office Address (Office Only)", category: "registered_office", priceNgn: 7500000, cellionCutNgn: 7500000, metadata: { tier: "office_only", annual: true, note: "Annual registered office address at our Lagos premises. Includes official CAC-registered address and annual renewal." } },
       { sku: "OFFICE_PLUS_MAIL", name: "Registered Office Address (Office + Mail Handling)", category: "registered_office", priceNgn: 15000000, cellionCutNgn: 15000000, metadata: { tier: "office_plus_mail", annual: true, note: "Annual registered office address plus mail receiving, scanning, and forwarding services." } },
+      { sku: "EXISTING_CO_VERIFY", name: "Existing Company Verification", category: "verification", priceNgn: 2500000, cellionCutNgn: 2500000, metadata: { note: "One-time company verification fee for existing companies. Covers Smile ID KYB (CAC database check), TIN lookup, and document review by our legal team." } },
+      { sku: "BANK_ACCOUNT", name: "Corporate Bank Account Opening", category: "post_incorporation", priceNgn: 0, cellionCutNgn: 0, metadata: { requiresManualPricing: true, note: "Corporate bank account opening service. Fee varies by partner bank. Our team will contact you with pricing after submission." } },
     ];
     for (const item of catalogItems) {
       await db.insert(productCatalog).values(item).onConflictDoNothing();

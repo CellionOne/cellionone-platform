@@ -487,6 +487,147 @@ export interface AmlCheckResult {
   error?: string;
 }
 
+// ============== KYB (Job Type 7 / Business Verification) ==============
+
+export interface KybResult {
+  found: boolean;
+  companyName?: string;
+  rcNumber?: string;
+  companyType?: string;
+  registrationDate?: string;
+  status?: string;
+  address?: string;
+  shareCapital?: string;
+  tinNumber?: string;
+  directors?: { name: string; role?: string }[];
+  smileJobId?: string;
+  error?: string;
+  rawResult?: Record<string, unknown>;
+}
+
+/**
+ * Verify a business using Smile ID Job Type 7 (Business Verification / CAC lookup).
+ * id_type: BUSINESS_REGISTRATION
+ * id_number: RC number (digits only, strip leading "RC")
+ */
+export async function verifyBusiness(
+  rcNumber: string,
+  userId: string,
+  jobId: string,
+): Promise<KybResult> {
+  const cleanRc = rcNumber.replace(/^rc/i, '').trim();
+
+  if (!isSmileIdConfigured()) {
+    console.log(`[SmileID] Not configured — skipping KYB for RC ${cleanRc}`);
+    return { found: false, error: 'NOT_CONFIGURED' };
+  }
+
+  try {
+    const smileIdentityCore = require('smile-identity-core');
+    const IDApi = smileIdentityCore.IDApi;
+    const connection = new IDApi(PARTNER_ID, API_KEY, SID_SERVER);
+
+    const partnerParams = { job_id: jobId, user_id: userId, job_type: 7 };
+    const idInfo = { country: 'NG', id_type: 'BUSINESS_REGISTRATION', id_number: cleanRc };
+
+    const result = await connection.submit_job(partnerParams, idInfo, {}, {});
+    const body: Record<string, unknown> = result?.body || result || {};
+    const resultCode = body?.ResultCode || body?.result_code;
+    const found = resultCode === '1012' || body?.ResultText === 'Verified';
+
+    const directors: { name: string; role?: string }[] = [];
+    const rawDirs = (body?.directors || body?.Directors || []) as Record<string, unknown>[];
+    if (Array.isArray(rawDirs)) {
+      for (const d of rawDirs) {
+        const name = String(d?.name || d?.Name || '');
+        const role = String(d?.role || d?.Role || '');
+        if (name) directors.push({ name, role: role || undefined });
+      }
+    }
+
+    await storage.createAuditLog({
+      actorUserId: userId,
+      action: 'smile_id_kyb_lookup',
+      entityType: 'company_profile',
+      entityId: userId,
+      details: { rcNumber: cleanRc, found, smileJobId: body?.SmileJobID },
+    });
+
+    return {
+      found,
+      companyName: String(body?.company_name || body?.CompanyName || body?.Entity || ''),
+      rcNumber: String(body?.rc_number || body?.RCNumber || cleanRc),
+      companyType: String(body?.company_type || body?.CompanyType || ''),
+      registrationDate: String(body?.registration_date || body?.DateOfRegistration || ''),
+      status: String(body?.status || body?.Status || ''),
+      address: String(body?.address || body?.Address || ''),
+      shareCapital: String(body?.share_capital || body?.ShareCapital || ''),
+      tinNumber: String(body?.tin || body?.TIN || ''),
+      directors,
+      smileJobId: String(body?.SmileJobID || ''),
+      rawResult: body,
+    };
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('[SmileID] KYB error:', err);
+    await storage.createAuditLog({
+      actorUserId: userId,
+      action: 'smile_id_kyb_error',
+      entityType: 'company_profile',
+      entityId: userId,
+      details: { rcNumber: cleanRc, error: err.message },
+    });
+    return { found: false, error: err.message };
+  }
+}
+
+/**
+ * Verify a TIN using Smile ID Job Type 7 (Business Verification / TAX_INFORMATION).
+ */
+export async function verifyTin(
+  tinNumber: string,
+  userId: string,
+  jobId: string,
+): Promise<KybResult> {
+  if (!isSmileIdConfigured()) {
+    console.log(`[SmileID] Not configured — skipping TIN verification`);
+    return { found: false, error: 'NOT_CONFIGURED' };
+  }
+
+  try {
+    const smileIdentityCore = require('smile-identity-core');
+    const IDApi = smileIdentityCore.IDApi;
+    const connection = new IDApi(PARTNER_ID, API_KEY, SID_SERVER);
+
+    const partnerParams = { job_id: jobId, user_id: userId, job_type: 7 };
+    const idInfo = { country: 'NG', id_type: 'TAX_INFORMATION', id_number: tinNumber };
+
+    const result = await connection.submit_job(partnerParams, idInfo, {}, {});
+    const body: Record<string, unknown> = result?.body || result || {};
+    const found = body?.ResultCode === '1012' || body?.ResultText === 'Verified';
+
+    await storage.createAuditLog({
+      actorUserId: userId,
+      action: 'smile_id_tin_lookup',
+      entityType: 'company_profile',
+      entityId: userId,
+      details: { tinNumber, found, smileJobId: body?.SmileJobID },
+    });
+
+    return {
+      found,
+      tinNumber,
+      companyName: String(body?.company_name || body?.CompanyName || ''),
+      smileJobId: String(body?.SmileJobID || ''),
+      rawResult: body,
+    };
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('[SmileID] TIN verification error:', err);
+    return { found: false, error: err.message };
+  }
+}
+
 interface SmileIdAmlHit {
   PEP?: string | boolean;
   Sanction?: string | boolean;

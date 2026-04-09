@@ -67,7 +67,9 @@ export default function FounderDashboard() {
 
   const firstProfileId = profiles?.[0]?.id;
   const existingCompanyPendingReview =
-    profiles?.some((p) => p.isExistingCompany && p.existingCompanyStatus === "pending_review") ?? false;
+    profiles?.some((p) => p.isExistingCompany && ["pending_review", "documents_under_review"].includes(p.existingCompanyStatus || "")) ?? false;
+  const existingCompanyRejected =
+    profiles?.find((p) => p.isExistingCompany && p.existingCompanyStatus === "rejected") ?? null;
 
   const { data: tasks } = useQuery<PostIncorporationTask[]>({
     queryKey: ["/api/founder/company-profiles", firstProfileId, "checklist"],
@@ -132,6 +134,28 @@ export default function FounderDashboard() {
                 Our team is verifying your company details. You'll receive an email once the review is complete and your account is fully activated.
               </p>
             </div>
+          </div>
+        )}
+
+        {existingCompanyRejected && (
+          <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30 px-4 py-3">
+            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-800 dark:text-red-300">
+                Company verification was not successful
+              </p>
+              {(existingCompanyRejected as any).rejectionReason && (
+                <p className="text-sm text-red-700 dark:text-red-400 mt-0.5">
+                  Reason: {(existingCompanyRejected as any).rejectionReason}
+                </p>
+              )}
+              <p className="text-sm text-red-700 dark:text-red-400 mt-1">
+                Please re-submit your company with the required corrections.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" asChild className="shrink-0 border-red-300 text-red-700 hover:bg-red-50" data-testid="button-resubmit-company">
+              <Link href="/founder/existing-company">Re-submit</Link>
+            </Button>
           </div>
         )}
 

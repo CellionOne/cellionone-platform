@@ -7315,8 +7315,29 @@ Important guidelines:
     }
   });
 
-  // ============== EXISTING COMPANY PROFILE ROUTE ==============
+  // ============== EXISTING COMPANY PROFILE ROUTES ==============
 
+  // KYB lookup: calls Smile ID to fetch CAC data for an RC number
+  app.post("/api/founder/existing-company/kyb-lookup", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { rcNumber } = z.object({ rcNumber: z.string().min(1) }).parse(req.body);
+
+      const smileIdService = await import('./services/smileIdService');
+      const jobId = `kyb-${userId}-${Date.now()}`;
+      const result = await smileIdService.verifyBusiness(rcNumber, userId, jobId);
+
+      // Never return rawResult to the client; strip it
+      const { rawResult: _raw, ...safeResult } = result;
+      res.json(safeResult);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("Error performing KYB lookup:", error);
+      res.status(500).json({ message: "KYB lookup failed" });
+    }
+  });
+
+  // Create / update existing company profile (accepts full wizard payload)
   app.post("/api/founder/company-profiles/existing", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
@@ -7325,8 +7346,38 @@ Important guidelines:
         companyType: z.string().optional(),
         rcNumber: z.string().min(2),
         incorporationDate: z.string().optional(),
+        tinNumber: z.string().optional(),
+        shareCapital: z.string().optional(),
         registeredAddress: z.any().optional(),
+        operatingAddress: z.any().optional(),
+        directors: z.array(z.object({
+          name: z.string(),
+          role: z.string().optional(),
+          email: z.string().optional(),
+          bvn: z.string().optional(),
+          nin: z.string().optional(),
+        })).optional(),
+        shareholders: z.array(z.object({
+          name: z.string(),
+          shares: z.number().optional(),
+          percentage: z.number().optional(),
+        })).optional(),
+        businessActivities: z.array(z.string()).optional(),
+        smileKybJobId: z.string().optional(),
+        smileKybResult: z.record(z.unknown()).optional(),
       }).parse(req.body);
+
+      // Run Smile ID TIN lookup if TIN is provided
+      let smileTinJobId: string | undefined;
+      let smileTinResult: Record<string, unknown> | undefined;
+      if (data.tinNumber) {
+        const smileIdService = await import('./services/smileIdService');
+        const tinJobId = `tin-${userId}-${Date.now()}`;
+        const tinResult = await smileIdService.verifyTin(data.tinNumber, userId, tinJobId);
+        smileTinJobId = tinResult.smileJobId;
+        const { rawResult: _raw, ...safeTin } = tinResult;
+        smileTinResult = safeTin as Record<string, unknown>;
+      }
 
       const [newProfile] = await db
         .insert(companyProfiles)
@@ -7338,11 +7389,19 @@ Important guidelines:
           rcNumber: data.rcNumber,
           incorporationDate: data.incorporationDate ? new Date(data.incorporationDate) : new Date(),
           registeredAddress: data.registeredAddress || {},
-          directors: [],
-          shareholders: [],
-          businessActivities: [],
+          operatingAddress: data.operatingAddress || {},
+          directors: data.directors || [],
+          shareholders: data.shareholders || [],
+          businessActivities: data.businessActivities || [],
+          shareCapital: data.shareCapital,
+          tinNumber: data.tinNumber,
+          smileKybJobId: data.smileKybJobId,
+          smileKybResult: data.smileKybResult,
+          smileTinJobId,
+          smileTinResult,
           isExistingCompany: true,
-          existingCompanyStatus: "pending_review",
+          existingCompanyStatus: "pending_payment",
+          profileDocuments: [],
         })
         .returning();
 
@@ -7368,6 +7427,219 @@ Important guidelines:
       if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
       console.error("Error creating existing company profile:", error);
       res.status(500).json({ message: "Failed to register existing company" });
+    }
+  });
+
+  // Upload document for an existing company profile (multipart)
+  const existingCoDocUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+  app.post("/api/founder/company-profiles/:id/documents/upload", isAuthenticated, requireRole("founder"), existingCoDocUpload.single("file"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const { docType, label } = req.body;
+      const file = req.file;
+
+      if (!file) return res.status(400).json({ message: "No file provided" });
+      if (!docType || !label) return res.status(400).json({ message: "docType and label are required" });
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const allowedMime = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png"];
+      if (!allowedMime.includes(file.mimetype)) return res.status(400).json({ message: "File type not allowed. Upload PDF, JPEG, PNG, DOC or DOCX." });
+
+      const objectStorage = new ObjectStorageService();
+      const uploadURL = await objectStorage.getObjectEntityUploadURL();
+      const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+
+      const uploadResponse = await fetch(uploadURL, {
+        method: "PUT",
+        body: file.buffer,
+        headers: { "Content-Type": file.mimetype, "Content-Length": String(file.buffer.length) },
+      });
+      if (!uploadResponse.ok) return res.status(500).json({ message: "File upload to storage failed" });
+
+      const existingDocs = (profile.profileDocuments as { docType: string; label: string; filePath?: string; uploadedAt?: string }[]) || [];
+      const updatedDocs = existingDocs.filter(d => d.docType !== docType);
+      updatedDocs.push({ docType, label, filePath: objectPath, uploadedAt: new Date().toISOString() });
+
+      await db.update(companyProfiles).set({ profileDocuments: updatedDocs, updatedAt: new Date() }).where(eq(companyProfiles.id, profileId));
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "existing_company_document_uploaded",
+        entityType: "company_profile",
+        entityId: profileId.toString(),
+        details: { docType, label, filePath: objectPath },
+      });
+
+      res.json({ success: true, docType, filePath: objectPath });
+    } catch (error: any) {
+      console.error("Error uploading company profile document:", error);
+      res.status(500).json({ message: error.message || "Upload failed" });
+    }
+  });
+
+  // Submit existing company profile for review (transition pending_payment → pending_review)
+  app.post("/api/founder/company-profiles/:id/submit-review", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+      if (!profile.isExistingCompany) return res.status(400).json({ message: "Not an existing company profile" });
+
+      if (!["pending_payment", "draft"].includes(profile.existingCompanyStatus || "")) {
+        return res.status(400).json({ message: "Profile cannot be submitted in its current state" });
+      }
+
+      const [updated] = await db.update(companyProfiles)
+        .set({ existingCompanyStatus: "pending_review", updatedAt: new Date() })
+        .where(eq(companyProfiles.id, profileId))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "existing_company_submitted_for_review",
+        entityType: "company_profile",
+        entityId: profileId.toString(),
+        details: { companyName: profile.companyName },
+      });
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error submitting company profile for review:", error);
+      res.status(500).json({ message: "Failed to submit for review" });
+    }
+  });
+
+  // ============== ADMIN: EXISTING COMPANIES ROUTES ==============
+
+  app.get("/api/admin/existing-companies", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const statusFilter = req.query.status as string | undefined;
+
+      const profiles = await db.select().from(companyProfiles).where(
+        and(
+          eq(companyProfiles.isExistingCompany, true),
+          statusFilter ? eq(companyProfiles.existingCompanyStatus, statusFilter) : undefined,
+        )
+      ).orderBy(desc(companyProfiles.createdAt));
+
+      res.json(profiles);
+    } catch (error: any) {
+      console.error("Error fetching existing companies:", error);
+      res.status(500).json({ message: "Failed to fetch existing companies" });
+    }
+  });
+
+  app.get("/api/admin/existing-companies/:id", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const profileId = parseInt(req.params.id, 10);
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+      res.json(profile);
+    } catch (error: any) {
+      console.error("Error fetching existing company:", error);
+      res.status(500).json({ message: "Failed to fetch existing company" });
+    }
+  });
+
+  app.post("/api/admin/existing-companies/:id/approve", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const { notes } = z.object({ notes: z.string().optional() }).parse(req.body);
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const [updated] = await db.update(companyProfiles)
+        .set({
+          existingCompanyStatus: "verified",
+          adminReviewNotes: notes || null,
+          adminReviewedBy: adminId,
+          adminReviewedAt: new Date(),
+          rejectionReason: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(companyProfiles.id, profileId))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "existing_company_approved",
+        entityType: "company_profile",
+        entityId: profileId.toString(),
+        details: { companyName: profile.companyName, notes },
+      });
+
+      // Notify the founder via email (non-blocking)
+      const { sendEmail } = await import('./services/emailService');
+      const founderUsers = await db.select().from(users).where(eq(users.id, profile.founderId));
+      const founderEmail = founderUsers[0]?.email;
+      if (founderEmail) {
+        sendEmail({
+          to: founderEmail,
+          subject: "Your company has been verified — Cellion One",
+          html: `<p>Hi,</p><p>Great news! Your existing company <strong>${profile.companyName}</strong> has been verified on Cellion One. You can now access all post-incorporation services for your company.</p><p>Log in to your dashboard to get started.</p><p>The Cellion One Team</p>`,
+        }).catch(() => {});
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("Error approving existing company:", error);
+      res.status(500).json({ message: "Failed to approve" });
+    }
+  });
+
+  app.post("/api/admin/existing-companies/:id/reject", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const { reason, notes } = z.object({ reason: z.string().min(10), notes: z.string().optional() }).parse(req.body);
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const [updated] = await db.update(companyProfiles)
+        .set({
+          existingCompanyStatus: "rejected",
+          rejectionReason: reason,
+          adminReviewNotes: notes || null,
+          adminReviewedBy: adminId,
+          adminReviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(companyProfiles.id, profileId))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "existing_company_rejected",
+        entityType: "company_profile",
+        entityId: profileId.toString(),
+        details: { companyName: profile.companyName, reason },
+      });
+
+      const { sendEmail } = await import('./services/emailService');
+      const founderUsers = await db.select().from(users).where(eq(users.id, profile.founderId));
+      const founderEmail = founderUsers[0]?.email;
+      if (founderEmail) {
+        sendEmail({
+          to: founderEmail,
+          subject: "Action required: Company verification update — Cellion One",
+          html: `<p>Hi,</p><p>Unfortunately, your existing company <strong>${profile.companyName}</strong> could not be verified at this time.</p><p><strong>Reason:</strong> ${reason}</p><p>Please log in to your dashboard and re-submit with the corrected information or documents.</p><p>The Cellion One Team</p>`,
+        }).catch(() => {});
+      }
+
+      res.json(updated);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
+      console.error("Error rejecting existing company:", error);
+      res.status(500).json({ message: "Failed to reject" });
     }
   });
 

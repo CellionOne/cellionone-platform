@@ -50,6 +50,7 @@ import AdminSecurity from "@/pages/admin/security";
 import AdminEscrowDashboard from "@/pages/admin/escrow-dashboard";
 import AdminBankingPartners from "@/pages/admin/banking-partners";
 import AdminCieCockpit from "@/pages/admin/cie";
+import AdminExistingCompanies from "@/pages/admin/existing-companies";
 import CiePortal from "@/pages/cie/index";
 import CieSecurities from "@/pages/cie/securities";
 import CieSecurityDetail from "@/pages/cie/security-detail";
@@ -395,6 +396,9 @@ function Router() {
       </Route>
       <Route path="/admin/cie">
         <ProtectedRoute component={AdminCieCockpit} roles={["admin", "cie_analyst"]} />
+      </Route>
+      <Route path="/admin/existing-companies">
+        <ProtectedRoute component={AdminExistingCompanies} roles={["admin"]} />
       </Route>
 
       <Route path="/cie/subscribe/success">

@@ -713,6 +713,7 @@ export type LegalChatMessage = typeof legalChatMessages.$inferSelect;
 export type InsertLegalChatMessage = z.infer<typeof insertLegalChatMessageSchema>;
 
 // ============== COMPANY PROFILE ==============
+// existingCompanyStatus values: draft | pending_payment | pending_review | documents_under_review | verified | rejected
 export const companyProfiles = pgTable("company_profiles", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id"),
@@ -722,19 +723,38 @@ export const companyProfiles = pgTable("company_profiles", {
   companyType: varchar("company_type", { length: 100 }),
   incorporationDate: timestamp("incorporation_date"),
   isExistingCompany: boolean("is_existing_company").default(false),
-  existingCompanyStatus: varchar("existing_company_status", { length: 30 }).default("pending_review"),
+  existingCompanyStatus: varchar("existing_company_status", { length: 30 }).default("draft"),
   registeredAddress: json("registered_address").$type<{
     line1?: string;
     line2?: string;
     city?: string;
     state?: string;
     postalCode?: string;
+    country?: string;
   }>(),
-  directors: json("directors").$type<{ name: string; role?: string; email?: string }[]>(),
+  operatingAddress: json("operating_address").$type<{
+    line1?: string;
+    line2?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  }>(),
+  directors: json("directors").$type<{ name: string; role?: string; email?: string; bvn?: string; nin?: string }[]>(),
   shareholders: json("shareholders").$type<{ name: string; shares?: number; percentage?: number }[]>(),
   businessActivities: json("business_activities").$type<string[]>(),
   shareCapital: varchar("share_capital", { length: 255 }),
   tinNumber: varchar("tin_number", { length: 100 }),
+  smileKybJobId: varchar("smile_kyb_job_id", { length: 100 }),
+  smileKybResult: json("smile_kyb_result").$type<Record<string, unknown>>(),
+  smileTinJobId: varchar("smile_tin_job_id", { length: 100 }),
+  smileTinResult: json("smile_tin_result").$type<Record<string, unknown>>(),
+  existingCoVerifyOrderId: integer("existing_co_verify_order_id"),
+  profileDocuments: json("profile_documents").$type<{ docType: string; label: string; filePath?: string; uploadedAt?: string }[]>(),
+  adminReviewNotes: text("admin_review_notes"),
+  adminReviewedBy: varchar("admin_reviewed_by"),
+  adminReviewedAt: timestamp("admin_reviewed_at"),
+  rejectionReason: text("rejection_reason"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

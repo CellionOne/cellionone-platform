@@ -171,6 +171,7 @@ const adminItems: NavItem[] = [
   { title: "Invoices", url: "/procurement/invoices", icon: Receipt },
   { title: "KYC Oversight", url: "/admin/kyc", icon: ShieldCheck },
   { title: "Field Verifications", url: "/admin/field-verifications", icon: MapPin },
+  { title: "Existing Companies", url: "/admin/existing-companies", icon: Building2 },
   { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
   { title: "Escrow Dashboard", url: "/admin/escrow-dashboard", icon: Vault },
   { title: "Banking Partners", url: "/admin/banking-partners", icon: Banknote },

@@ -2297,44 +2297,50 @@ export async function registerRoutes(
       // Retrieve company profile to get founder ID for audit logging
       const [profile] = await db.select().from(companyProfiles).where(eq(companyProfiles.id, invite.companyProfileId));
       const founderId = profile?.founderId || 'system';
-      // Initiate Smile ID Job Type 4 biometric verification
+      const isProdBio = process.env.NODE_ENV === 'production';
+      const PARTNER_ID_BIO = process.env.SMILE_ID_PARTNER_ID || '';
+      const API_KEY_BIO = process.env.SMILE_ID_API_KEY || '';
+      if (!PARTNER_ID_BIO || !API_KEY_BIO) {
+        // Production: reject — Smile ID must be configured for biometric verification
+        if (isProdBio) {
+          await db.update(directorBiometricInvites).set({ status: 'pending', updatedAt: new Date() }).where(eq(directorBiometricInvites.id, invite.id));
+          return res.status(503).json({ message: "Identity verification service is temporarily unavailable. Please try again later." });
+        }
+        // Development: allow completion without Smile ID (local testing only)
+        console.warn('[BiometricInvite] Smile ID not configured — marking invite completed in dev mode only');
+        await db.update(directorBiometricInvites)
+          .set({ status: 'completed', completedAt: new Date(), updatedAt: new Date() })
+          .where(eq(directorBiometricInvites.id, invite.id));
+        return res.json({ success: true, message: "Biometric received (dev mode — Smile ID not configured)." });
+      }
       try {
         const smileIdentityCore = require('smile-identity-core');
-        const PARTNER_ID_BIO = process.env.SMILE_ID_PARTNER_ID || '';
-        const API_KEY_BIO = process.env.SMILE_ID_API_KEY || '';
         const SID_SERVER_BIO = process.env.SMILE_ID_SERVER || '0';
-        if (PARTNER_ID_BIO && API_KEY_BIO) {
-          const WebApi = smileIdentityCore.WebApi;
-          const connection = new WebApi(PARTNER_ID_BIO, `${req.protocol}://${req.get('host')}/api/smile-id/biometric-callback`, API_KEY_BIO, SID_SERVER_BIO);
-          const smileJobId = `bio-${invite.companyProfileId}-${invite.directorIndex}-${Date.now()}`;
-          const partnerParams = { job_id: smileJobId, user_id: founderId, job_type: 4 };
-          const idInfo = { country: 'NG', entered: true };
-          const images = selfieImageBase64 ? [{ image_type_id: 2, image: selfieImageBase64 }] : [];
-          if (idImageBase64) images.push({ image_type_id: 1, image: idImageBase64 });
-          const options = { return_job_status: false, return_image_links: false };
-          await connection.submit_job(partnerParams, images, idInfo, options);
-          await db.update(directorBiometricInvites)
-            .set({ smileJobId, updatedAt: new Date() })
-            .where(eq(directorBiometricInvites.id, invite.id));
-          await storage.createAuditLog({
-            actorUserId: founderId,
-            action: 'director_biometric_submitted',
-            entityType: 'director_biometric_invite',
-            entityId: String(invite.id),
-            details: { directorName: invite.directorName, smileJobId },
-          });
-          return res.json({ success: true, message: "Biometric submitted for verification. You will receive confirmation when complete." });
-        }
+        const WebApi = smileIdentityCore.WebApi;
+        const connection = new WebApi(PARTNER_ID_BIO, `${req.protocol}://${req.get('host')}/api/smile-id/biometric-callback`, API_KEY_BIO, SID_SERVER_BIO);
+        const smileJobId = `bio-${invite.companyProfileId}-${invite.directorIndex}-${Date.now()}`;
+        const partnerParams = { job_id: smileJobId, user_id: founderId, job_type: 4 };
+        const idInfo = { country: 'NG', entered: true };
+        const images = selfieImageBase64 ? [{ image_type_id: 2, image: selfieImageBase64 }] : [];
+        if (idImageBase64) images.push({ image_type_id: 1, image: idImageBase64 });
+        const options = { return_job_status: false, return_image_links: false };
+        await connection.submit_job(partnerParams, images, idInfo, options);
+        await db.update(directorBiometricInvites)
+          .set({ smileJobId, updatedAt: new Date() })
+          .where(eq(directorBiometricInvites.id, invite.id));
+        await storage.createAuditLog({
+          actorUserId: founderId,
+          action: 'director_biometric_submitted',
+          entityType: 'director_biometric_invite',
+          entityId: String(invite.id),
+          details: { directorName: invite.directorName, smileJobId },
+        });
+        return res.json({ success: true, message: "Biometric submitted for verification. You will receive confirmation when complete." });
       } catch (smileErr: any) {
         console.error(`[BiometricInvite] Smile ID Job Type 4 failed: ${smileErr.message}`);
         await db.update(directorBiometricInvites).set({ status: 'failed', updatedAt: new Date() }).where(eq(directorBiometricInvites.id, invite.id));
         return res.status(500).json({ message: "Biometric submission failed. Please try again." });
       }
-      // Smile ID not configured (dev mode) — mark completed directly
-      await db.update(directorBiometricInvites)
-        .set({ status: 'completed', completedAt: new Date(), updatedAt: new Date() })
-        .where(eq(directorBiometricInvites.id, invite.id));
-      res.json({ success: true, message: "Biometric received (dev mode — Smile ID not configured)." });
     } catch (err: any) {
       console.error('[BiometricInvite] Error submitting biometric:', err.message);
       res.status(500).json({ message: "Submission failed" });

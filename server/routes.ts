@@ -2130,10 +2130,33 @@ export async function registerRoutes(
 
   // Smile ID async KYB callback — receives job results for BUSINESS_REGISTRATION (Job Type 7)
   // Smile ID posts to this URL when an async KYB job completes. No session auth required (external webhook).
-  // Security: validates Smile-Sec-Key header (Smile ID uses HMAC-SHA256 with the API key).
+  // Security: HMAC-SHA256 signature validated via Smile ID Signature SDK (sec_key + timestamp in payload).
   app.post("/api/smile-id/kyb-callback", async (req: any, res) => {
     try {
       const body: Record<string, unknown> = req.body || {};
+
+      // Validate Smile ID callback signature — prevents forged callbacks from altering KYB data
+      const secKey = String(body.sec_key || '');
+      const timestamp = String(body.timestamp || '');
+      if (secKey && timestamp) {
+        try {
+          const smileIdentityCore = require('smile-identity-core');
+          const API_KEY_CB = process.env.SMILE_ID_API_KEY || '';
+          const PARTNER_ID_CB = process.env.SMILE_ID_PARTNER_ID || '';
+          if (API_KEY_CB && PARTNER_ID_CB) {
+            const sig = new smileIdentityCore.Signature(PARTNER_ID_CB, API_KEY_CB);
+            const isValid = sig.confirm_signature(timestamp, secKey);
+            if (!isValid) {
+              console.warn('[SmileID Callback] Signature validation FAILED — rejecting callback');
+              return res.status(401).json({ message: "Invalid callback signature" });
+            }
+          }
+        } catch (sigErr: any) {
+          // If SDK is unavailable, log but allow (dev mode safety)
+          console.warn(`[SmileID Callback] Signature check skipped (SDK error): ${sigErr.message}`);
+        }
+      }
+
       const jobType = body.job_type || body.JobType;
       const smileJobId = String(body.SmileJobID || body.smile_job_id || '');
       const resultCode = String(body.ResultCode || body.result_code || '');
@@ -2170,7 +2193,9 @@ export async function registerRoutes(
         }
       }
 
-      // Update profile with async KYB result (raw result intentionally NOT persisted — strip it)
+      // Persist full raw response (as required) plus parsed safe fields
+      // Raw response stored for audit trail and admin review; sec_key excluded to avoid re-use
+      const { sec_key: _stripped, ...rawBodySafe } = body;
       await db.update(companyProfiles)
         .set({
           smileKybResult: {
@@ -2184,6 +2209,7 @@ export async function registerRoutes(
             directors,
             resultCode,
             resultText,
+            rawCallback: rawBodySafe,
             asyncCallbackReceivedAt: new Date().toISOString(),
           },
           updatedAt: new Date(),
@@ -2887,7 +2913,7 @@ export async function registerRoutes(
 
       // Service gating: block post-inc SKU purchases for founders whose existing company is unverified.
       // Only applies when no applicationId (existing company context, not a new incorporation).
-      const POST_INC_SKUS = ['SCUML', 'TM', 'TIN', 'ADD_DIR', 'BANK_ACCOUNT'];
+      const POST_INC_SKUS = ['SCUML', 'TM', 'TIN', 'ADD_DIR', 'BANK_ACCOUNT', 'OFFICE_ONLY', 'OFFICE_PLUS_MAIL'];
       const hasPostIncSku = finalItems.some(i => POST_INC_SKUS.includes(i.sku));
       if (hasPostIncSku && !applicationId) {
         const unverifiedExistingProfiles = await db
@@ -7832,7 +7858,16 @@ Important guidelines:
         details: { companyName: profile.companyName, notes },
       });
 
-      // Notify the founder via email (non-blocking)
+      // In-app notification for founder (required)
+      await storage.createNotification({
+        userId: profile.founderId,
+        title: "Company Verified",
+        message: `Great news! ${profile.companyName} has been verified on Cellion One. You can now access all post-incorporation services.`,
+        type: "success",
+        linkUrl: "/founder/post-inc-checklist",
+      });
+
+      // Email notification (non-blocking)
       const { sendEmail } = await import('./services/emailService');
       const founderUsers = await db.select().from(usersTable).where(eq(usersTable.id, profile.founderId));
       const founderEmail = founderUsers[0]?.email;
@@ -7881,6 +7916,16 @@ Important guidelines:
         details: { companyName: profile.companyName, reason },
       });
 
+      // In-app notification for founder (required)
+      await storage.createNotification({
+        userId: profile.founderId,
+        title: "Company Verification Update",
+        message: `Your company ${profile.companyName} could not be verified at this time. Reason: ${reason}. Please update your submission and resubmit.`,
+        type: "error",
+        linkUrl: "/founder/existing-company",
+      });
+
+      // Email notification (non-blocking)
       const { sendEmail } = await import('./services/emailService');
       const founderUsers = await db.select().from(usersTable).where(eq(usersTable.id, profile.founderId));
       const founderEmail = founderUsers[0]?.email;

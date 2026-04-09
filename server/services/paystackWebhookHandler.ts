@@ -488,39 +488,79 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             linkUrl: '/founder/existing-company',
           });
 
-          // Trigger server-side BVN/NIN verification for directors who provided credentials
-          // NOTE: BVN/NIN values stored in directors JSON are AES-256-GCM encrypted; decrypt before passing to Smile ID
+          // Director verification pipeline (BVN + NIN + AML/PEP/sanctions screening)
+          // BVN/NIN stored encrypted — decrypt before Smile ID API calls
+          // Updates director verification statuses back into the profile JSON
           try {
-            const { verifyBvn, verifyNin } = await import('./smileIdService');
+            const { verifyBvn, verifyNin, performAmlCheck } = await import('./smileIdService');
             const { decryptField } = await import('./encryptionService');
-            const directors = (profile.directors as { name: string; bvn?: string; nin?: string }[]) || [];
+            const directors = (profile.directors as {
+              name: string; bvn?: string; nin?: string;
+              bvnVerified?: boolean; ninVerified?: boolean;
+              amlIsHit?: boolean; amlHitTypes?: string[];
+            }[]) || [];
+            const updatedDirectors = [...directors];
             for (const [idx, director] of directors.entries()) {
               const dirJobBase = `dir-${profile.id}-${idx}-${Date.now()}`;
+              let bvnVerified: boolean | undefined;
+              let ninVerified: boolean | undefined;
+              // BVN verification
               if (director.bvn) {
                 try {
                   const plainBvn = decryptField(director.bvn);
-                  await verifyBvn(plainBvn, order.founderId, `bvn-${dirJobBase}`);
+                  const bvnResult = await verifyBvn(plainBvn, order.founderId, `bvn-${dirJobBase}`);
+                  bvnVerified = bvnResult.success;
                 } catch (e: any) {
                   console.error(`[Webhook] Director BVN verification failed (director ${idx}): ${e.message}`);
                 }
               }
+              // NIN verification
               if (director.nin) {
                 try {
                   const plainNin = decryptField(director.nin);
-                  await verifyNin(plainNin, order.founderId, `nin-${dirJobBase}`);
+                  const ninResult = await verifyNin(plainNin, order.founderId, `nin-${dirJobBase}`);
+                  ninVerified = ninResult.success;
                 } catch (e: any) {
                   console.error(`[Webhook] Director NIN verification failed (director ${idx}): ${e.message}`);
                 }
               }
-              // Log AML screening intent — actual AML/PEP/sanctions screening is initiated
-              // via Smile ID Job Type 4 (biometric) or through the KYC-as-a-Service AML pipeline
-              // after BVN/NIN lookups complete and director identity is confirmed.
-              if (director.bvn || director.nin) {
-                console.log(`[Webhook] AML screening queued for director ${idx} of profile ${profile.id} (name: ${director.name})`);
+              // AML/PEP/sanctions screening — runs for all named directors
+              let amlIsHit: boolean | undefined;
+              let amlHitTypes: string[] | undefined;
+              try {
+                const amlResult = await performAmlCheck(director.name, order.founderId);
+                amlIsHit = amlResult.isHit;
+                amlHitTypes = amlResult.hitTypes;
+                if (amlResult.isHit) {
+                  console.warn(`[Webhook] AML hit for director "${director.name}" of profile ${profile.id}: ${amlResult.hitTypes.join(', ')}`);
+                  await storage.createNotification({
+                    userId: profile.founderId,
+                    title: 'Director AML Review Required',
+                    message: `A potential AML/PEP match was detected for director "${director.name}". Our compliance team will follow up.`,
+                    type: 'warning',
+                    linkUrl: '/founder/existing-company',
+                  });
+                }
+              } catch (e: any) {
+                console.error(`[Webhook] Director AML check failed (director ${idx}): ${e.message}`);
               }
+              // Update director entry with verification statuses (encrypted PII preserved as-is)
+              updatedDirectors[idx] = {
+                ...director,
+                bvnVerified: bvnVerified !== undefined ? bvnVerified : director.bvnVerified,
+                ninVerified: ninVerified !== undefined ? ninVerified : director.ninVerified,
+                amlIsHit: amlIsHit !== undefined ? amlIsHit : director.amlIsHit,
+                amlHitTypes: amlHitTypes !== undefined ? amlHitTypes : director.amlHitTypes,
+              };
+            }
+            // Persist updated director verification statuses to profile
+            if (updatedDirectors.length > 0) {
+              await db.update(companyProfiles)
+                .set({ directors: updatedDirectors, updatedAt: new Date() })
+                .where(eq(companyProfiles.id, profile.id));
             }
           } catch (dirErr: any) {
-            console.error('[Webhook] Director verification error:', dirErr.message);
+            console.error('[Webhook] Director verification pipeline error:', dirErr.message);
           }
 
           console.log(`[Paystack Webhook] Existing company profile ${profile.id} moved to pending_review`);

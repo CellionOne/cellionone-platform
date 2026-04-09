@@ -43,7 +43,17 @@ import type { CompanyProfile, ProfileChecklistItem } from "@shared/schema";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface AddressRecord { line1?: string; line2?: string; city?: string; state?: string }
-interface DirectorRecord { name: string; role?: string; email?: string; bvn?: string }
+interface DirectorRecord {
+  name: string;
+  role?: string;
+  email?: string;
+  bvn?: string;
+  nin?: string;
+  bvnVerified?: boolean;
+  ninVerified?: boolean;
+  amlIsHit?: boolean;
+  amlHitTypes?: string[];
+}
 interface CompanyProfileDetail extends CompanyProfile {
   checklistItems?: ProfileChecklistItem[];
 }
@@ -324,12 +334,36 @@ export default function AdminExistingCompaniesPage() {
                     <p className="text-sm font-medium mb-2">Directors / Officers</p>
                     <div className="space-y-2">
                       {(detail.directors as DirectorRecord[]).map((d, i) => (
-                        <div key={i} className="flex items-center gap-2 text-sm">
-                          <User className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="font-medium">{d.name}</span>
-                          {d.role && <Badge variant="outline" className="text-xs">{d.role}</Badge>}
-                          {d.email && <span className="text-muted-foreground text-xs">{d.email}</span>}
-                          {d.bvn && <Badge variant="outline" className="text-xs font-mono">BVN: {d.bvn.replace(/./g, (c, i) => i < 4 || i > 8 ? "*" : c)}</Badge>}
+                        <div key={i} className="rounded-md border p-2.5 space-y-1.5">
+                          <div className="flex items-center gap-2 text-sm">
+                            <User className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="font-medium">{d.name}</span>
+                            {d.role && <Badge variant="outline" className="text-xs">{d.role}</Badge>}
+                            {d.email && <span className="text-muted-foreground text-xs">{d.email}</span>}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {d.bvn && (
+                              <Badge variant={d.bvnVerified === true ? "secondary" : d.bvnVerified === false ? "destructive" : "outline"} className="text-xs">
+                                BVN: {d.bvnVerified === true ? "Verified" : d.bvnVerified === false ? "Failed" : "Pending"}
+                              </Badge>
+                            )}
+                            {d.nin && (
+                              <Badge variant={d.ninVerified === true ? "secondary" : d.ninVerified === false ? "destructive" : "outline"} className="text-xs">
+                                NIN: {d.ninVerified === true ? "Verified" : d.ninVerified === false ? "Failed" : "Pending"}
+                              </Badge>
+                            )}
+                            {d.amlIsHit === true && (
+                              <Badge variant="destructive" className="text-xs">
+                                AML Hit: {d.amlHitTypes?.join(", ") || "Review Required"}
+                              </Badge>
+                            )}
+                            {d.amlIsHit === false && (
+                              <Badge variant="secondary" className="text-xs">AML Clear</Badge>
+                            )}
+                            {d.amlIsHit === undefined && (d.bvn || d.nin) && (
+                              <Badge variant="outline" className="text-xs">AML Pending</Badge>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

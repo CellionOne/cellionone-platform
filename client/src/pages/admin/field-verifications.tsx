@@ -7,6 +7,7 @@ import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -92,15 +93,24 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+type StatusFilter = "all" | "submitted" | "agent_assigned" | "completed" | "failed";
+
 export default function AdminFieldVerifications() {
   const { toast } = useToast();
   const [selectedJob, setSelectedJob] = useState<FieldVerificationJob | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [adminNotes, setAdminNotes] = useState("");
   const [overrideVerdict, setOverrideVerdict] = useState<"verified" | "not_verified" | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const { data: jobs, isLoading } = useQuery<FieldVerificationJob[]>({
     queryKey: ["/api/admin/field-verifications"],
+  });
+
+  const filteredJobs = jobs?.filter(j => {
+    if (statusFilter === "all") return true;
+    if (statusFilter === "completed") return j.status === "completed";
+    return j.status === statusFilter;
   });
 
   const { data: jobDetail, isLoading: isDetailLoading } = useQuery<FieldVerificationJob>({
@@ -151,26 +161,43 @@ export default function AdminFieldVerifications() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-primary" />
-              All Jobs
-              {jobs && (
-                <Badge variant="outline" className="ml-2">
-                  {jobs.length} total
-                </Badge>
-              )}
-            </CardTitle>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <CardTitle className="text-base flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-primary" />
+                All Jobs
+                {jobs && (
+                  <Badge variant="outline" className="ml-2">
+                    {filteredJobs?.length ?? 0} / {jobs.length}
+                  </Badge>
+                )}
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Label className="text-sm text-muted-foreground whitespace-nowrap">Filter by status</Label>
+                <Select value={statusFilter} onValueChange={v => setStatusFilter(v as StatusFilter)}>
+                  <SelectTrigger className="w-44" data-testid="select-status-filter">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="submitted">Submitted</SelectItem>
+                    <SelectItem value="agent_assigned">Agent Assigned</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="failed">Failed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <div className="flex justify-center py-12">
                 <LoadingSpinner />
               </div>
-            ) : !jobs || jobs.length === 0 ? (
+            ) : !filteredJobs || filteredJobs.length === 0 ? (
               <EmptyState
                 icon={MapPin}
-                title="No field verification jobs yet"
-                description="Jobs are auto-created when a founder completes payment for incorporation."
+                title={statusFilter === "all" ? "No field verification jobs yet" : `No jobs with status "${statusFilter}"`}
+                description={statusFilter === "all" ? "Jobs are auto-created when a founder completes payment for incorporation." : "Try changing the filter above."}
               />
             ) : (
               <div className="overflow-x-auto">
@@ -188,7 +215,7 @@ export default function AdminFieldVerifications() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {jobs.map((job) => (
+                    {filteredJobs.map((job) => (
                       <TableRow key={job.id} data-testid={`row-field-verification-${job.id}`}>
                         <TableCell className="font-mono text-xs">{job.id}</TableCell>
                         <TableCell className="font-medium">

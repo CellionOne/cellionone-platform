@@ -297,69 +297,75 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
         console.error(`[Paystack Webhook] Error dispatching deferred invitations for application ${order.applicationId}:`, inviteErr);
       }
 
-      // Auto-submit Youverify field-agent address verification if operating address present
-      try {
-        const [app] = await db.select().from(companyApplications).where(eq(companyApplications.id, order.applicationId));
-        if (app && app.operatingAddress && app.addressVerificationStatus === 'none') {
-          const addr = app.operatingAddress as any;
-          const founder = await storage.getUser(order.founderId);
-          const firstName = founder?.firstName || 'Company';
-          const lastName = founder?.lastName || 'Director';
-          const email = founder?.email || 'noreply@cellionone.com';
+      // Auto-submit Youverify field-agent address verification if this order
+      // contains a CAC incorporation SKU and the application has an operating address.
+      const CAC_SKUS = ['CAC_1M', 'CAC_5M', 'CAC_10M', 'CAC_20M', 'CAC_100M'];
+      const hasCacSku = items.some(i => CAC_SKUS.includes(i.sku));
+      if (hasCacSku) {
+        try {
+          const [app] = await db.select().from(companyApplications).where(eq(companyApplications.id, order.applicationId));
+          if (app && app.operatingAddress && app.addressVerificationStatus === 'none') {
+            const addr = app.operatingAddress;
+            const founder = await storage.getUser(order.founderId);
+            const firstName = founder?.firstName ?? 'Company';
+            const lastName = founder?.lastName ?? 'Director';
+            const email = founder?.email ?? 'noreply@cellionone.com';
 
-          const candidateId = await createCandidate({ firstName, lastName, email });
-          if (candidateId) {
-            const companyName = app.companyName || 'Company';
-            const appUrl = process.env.REPLIT_DEV_DOMAIN
-              ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-              : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
-            const callbackUrl = `${appUrl}/api/webhooks/youverify`;
+            const candidateId = await createCandidate({ firstName, lastName, email });
+            if (candidateId) {
+              const companyName = app.companyName ?? 'Company';
+              const appUrl = process.env.REPLIT_DEV_DOMAIN
+                ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+                : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+              const callbackUrl = `${appUrl}/api/webhooks/youverify`;
 
-            const referenceId = await submitBusinessAddressVerification({
-              candidateId,
-              companyName,
-              address: {
-                line1: addr.line1 || '',
-                line2: addr.line2 || '',
-                city: addr.city || '',
-                state: addr.state || '',
-                postalCode: addr.postalCode || '',
-                country: addr.country || 'NG',
-              },
-              callbackUrl,
-            });
+              const referenceId = await submitBusinessAddressVerification({
+                candidateId,
+                companyName,
+                address: {
+                  line1: addr.line1 ?? '',
+                  line2: addr.line2 ?? '',
+                  city: addr.city ?? '',
+                  state: addr.state ?? '',
+                  postalCode: addr.postalCode ?? '',
+                  country: addr.country ?? 'NG',
+                },
+                callbackUrl,
+              });
 
-            const [newJob] = await db.insert(addressVerificationJobs).values({
-              applicationId: order.applicationId,
-              founderId: order.founderId,
-              youverifyCandidateId: candidateId,
-              youverifyReferenceId: referenceId || null,
-              status: referenceId ? 'submitted' : 'failed',
-            }).returning();
+              const [newJob] = await db.insert(addressVerificationJobs).values({
+                applicationId: order.applicationId,
+                founderId: order.founderId,
+                youverifyCandidateId: candidateId,
+                youverifyReferenceId: referenceId ?? null,
+                status: referenceId ? 'submitted' : 'failed',
+              }).returning();
 
-            await db.update(companyApplications)
-              .set({ addressVerificationStatus: referenceId ? 'submitted' : 'failed', updatedAt: new Date() })
-              .where(eq(companyApplications.id, order.applicationId));
+              await db.update(companyApplications)
+                .set({ addressVerificationStatus: referenceId ? 'submitted' : 'failed', updatedAt: new Date() })
+                .where(eq(companyApplications.id, order.applicationId));
 
-            await storage.createAuditLog({
-              actorUserId: order.founderId,
-              action: 'youverify_address_submitted',
-              entityType: 'address_verification_job',
-              entityId: String(newJob.id),
-              details: { candidateId, referenceId, applicationId: order.applicationId, success: !!referenceId },
-            });
+              await storage.createAuditLog({
+                actorUserId: order.founderId,
+                action: 'youverify_address_submitted',
+                entityType: 'address_verification_job',
+                entityId: String(newJob.id),
+                details: { candidateId, referenceId, applicationId: order.applicationId, success: !!referenceId },
+              });
 
-            if (referenceId) {
-              console.log(`[Paystack Webhook] Youverify address verification submitted — referenceId: ${referenceId}, jobId: ${newJob.id}`);
+              if (referenceId) {
+                console.log(`[Paystack Webhook] Youverify address verification submitted — referenceId: ${referenceId}, jobId: ${newJob.id}`);
+              } else {
+                console.warn(`[Paystack Webhook] Youverify submission failed for application ${order.applicationId} — job recorded as failed`);
+              }
             } else {
-              console.warn(`[Paystack Webhook] Youverify submission failed for application ${order.applicationId} — job recorded as failed`);
+              console.warn(`[Paystack Webhook] Youverify candidate creation failed for application ${order.applicationId}`);
             }
-          } else {
-            console.warn(`[Paystack Webhook] Youverify candidate creation failed for application ${order.applicationId}`);
           }
+        } catch (yvErr: unknown) {
+          const msg = yvErr instanceof Error ? yvErr.message : String(yvErr);
+          console.error(`[Paystack Webhook] Youverify submission error for application ${order.applicationId}:`, msg);
         }
-      } catch (yvErr: any) {
-        console.error(`[Paystack Webhook] Youverify submission error for application ${order.applicationId}:`, yvErr.message);
       }
 
     } catch (err) {

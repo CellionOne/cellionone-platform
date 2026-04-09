@@ -3832,7 +3832,15 @@ export async function registerRoutes(
       const [job] = await db.select().from(addressVerificationJobsTable).where(eq(addressVerificationJobsTable.id, jobId));
       if (!job) return res.status(404).json({ message: "Job not found" });
 
-      const updateData: any = {
+      type JobUpdateFields = {
+        adminNotes: string | null;
+        adminReviewedAt: Date;
+        adminReviewedBy: string | undefined;
+        updatedAt: Date;
+        verdict?: string;
+      };
+
+      const updateFields: JobUpdateFields = {
         adminNotes: parsed.data.adminNotes ?? job.adminNotes,
         adminReviewedAt: new Date(),
         adminReviewedBy: req.user?.id,
@@ -3840,7 +3848,7 @@ export async function registerRoutes(
       };
 
       if (parsed.data.verdict) {
-        updateData.verdict = parsed.data.verdict;
+        updateFields.verdict = parsed.data.verdict;
         // Sync to application
         const appStatus = parsed.data.verdict === "verified" ? "verified" : "not_verified";
         await db.update(companyApplicationsTable)
@@ -3849,7 +3857,7 @@ export async function registerRoutes(
       }
 
       const [updated] = await db.update(addressVerificationJobsTable)
-        .set(updateData)
+        .set(updateFields)
         .where(eq(addressVerificationJobsTable.id, jobId))
         .returning();
 
@@ -4552,6 +4560,39 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error) {
       console.error("Error fetching lawyer applications:", error);
       res.status(500).json({ message: "Failed to fetch applications" });
+    }
+  });
+
+  app.get("/api/lawyer/applications/:applicationId/field-verification", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const lawyerId = getUserId(req);
+      const applicationId = parseInt(req.params.applicationId, 10);
+      if (isNaN(applicationId)) return res.status(400).json({ message: "Invalid application ID" });
+
+      // Ensure this lawyer is assigned to this application
+      const [app] = await db.select({ assignedLawyerUserId: companyApplicationsTable.assignedLawyerUserId })
+        .from(companyApplicationsTable)
+        .where(eq(companyApplicationsTable.id, applicationId));
+
+      if (!app || app.assignedLawyerUserId !== lawyerId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Return the most recent field verification job for this application
+      const [job] = await db.select()
+        .from(addressVerificationJobsTable)
+        .where(eq(addressVerificationJobsTable.applicationId, applicationId))
+        .orderBy(desc(addressVerificationJobsTable.createdAt))
+        .limit(1);
+
+      if (!job) return res.status(404).json({ message: "No field verification job found" });
+
+      // Expose findings but strip adminNotes (internal only)
+      const { adminNotes: _omit, adminReviewedBy: _omit2, ...publicJob } = job;
+      res.json(publicJob);
+    } catch (error) {
+      console.error("Error fetching field verification for lawyer:", error);
+      res.status(500).json({ message: "Failed to fetch field verification" });
     }
   });
 

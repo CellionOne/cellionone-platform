@@ -206,6 +206,7 @@ export default function LawyerApplicationDetail() {
               checklist={checklist}
               documents={documents || []}
               operatingAddress={application.operatingAddress}
+              addressVerificationStatus={application.addressVerificationStatus}
             />
           </TabsContent>
 
@@ -613,21 +614,51 @@ function DocumentFileDetails({
   );
 }
 
+interface FieldVerificationFindings {
+  taskStatus?: string;
+  gpsCoordinates?: { latitude: number; longitude: number };
+  buildingType?: string;
+  buildingColor?: string;
+  submissionDistanceInMeters?: number;
+  agentPhotoUrl?: string;
+  agentSignatureUrl?: string;
+  summary?: string;
+}
+
+interface FieldVerificationJob {
+  id: number;
+  status: string;
+  verdict: string | null;
+  findingsJson: FieldVerificationFindings | null;
+  youverifyReferenceId: string | null;
+  submittedAt: string | null;
+  completedAt: string | null;
+}
+
 function DocumentsTab({ 
   applicationId, 
   checklist,
   documents,
   operatingAddress,
+  addressVerificationStatus,
 }: { 
   applicationId: number;
   checklist: ApplicationChecklistItem[];
   documents: DocumentFile[];
   operatingAddress?: { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string; } | null;
+  addressVerificationStatus?: string | null;
 }) {
   const { toast } = useToast();
   const [selectedDoc, setSelectedDoc] = useState<ApplicationChecklistItem | null>(null);
   const [qualityStatus, setQualityStatus] = useState<string>("");
   const [qualityNotes, setQualityNotes] = useState("");
+
+  // Fetch field verification findings (only if an address_proof doc might be reviewed)
+  const { data: fieldVerificationJob } = useQuery<FieldVerificationJob>({
+    queryKey: ["/api/lawyer/applications", applicationId, "field-verification"],
+    enabled: !!addressVerificationStatus && addressVerificationStatus !== "none",
+    retry: false,
+  });
 
   const getDocumentFile = (checklistItem: ApplicationChecklistItem): DocumentFile | undefined => {
     return documents.find(doc => doc.docType === checklistItem.key);
@@ -730,6 +761,56 @@ function DocumentsTab({
                                 Verify the uploaded document matches this address.
                               </p>
                             </div>
+                          </div>
+                        )}
+                        {item.key === "address_proof" && fieldVerificationJob && (
+                          <div
+                            className={`p-3 rounded-md border space-y-2 ${fieldVerificationJob.verdict === "verified" ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : fieldVerificationJob.verdict === "not_verified" ? "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800" : "bg-muted/40"}`}
+                            data-testid="review-dialog-field-verification"
+                          >
+                            <p className="text-sm font-medium flex items-center gap-1.5">
+                              {fieldVerificationJob.verdict === "verified" && <CheckCircle2 className="h-4 w-4 text-green-600" />}
+                              {fieldVerificationJob.verdict === "not_verified" && <AlertCircle className="h-4 w-4 text-red-600" />}
+                              {!fieldVerificationJob.verdict && <Clock className="h-4 w-4 text-muted-foreground" />}
+                              Field Agent Verification
+                              {fieldVerificationJob.verdict === "verified" && <span className="text-green-700 dark:text-green-400">— Confirmed</span>}
+                              {fieldVerificationJob.verdict === "not_verified" && <span className="text-red-700 dark:text-red-400">— Not Confirmed</span>}
+                              {!fieldVerificationJob.verdict && <span className="text-muted-foreground">— Pending</span>}
+                            </p>
+                            {fieldVerificationJob.findingsJson?.taskStatus && (
+                              <p className="text-xs text-muted-foreground">Task status: {fieldVerificationJob.findingsJson.taskStatus}</p>
+                            )}
+                            {fieldVerificationJob.findingsJson?.buildingType && (
+                              <p className="text-xs text-muted-foreground">Building: {fieldVerificationJob.findingsJson.buildingType}{fieldVerificationJob.findingsJson.buildingColor ? ` · ${fieldVerificationJob.findingsJson.buildingColor}` : ""}</p>
+                            )}
+                            {fieldVerificationJob.findingsJson?.submissionDistanceInMeters != null && (
+                              <p className="text-xs text-muted-foreground">Agent distance: {fieldVerificationJob.findingsJson.submissionDistanceInMeters} m</p>
+                            )}
+                            {fieldVerificationJob.findingsJson?.gpsCoordinates && (
+                              <a
+                                href={`https://maps.google.com/?q=${fieldVerificationJob.findingsJson.gpsCoordinates.latitude},${fieldVerificationJob.findingsJson.gpsCoordinates.longitude}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-primary underline underline-offset-2 block"
+                                data-testid="link-lawyer-gps"
+                              >
+                                View GPS location on map ↗
+                              </a>
+                            )}
+                            {fieldVerificationJob.findingsJson?.agentPhotoUrl && (
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Agent photo</p>
+                                <img
+                                  src={fieldVerificationJob.findingsJson.agentPhotoUrl}
+                                  alt="Agent photo"
+                                  className="rounded max-h-40 object-cover border border-border"
+                                  data-testid="img-lawyer-agent-photo"
+                                />
+                              </div>
+                            )}
+                            {fieldVerificationJob.findingsJson?.summary && (
+                              <p className="text-xs italic text-muted-foreground">{fieldVerificationJob.findingsJson.summary}</p>
+                            )}
                           </div>
                         )}
                         {(() => {

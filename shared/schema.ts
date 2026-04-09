@@ -184,6 +184,7 @@ export const companyApplications = pgTable("company_applications", {
   }>(),
   paymentState: varchar("payment_state", { length: 50 }).default("unpaid"), // unpaid, paid_escrowed, released_to_lawyer, refunded_partial, refunded_full, chargeback
   paymentStateUpdatedAt: timestamp("payment_state_updated_at"),
+  addressVerificationStatus: varchar("address_verification_status", { length: 50 }).default("none"), // none, submitted, agent_assigned, verified, not_verified, failed
   aiSuggestionVersion: varchar("ai_suggestion_version", { length: 50 }),
   aiLastSuggestedAt: timestamp("ai_last_suggested_at"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -919,6 +920,45 @@ export const serviceRequests = pgTable("service_requests", {
 export const insertServiceRequestSchema = createInsertSchema(serviceRequests).omit({ id: true, createdAt: true, updatedAt: true });
 export type ServiceRequest = typeof serviceRequests.$inferSelect;
 export type InsertServiceRequest = z.infer<typeof insertServiceRequestSchema>;
+
+// ============== ADDRESS VERIFICATION JOBS (Youverify field agent visits) ==============
+// status flow: submitted → agent_assigned → completed (verdict: verified | not_verified) | failed
+export const addressVerificationJobs = pgTable("address_verification_jobs", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  founderId: varchar("founder_id").notNull(),
+  youverifyCandidateId: varchar("youverify_candidate_id", { length: 100 }),
+  youverifyReferenceId: varchar("youverify_reference_id", { length: 100 }),
+  status: varchar("status", { length: 50 }).default("submitted"), // submitted | agent_assigned | completed | failed
+  verdict: varchar("verdict", { length: 30 }), // verified | not_verified
+  findingsJson: jsonb("findings_json").$type<{
+    taskStatus?: string;
+    gpsCoordinates?: { latitude: number; longitude: number };
+    buildingType?: string;
+    buildingColor?: string;
+    submissionDistanceInMeters?: number;
+    agentPhotoUrl?: string;
+    agentSignatureUrl?: string;
+    summary?: string;
+    rawPayload?: any;
+  }>(),
+  adminNotes: text("admin_notes"),
+  adminReviewedAt: timestamp("admin_reviewed_at"),
+  adminReviewedBy: varchar("admin_reviewed_by"),
+  submittedAt: timestamp("submitted_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_addr_verify_jobs_app").on(table.applicationId),
+  index("idx_addr_verify_jobs_founder").on(table.founderId),
+  index("idx_addr_verify_jobs_ref").on(table.youverifyReferenceId),
+  index("idx_addr_verify_jobs_status").on(table.status),
+]);
+
+export const insertAddressVerificationJobSchema = createInsertSchema(addressVerificationJobs).omit({ id: true, createdAt: true, updatedAt: true });
+export type AddressVerificationJob = typeof addressVerificationJobs.$inferSelect;
+export type InsertAddressVerificationJob = z.infer<typeof insertAddressVerificationJobSchema>;
 
 // ============== ADD DIRECTOR REQUESTS (explicit table for ADD_DIR data) ==============
 // status flow: draft → submitted → awaiting_director_verification → ready_for_filing → filed → completed

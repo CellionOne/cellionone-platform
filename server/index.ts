@@ -96,6 +96,30 @@ app.post(
   }
 );
 
+// ============== YOUVERIFY FIELD AGENT WEBHOOK ROUTE ==============
+// CRITICAL: Must be registered BEFORE express.json() middleware
+app.post(
+  '/api/webhooks/youverify',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    try {
+      const payload = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body);
+      const headersMap: Record<string, string | string[] | undefined> = {};
+      Object.keys(req.headers).forEach(k => { headersMap[k] = req.headers[k]; });
+      const { processYouverifyWebhook } = await import('./services/youverifyWebhookHandler');
+      const result = await processYouverifyWebhook(payload, headersMap);
+      if (!result.success) {
+        console.error('[Youverify Webhook] Failed to process:', result.error);
+        return res.status(400).json({ error: result.error });
+      }
+      res.status(200).json({ received: true });
+    } catch (error: any) {
+      console.error('[Youverify Webhook] Error:', error.message);
+      res.status(400).json({ error: 'Webhook processing error' });
+    }
+  }
+);
+
 // ============== EXTERNAL VERIFICATION WEBHOOK ROUTE ==============
 // CRITICAL: Must be registered BEFORE express.json() middleware
 // External identity verification services send webhooks when verification completes

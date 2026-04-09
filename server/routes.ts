@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne } from "drizzle-orm";
 import * as services from "./services";
@@ -3759,6 +3759,115 @@ export async function registerRoutes(
   });
 
   // ============== ADMIN ORDER MANAGEMENT ==============
+  // ============== ADMIN: FIELD VERIFICATIONS (Youverify) ==============
+  app.get("/api/admin/field-verifications", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const jobs = await db.select({
+        job: addressVerificationJobsTable,
+        companyName: companyApplicationsTable.companyName,
+        founderEmail: usersTable.email,
+      })
+        .from(addressVerificationJobsTable)
+        .leftJoin(companyApplicationsTable, eq(addressVerificationJobsTable.applicationId, companyApplicationsTable.id))
+        .leftJoin(usersTable, eq(addressVerificationJobsTable.founderId, usersTable.id))
+        .orderBy(desc(addressVerificationJobsTable.createdAt));
+
+      res.json(jobs.map(r => ({
+        ...r.job,
+        companyName: r.companyName || null,
+        founderEmail: r.founderEmail || null,
+      })));
+    } catch (error) {
+      console.error("Error fetching field verification jobs:", error);
+      res.status(500).json({ message: "Failed to fetch field verification jobs" });
+    }
+  });
+
+  app.get("/api/admin/field-verifications/:id", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const jobId = parseInt(req.params.id, 10);
+      if (isNaN(jobId)) return res.status(400).json({ message: "Invalid job ID" });
+
+      const [result] = await db.select({
+        job: addressVerificationJobsTable,
+        companyName: companyApplicationsTable.companyName,
+        operatingAddress: companyApplicationsTable.operatingAddress,
+        founderEmail: usersTable.email,
+        founderFirstName: usersTable.firstName,
+        founderLastName: usersTable.lastName,
+      })
+        .from(addressVerificationJobsTable)
+        .leftJoin(companyApplicationsTable, eq(addressVerificationJobsTable.applicationId, companyApplicationsTable.id))
+        .leftJoin(usersTable, eq(addressVerificationJobsTable.founderId, usersTable.id))
+        .where(eq(addressVerificationJobsTable.id, jobId));
+
+      if (!result) return res.status(404).json({ message: "Job not found" });
+
+      res.json({
+        ...result.job,
+        companyName: result.companyName || null,
+        operatingAddress: result.operatingAddress || null,
+        founderEmail: result.founderEmail || null,
+        founderName: `${result.founderFirstName || ''} ${result.founderLastName || ''}`.trim() || null,
+      });
+    } catch (error) {
+      console.error("Error fetching field verification job:", error);
+      res.status(500).json({ message: "Failed to fetch field verification job" });
+    }
+  });
+
+  app.patch("/api/admin/field-verifications/:id", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const jobId = parseInt(req.params.id, 10);
+      if (isNaN(jobId)) return res.status(400).json({ message: "Invalid job ID" });
+
+      const schema = z.object({
+        adminNotes: z.string().optional(),
+        verdict: z.enum(["verified", "not_verified"]).optional(),
+      });
+
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+
+      const [job] = await db.select().from(addressVerificationJobsTable).where(eq(addressVerificationJobsTable.id, jobId));
+      if (!job) return res.status(404).json({ message: "Job not found" });
+
+      const updateData: any = {
+        adminNotes: parsed.data.adminNotes ?? job.adminNotes,
+        adminReviewedAt: new Date(),
+        adminReviewedBy: req.user?.id,
+        updatedAt: new Date(),
+      };
+
+      if (parsed.data.verdict) {
+        updateData.verdict = parsed.data.verdict;
+        // Sync to application
+        const appStatus = parsed.data.verdict === "verified" ? "verified" : "not_verified";
+        await db.update(companyApplicationsTable)
+          .set({ addressVerificationStatus: appStatus, updatedAt: new Date() })
+          .where(eq(companyApplicationsTable.id, job.applicationId));
+      }
+
+      const [updated] = await db.update(addressVerificationJobsTable)
+        .set(updateData)
+        .where(eq(addressVerificationJobsTable.id, jobId))
+        .returning();
+
+      await storage.createAuditLog({
+        actorUserId: req.user?.id,
+        action: "field_verification_admin_reviewed",
+        entityType: "address_verification_job",
+        entityId: String(jobId),
+        details: { verdict: parsed.data.verdict, hasNotes: !!parsed.data.adminNotes },
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating field verification job:", error);
+      res.status(500).json({ message: "Failed to update field verification job" });
+    }
+  });
+
   app.get("/api/admin/orders", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const allOrders = await db.select().from(ordersTable).orderBy(ordersTable.createdAt);

@@ -43,6 +43,7 @@ import AdminLawyerApplications from "@/pages/admin/lawyer-applications";
 import AdminMailroom from "@/pages/admin/mailroom";
 import AdminOrders from "@/pages/admin/orders";
 import AdminKycOverview from "@/pages/admin/kyc-overview";
+import AdminFieldVerifications from "@/pages/admin/field-verifications";
 import AdminProposals from "@/pages/admin/proposals";
 import AdminRegisteredOffices from "@/pages/admin/registered-offices";
 import AdminSecurity from "@/pages/admin/security";
@@ -373,6 +374,9 @@ function Router() {
       </Route>
       <Route path="/admin/kyc">
         <ProtectedRoute component={AdminKycOverview} roles={["admin"]} />
+      </Route>
+      <Route path="/admin/field-verifications">
+        <ProtectedRoute component={AdminFieldVerifications} roles={["admin"]} />
       </Route>
       <Route path="/admin/proposals">
         <ProtectedRoute component={AdminProposals} roles={["admin"]} />

@@ -440,6 +440,25 @@ function OverviewTab({
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Cross-reference the uploaded Proof of Operating Address against this address.
                 </p>
+                {application.addressVerificationStatus && application.addressVerificationStatus !== "none" && (
+                  <div className="mt-1.5">
+                    {application.addressVerificationStatus === "verified" && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded-full">
+                        Field agent confirmed address
+                      </span>
+                    )}
+                    {application.addressVerificationStatus === "not_verified" && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded-full">
+                        Field agent could not confirm address
+                      </span>
+                    )}
+                    {(application.addressVerificationStatus === "submitted" || application.addressVerificationStatus === "agent_assigned") && (
+                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                        Field agent visit in progress
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

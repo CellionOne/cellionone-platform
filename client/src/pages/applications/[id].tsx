@@ -35,6 +35,8 @@ import {
   Hash,
   Shield,
   MapPin,
+  XCircle,
+  Navigation,
   type LucideIcon,
 } from "lucide-react";
 import type { CompanyApplication, ApplicationChecklistItem, Payment, ClarificationRequest } from "@shared/schema";
@@ -506,6 +508,30 @@ export default function ApplicationDetailsPage() {
                         <MapPin className="h-3 w-3" />
                         Match your Proof of Operating Address document to this address
                       </p>
+                      {application.addressVerificationStatus && application.addressVerificationStatus !== "none" && (
+                        <div className="mt-1.5">
+                          {application.addressVerificationStatus === "verified" && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded-full" data-testid="badge-address-verified">
+                              <CheckCircle2 className="h-3 w-3" /> Address verified by field agent
+                            </span>
+                          )}
+                          {application.addressVerificationStatus === "not_verified" && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded-full" data-testid="badge-address-not-verified">
+                              <XCircle className="h-3 w-3" /> Address verification unsuccessful — an admin will contact you
+                            </span>
+                          )}
+                          {application.addressVerificationStatus === "submitted" && (
+                            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="badge-address-submitted">
+                              <Clock className="h-3 w-3" /> Field agent visit pending
+                            </span>
+                          )}
+                          {application.addressVerificationStatus === "agent_assigned" && (
+                            <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400" data-testid="badge-address-agent-assigned">
+                              <Navigation className="h-3 w-3" /> Field agent assigned — visit in progress
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

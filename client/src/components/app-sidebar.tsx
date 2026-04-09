@@ -59,6 +59,7 @@ import {
   ArrowLeftRight,
   Info,
   LayoutGrid,
+  MapPin,
 } from "lucide-react";
 import {
   Tooltip,
@@ -169,6 +170,7 @@ const adminItems: NavItem[] = [
   { title: "Contracts", url: "/procurement/contracts", icon: FileSignature },
   { title: "Invoices", url: "/procurement/invoices", icon: Receipt },
   { title: "KYC Oversight", url: "/admin/kyc", icon: ShieldCheck },
+  { title: "Field Verifications", url: "/admin/field-verifications", icon: MapPin },
   { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
   { title: "Escrow Dashboard", url: "/admin/escrow-dashboard", icon: Vault },
   { title: "Banking Partners", url: "/admin/banking-partners", icon: Banknote },

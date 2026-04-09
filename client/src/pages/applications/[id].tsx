@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRoute, Link } from "wouter";
+import { useRoute, Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,12 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingSpinner, LoadingPage } from "@/components/loading-spinner";
 import { ReadinessPanel } from "@/components/readiness-panel";
 import { OfflineSyncStatus } from "@/components/offline-sync-status";
 import { useToast } from "@/hooks/use-toast";
-import { useCheckout } from "@/hooks/use-checkout";
 import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import {
   Building2,
@@ -29,6 +29,7 @@ import {
   ShieldCheck,
   Mail,
   UserCheck,
+  ArrowRight,
 } from "lucide-react";
 import type { CompanyApplication, ApplicationChecklistItem, Payment, ClarificationRequest } from "@shared/schema";
 
@@ -63,6 +64,14 @@ interface ApplicationDetails {
   clarifications: ClarificationRequest[];
 }
 
+interface VerificationInfo {
+  founderVerified: boolean;
+  people: { id: number; email: string | null; role: string; title: string | null; isVerified: boolean }[];
+  unverifiedCount: number;
+  verificationFeePerPerson: number;
+  totalVerificationFee: number;
+}
+
 const statusTimeline = [
   { status: "draft", label: "Draft", icon: FileText },
   { status: "pending_verification", label: "Awaiting Verification", icon: AlertCircle },
@@ -77,6 +86,7 @@ const statusTimeline = [
 export default function ApplicationDetailsPage() {
   const [, params] = useRoute("/applications/:id");
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const applicationId = params?.id;
 
   const { data, isLoading } = useQuery<ApplicationDetails>({
@@ -88,6 +98,11 @@ export default function ApplicationDetailsPage() {
     queryKey: ["/api/company-people/readiness"],
   });
   const teamPeople = teamReadiness?.people ?? [];
+
+  const { data: verificationInfo } = useQuery<VerificationInfo>({
+    queryKey: [`/api/checkout/verification-info?applicationId=${applicationId}`],
+    enabled: !!applicationId,
+  });
 
   const [isFileUploading, setIsFileUploading] = useState(false);
 
@@ -143,13 +158,17 @@ export default function ApplicationDetailsPage() {
     },
   });
 
-  const { checkoutIncorporation } = useCheckout();
-
   const handlePayment = () => {
     if (applicationId) {
-      checkoutIncorporation(parseInt(applicationId, 10));
+      setLocation(`/founder/checkout?applicationId=${applicationId}`);
     }
   };
+
+  const INCORPORATION_FEE_KOBO = 10000000;
+  const verifyCount = verificationInfo?.unverifiedCount ?? 0;
+  const verifyFeePerPerson = verificationInfo?.verificationFeePerPerson ?? 1000000;
+  const totalVerifyFee = verifyCount * verifyFeePerPerson;
+  const estimatedTotal = INCORPORATION_FEE_KOBO + totalVerifyFee;
 
   if (isLoading) return <LoadingPage />;
 
@@ -385,56 +404,86 @@ export default function ApplicationDetailsPage() {
             )}
 
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <CreditCard className="h-5 w-5" />
                   Payment
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 {hasMissingRequired && (
-                  <div className="flex items-start gap-2 mb-3 p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                  <div className="flex items-start gap-2 p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
                     <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                     <p className="text-xs text-amber-700 dark:text-amber-400">
                       Upload all required documents before proceeding to payment.
                     </p>
                   </div>
                 )}
-                {payment ? (
+
+                {payment?.status === "success" ? (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Status</span>
-                      <StatusBadge status={payment.status || "initialized"} />
+                      <span className="text-muted-foreground text-sm">Status</span>
+                      <StatusBadge status={payment.status} />
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Amount</span>
-                      <span className="font-semibold">
+                      <span className="text-muted-foreground text-sm">Amount paid</span>
+                      <span className="font-semibold text-sm">
                         ₦{((payment.amountTotalKobo || 0) / 100).toLocaleString()}
                       </span>
                     </div>
-                    {payment.status !== "success" && (
-                      <Button
-                        className="w-full"
-                        onClick={handlePayment}
-                        disabled={hasMissingRequired}
-                        data-testid="button-pay"
-                      >
-                        Pay Now
-                      </Button>
-                    )}
                   </div>
                 ) : (
-                  <div className="text-center py-4">
-                    <p className="text-sm text-muted-foreground mb-3">
-                      Ready to pay for your incorporation
-                    </p>
+                  <div className="space-y-3">
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center justify-between" data-testid="fee-line-incorporation">
+                        <span className="text-muted-foreground">Company Incorporation</span>
+                        <span className="font-medium">₦100,000</span>
+                      </div>
+                      {verifyCount > 0 && (
+                        <div className="flex items-start justify-between gap-2" data-testid="fee-line-verification">
+                          <div>
+                            <span className="text-muted-foreground">Identity Verification</span>
+                            <p className="text-xs text-muted-foreground">
+                              {verifyCount} {verifyCount === 1 ? "person" : "people"} × ₦{(verifyFeePerPerson / 100).toLocaleString()}
+                            </p>
+                          </div>
+                          <span className="font-medium shrink-0">
+                            ₦{(totalVerifyFee / 100).toLocaleString()}
+                          </span>
+                        </div>
+                      )}
+                      {verifyCount === 0 && verificationInfo && (
+                        <div className="flex items-center gap-1.5 text-xs text-primary" data-testid="fee-line-verified">
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          <span>All identities verified — no verification fee</span>
+                        </div>
+                      )}
+                      <Separator />
+                      <div className="flex items-center justify-between font-semibold" data-testid="fee-line-total">
+                        <span>Estimated Total</span>
+                        <span>₦{(estimatedTotal / 100).toLocaleString()}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Optional services (TIN, Trademark, etc.) can be added at checkout.
+                      </p>
+                    </div>
+
+                    {payment && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Previous payment</span>
+                        <StatusBadge status={payment.status || "initialized"} />
+                      </div>
+                    )}
+
                     <Button
                       className="w-full"
                       onClick={handlePayment}
                       disabled={hasMissingRequired}
-                      data-testid="button-initiate-payment"
+                      data-testid="button-pay"
                     >
-                      Pay Now
+                      Continue to Checkout
+                      <ArrowRight className="h-4 w-4 ml-2" />
                     </Button>
                   </div>
                 )}

@@ -16,6 +16,8 @@ import {
   Filter,
   UserPlus,
   CreditCard,
+  Send,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -27,6 +29,8 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import type { CompanyApplication, LawyerProfile } from "@shared/schema";
+
+interface BankPartnerBasic { id: number; name: string; }
 
 interface ApplicationWithLawyer extends CompanyApplication {
   lawyerName?: string;
@@ -49,6 +53,9 @@ export default function AdminApplications() {
   const [selectedLawyer, setSelectedLawyer] = useState<string>("");
   const [selectedPaymentState, setSelectedPaymentState] = useState<string>("");
   const [paymentReason, setPaymentReason] = useState<string>("");
+  const [bankDispatchOpen, setBankDispatchOpen] = useState(false);
+  const [bankDispatchAppId, setBankDispatchAppId] = useState<number | null>(null);
+  const [selectedBankId, setSelectedBankId] = useState<string>("");
 
   const { data: applications, isLoading } = useQuery<ApplicationWithLawyer[]>({
     queryKey: ["/api/admin/applications"],
@@ -56,6 +63,54 @@ export default function AdminApplications() {
 
   const { data: lawyers } = useQuery<(LawyerProfile & { email: string; name: string })[]>({
     queryKey: ["/api/admin/lawyers"],
+  });
+
+  const { data: bankPartners = [] } = useQuery<BankPartnerBasic[]>({
+    queryKey: ["/api/admin/banking-partners"],
+  });
+
+  const { data: appCompanyProfile } = useQuery<{ id: number; companyName: string; existingCompanyStatus?: string } | null>({
+    queryKey: ["/api/admin/applications", bankDispatchAppId, "company-profile"],
+    queryFn: async () => {
+      try {
+        const res = await fetch(`/api/admin/applications/${bankDispatchAppId}/company-profile`, { credentials: "include" });
+        if (!res.ok) return null;
+        return res.json();
+      } catch { return null; }
+    },
+    enabled: bankDispatchOpen && !!bankDispatchAppId,
+  });
+
+  const { data: bankPreview, isLoading: previewLoading } = useQuery<{
+    companyName: string; rcNumber?: string; companyType?: string; existingCompanyStatus?: string;
+    directorCount: number; verifiedDirectors: number; checklistTotal: number; checklistSubmitted: number; kybStatus: string;
+  } | null>({
+    queryKey: ["/api/admin/company-profiles", appCompanyProfile?.id, "bank-preview"],
+    queryFn: async () => {
+      try {
+        const res = await fetch(`/api/admin/company-profiles/${appCompanyProfile!.id}/bank-preview`, { credentials: "include" });
+        if (!res.ok) return null;
+        return res.json();
+      } catch { return null; }
+    },
+    enabled: bankDispatchOpen && !!appCompanyProfile?.id,
+  });
+
+  const dispatchMutation = useMutation({
+    mutationFn: async ({ companyProfileId, bankPartnerId }: { companyProfileId: number; bankPartnerId: number }) => {
+      const res = await apiRequest("POST", "/api/admin/bank-dispatches", { companyProfileId, bankPartnerId });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to dispatch dossier");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Dossier dispatched", description: "The bank has been emailed the company dossier." });
+      setBankDispatchOpen(false);
+      setSelectedBankId("");
+    },
+    onError: (e: Error) => toast({ title: "Dispatch failed", description: e.message, variant: "destructive" }),
   });
 
   const assignMutation = useMutation({
@@ -204,6 +259,21 @@ export default function AdminApplications() {
                           Assign
                         </Button>
                       )}
+                      {app.status === "completed" && bankPartners.length > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setBankDispatchAppId(app.id);
+                            setSelectedBankId("");
+                            setBankDispatchOpen(true);
+                          }}
+                          data-testid={`button-send-to-bank-app-${app.id}`}
+                        >
+                          <Send className="h-4 w-4 mr-1" />
+                          Send to Bank
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -319,6 +389,70 @@ export default function AdminApplications() {
               data-testid="button-confirm-payment"
             >
               {paymentTransitionMutation.isPending ? <LoadingSpinner size="sm" /> : "Execute"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bank Dispatch Dialog for completed applications */}
+      <Dialog open={bankDispatchOpen} onOpenChange={setBankDispatchOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send to Bank</DialogTitle>
+            <DialogDescription>
+              Review the dossier summary before emailing it to a bank partner.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {previewLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : appCompanyProfile === null ? (
+              <p className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/20 rounded p-2">
+                No company profile found for this application yet. The profile is created after incorporation is complete.
+              </p>
+            ) : bankPreview ? (
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-sm" data-testid="block-dossier-preview-app">
+                <p className="font-semibold text-base">{bankPreview.companyName}</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>RC Number</span><span className="text-foreground">{bankPreview.rcNumber || "—"}</span>
+                  <span>Type</span><span className="text-foreground">{bankPreview.companyType || "—"}</span>
+                  <span>KYB Status</span><span className={`font-medium ${bankPreview.kybStatus === "VERIFIED" ? "text-green-600" : "text-amber-600"}`}>{bankPreview.kybStatus}</span>
+                  <span>Directors</span><span className="text-foreground">{bankPreview.directorCount} ({bankPreview.verifiedDirectors} verified)</span>
+                  <span>Documents</span><span className="text-foreground">{bankPreview.checklistSubmitted}/{bankPreview.checklistTotal} submitted</span>
+                </div>
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label>Select bank partner</Label>
+              <Select value={selectedBankId} onValueChange={setSelectedBankId}>
+                <SelectTrigger data-testid="select-bank-partner-app">
+                  <SelectValue placeholder="Choose a bank…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bankPartners.map(bp => (
+                    <SelectItem key={bp.id} value={String(bp.id)}>{bp.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The dossier will be emailed to all registered email addresses for the selected bank.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBankDispatchOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => appCompanyProfile?.id && selectedBankId && dispatchMutation.mutate({
+                companyProfileId: appCompanyProfile.id,
+                bankPartnerId: parseInt(selectedBankId),
+              })}
+              disabled={dispatchMutation.isPending || !selectedBankId || !appCompanyProfile?.id}
+              data-testid="button-confirm-bank-dispatch-app"
+            >
+              {dispatchMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-1.5" />}
+              Dispatch Dossier
             </Button>
           </DialogFooter>
         </DialogContent>

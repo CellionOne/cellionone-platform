@@ -30,6 +30,7 @@ Key architectural decisions and features include:
 -   **Digital Signature Pad:** For signature specimens.
 -   **SEO & Structured Data:** Open Graph, Twitter Cards, Schema.org JSON-LD, `robots.txt`, `sitemap.xml`, and a `usePageMeta` hook for dynamic SEO.
 -   **Consent-Based Data Sharing:** Founders can create time-limited, revocable consent tokens to share verified data.
+-   **Bank Company Dossier & Portal:** Admin-driven system to dispatch structured company dossiers to registered bank partners via email (Resend), with a dedicated read-only bank staff portal at `/bank/*`. Features: multi-email management per bank partner (with invite/resend/revoke flows), dispatch log, document request submission by bank staff to admin, and admin document request management. Backend: `bank_portal_users`, `bank_company_dispatches`, `bank_document_requests` tables; `server/routes/bankPortalRoutes.ts`; session-based bank portal auth. Frontend: 6 bank portal pages (login, set-password, forgot-password, reset-password, company list, company detail) + "Send to Bank" panel in admin existing-company review + enhanced Banking Partners admin page with Tabs (Partners / Dispatch Log / Document Requests).
 
 ## External Dependencies
 -   **PostgreSQL:** Primary database, hosted via Neon.

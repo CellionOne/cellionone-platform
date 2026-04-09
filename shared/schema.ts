@@ -1894,6 +1894,7 @@ export const bankPartners = pgTable("bank_partners", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   contactEmail: varchar("contact_email", { length: 255 }),
+  emails: json("emails").$type<{ label: string; address: string }[]>().default([]),
   feeRateBps: integer("fee_rate_bps").notNull().default(0), // basis points, e.g. 50 = 0.50%
   isActive: boolean("is_active").notNull().default(false),
   notes: text("notes"),
@@ -1905,6 +1906,69 @@ export const bankPartners = pgTable("bank_partners", {
 export const insertBankPartnerSchema = createInsertSchema(bankPartners).omit({ id: true, createdAt: true });
 export type BankPartner = typeof bankPartners.$inferSelect;
 export type InsertBankPartner = z.infer<typeof insertBankPartnerSchema>;
+
+// ============== BANK PORTAL USERS ==============
+export const bankPortalUsers = pgTable("bank_portal_users", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  bankPartnerId: integer("bank_partner_id").notNull().references(() => bankPartners.id),
+  passwordHash: varchar("password_hash", { length: 500 }),
+  inviteToken: varchar("invite_token", { length: 255 }),
+  inviteTokenExpiry: timestamp("invite_token_expiry"),
+  resetToken: varchar("reset_token", { length: 255 }),
+  resetTokenExpiry: timestamp("reset_token_expiry"),
+  isActive: boolean("is_active").default(true),
+  lastLoginAt: timestamp("last_login_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_bank_portal_users_email").on(table.email),
+  index("idx_bank_portal_users_bank").on(table.bankPartnerId),
+  index("idx_bank_portal_users_invite_token").on(table.inviteToken),
+  index("idx_bank_portal_users_reset_token").on(table.resetToken),
+]);
+
+export const insertBankPortalUserSchema = createInsertSchema(bankPortalUsers).omit({ id: true, createdAt: true, updatedAt: true });
+export type BankPortalUser = typeof bankPortalUsers.$inferSelect;
+export type InsertBankPortalUser = z.infer<typeof insertBankPortalUserSchema>;
+
+// ============== BANK COMPANY DISPATCHES ==============
+export const bankCompanyDispatches = pgTable("bank_company_dispatches", {
+  id: serial("id").primaryKey(),
+  companyProfileId: integer("company_profile_id").notNull(),
+  bankPartnerId: integer("bank_partner_id").notNull().references(() => bankPartners.id),
+  sentByUserId: varchar("sent_by_user_id").notNull(),
+  sentAt: timestamp("sent_at").defaultNow(),
+}, (table) => [
+  index("idx_bank_dispatches_company").on(table.companyProfileId),
+  index("idx_bank_dispatches_bank").on(table.bankPartnerId),
+]);
+
+export const insertBankCompanyDispatchSchema = createInsertSchema(bankCompanyDispatches).omit({ id: true, sentAt: true });
+export type BankCompanyDispatch = typeof bankCompanyDispatches.$inferSelect;
+export type InsertBankCompanyDispatch = z.infer<typeof insertBankCompanyDispatchSchema>;
+
+// ============== BANK DOCUMENT REQUESTS ==============
+export const bankDocumentRequests = pgTable("bank_document_requests", {
+  id: serial("id").primaryKey(),
+  companyProfileId: integer("company_profile_id").notNull(),
+  bankPartnerId: integer("bank_partner_id").notNull().references(() => bankPartners.id),
+  requestedByEmail: varchar("requested_by_email", { length: 255 }).notNull(),
+  documentsRequested: text("documents_requested").notNull(),
+  reason: text("reason"),
+  status: varchar("status", { length: 50 }).default("open"), // open, actioned
+  createdAt: timestamp("created_at").defaultNow(),
+  actionedAt: timestamp("actioned_at"),
+  actionedByUserId: varchar("actioned_by_user_id"),
+}, (table) => [
+  index("idx_bank_doc_requests_company").on(table.companyProfileId),
+  index("idx_bank_doc_requests_bank").on(table.bankPartnerId),
+  index("idx_bank_doc_requests_status").on(table.status),
+]);
+
+export const insertBankDocumentRequestSchema = createInsertSchema(bankDocumentRequests).omit({ id: true, createdAt: true });
+export type BankDocumentRequest = typeof bankDocumentRequests.$inferSelect;
+export type InsertBankDocumentRequest = z.infer<typeof insertBankDocumentRequestSchema>;
 
 export const escrowTransactions = pgTable("escrow_transactions", {
   id: serial("id").primaryKey(),

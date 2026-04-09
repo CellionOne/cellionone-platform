@@ -51,6 +51,9 @@ import {
   procurementInvoices, type ProcurementInvoice, type InsertProcurementInvoice,
   procurementInvoiceItems, type ProcurementInvoiceItem, type InsertProcurementInvoiceItem,
   bankPartners, type BankPartner, type InsertBankPartner,
+  bankPortalUsers, type BankPortalUser, type InsertBankPortalUser,
+  bankCompanyDispatches, type BankCompanyDispatch, type InsertBankCompanyDispatch,
+  bankDocumentRequests, type BankDocumentRequest, type InsertBankDocumentRequest,
   kycStrReports, type KycStrReport, type InsertKycStrReport,
   cieSecurities, type CieSecurity, type InsertCieSecurity,
   ciePrices, type CiePrice, type InsertCiePrice,
@@ -387,6 +390,25 @@ export interface IStorage {
   updateBankPartner(id: number, data: Partial<InsertBankPartner>): Promise<BankPartner | undefined>;
   activateBankPartner(id: number): Promise<BankPartner | undefined>;
   deactivateBankPartner(id: number): Promise<BankPartner | undefined>;
+
+  // Bank Portal Users
+  createBankPortalUser(data: InsertBankPortalUser): Promise<BankPortalUser>;
+  getBankPortalUserByEmail(email: string): Promise<BankPortalUser | undefined>;
+  getBankPortalUserByInviteToken(token: string): Promise<BankPortalUser | undefined>;
+  getBankPortalUserByResetToken(token: string): Promise<BankPortalUser | undefined>;
+  getBankPortalUsersByBankId(bankPartnerId: number): Promise<BankPortalUser[]>;
+  updateBankPortalUser(id: number, data: Partial<InsertBankPortalUser>): Promise<BankPortalUser | undefined>;
+  deleteBankPortalUser(id: number): Promise<void>;
+
+  // Bank Company Dispatches
+  createBankCompanyDispatch(data: InsertBankCompanyDispatch): Promise<BankCompanyDispatch>;
+  listBankCompanyDispatches(filters?: { companyProfileId?: number; bankPartnerId?: number }): Promise<BankCompanyDispatch[]>;
+
+  // Bank Document Requests
+  createBankDocumentRequest(data: InsertBankDocumentRequest): Promise<BankDocumentRequest>;
+  listBankDocumentRequests(filters?: { status?: string; bankPartnerId?: number }): Promise<BankDocumentRequest[]>;
+  getBankDocumentRequest(id: number): Promise<BankDocumentRequest | undefined>;
+  updateBankDocumentRequest(id: number, data: Partial<InsertBankDocumentRequest>): Promise<BankDocumentRequest | undefined>;
 
   // STR Reports
   createStrReport(data: InsertKycStrReport): Promise<KycStrReport>;
@@ -1889,8 +1911,21 @@ export class DatabaseStorage implements IStorage {
     return partner;
   }
 
+  async runBankPartnerEmailMigration(): Promise<void> {
+    const rows = await db.select().from(bankPartners);
+    for (const partner of rows) {
+      const emails: { label: string; address: string }[] = Array.isArray(partner.emails) ? (partner.emails as { label: string; address: string }[]) : [];
+      if (emails.length === 0 && partner.contactEmail) {
+        await db.update(bankPartners)
+          .set({ emails: [{ label: "Primary Contact", address: partner.contactEmail }] })
+          .where(eq(bankPartners.id, partner.id));
+      }
+    }
+  }
+
   async listBankPartners(): Promise<BankPartner[]> {
-    return db.select().from(bankPartners).orderBy(desc(bankPartners.createdAt));
+    const rows = await db.select().from(bankPartners).orderBy(desc(bankPartners.createdAt));
+    return rows;
   }
 
   async getBankPartner(id: number): Promise<BankPartner | undefined> {
@@ -1928,6 +1963,83 @@ export class DatabaseStorage implements IStorage {
       .where(eq(bankPartners.id, id))
       .returning();
     return partner;
+  }
+
+  // Bank Portal Users
+  async createBankPortalUser(data: InsertBankPortalUser): Promise<BankPortalUser> {
+    const [user] = await db.insert(bankPortalUsers).values(data).returning();
+    return user;
+  }
+
+  async getBankPortalUserByEmail(email: string): Promise<BankPortalUser | undefined> {
+    const [user] = await db.select().from(bankPortalUsers).where(eq(bankPortalUsers.email, email.toLowerCase()));
+    return user;
+  }
+
+  async getBankPortalUserByInviteToken(token: string): Promise<BankPortalUser | undefined> {
+    const [user] = await db.select().from(bankPortalUsers).where(eq(bankPortalUsers.inviteToken, token));
+    return user;
+  }
+
+  async getBankPortalUserByResetToken(token: string): Promise<BankPortalUser | undefined> {
+    const [user] = await db.select().from(bankPortalUsers).where(eq(bankPortalUsers.resetToken, token));
+    return user;
+  }
+
+  async getBankPortalUsersByBankId(bankPartnerId: number): Promise<BankPortalUser[]> {
+    return db.select().from(bankPortalUsers).where(eq(bankPortalUsers.bankPartnerId, bankPartnerId));
+  }
+
+  async updateBankPortalUser(id: number, data: Partial<InsertBankPortalUser>): Promise<BankPortalUser | undefined> {
+    const [user] = await db.update(bankPortalUsers).set({ ...data, updatedAt: new Date() }).where(eq(bankPortalUsers.id, id)).returning();
+    return user;
+  }
+
+  async deleteBankPortalUser(id: number): Promise<void> {
+    await db.delete(bankPortalUsers).where(eq(bankPortalUsers.id, id));
+  }
+
+  // Bank Company Dispatches
+  async createBankCompanyDispatch(data: InsertBankCompanyDispatch): Promise<BankCompanyDispatch> {
+    const [dispatch] = await db.insert(bankCompanyDispatches).values(data).returning();
+    return dispatch;
+  }
+
+  async listBankCompanyDispatches(filters?: { companyProfileId?: number; bankPartnerId?: number }): Promise<BankCompanyDispatch[]> {
+    let query = db.select().from(bankCompanyDispatches);
+    const conditions = [];
+    if (filters?.companyProfileId) conditions.push(eq(bankCompanyDispatches.companyProfileId, filters.companyProfileId));
+    if (filters?.bankPartnerId) conditions.push(eq(bankCompanyDispatches.bankPartnerId, filters.bankPartnerId));
+    if (conditions.length > 0) {
+      return db.select().from(bankCompanyDispatches).where(and(...conditions)).orderBy(desc(bankCompanyDispatches.sentAt));
+    }
+    return db.select().from(bankCompanyDispatches).orderBy(desc(bankCompanyDispatches.sentAt));
+  }
+
+  // Bank Document Requests
+  async createBankDocumentRequest(data: InsertBankDocumentRequest): Promise<BankDocumentRequest> {
+    const [req] = await db.insert(bankDocumentRequests).values(data).returning();
+    return req;
+  }
+
+  async listBankDocumentRequests(filters?: { status?: string; bankPartnerId?: number }): Promise<BankDocumentRequest[]> {
+    const conditions = [];
+    if (filters?.status) conditions.push(eq(bankDocumentRequests.status, filters.status));
+    if (filters?.bankPartnerId) conditions.push(eq(bankDocumentRequests.bankPartnerId, filters.bankPartnerId));
+    if (conditions.length > 0) {
+      return db.select().from(bankDocumentRequests).where(and(...conditions)).orderBy(desc(bankDocumentRequests.createdAt));
+    }
+    return db.select().from(bankDocumentRequests).orderBy(desc(bankDocumentRequests.createdAt));
+  }
+
+  async getBankDocumentRequest(id: number): Promise<BankDocumentRequest | undefined> {
+    const [req] = await db.select().from(bankDocumentRequests).where(eq(bankDocumentRequests.id, id));
+    return req;
+  }
+
+  async updateBankDocumentRequest(id: number, data: Partial<InsertBankDocumentRequest>): Promise<BankDocumentRequest | undefined> {
+    const [req] = await db.update(bankDocumentRequests).set(data).where(eq(bankDocumentRequests.id, id)).returning();
+    return req;
   }
 
   // STR Reports

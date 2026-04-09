@@ -67,6 +67,12 @@ import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
 import PartnerWithUsPage from "@/pages/partner-with-us";
 import ContactPage from "@/pages/contact";
+import BankPortalLogin from "@/pages/bank/login";
+import BankSetPasswordPage from "@/pages/bank/set-password";
+import BankForgotPasswordPage from "@/pages/bank/forgot-password";
+import BankResetPasswordPage from "@/pages/bank/reset-password";
+import BankCompaniesPage from "@/pages/bank/companies";
+import BankCompanyDetailPage from "@/pages/bank/company-detail";
 import LoginPage from "@/pages/auth/login";
 import RegisterPage from "@/pages/auth/register";
 import ForgotPasswordPage from "@/pages/auth/forgot-password";
@@ -458,6 +464,15 @@ function Router() {
       <Route path="/partner-with-us" component={PartnerWithUsPage} />
       <Route path="/contact" component={ContactPage} />
       
+      {/* Bank Portal Routes */}
+      <Route path="/bank/login" component={BankPortalLogin} />
+      <Route path="/bank/set-password" component={BankSetPasswordPage} />
+      <Route path="/bank/forgot-password" component={BankForgotPasswordPage} />
+      <Route path="/bank/reset-password" component={BankResetPasswordPage} />
+      <Route path="/bank/companies/:id" component={BankCompanyDetailPage} />
+      <Route path="/bank/companies" component={BankCompaniesPage} />
+      <Route path="/bank" component={BankPortalLogin} />
+
       <Route path="/login" component={LoginPage} />
       <Route path="/register" component={RegisterPage} />
       <Route path="/invite/:token" component={InviteAcceptPage} />

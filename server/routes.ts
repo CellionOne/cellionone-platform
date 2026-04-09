@@ -25,6 +25,7 @@ import { registerCieAdminRoutes } from "./routes/cieAdminRoutes";
 import { registerCieApiRoutes } from "./routes/cieApiRoutes";
 import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
+import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
 
 // Validation schemas
 const operatingAddressSchema = z.object({
@@ -9865,6 +9866,9 @@ For questions, contact: service@cellionone.com
 
   // ============== CIE PORTAL SESSION ROUTES ==============
   registerCiePortalRoutes(app);
+
+  // ============== BANK PORTAL ROUTES ==============
+  registerBankPortalRoutes(app);
 
   return httpServer;
 }

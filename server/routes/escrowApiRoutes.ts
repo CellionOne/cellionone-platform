@@ -7,6 +7,7 @@ import { kycWebhookConfigs, escrowTransactions, userRoles } from "@shared/schema
 import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth";
 import { isAuthenticated } from "../replit_integrations/auth";
 import crypto from "crypto";
+import { createBankPortalUserAndSendInvite } from "./bankPortalRoutes";
 
 async function isAdmin(req: Request): Promise<boolean> {
   const userId = (req as any).user?.claims?.sub;
@@ -657,7 +658,10 @@ export function registerEscrowApiRoutes(app: Express): void {
         notes: z.string().optional(),
       }).parse(req.body);
 
-      const partner = await storage.createBankPartner({ ...body, isActive: false });
+      const initialEmails: { label: string; address: string }[] = body.contactEmail
+        ? [{ label: "Primary Contact", address: body.contactEmail }]
+        : [];
+      const partner = await storage.createBankPartner({ ...body, isActive: false, emails: initialEmails });
 
       await storage.createAuditLog({
         actorUserId: (req as any).user?.claims?.sub,
@@ -666,6 +670,17 @@ export function registerEscrowApiRoutes(app: Express): void {
         entityId: String(partner.id),
         details: { name: partner.name, feeRateBps: partner.feeRateBps },
       });
+
+      // If a contactEmail was provided, auto-create a portal user and send invite
+      if (body.contactEmail) {
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        try {
+          await createBankPortalUserAndSendInvite(body.contactEmail, partner.id, partner.name, baseUrl);
+        } catch (inviteErr) {
+          console.error("[BankPortal] Auto-invite on partner creation failed:", inviteErr);
+          // Non-fatal — partner was still created
+        }
+      }
 
       res.status(201).json(partner);
     } catch (e: any) {

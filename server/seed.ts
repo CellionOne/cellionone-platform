@@ -3,6 +3,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts, cieSecurities, cieModelVersions, cieMarketPulse, ciePartners, kycApiKeys } from "@shared/schema";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { storage } from "./storage";
 
 export async function seedDatabase() {
   try {
@@ -478,6 +479,13 @@ export async function seedDatabase() {
       }
     } catch (partnerErr: any) {
       console.warn("[Seed] Icon eTrade partner provisioning skipped:", partnerErr.message);
+    }
+
+    // Migrate legacy contactEmail to emails JSON column (idempotent — only affects rows where emails is empty)
+    try {
+      await storage.runBankPartnerEmailMigration();
+    } catch (migErr) {
+      console.warn("[Seed] Bank partner email migration skipped:", migErr);
     }
 
     console.log("Database seeding complete");

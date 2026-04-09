@@ -37,6 +37,7 @@ import {
   AlertCircle,
   ThumbsUp,
   ThumbsDown,
+  Send,
 } from "lucide-react";
 import type { CompanyProfile, ProfileChecklistItem } from "@shared/schema";
 
@@ -108,6 +109,8 @@ function DocStatusBadge({ status }: { status: string | null }) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
+interface BankPartner { id: number; name: string; }
+
 export default function AdminExistingCompaniesPage() {
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -117,8 +120,14 @@ export default function AdminExistingCompaniesPage() {
   const [rejectNotes, setRejectNotes] = useState("");
   const [showApproveDialog, setShowApproveDialog] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [showDispatchDialog, setShowDispatchDialog] = useState(false);
+  const [selectedBankPartnerId, setSelectedBankPartnerId] = useState<string>("");
   const [docReviewItemId, setDocReviewItemId] = useState<number | null>(null);
   const [docReviewNotes, setDocReviewNotes] = useState("");
+
+  const { data: bankPartners = [] } = useQuery<BankPartner[]>({
+    queryKey: ["/api/admin/banking-partners"],
+  });
 
   const queryKey = statusFilter === "all"
     ? ["/api/admin/existing-companies"]
@@ -189,6 +198,37 @@ export default function AdminExistingCompaniesPage() {
       setDocReviewNotes("");
     },
     onError: () => toast({ title: "Error", description: "Failed to update document status.", variant: "destructive" }),
+  });
+
+  const dispatchMutation = useMutation({
+    mutationFn: async ({ companyProfileId, bankPartnerId }: { companyProfileId: number; bankPartnerId: number }) => {
+      const res = await apiRequest("POST", "/api/admin/bank-dispatches", { companyProfileId, bankPartnerId });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to dispatch dossier");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Dossier dispatched", description: "The bank has been emailed the company dossier and given portal access." });
+      setShowDispatchDialog(false);
+      setSelectedBankPartnerId("");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/bank-dispatches"] });
+    },
+    onError: (e: Error) => toast({ title: "Dispatch failed", description: e.message, variant: "destructive" }),
+  });
+
+  const { data: bankPreview, isLoading: bankPreviewLoading } = useQuery<{
+    companyName: string; rcNumber?: string; companyType?: string; existingCompanyStatus?: string;
+    directorCount: number; verifiedDirectors: number; checklistTotal: number; checklistSubmitted: number; kybStatus: string;
+  }>({
+    queryKey: ["/api/admin/company-profiles", selected?.id, "bank-preview"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/company-profiles/${selected!.id}/bank-preview`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch preview");
+      return res.json();
+    },
+    enabled: showDispatchDialog && !!selected?.id,
   });
 
   const reviewableStatuses = ["pending_review", "documents_under_review"];
@@ -488,30 +528,109 @@ export default function AdminExistingCompaniesPage() {
             ) : null}
 
             {/* Actions */}
-            {reviewableStatuses.includes(selected.existingCompanyStatus || "") && (
-              <DialogFooter className="gap-2 pt-2">
+            <DialogFooter className="gap-2 pt-2 flex-wrap">
+              {bankPartners.length > 0 && (
                 <Button
-                  variant="destructive"
-                  onClick={() => setShowRejectDialog(true)}
-                  disabled={approveMutation.isPending || rejectMutation.isPending}
-                  data-testid="button-reject-company"
+                  variant="outline"
+                  onClick={() => { setSelectedBankPartnerId(""); setShowDispatchDialog(true); }}
+                  disabled={dispatchMutation.isPending}
+                  data-testid="button-send-to-bank"
                 >
-                  <XCircle className="h-4 w-4 mr-1.5" />
-                  Reject
+                  <Send className="h-4 w-4 mr-1.5" />
+                  Send to Bank
                 </Button>
-                <Button
-                  onClick={() => setShowApproveDialog(true)}
-                  disabled={approveMutation.isPending || rejectMutation.isPending}
-                  data-testid="button-approve-company"
-                >
-                  <CheckCircle2 className="h-4 w-4 mr-1.5" />
-                  Approve & Verify
-                </Button>
-              </DialogFooter>
-            )}
+              )}
+              {reviewableStatuses.includes(selected.existingCompanyStatus || "") && (
+                <>
+                  <Button
+                    variant="destructive"
+                    onClick={() => setShowRejectDialog(true)}
+                    disabled={approveMutation.isPending || rejectMutation.isPending}
+                    data-testid="button-reject-company"
+                  >
+                    <XCircle className="h-4 w-4 mr-1.5" />
+                    Reject
+                  </Button>
+                  <Button
+                    onClick={() => setShowApproveDialog(true)}
+                    disabled={approveMutation.isPending || rejectMutation.isPending}
+                    data-testid="button-approve-company"
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                    Approve & Verify
+                  </Button>
+                </>
+              )}
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
+
+      {/* ── Send to Bank Dialog ── */}
+      <Dialog open={showDispatchDialog} onOpenChange={setShowDispatchDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send to Bank</DialogTitle>
+            <DialogDescription>
+              Review the dossier summary before emailing it to a bank partner.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Dossier preview block */}
+            {bankPreviewLoading ? (
+              <div className="flex items-center justify-center py-3">
+                <Eye className="h-4 w-4 animate-pulse text-muted-foreground mr-2" />
+                <span className="text-sm text-muted-foreground">Loading dossier summary…</span>
+              </div>
+            ) : bankPreview ? (
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-sm" data-testid="block-dossier-preview">
+                <p className="font-semibold text-base">{bankPreview.companyName}</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>RC Number</span><span className="text-foreground">{bankPreview.rcNumber || "—"}</span>
+                  <span>Type</span><span className="text-foreground">{bankPreview.companyType || "—"}</span>
+                  <span>KYB Status</span><span className={`font-medium ${bankPreview.kybStatus === "VERIFIED" ? "text-green-600" : "text-amber-600"}`}>{bankPreview.kybStatus}</span>
+                  <span>Verification</span><span className={`font-medium ${bankPreview.existingCompanyStatus === "verified" ? "text-green-600" : "text-amber-600"}`}>{(bankPreview.existingCompanyStatus || "").toUpperCase().replace(/_/g, " ") || "—"}</span>
+                  <span>Directors</span><span className="text-foreground">{bankPreview.directorCount} ({bankPreview.verifiedDirectors} verified)</span>
+                  <span>Documents</span><span className="text-foreground">{bankPreview.checklistSubmitted}/{bankPreview.checklistTotal} submitted</span>
+                </div>
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label>Select bank partner</Label>
+              <Select value={selectedBankPartnerId} onValueChange={setSelectedBankPartnerId}>
+                <SelectTrigger data-testid="select-bank-partner">
+                  <SelectValue placeholder="Choose a bank…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bankPartners.map(bp => (
+                    <SelectItem key={bp.id} value={String(bp.id)}>{bp.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The dossier will be emailed to all registered email addresses for the selected bank partner.
+                Bank staff will also be able to view it in the bank portal.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDispatchDialog(false)}>Cancel</Button>
+            <Button
+              onClick={() => selected && selectedBankPartnerId && dispatchMutation.mutate({
+                companyProfileId: selected.id,
+                bankPartnerId: parseInt(selectedBankPartnerId),
+              })}
+              disabled={dispatchMutation.isPending || !selectedBankPartnerId}
+              data-testid="button-confirm-dispatch"
+            >
+              {dispatchMutation.isPending ? "Dispatching…" : <>
+                <Send className="h-4 w-4 mr-1.5" />
+                Dispatch Dossier
+              </>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Approve Dialog ── */}
       <Dialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>

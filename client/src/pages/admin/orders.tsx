@@ -8,8 +8,17 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
   Loader2, ShoppingCart, CheckCircle2, Clock, XCircle, ChevronDown, ChevronUp,
-  FileText, UserCheck, FileClock, FileCheck2, Info, Building2, User, ShieldCheck, MailCheck, AlertCircle,
+  FileText, UserCheck, FileClock, FileCheck2, Info, Building2, User, ShieldCheck, MailCheck, AlertCircle, Send,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -103,11 +112,17 @@ function getServiceLabel(serviceType: string): string {
   return labels[serviceType] || serviceType;
 }
 
+interface BankPartnerBasic { id: number; name: string; }
+
 export default function AdminOrdersPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
   const [expandedDirectorSrId, setExpandedDirectorSrId] = useState<number | null>(null);
+  const [bankDispatchOpen, setBankDispatchOpen] = useState(false);
+  const [bankDispatchSrId, setBankDispatchSrId] = useState<number | null>(null);
+  const [bankDispatchCompanyId, setBankDispatchCompanyId] = useState<number | null>(null);
+  const [selectedBankId, setSelectedBankId] = useState<string>("");
 
   const { data: orders, isLoading } = useQuery<Order[]>({
     queryKey: ["/api/admin/orders"],
@@ -115,6 +130,40 @@ export default function AdminOrdersPage() {
 
   const { data: allServiceRequests } = useQuery<ServiceRequest[]>({
     queryKey: ["/api/admin/service-requests"],
+  });
+
+  const { data: bankPartners = [] } = useQuery<BankPartnerBasic[]>({
+    queryKey: ["/api/admin/banking-partners"],
+  });
+
+  const dispatchMutation = useMutation({
+    mutationFn: async ({ companyProfileId, bankPartnerId }: { companyProfileId: number; bankPartnerId: number }) => {
+      const res = await apiRequest("POST", "/api/admin/bank-dispatches", { companyProfileId, bankPartnerId });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to dispatch dossier");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Dossier dispatched", description: "The bank has been emailed the company dossier." });
+      setBankDispatchOpen(false);
+      setSelectedBankId("");
+    },
+    onError: (e: Error) => toast({ title: "Dispatch failed", description: e.message, variant: "destructive" }),
+  });
+
+  const { data: bankPreview, isLoading: previewLoading } = useQuery<{
+    companyName: string; rcNumber?: string; companyType?: string; existingCompanyStatus?: string;
+    directorCount: number; verifiedDirectors: number; checklistTotal: number; checklistSubmitted: number; kybStatus: string;
+  }>({
+    queryKey: ["/api/admin/company-profiles", bankDispatchCompanyId, "bank-preview"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/company-profiles/${bankDispatchCompanyId}/bank-preview`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch preview");
+      return res.json();
+    },
+    enabled: bankDispatchOpen && !!bankDispatchCompanyId,
   });
 
   const updateFulfilmentMutation = useMutation({
@@ -345,6 +394,23 @@ export default function AdminOrdersPage() {
                               {sr.serviceType === "ADD_DIR" && expandedDirectorSrId === sr.id && (
                                 <DirectorDetailPanel srId={sr.id} />
                               )}
+                              {sr.serviceType === "BANK_ACCOUNT" && sr.companyProfileId && bankPartners.length > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-xs mt-1"
+                                  onClick={() => {
+                                    setBankDispatchCompanyId(sr.companyProfileId);
+                                    setBankDispatchSrId(sr.id);
+                                    setSelectedBankId("");
+                                    setBankDispatchOpen(true);
+                                  }}
+                                  data-testid={`button-send-to-bank-sr-${sr.id}`}
+                                >
+                                  <Send className="h-3 w-3 mr-1" />
+                                  Send to Bank
+                                </Button>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -357,6 +423,68 @@ export default function AdminOrdersPage() {
           })}
         </div>
       )}
+
+      {/* Bank Dispatch Dialog for BANK_ACCOUNT service requests */}
+      <Dialog open={bankDispatchOpen} onOpenChange={setBankDispatchOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send to Bank</DialogTitle>
+            <DialogDescription>
+              Review the dossier summary before emailing it to a bank partner.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Dossier preview */}
+            {previewLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : bankPreview ? (
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-sm" data-testid="block-dossier-preview-order">
+                <p className="font-semibold text-base">{bankPreview.companyName}</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>RC Number</span><span className="text-foreground">{bankPreview.rcNumber || "—"}</span>
+                  <span>Type</span><span className="text-foreground">{bankPreview.companyType || "—"}</span>
+                  <span>KYB Status</span><span className={`font-medium ${bankPreview.kybStatus === "VERIFIED" ? "text-green-600" : "text-amber-600"}`}>{bankPreview.kybStatus}</span>
+                  <span>Verification</span><span className={`font-medium ${bankPreview.existingCompanyStatus === "verified" ? "text-green-600" : "text-amber-600"}`}>{(bankPreview.existingCompanyStatus || "").toUpperCase().replace(/_/g, " ") || "—"}</span>
+                  <span>Directors</span><span className="text-foreground">{bankPreview.directorCount} ({bankPreview.verifiedDirectors} verified)</span>
+                  <span>Documents</span><span className="text-foreground">{bankPreview.checklistSubmitted}/{bankPreview.checklistTotal} submitted</span>
+                </div>
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label>Select bank partner</Label>
+              <Select value={selectedBankId} onValueChange={setSelectedBankId}>
+                <SelectTrigger data-testid="select-bank-partner-order">
+                  <SelectValue placeholder="Choose a bank…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bankPartners.map(bp => (
+                    <SelectItem key={bp.id} value={String(bp.id)}>{bp.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The dossier will be emailed to all registered email addresses for the selected bank.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBankDispatchOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => bankDispatchCompanyId && selectedBankId && dispatchMutation.mutate({
+                companyProfileId: bankDispatchCompanyId,
+                bankPartnerId: parseInt(selectedBankId),
+              })}
+              disabled={dispatchMutation.isPending || !selectedBankId}
+              data-testid="button-confirm-bank-dispatch-order"
+            >
+              {dispatchMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-1.5" />}
+              Dispatch Dossier
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

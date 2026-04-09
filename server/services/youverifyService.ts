@@ -152,3 +152,42 @@ export async function getJobResult(referenceId: string): Promise<any | null> {
 }
 
 export { isConfigured as isYouverifyConfigured };
+
+/**
+ * Validates a Youverify webhook request token against the configured secret.
+ * FAIL-CLOSED: returns { valid: false } when YOUVERIFY_API_TOKEN is not set.
+ * Centralised here so token access stays in a single module.
+ */
+export function validateYouverifyWebhookToken(
+  headers: Record<string, string | string[] | undefined>
+): { valid: boolean; reason?: string } {
+  const apiToken = getToken();
+
+  if (!apiToken) {
+    console.error(
+      "[Youverify] YOUVERIFY_API_TOKEN is not configured — rejecting all webhook requests (fail-closed)"
+    );
+    return { valid: false, reason: "Webhook authentication not configured" };
+  }
+
+  const rawHeader =
+    headers["token"] ??
+    headers["x-youverify-token"] ??
+    headers["authorization"];
+
+  const headerValue = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+
+  if (!headerValue) {
+    console.error("[Youverify] Missing authentication token header");
+    return { valid: false, reason: "Missing authentication header" };
+  }
+
+  const providedToken = headerValue.replace(/^Bearer\s+/i, "").trim();
+
+  if (providedToken !== apiToken) {
+    console.error("[Youverify] Token mismatch — rejecting webhook request");
+    return { valid: false, reason: "Invalid webhook token" };
+  }
+
+  return { valid: true };
+}

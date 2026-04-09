@@ -15,7 +15,7 @@ import { db } from "../db";
 import { eq } from "drizzle-orm";
 import { addressVerificationJobs, companyApplications, userRoles } from "../../shared/schema";
 import { storage } from "../storage";
-import { getJobResult } from "./youverifyService";
+import { getJobResult, validateYouverifyWebhookToken } from "./youverifyService";
 import { sendNewOrderNotificationEmail, ADMIN_NOTIFICATION_EMAIL } from "./emailService";
 
 interface YouverifyGpsCoordinates {
@@ -46,46 +46,6 @@ interface YouverifyWebhookPayload {
 /** Known terminal task statuses from Youverify. */
 const VERIFIED_STATUS = "VERIFIED";
 const NOT_VERIFIED_STATUS = "NOT_VERIFIED";
-
-/**
- * Validates the webhook request is genuinely from Youverify.
- * FAIL-CLOSED: if the configured secret is absent, all requests are rejected.
- */
-function validateWebhookToken(
-  headers: Record<string, string | string[] | undefined>
-): { valid: boolean; reason?: string } {
-  const apiToken = process.env.YOUVERIFY_API_TOKEN;
-
-  if (!apiToken) {
-    // FAIL-CLOSED: we cannot authenticate without the token; reject all requests.
-    console.error(
-      "[Youverify Webhook] YOUVERIFY_API_TOKEN is not configured — rejecting all webhook requests (fail-closed)"
-    );
-    return { valid: false, reason: "Webhook authentication not configured" };
-  }
-
-  const rawHeader =
-    headers["token"] ||
-    headers["x-youverify-token"] ||
-    headers["authorization"];
-
-  const headerValue = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-
-  if (!headerValue) {
-    console.error("[Youverify Webhook] Missing authentication token header");
-    return { valid: false, reason: "Missing authentication header" };
-  }
-
-  // Strip 'Bearer ' prefix if present
-  const providedToken = headerValue.replace(/^Bearer\s+/i, "").trim();
-
-  if (providedToken !== apiToken) {
-    console.error("[Youverify Webhook] Token mismatch — rejecting request");
-    return { valid: false, reason: "Invalid webhook token" };
-  }
-
-  return { valid: true };
-}
 
 /**
  * Resolves the job/app status for intermediate events (agent assigned/in progress).
@@ -136,8 +96,8 @@ export async function processYouverifyWebhook(
   payload: string,
   headers: Record<string, string | string[] | undefined>
 ): Promise<{ success: boolean; error?: string }> {
-  // 1. Validate webhook authenticity — FAIL-CLOSED
-  const auth = validateWebhookToken(headers);
+  // 1. Validate webhook authenticity — FAIL-CLOSED (via centralised service module)
+  const auth = validateYouverifyWebhookToken(headers);
   if (!auth.valid) {
     return { success: false, error: auth.reason ?? "Unauthorized" };
   }

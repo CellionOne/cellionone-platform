@@ -359,7 +359,29 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 console.warn(`[Paystack Webhook] Youverify submission failed for application ${order.applicationId} — job recorded as failed`);
               }
             } else {
-              console.warn(`[Paystack Webhook] Youverify candidate creation failed for application ${order.applicationId}`);
+              // Candidate creation failed — record a failed job row so admins have
+              // full operational visibility and can trigger a retry manually.
+              const [failedJob] = await db.insert(addressVerificationJobs).values({
+                applicationId: order.applicationId,
+                founderId: order.founderId,
+                youverifyCandidateId: null,
+                youverifyReferenceId: null,
+                status: 'failed',
+              }).returning();
+
+              await db.update(companyApplications)
+                .set({ addressVerificationStatus: 'failed', updatedAt: new Date() })
+                .where(eq(companyApplications.id, order.applicationId));
+
+              await storage.createAuditLog({
+                actorUserId: order.founderId,
+                action: 'youverify_candidate_failed',
+                entityType: 'address_verification_job',
+                entityId: String(failedJob.id),
+                details: { applicationId: order.applicationId, reason: 'createCandidate returned null' },
+              });
+
+              console.warn(`[Paystack Webhook] Youverify candidate creation failed for application ${order.applicationId} — failed job row created (id: ${failedJob.id})`);
             }
           }
         } catch (yvErr: unknown) {

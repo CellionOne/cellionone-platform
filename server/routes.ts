@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne } from "drizzle-orm";
 import * as services from "./services";
@@ -2249,6 +2249,138 @@ export async function registerRoutes(
     }
   });
 
+  // ── Director Biometric Invite — token validation + Job Type 4 initiation ──────
+  // GET: validates a director invite token and returns the invite details (no auth required — link-based)
+  app.get("/api/director-biometric/invite", async (req: any, res) => {
+    try {
+      const token = String(req.query.token || '');
+      if (!token) return res.status(400).json({ message: "Token is required" });
+      const [invite] = await db.select().from(directorBiometricInvites).where(eq(directorBiometricInvites.token, token));
+      if (!invite) return res.status(404).json({ message: "Invalid or expired invite link" });
+      if (invite.expiresAt < new Date()) {
+        await db.update(directorBiometricInvites).set({ status: 'expired', updatedAt: new Date() }).where(eq(directorBiometricInvites.id, invite.id));
+        return res.status(410).json({ message: "This verification link has expired. Please contact the company owner to request a new link." });
+      }
+      if (['completed', 'expired'].includes(invite.status || '')) {
+        return res.status(409).json({ message: "This verification link has already been used." });
+      }
+      res.json({
+        directorName: invite.directorName,
+        companyProfileId: invite.companyProfileId,
+        status: invite.status,
+        expiresAt: invite.expiresAt,
+      });
+    } catch (err: any) {
+      console.error('[BiometricInvite] Error validating invite:', err.message);
+      res.status(500).json({ message: "Failed to validate invite" });
+    }
+  });
+
+  // POST: director submits their biometric (selfie image) via the invite token
+  // Initiates Smile ID Job Type 4 (biometric) and marks invite as in_progress
+  app.post("/api/director-biometric/submit", async (req: any, res) => {
+    try {
+      const { token, selfieImageBase64, idImageBase64, idType } = req.body as {
+        token: string; selfieImageBase64?: string; idImageBase64?: string; idType?: string;
+      };
+      if (!token) return res.status(400).json({ message: "Token is required" });
+      const [invite] = await db.select().from(directorBiometricInvites).where(eq(directorBiometricInvites.token, token));
+      if (!invite) return res.status(404).json({ message: "Invalid invite" });
+      if (invite.expiresAt < new Date() || invite.status === 'expired') {
+        return res.status(410).json({ message: "This verification link has expired" });
+      }
+      if (invite.status === 'completed') return res.status(409).json({ message: "Already completed" });
+      // Mark in_progress immediately to prevent double-submission
+      await db.update(directorBiometricInvites)
+        .set({ status: 'in_progress', updatedAt: new Date() })
+        .where(eq(directorBiometricInvites.id, invite.id));
+      // Retrieve company profile to get founder ID for audit logging
+      const [profile] = await db.select().from(companyProfiles).where(eq(companyProfiles.id, invite.companyProfileId));
+      const founderId = profile?.founderId || 'system';
+      // Initiate Smile ID Job Type 4 biometric verification
+      try {
+        const smileIdentityCore = require('smile-identity-core');
+        const PARTNER_ID_BIO = process.env.SMILE_ID_PARTNER_ID || '';
+        const API_KEY_BIO = process.env.SMILE_ID_API_KEY || '';
+        const SID_SERVER_BIO = process.env.SMILE_ID_SERVER || '0';
+        if (PARTNER_ID_BIO && API_KEY_BIO) {
+          const WebApi = smileIdentityCore.WebApi;
+          const connection = new WebApi(PARTNER_ID_BIO, `${req.protocol}://${req.get('host')}/api/smile-id/biometric-callback`, API_KEY_BIO, SID_SERVER_BIO);
+          const smileJobId = `bio-${invite.companyProfileId}-${invite.directorIndex}-${Date.now()}`;
+          const partnerParams = { job_id: smileJobId, user_id: founderId, job_type: 4 };
+          const idInfo = { country: 'NG', entered: true };
+          const images = selfieImageBase64 ? [{ image_type_id: 2, image: selfieImageBase64 }] : [];
+          if (idImageBase64) images.push({ image_type_id: 1, image: idImageBase64 });
+          const options = { return_job_status: false, return_image_links: false };
+          await connection.submit_job(partnerParams, images, idInfo, options);
+          await db.update(directorBiometricInvites)
+            .set({ smileJobId, updatedAt: new Date() })
+            .where(eq(directorBiometricInvites.id, invite.id));
+          await storage.createAuditLog({
+            actorUserId: founderId,
+            action: 'director_biometric_submitted',
+            entityType: 'director_biometric_invite',
+            entityId: String(invite.id),
+            details: { directorName: invite.directorName, smileJobId },
+          });
+          return res.json({ success: true, message: "Biometric submitted for verification. You will receive confirmation when complete." });
+        }
+      } catch (smileErr: any) {
+        console.error(`[BiometricInvite] Smile ID Job Type 4 failed: ${smileErr.message}`);
+        await db.update(directorBiometricInvites).set({ status: 'failed', updatedAt: new Date() }).where(eq(directorBiometricInvites.id, invite.id));
+        return res.status(500).json({ message: "Biometric submission failed. Please try again." });
+      }
+      // Smile ID not configured (dev mode) — mark completed directly
+      await db.update(directorBiometricInvites)
+        .set({ status: 'completed', completedAt: new Date(), updatedAt: new Date() })
+        .where(eq(directorBiometricInvites.id, invite.id));
+      res.json({ success: true, message: "Biometric received (dev mode — Smile ID not configured)." });
+    } catch (err: any) {
+      console.error('[BiometricInvite] Error submitting biometric:', err.message);
+      res.status(500).json({ message: "Submission failed" });
+    }
+  });
+
+  // Smile ID Job Type 4 async callback — updates director biometric invite on completion
+  app.post("/api/smile-id/biometric-callback", async (req: any, res) => {
+    try {
+      const body: Record<string, unknown> = req.body || {};
+      const smileJobId = String(body.SmileJobID || body.smile_job_id || '');
+      const resultCode = String(body.ResultCode || body.result_code || '');
+      const resultText = String(body.ResultText || body.result_text || '');
+      if (!smileJobId) return res.status(400).json({ message: "Missing SmileJobID" });
+      const [invite] = await db.select().from(directorBiometricInvites).where(eq(directorBiometricInvites.smileJobId, smileJobId));
+      if (!invite) {
+        console.warn(`[BiometricCallback] No invite found for job ${smileJobId}`);
+        return res.status(200).json({ received: true });
+      }
+      const passed = resultCode === '0810' || resultText?.toLowerCase().includes('passed');
+      const { sec_key: _sk, ...rawSafe } = body;
+      await db.update(directorBiometricInvites).set({
+        status: passed ? 'completed' : 'failed',
+        completedAt: new Date(),
+        resultCode,
+        resultText,
+        rawResult: rawSafe,
+        updatedAt: new Date(),
+      }).where(eq(directorBiometricInvites.id, invite.id));
+      // Update biometricStatus in director JSON of company profile
+      const [profile] = await db.select().from(companyProfiles).where(eq(companyProfiles.id, invite.companyProfileId));
+      if (profile) {
+        const directors = (profile.directors as Record<string, unknown>[]) || [];
+        if (invite.directorIndex < directors.length) {
+          directors[invite.directorIndex] = { ...directors[invite.directorIndex], biometricStatus: passed ? 'completed' : 'failed' };
+          await db.update(companyProfiles).set({ directors, updatedAt: new Date() }).where(eq(companyProfiles.id, profile.id));
+        }
+      }
+      console.log(`[BiometricCallback] Job ${smileJobId}: ${passed ? 'PASS' : 'FAIL'} for director "${invite.directorName}"`);
+      res.status(200).json({ received: true });
+    } catch (err: any) {
+      console.error('[BiometricCallback] Error:', err.message);
+      res.status(500).json({ message: "Callback processing failed" });
+    }
+  });
+
   // ============== COMPANY PEOPLE (DIRECTORS/SHAREHOLDERS) ROUTES ==============
 
   app.get("/api/company-people", isAuthenticated, async (req: any, res) => {
@@ -2928,30 +3060,24 @@ export async function registerRoutes(
 
       let finalItems: { sku: string; quantity?: number }[] = items.map((i: { sku: string }) => ({ sku: i.sku }));
 
-      // Service gating: block post-inc SKU purchases for founders whose existing company is unverified.
-      // Only applies when no applicationId (existing company context, not a new incorporation).
+      // Service gating: block post-inc SKU purchases only when all the founder's existing-company profiles
+      // are unverified AND the order has no applicationId (incorporation context).
+      // Founders with a verified existing company OR a completed incorporation may always purchase.
       const POST_INC_SKUS = ['SCUML', 'TM', 'TIN', 'ADD_DIR', 'BANK_ACCOUNT', 'OFFICE_ONLY', 'OFFICE_PLUS_MAIL'];
       const hasPostIncSku = finalItems.some(i => POST_INC_SKUS.includes(i.sku));
       if (hasPostIncSku && !applicationId) {
-        const unverifiedExistingProfiles = await db
-          .select({ id: companyProfiles.id })
+        // Only gate when the founder has at least one existing-company profile AND none of them are verified
+        const existingProfiles = await db
+          .select({ id: companyProfiles.id, status: companyProfiles.existingCompanyStatus })
           .from(companyProfiles)
           .where(and(
             eq(companyProfiles.founderId, userId),
             eq(companyProfiles.isExistingCompany, true),
           ));
-        const hasUnverifiedExisting = unverifiedExistingProfiles.length > 0 &&
-          await (async () => {
-            for (const p of unverifiedExistingProfiles) {
-              const [full] = await db
-                .select({ status: companyProfiles.existingCompanyStatus })
-                .from(companyProfiles)
-                .where(eq(companyProfiles.id, p.id));
-              if (full?.status !== 'verified') return true;
-            }
-            return false;
-          })();
-        if (hasUnverifiedExisting) {
+        const hasVerifiedExisting = existingProfiles.some(p => p.status === 'verified');
+        const hasAnyExistingProfile = existingProfiles.length > 0;
+        // Block only if all existing-company profiles are unverified (and none are verified)
+        if (hasAnyExistingProfile && !hasVerifiedExisting) {
           return res.status(403).json({
             message: "Post-incorporation services are only available after your company verification is complete.",
             code: "EXISTING_COMPANY_NOT_VERIFIED",
@@ -7726,6 +7852,18 @@ Important guidelines:
       if (!profile.isExistingCompany) return res.status(400).json({ message: "Not an existing company profile" });
       if (!["draft", "pending_payment"].includes(profile.existingCompanyStatus || "")) {
         return res.status(400).json({ message: "Profile cannot be checked out in its current state" });
+      }
+
+      // Server-side: enforce all mandatory documents are uploaded before checkout
+      const checklistItems = await db.select().from(profileChecklistItems).where(eq(profileChecklistItems.companyProfileId, profileId));
+      const missingMandatory = checklistItems.filter(item => item.required && (!item.filePath || item.status === 'missing'));
+      if (missingMandatory.length > 0) {
+        const missingLabels = missingMandatory.map(i => i.label).join(', ');
+        return res.status(400).json({
+          message: `Missing required documents before checkout: ${missingLabels}`,
+          code: "MISSING_REQUIRED_DOCUMENTS",
+          missing: missingMandatory.map(i => ({ key: i.key, label: i.label })),
+        });
       }
 
       // Build SKU list: 1× EXISTING_CO_VERIFY + N× VERIFY (per director)

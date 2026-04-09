@@ -1,6 +1,6 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles } from '@shared/schema';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles, directorBiometricInvites } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { invalidateCieOrgTierCache } from '../routes/cieApiRoutes';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
@@ -561,17 +561,35 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               await db.update(companyProfiles)
                 .set({ directors: updatedDirectors, updatedAt: new Date() })
                 .where(eq(companyProfiles.id, profile.id));
-              // Notify directors with email to complete biometric selfie
+              // Issue secure per-director biometric invite tokens and notify via email
               // Smile ID Job Type 4 (biometric) requires a selfie capture — web flow cannot collect this.
-              // Directors are invited asynchronously via email to complete the biometric step.
+              // Each director gets a cryptographically random, 48-hour, single-use token.
               const { sendEmail } = await import('./emailService');
-              for (const director of updatedDirectors) {
-                if (director.email) {
-                  sendEmail({
-                    to: director.email,
-                    subject: `Action required: Complete identity verification — ${profile.companyName}`,
-                    html: `<p>Hi ${director.name},</p><p>You have been listed as a director/officer of <strong>${profile.companyName}</strong> on Cellion One.</p><p>To complete your identity verification, you are required to submit a selfie photo for biometric verification. Please <a href="${process.env.APP_URL || 'https://cellionone.com'}/verify-biometric?token=director&company=${profile.id}">click here to start your biometric verification</a>.</p><p>This step is required before the company can be fully verified on Cellion One.</p><p>The Cellion One Compliance Team</p>`,
-                  }).catch((e: Error) => console.error(`[Webhook] Biometric invite email failed for director ${director.name}: ${e.message}`));
+              const crypto = await import('crypto');
+              for (const [dirIdx, director] of updatedDirectors.entries()) {
+                try {
+                  const inviteToken = crypto.randomBytes(48).toString('hex');
+                  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+                  await db.insert(directorBiometricInvites).values({
+                    token: inviteToken,
+                    companyProfileId: profile.id,
+                    directorIndex: dirIdx,
+                    directorName: director.name,
+                    directorEmail: director.email || null,
+                    status: 'pending',
+                    expiresAt,
+                  });
+                  if (director.email) {
+                    const appUrl = process.env.APP_URL || 'https://cellionone.com';
+                    const biometricUrl = `${appUrl}/director-biometric?token=${inviteToken}`;
+                    sendEmail({
+                      to: director.email,
+                      subject: `Action required: Complete identity verification — ${profile.companyName}`,
+                      html: `<p>Hi ${director.name},</p><p>You have been listed as a director/officer of <strong>${profile.companyName}</strong> on Cellion One.</p><p>To complete your identity verification, please submit a biometric selfie using the secure link below. This link is valid for 48 hours and can only be used once.</p><p><a href="${biometricUrl}" style="font-weight:bold">Complete Biometric Verification</a></p><p>This step is required before the company can be fully verified on Cellion One.</p><p>The Cellion One Compliance Team</p>`,
+                    }).catch((e: Error) => console.error(`[Webhook] Biometric invite email failed for director ${director.name}: ${e.message}`));
+                  }
+                } catch (e: any) {
+                  console.error(`[Webhook] Failed to create biometric invite for director ${director.name}: ${e.message}`);
                 }
               }
             }

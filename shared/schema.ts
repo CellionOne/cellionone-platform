@@ -788,6 +788,34 @@ export const insertProfileChecklistItemSchema = createInsertSchema(profileCheckl
 export type ProfileChecklistItem = typeof profileChecklistItems.$inferSelect;
 export type InsertProfileChecklistItem = z.infer<typeof insertProfileChecklistItemSchema>;
 
+// ============== DIRECTOR BIOMETRIC INVITES ==============
+// Per-director secure invite tokens for Smile ID Job Type 4 biometric (selfie) completion.
+// Tokens are cryptographically random, time-limited (48h), and single-use.
+export const directorBiometricInvites = pgTable("director_biometric_invites", {
+  id: serial("id").primaryKey(),
+  token: varchar("token", { length: 128 }).notNull().unique(),
+  companyProfileId: integer("company_profile_id").notNull(),
+  directorIndex: integer("director_index").notNull(),
+  directorName: varchar("director_name", { length: 255 }).notNull(),
+  directorEmail: varchar("director_email", { length: 255 }),
+  smileJobId: varchar("smile_job_id", { length: 255 }),
+  status: varchar("status", { length: 50 }).default("pending"), // pending | in_progress | completed | failed | expired
+  expiresAt: timestamp("expires_at").notNull(),
+  completedAt: timestamp("completed_at"),
+  resultCode: varchar("result_code", { length: 20 }),
+  resultText: text("result_text"),
+  rawResult: json("raw_result"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_dir_biometric_token").on(table.token),
+  index("idx_dir_biometric_profile").on(table.companyProfileId),
+]);
+
+export const insertDirectorBiometricInviteSchema = createInsertSchema(directorBiometricInvites).omit({ id: true, createdAt: true, updatedAt: true });
+export type DirectorBiometricInvite = typeof directorBiometricInvites.$inferSelect;
+export type InsertDirectorBiometricInvite = z.infer<typeof insertDirectorBiometricInviteSchema>;
+
 // ============== POST-INCORPORATION CHECKLIST ==============
 export const postIncorporationTasks = pgTable("post_incorporation_tasks", {
   id: serial("id").primaryKey(),

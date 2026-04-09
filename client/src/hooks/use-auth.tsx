@@ -8,6 +8,7 @@ export interface AuthUser {
   lastName?: string | null;
   profileImageUrl?: string | null;
   roles?: string[];
+  primaryIntent?: string | null;
 }
 
 interface AuthContextValue {

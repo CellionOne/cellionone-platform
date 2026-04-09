@@ -57,7 +57,14 @@ import {
   ChevronDown,
   ChevronRight,
   ArrowLeftRight,
+  Info,
+  LayoutGrid,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { CelionLogo } from "@/components/celion-logo";
 import { ModuleSwitcher } from "@/components/module-switcher";
 import type { Intent } from "@/components/module-switcher";
@@ -203,6 +210,7 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
     { title: "My Orders", url: "/founder/orders", icon: Receipt },
     { title: "Services & Checkout", url: "/founder/checkout", icon: ShoppingCart },
     { title: "Settings", url: "/settings", icon: Settings },
+    { title: "Service Selection", url: "/welcome", icon: LayoutGrid },
   ];
 
   const initialOpenGroups = founderGroups.reduce<Record<string, boolean>>((acc, g) => {
@@ -233,6 +241,13 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
         const isActive = primaryIntent ? group.activeIntents.includes(primaryIntent) : false;
         const isOpen = openGroups[group.label] ?? false;
 
+        const founderIntents: Intent[] = ["founder_new_co", "founder_existing_co"];
+        const showRequirementHint =
+          !isActive &&
+          primaryIntent &&
+          founderIntents.includes(primaryIntent) &&
+          (group.label === "KYC & Verification" || group.label === "Procurement");
+
         return (
           <Collapsible key={group.label} open={isOpen} onOpenChange={() => toggleGroup(group.label)}>
             <SidebarGroup>
@@ -242,11 +257,29 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
                   data-testid={`group-${group.label.toLowerCase().replace(/\s+/g, "-")}`}
                 >
                   <span className={isActive ? "text-foreground font-medium" : ""}>{group.label}</span>
-                  {isOpen ? (
-                    <ChevronDown className="h-3.5 w-3.5 ml-auto shrink-0" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5 ml-auto shrink-0" />
-                  )}
+                  <div className="flex items-center gap-1 ml-auto">
+                    {showRequirementHint && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-muted-foreground hover:text-foreground"
+                            data-testid={`hint-${group.label.toLowerCase().replace(/\s+/g, "-")}`}
+                          >
+                            <Info className="h-3 w-3" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-[200px] text-xs">
+                          A verified company profile may be needed for full access to {group.label}.
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                    {isOpen ? (
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                    )}
+                  </div>
                 </SidebarGroupLabel>
               </CollapsibleTrigger>
               <CollapsibleContent>

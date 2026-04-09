@@ -224,14 +224,7 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
   );
 
   useEffect(() => {
-    setOpenGroups((prev) => {
-      const next = { ...prev };
-      founderGroups.forEach((g) => {
-        const shouldBeOpen = primaryIntent ? g.activeIntents.includes(primaryIntent) : false;
-        if (shouldBeOpen) next[g.label] = true;
-      });
-      return next;
-    });
+    setOpenGroups(computeOpenGroups(primaryIntent));
   }, [primaryIntent]);
 
   const toggleGroup = (label: string) => {
@@ -270,7 +263,7 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
                   className="cursor-pointer flex items-center justify-between hover:text-foreground transition-colors select-none"
                   data-testid={`group-${group.label.toLowerCase().replace(/\s+/g, "-")}`}
                 >
-                  <span className={isActive ? "text-foreground font-medium" : ""}>{group.label}</span>
+                  <span className={isActive ? "text-foreground font-medium" : "text-muted-foreground/70"}>{group.label}</span>
                   <div className="flex items-center gap-1 ml-auto">
                     {showRequirementHint && (
                       <Tooltip>

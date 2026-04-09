@@ -2342,9 +2342,42 @@ export async function registerRoutes(
   });
 
   // Smile ID Job Type 4 async callback — updates director biometric invite on completion
+  // Security: same Smile ID HMAC signature validation as KYB callback (strict in production)
   app.post("/api/smile-id/biometric-callback", async (req: any, res) => {
     try {
       const body: Record<string, unknown> = req.body || {};
+
+      // Smile ID signature validation — reject unsigned or invalid callbacks in production
+      const secKey = String(body.sec_key || '');
+      const timestamp = String(body.timestamp || '');
+      const isProd = process.env.NODE_ENV === 'production';
+      if (!secKey || !timestamp) {
+        if (isProd) {
+          console.warn('[BiometricCallback] Missing sec_key or timestamp — rejecting in production');
+          return res.status(401).json({ message: "Missing callback signature" });
+        }
+        console.warn('[BiometricCallback] Missing sec_key or timestamp in dev mode — proceeding without signature check');
+      } else {
+        try {
+          const smileIdentityCore = require('smile-identity-core');
+          const API_KEY_BIO_CB = process.env.SMILE_ID_API_KEY || '';
+          const PARTNER_ID_BIO_CB = process.env.SMILE_ID_PARTNER_ID || '';
+          if (!API_KEY_BIO_CB || !PARTNER_ID_BIO_CB) {
+            if (isProd) return res.status(503).json({ message: "KYB service misconfigured" });
+            console.warn('[BiometricCallback] Smile ID credentials missing — skipping signature check in dev');
+          } else {
+            const sig = new smileIdentityCore.Signature(PARTNER_ID_BIO_CB, API_KEY_BIO_CB);
+            if (!sig.confirm_signature(timestamp, secKey)) {
+              console.warn('[BiometricCallback] Signature INVALID — rejecting callback');
+              return res.status(401).json({ message: "Invalid callback signature" });
+            }
+          }
+        } catch (sigErr: any) {
+          if (isProd) return res.status(500).json({ message: "Signature verification failed" });
+          console.warn(`[BiometricCallback] Signature check skipped (SDK error in dev): ${sigErr.message}`);
+        }
+      }
+
       const smileJobId = String(body.SmileJobID || body.smile_job_id || '');
       const resultCode = String(body.ResultCode || body.result_code || '');
       const resultText = String(body.ResultText || body.result_text || '');
@@ -7645,8 +7678,10 @@ Important guidelines:
       }).parse(req.body);
 
       // Run KYB server-side — authoritative; never trust client-supplied KYB result
-      // If Smile ID service is unavailable (not configured or SDK error), proceed without blocking.
-      // If Smile ID service IS available but returns found=false (genuine not-found), reject profile creation.
+      // KYB (CAC registry lookup) is a hard gate for existing-company onboarding.
+      // In production: service errors and misconfigurations reject profile creation.
+      // In development: service errors (NOT_CONFIGURED, SDK crash) are tolerated to unblock local testing.
+      const isProductionMode = process.env.NODE_ENV === 'production';
       const smileIdService = await import('./services/smileIdService');
       const kybJobId = `kyb-${userId}-${Date.now()}`;
       let smileKybJobId: string | undefined;
@@ -7654,10 +7689,19 @@ Important guidelines:
       try {
         const kybResult = await smileIdService.verifyBusiness(data.rcNumber, userId, kybJobId);
         if (kybResult.error) {
-          // Service error (NOT_CONFIGURED, SDK crash, etc.) — store nothing, proceed without blocking
-          console.log(`[ExistingCo] KYB service error: ${kybResult.error} — proceeding without KYB result`);
+          // Service error (NOT_CONFIGURED, SDK crash, etc.)
+          if (isProductionMode) {
+            console.error(`[ExistingCo] KYB service error in production: ${kybResult.error}`);
+            return res.status(503).json({
+              message: "CAC registry lookup service is temporarily unavailable. Please try again later.",
+              code: "KYB_SERVICE_ERROR",
+              error: kybResult.error,
+            });
+          }
+          // Development-only: log and allow without KYB data
+          console.warn(`[ExistingCo] KYB service error (dev only — proceeding): ${kybResult.error}`);
         } else if (!kybResult.found) {
-          // Service is working correctly, company genuinely not found in CAC registry — block profile creation
+          // Service is working correctly, company genuinely not found in CAC registry — block in all environments
           return res.status(400).json({
             message: "Company not found in the CAC registry",
             code: "KYB_NOT_FOUND",
@@ -7669,8 +7713,15 @@ Important guidelines:
           smileKybResult = safeKyb as Record<string, unknown>;
         }
       } catch (kybErr: any) {
-        // Unexpected throw — log and proceed
-        console.error(`[ExistingCo] Unexpected KYB error: ${kybErr.message}`);
+        // Unexpected throw
+        if (isProductionMode) {
+          console.error(`[ExistingCo] Unexpected KYB error in production: ${kybErr.message}`);
+          return res.status(503).json({
+            message: "CAC registry lookup failed unexpectedly. Please try again later.",
+            code: "KYB_UNEXPECTED_ERROR",
+          });
+        }
+        console.error(`[ExistingCo] Unexpected KYB error (dev only — proceeding): ${kybErr.message}`);
       }
 
       // Run TIN verification server-side if TIN provided

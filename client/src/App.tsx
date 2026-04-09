@@ -78,6 +78,7 @@ import CompanyPeoplePage from "@/pages/founder/company-people";
 import FounderDataSharing from "@/pages/founder/data-sharing";
 import VerifyPage from "@/pages/verify";
 import InviteAcceptPage from "@/pages/invite-accept";
+import DirectorBiometricPage from "@/pages/director-biometric";
 import NotificationsPage from "@/pages/notifications";
 import PaymentCheckoutPage from "@/pages/payment/checkout";
 import PaymentSuccessPage from "@/pages/payment/success";
@@ -460,6 +461,7 @@ function Router() {
       <Route path="/login" component={LoginPage} />
       <Route path="/register" component={RegisterPage} />
       <Route path="/invite/:token" component={InviteAcceptPage} />
+      <Route path="/director-biometric" component={DirectorBiometricPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />

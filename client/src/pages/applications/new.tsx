@@ -72,6 +72,7 @@ const countries = [
   "Cameroon", "Côte d'Ivoire", "Angola", "Mozambique", "Zambia", "Zimbabwe", "Botswana", "Namibia",
   "United Kingdom", "United States", "Canada", "Australia", "Germany", "France", "Netherlands",
   "United Arab Emirates", "Saudi Arabia", "India", "China", "Singapore", "Malaysia",
+  "Other country…",
 ];
 
 const shareClassInfo: Record<string, { label: string; description: string }> = {
@@ -124,6 +125,7 @@ export default function NewApplicationPage() {
     useRegisteredOffice: false,
     registeredOfficeTier: "" as "" | "office_only" | "office_plus_mail",
   });
+  const [useCustomCountry, setUseCustomCountry] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
   const [isLoadingAi, setIsLoadingAi] = useState(false);
 
@@ -152,6 +154,11 @@ export default function NewApplicationPage() {
         }
       }
       
+      const mergedAddress = { country: "Nigeria", ...restoredAddress };
+      const restoredCountry = mergedAddress.country;
+      if (restoredCountry && restoredCountry !== "Nigeria" && !countries.includes(restoredCountry)) {
+        setUseCustomCountry(true);
+      }
       setFormData(prev => ({
         ...prev,
         applicationType: savedDraft.data.applicationType || prev.applicationType,
@@ -160,7 +167,7 @@ export default function NewApplicationPage() {
         companyName2: savedDraft.data.companyName2 || prev.companyName2,
         companyName3: savedDraft.data.companyName3 || prev.companyName3,
         businessDescription: savedDraft.data.businessDescription || prev.businessDescription,
-        registeredAddress: { country: "Nigeria", ...restoredAddress },
+        registeredAddress: mergedAddress,
       }));
       setCurrentStep(savedDraft.step);
       toast({
@@ -856,10 +863,17 @@ export default function NewApplicationPage() {
                     <div className="space-y-2">
                       <Label htmlFor="country">Country *</Label>
                       <Select
-                        value={formData.registeredAddress.country || "Nigeria"}
+                        value={useCustomCountry ? "Other country…" : (formData.registeredAddress.country || "Nigeria")}
                         onValueChange={(value) => {
-                          updateAddress("country", value);
-                          updateAddress("state", "");
+                          if (value === "Other country…") {
+                            setUseCustomCountry(true);
+                            updateAddress("country", "");
+                            updateAddress("state", "");
+                          } else {
+                            setUseCustomCountry(false);
+                            updateAddress("country", value);
+                            updateAddress("state", "");
+                          }
                         }}
                       >
                         <SelectTrigger id="country" data-testid="select-address-country">
@@ -871,6 +885,15 @@ export default function NewApplicationPage() {
                           ))}
                         </SelectContent>
                       </Select>
+                      {useCustomCountry && (
+                        <Input
+                          placeholder="Type your country name"
+                          value={formData.registeredAddress.country}
+                          onChange={(e) => updateAddress("country", e.target.value)}
+                          data-testid="input-address-country-custom"
+                          autoFocus
+                        />
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="line1">Street Address *</Label>

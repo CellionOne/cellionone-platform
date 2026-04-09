@@ -135,6 +135,17 @@ export async function processYouverifyWebhook(
     return { success: false, error: "Job not found" };
   }
 
+  // 6b. Idempotency guard — skip re-processing if already in a terminal state.
+  //     Replayed address.completed events are acknowledged (200 OK) without re-running
+  //     side-effects (notifications, audit logs, status updates).
+  const TERMINAL_STATUSES = ["completed", "failed"];
+  if (TERMINAL_STATUSES.includes(job.status)) {
+    console.log(
+      `[Youverify Webhook] Job #${job.id} already in terminal status "${job.status}" — ignoring replayed event`
+    );
+    return { success: true };
+  }
+
   // 7. Pull authoritative result from Youverify API (source of truth)
   const jobResult: YouverifyJobResult | null = await getJobResult(referenceId);
   const taskStatus: string | undefined =

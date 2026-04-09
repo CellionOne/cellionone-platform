@@ -23,7 +23,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { updateProfileSchema, changePasswordSchema } from "@shared/schema";
 import type { UpdateProfileInput, ChangePasswordInput } from "@shared/schema";
-import { User, Lock, Bell, Loader2, Check, ShieldCheck, Phone, Copy, Eye, EyeOff } from "lucide-react";
+import { User, Lock, Bell, Loader2, Check, ShieldCheck, Phone, Copy, Eye, EyeOff, Layers } from "lucide-react";
+import { ModuleSwitcher } from "@/components/module-switcher";
 import {
   InputOTP,
   InputOTPGroup,
@@ -74,6 +75,12 @@ export default function SettingsPage() {
           <p className="text-muted-foreground">Manage your account, security, and notification preferences</p>
         </div>
 
+        {roles.includes("founder") && (
+          <>
+            <YourServicesSection />
+            <Separator />
+          </>
+        )}
         <ProfileSection />
         <Separator />
         <PasswordSection />
@@ -83,6 +90,24 @@ export default function SettingsPage() {
         <NotificationSection roles={roles} />
       </div>
     </DashboardLayout>
+  );
+}
+
+function YourServicesSection() {
+  return (
+    <Card data-testid="card-your-services">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Layers className="h-5 w-5" /> Your Services
+        </CardTitle>
+        <CardDescription>
+          Switch your active service at any time. Your data and applications are preserved when you switch.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ModuleSwitcher />
+      </CardContent>
+    </Card>
   );
 }
 

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -12,6 +13,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,8 +54,13 @@ import {
   Vault,
   Banknote,
   BarChart3,
+  ChevronDown,
+  ChevronRight,
+  ArrowLeftRight,
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
+import { ModuleSwitcher } from "@/components/module-switcher";
+import type { Intent } from "@/components/module-switcher";
 
 interface NavItem {
   title: string;
@@ -57,30 +68,54 @@ interface NavItem {
   icon: React.ElementType;
 }
 
-const founderItems: NavItem[] = [
-  { title: "Dashboard", url: "/founder/dashboard", icon: LayoutDashboard },
-  { title: "Personal Profile", url: "/profile", icon: UserCircle },
-  { title: "Identity Verification", url: "/founder/identity", icon: User },
-  { title: "Directors & Shareholders", url: "/founder/company-people", icon: Users },
-  { title: "My Applications", url: "/founder/applications", icon: FileText },
-  { title: "My Orders", url: "/founder/orders", icon: Receipt },
-  { title: "Company Profile", url: "/founder/company-profile", icon: Briefcase },
-  { title: "Checklist", url: "/founder/post-inc-checklist", icon: ListChecks },
-  { title: "Compliance Calendar", url: "/founder/compliance", icon: Calendar },
-  { title: "Document Vault", url: "/founder/vault", icon: FolderOpen },
-  { title: "Registered Office", url: "/founder/registered-office", icon: Building2 },
-  { title: "Mail Handling", url: "/founder/mail", icon: Mail },
-  { title: "Legal AI", url: "/founder/legal-assistant", icon: MessageSquare },
-  { title: "Data Sharing", url: "/founder/data-sharing", icon: Share2 },
-  { title: "Marketplace", url: "/procurement/marketplace", icon: Store },
-  { title: "My RFQs", url: "/procurement/my-rfqs", icon: FileSearch },
-  { title: "My Bids", url: "/procurement/my-bids", icon: Gavel },
-  { title: "Contracts", url: "/procurement/contracts", icon: FileSignature },
-  { title: "Invoices", url: "/procurement/invoices", icon: Receipt },
-  { title: "KYC Service", url: "/kyc/orgs", icon: ShieldCheck },
-  { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
-  { title: "Services & Checkout", url: "/founder/checkout", icon: ShoppingCart },
-  { title: "Settings", url: "/settings", icon: Settings },
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+  activeIntents: Intent[];
+}
+
+const founderGroups: NavGroup[] = [
+  {
+    label: "Incorporation",
+    items: [
+      { title: "My Applications", url: "/founder/applications", icon: FileText },
+      { title: "Directors & Shareholders", url: "/founder/company-people", icon: Users },
+      { title: "Company Profile", url: "/founder/company-profile", icon: Briefcase },
+      { title: "Post-Inc Checklist", url: "/founder/post-inc-checklist", icon: ListChecks },
+      { title: "Compliance Calendar", url: "/founder/compliance", icon: Calendar },
+      { title: "Document Vault", url: "/founder/vault", icon: FolderOpen },
+    ],
+    activeIntents: ["founder_new_co", "founder_existing_co"],
+  },
+  {
+    label: "Business Services",
+    items: [
+      { title: "Registered Office", url: "/founder/registered-office", icon: Building2 },
+      { title: "Mail Handling", url: "/founder/mail", icon: Mail },
+      { title: "Legal AI", url: "/founder/legal-assistant", icon: MessageSquare },
+      { title: "Data Sharing", url: "/founder/data-sharing", icon: Share2 },
+    ],
+    activeIntents: ["founder_new_co", "founder_existing_co"],
+  },
+  {
+    label: "KYC & Verification",
+    items: [
+      { title: "KYC Service", url: "/kyc/orgs", icon: ShieldCheck },
+      { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
+    ],
+    activeIntents: ["kyc_service"],
+  },
+  {
+    label: "Procurement",
+    items: [
+      { title: "Marketplace", url: "/procurement/marketplace", icon: Store },
+      { title: "My RFQs", url: "/procurement/my-rfqs", icon: FileSearch },
+      { title: "My Bids", url: "/procurement/my-bids", icon: Gavel },
+      { title: "Contracts", url: "/procurement/contracts", icon: FileSignature },
+      { title: "Invoices", url: "/procurement/invoices", icon: Receipt },
+    ],
+    activeIntents: ["procurement"],
+  },
 ];
 
 const lawyerItems: NavItem[] = [
@@ -140,27 +175,140 @@ interface AppSidebarProps {
   role: "founder" | "lawyer" | "admin" | "building_manager";
 }
 
+function NavItemButton({ item, location }: { item: NavItem; location: string }) {
+  return (
+    <SidebarMenuItem key={item.title}>
+      <SidebarMenuButton
+        asChild
+        isActive={location === item.url || location.startsWith(item.url + "/")}
+        data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
+      >
+        <Link href={item.url}>
+          <item.icon className="h-4 w-4" />
+          <span>{item.title}</span>
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+function FounderSidebar({ location, primaryIntent }: { location: string; primaryIntent: Intent | null }) {
+  const coreItems: NavItem[] = [
+    { title: "Dashboard", url: "/founder/dashboard", icon: LayoutDashboard },
+    { title: "Personal Profile", url: "/profile", icon: UserCircle },
+    { title: "Identity Verification", url: "/founder/identity", icon: User },
+  ];
+
+  const accountItems: NavItem[] = [
+    { title: "My Orders", url: "/founder/orders", icon: Receipt },
+    { title: "Services & Checkout", url: "/founder/checkout", icon: ShoppingCart },
+    { title: "Settings", url: "/settings", icon: Settings },
+  ];
+
+  const initialOpenGroups = founderGroups.reduce<Record<string, boolean>>((acc, g) => {
+    acc[g.label] = primaryIntent ? g.activeIntents.includes(primaryIntent) : false;
+    return acc;
+  }, {});
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(initialOpenGroups);
+
+  const toggleGroup = (label: string) => {
+    setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+  };
+
+  return (
+    <SidebarContent>
+      <SidebarGroup>
+        <SidebarGroupLabel>Core</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {coreItems.map((item) => (
+              <NavItemButton key={item.title} item={item} location={location} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      {founderGroups.map((group) => {
+        const isActive = primaryIntent ? group.activeIntents.includes(primaryIntent) : false;
+        const isOpen = openGroups[group.label] ?? false;
+
+        return (
+          <Collapsible key={group.label} open={isOpen} onOpenChange={() => toggleGroup(group.label)}>
+            <SidebarGroup>
+              <CollapsibleTrigger asChild>
+                <SidebarGroupLabel
+                  className="cursor-pointer flex items-center justify-between hover:text-foreground transition-colors select-none"
+                  data-testid={`group-${group.label.toLowerCase().replace(/\s+/g, "-")}`}
+                >
+                  <span className={isActive ? "text-foreground font-medium" : ""}>{group.label}</span>
+                  {isOpen ? (
+                    <ChevronDown className="h-3.5 w-3.5 ml-auto shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5 ml-auto shrink-0" />
+                  )}
+                </SidebarGroupLabel>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {group.items.map((item) => (
+                      <NavItemButton key={item.title} item={item} location={location} />
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </CollapsibleContent>
+            </SidebarGroup>
+          </Collapsible>
+        );
+      })}
+
+      <SidebarGroup>
+        <SidebarGroupLabel>Account</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {accountItems.map((item) => (
+              <NavItemButton key={item.title} item={item} location={location} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </SidebarContent>
+  );
+}
+
 export function AppSidebar({ role }: AppSidebarProps) {
   const [location] = useLocation();
   const { user, logout } = useAuth();
+  const [showModuleSwitcher, setShowModuleSwitcher] = useState(false);
 
-  const items = role === "founder" ? founderItems : role === "lawyer" ? lawyerItems : role === "building_manager" ? buildingManagerItems : adminItems;
-  const roleLabel = role === "founder" ? "Founder Portal" : role === "lawyer" ? "Lawyer Portal" : role === "building_manager" ? "Building Manager" : "Admin Portal";
+  const primaryIntent = (user?.primaryIntent as Intent) || null;
+  const roleLabel =
+    role === "founder"
+      ? "Founder Portal"
+      : role === "lawyer"
+        ? "Lawyer Portal"
+        : role === "building_manager"
+          ? "Building Manager"
+          : "Admin Portal";
+
+  const nonFounderItems =
+    role === "lawyer"
+      ? lawyerItems
+      : role === "building_manager"
+        ? buildingManagerItems
+        : adminItems;
 
   const getInitials = () => {
     if (user?.firstName && user?.lastName) {
       return `${user.firstName[0]}${user.lastName[0]}`.toUpperCase();
     }
-    if (user?.email) {
-      return user.email[0].toUpperCase();
-    }
+    if (user?.email) return user.email[0].toUpperCase();
     return "U";
   };
 
   const getUserName = () => {
-    if (user?.firstName && user?.lastName) {
-      return `${user.firstName} ${user.lastName}`;
-    }
+    if (user?.firstName && user?.lastName) return `${user.firstName} ${user.lastName}`;
     return user?.email || "User";
   };
 
@@ -173,47 +321,46 @@ export function AppSidebar({ role }: AppSidebarProps) {
             <p className="text-xs text-muted-foreground">{roleLabel}</p>
           </div>
         </Link>
-      </SidebarHeader>
-
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {items.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton 
-                    asChild 
-                    isActive={location === item.url || location.startsWith(item.url + "/")}
-                    data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
-                  >
-                    <Link href={item.url}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
 
         {role === "founder" && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Quick Actions</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <div className="px-2">
-                <Button asChild className="w-full" data-testid="button-new-application">
-                  <Link href="/applications/new">
-                    <FileText className="h-4 w-4 mr-2" />
-                    New Application
-                  </Link>
-                </Button>
+          <div className="mt-2">
+            <button
+              onClick={() => setShowModuleSwitcher((v) => !v)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-1 py-0.5 rounded"
+              data-testid="button-switch-module"
+            >
+              <ArrowLeftRight className="h-3 w-3" />
+              {showModuleSwitcher ? "Close service selector" : "Switch service"}
+            </button>
+
+            {showModuleSwitcher && (
+              <div className="mt-2 border rounded-lg p-2 bg-background">
+                <ModuleSwitcher
+                  compact
+                  onSwitch={() => setShowModuleSwitcher(false)}
+                />
               </div>
+            )}
+          </div>
+        )}
+      </SidebarHeader>
+
+      {role === "founder" ? (
+        <FounderSidebar location={location} primaryIntent={primaryIntent} />
+      ) : (
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {nonFounderItems.map((item) => (
+                  <NavItemButton key={item.title} item={item} location={location} />
+                ))}
+              </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        )}
-      </SidebarContent>
+        </SidebarContent>
+      )}
 
       <SidebarFooter className="p-4">
         <div className="flex items-center gap-3 p-2 rounded-lg bg-sidebar-accent">

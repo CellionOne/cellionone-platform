@@ -30,6 +30,11 @@ import {
   Mail,
   UserCheck,
   ArrowRight,
+  Plus,
+  X,
+  Hash,
+  Shield,
+  MapPin,
 } from "lucide-react";
 import type { CompanyApplication, ApplicationChecklistItem, Payment, ClarificationRequest } from "@shared/schema";
 
@@ -72,6 +77,54 @@ interface VerificationInfo {
   totalVerificationFee: number;
 }
 
+interface Product {
+  id: number;
+  sku: string;
+  name: string;
+  category: string;
+  priceNgn: number;
+  requiresManualPricing: boolean | null;
+  metadata: Record<string, unknown> | null;
+}
+
+const ADD_ON_SKUS = ["TIN", "SCUML", "TM"] as const;
+
+const ADD_ON_META: Record<string, { icon: any; label: string; description: string; benefit: string }> = {
+  TIN: {
+    icon: Hash,
+    label: "TIN Registration",
+    description: "Get your Tax Identification Number from FIRS. Required for opening a corporate bank account.",
+    benefit: "Needed for corporate bank account",
+  },
+  SCUML: {
+    icon: FileText,
+    label: "SCUML Certificate",
+    description: "Special Control Unit against Money Laundering certificate from the EFCC. Required for certain financial transactions.",
+    benefit: "Ready in 5 business days",
+  },
+  TM: {
+    icon: Shield,
+    label: "Trademark Registration",
+    description: "Protect your brand name with a registered trademark. Covers both stages of the trademark process.",
+    benefit: "Full brand name protection",
+  },
+};
+
+const REGISTERED_OFFICE_TIERS = [
+  {
+    id: "office_only",
+    label: "Registered Office — Office Only",
+    description: "Use our Lagos address as your official CAC-registered address. Mail is held securely.",
+    priceDisplay: "₦75,000/year",
+  },
+  {
+    id: "office_plus_mail",
+    label: "Registered Office — Office + Mail Handling",
+    description: "Our address plus mail opening, scanning, and forwarding. Perfect for remote founders.",
+    priceDisplay: "₦150,000/year",
+  },
+];
+
 const statusTimeline = [
   { status: "draft", label: "Draft", icon: FileText },
   { status: "pending_verification", label: "Awaiting Verification", icon: AlertCircle },
@@ -88,6 +141,7 @@ export default function ApplicationDetailsPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const applicationId = params?.id;
+  const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
 
   const { data, isLoading } = useQuery<ApplicationDetails>({
     queryKey: ["/api/applications", applicationId],
@@ -103,6 +157,23 @@ export default function ApplicationDetailsPage() {
     queryKey: [`/api/checkout/verification-info?applicationId=${applicationId}`],
     enabled: !!applicationId,
   });
+
+  const { data: products } = useQuery<Product[]>({
+    queryKey: ["/api/products"],
+  });
+
+  const addOnProducts = (products ?? []).filter(
+    p => (ADD_ON_SKUS as readonly string[]).includes(p.sku) && !p.requiresManualPricing
+  );
+
+  const toggleAddOn = (sku: string) => {
+    setSelectedAddOns(prev =>
+      prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku]
+    );
+  };
+
+  const selectedAddOnProducts = addOnProducts.filter(p => selectedAddOns.includes(p.sku));
+  const addOnsTotalKobo = selectedAddOnProducts.reduce((sum, p) => sum + p.priceNgn, 0);
 
   const [isFileUploading, setIsFileUploading] = useState(false);
 
@@ -159,16 +230,19 @@ export default function ApplicationDetailsPage() {
   });
 
   const handlePayment = () => {
-    if (applicationId) {
-      setLocation(`/founder/checkout?applicationId=${applicationId}`);
+    if (!applicationId) return;
+    const params = new URLSearchParams({ applicationId });
+    if (selectedAddOns.length > 0) {
+      params.set("initSkus", selectedAddOns.join(","));
     }
+    setLocation(`/founder/checkout?${params.toString()}`);
   };
 
   const INCORPORATION_FEE_KOBO = 10000000;
   const verifyCount = verificationInfo?.unverifiedCount ?? 0;
   const verifyFeePerPerson = verificationInfo?.verificationFeePerPerson ?? 1000000;
   const totalVerifyFee = verifyCount * verifyFeePerPerson;
-  const estimatedTotal = INCORPORATION_FEE_KOBO + totalVerifyFee;
+  const estimatedTotal = INCORPORATION_FEE_KOBO + totalVerifyFee + addOnsTotalKobo;
 
   if (isLoading) return <LoadingPage />;
 
@@ -459,14 +533,17 @@ export default function ApplicationDetailsPage() {
                           <span>All identities verified — no verification fee</span>
                         </div>
                       )}
+                      {selectedAddOnProducts.map(p => (
+                        <div key={p.sku} className="flex items-center justify-between" data-testid={`fee-line-addon-${p.sku}`}>
+                          <span className="text-muted-foreground">{ADD_ON_META[p.sku]?.label || p.name}</span>
+                          <span className="font-medium">₦{(p.priceNgn / 100).toLocaleString()}</span>
+                        </div>
+                      ))}
                       <Separator />
                       <div className="flex items-center justify-between font-semibold" data-testid="fee-line-total">
                         <span>Estimated Total</span>
                         <span>₦{(estimatedTotal / 100).toLocaleString()}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        Optional services (TIN, Trademark, etc.) can be added at checkout.
-                      </p>
                     </div>
 
                     {payment && (
@@ -489,6 +566,87 @@ export default function ApplicationDetailsPage() {
                 )}
               </CardContent>
             </Card>
+
+            {application.status === "draft" && payment?.status !== "success" && (
+              <Card data-testid="card-optional-addons">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Optional Services</CardTitle>
+                  <CardDescription>
+                    Add these to your checkout to complete everything in one payment.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {addOnProducts.map(p => {
+                    const meta = ADD_ON_META[p.sku];
+                    const Icon = meta?.icon || FileText;
+                    const isSelected = selectedAddOns.includes(p.sku);
+                    return (
+                      <div
+                        key={p.sku}
+                        className={`rounded-lg border p-3 cursor-pointer transition-colors ${
+                          isSelected
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:border-primary/50"
+                        }`}
+                        onClick={() => toggleAddOn(p.sku)}
+                        data-testid={`addon-card-${p.sku}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 min-w-0">
+                            <div className={`h-7 w-7 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${isSelected ? "bg-primary/10" : "bg-muted"}`}>
+                              <Icon className={`h-3.5 w-3.5 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">{meta?.label || p.name}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{meta?.description}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-sm font-semibold">₦{(p.priceNgn / 100).toLocaleString()}</span>
+                            {isSelected ? (
+                              <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center" data-testid={`addon-selected-${p.sku}`}>
+                                <X className="h-3 w-3 text-primary-foreground" />
+                              </div>
+                            ) : (
+                              <div className="h-5 w-5 rounded-full border-2 border-muted-foreground/30 flex items-center justify-center" data-testid={`addon-add-${p.sku}`}>
+                                <Plus className="h-3 w-3 text-muted-foreground" />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {meta?.benefit && (
+                          <p className="text-xs text-primary mt-2 ml-9">{meta.benefit}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  <div className="pt-1">
+                    <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5" />
+                      Registered Office Address (separate setup)
+                    </p>
+                    {REGISTERED_OFFICE_TIERS.map(tier => (
+                      <div key={tier.id} className="rounded-lg border border-dashed p-3 mb-2" data-testid={`addon-info-${tier.id}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{tier.label}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{tier.description}</p>
+                          </div>
+                          <span className="text-sm font-semibold shrink-0">{tier.priceDisplay}</span>
+                        </div>
+                      </div>
+                    ))}
+                    <Link href="/founder/registered-office">
+                      <Button variant="outline" size="sm" className="w-full text-xs" data-testid="button-setup-registered-office">
+                        <MapPin className="h-3 w-3 mr-1.5" />
+                        Set Up Registered Office
+                      </Button>
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {application.status === "draft" && (
               <Card>

@@ -75,16 +75,21 @@ export default function CheckoutPage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [, setLocation] = useLocation();
+
+  const { applicationId, initSkus } = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const appId = params.get("applicationId");
+    const skusParam = params.get("initSkus");
+    return {
+      applicationId: appId ? parseInt(appId, 10) : null,
+      initSkus: skusParam ? skusParam.split(",").filter(Boolean) : [],
+    };
+  })();
+
   const [mode, setMode] = useState<CheckoutMode>("new_company");
-  const [selectedSkus, setSelectedSkus] = useState<string[]>([]);
+  const [selectedSkus, setSelectedSkus] = useState<string[]>(initSkus);
 
   const isVerified = !!(user as any)?.isIdentityVerified;
-
-  const applicationId = (() => {
-    const params = new URLSearchParams(window.location.search);
-    const v = params.get("applicationId");
-    return v ? parseInt(v, 10) : null;
-  })();
 
   const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],

@@ -23,6 +23,40 @@ function headers() {
   };
 }
 
+// ---- Typed API response interfaces ----
+
+interface YouverifyCandidateResponse {
+  data?: { id?: string };
+  error?: string;
+  message?: string;
+}
+
+interface YouverifyAddressRequestResponse {
+  data?: { id?: string };
+  error?: string;
+  message?: string;
+}
+
+export interface YouverifyJobResult {
+  id?: string;
+  taskStatus?: string;
+  gpsCoordinates?: { latitude: number; longitude: number };
+  buildingType?: string;
+  buildingColor?: string;
+  submissionDistanceInMeters?: number;
+  agentPhoto?: string;
+  agentSignature?: string;
+  summary?: string;
+}
+
+interface YouverifyJobResultResponse {
+  data?: YouverifyJobResult;
+  error?: string;
+  message?: string;
+}
+
+// ---- API Calls ----
+
 /**
  * Create a Youverify candidate (person to verify on behalf of).
  * Returns the candidateId string, or null on error.
@@ -48,16 +82,17 @@ export async function createCandidate(params: {
       }),
     });
 
-    const body = await resp.json() as any;
+    const body = await resp.json() as YouverifyCandidateResponse;
 
     if (!resp.ok || !body.data?.id) {
       console.error("[Youverify] createCandidate failed:", resp.status, body);
       return null;
     }
 
-    return body.data.id as string;
-  } catch (err: any) {
-    console.error("[Youverify] createCandidate error:", err.message);
+    return body.data.id;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[Youverify] createCandidate error:", msg);
     return null;
   }
 }
@@ -107,25 +142,26 @@ export async function submitBusinessAddressVerification(params: {
       body: JSON.stringify(payload),
     });
 
-    const body = await resp.json() as any;
+    const body = await resp.json() as YouverifyAddressRequestResponse;
 
     if (!resp.ok || !body.data?.id) {
       console.error("[Youverify] submitBusinessAddressVerification failed:", resp.status, body);
       return null;
     }
 
-    return body.data.id as string;
-  } catch (err: any) {
-    console.error("[Youverify] submitBusinessAddressVerification error:", err.message);
+    return body.data.id;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[Youverify] submitBusinessAddressVerification error:", msg);
     return null;
   }
 }
 
 /**
  * Fetch current job result from Youverify.
- * Returns raw result object, or null on error.
+ * Returns typed result object, or null on error.
  */
-export async function getJobResult(referenceId: string): Promise<any | null> {
+export async function getJobResult(referenceId: string): Promise<YouverifyJobResult | null> {
   if (!isConfigured()) {
     console.warn("[Youverify] YOUVERIFY_API_TOKEN not set — skipping getJobResult");
     return null;
@@ -137,16 +173,17 @@ export async function getJobResult(referenceId: string): Promise<any | null> {
       headers: headers(),
     });
 
-    const body = await resp.json() as any;
+    const body = await resp.json() as YouverifyJobResultResponse;
 
     if (!resp.ok) {
       console.error("[Youverify] getJobResult failed:", resp.status, body);
       return null;
     }
 
-    return body.data || null;
-  } catch (err: any) {
-    console.error("[Youverify] getJobResult error:", err.message);
+    return body.data ?? null;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[Youverify] getJobResult error:", msg);
     return null;
   }
 }

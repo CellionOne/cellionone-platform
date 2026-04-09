@@ -3764,7 +3764,7 @@ export async function registerRoutes(
     try {
       const jobs = await db.select({
         job: addressVerificationJobsTable,
-        companyName: companyApplicationsTable.companyName,
+        companyName: companyApplicationsTable.companyName1,
         founderEmail: usersTable.email,
       })
         .from(addressVerificationJobsTable)
@@ -3790,7 +3790,7 @@ export async function registerRoutes(
 
       const [result] = await db.select({
         job: addressVerificationJobsTable,
-        companyName: companyApplicationsTable.companyName,
+        companyName: companyApplicationsTable.companyName1,
         operatingAddress: companyApplicationsTable.operatingAddress,
         founderEmail: usersTable.email,
         founderFirstName: usersTable.firstName,

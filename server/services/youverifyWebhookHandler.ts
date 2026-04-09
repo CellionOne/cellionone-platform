@@ -15,25 +15,13 @@ import { db } from "../db";
 import { eq } from "drizzle-orm";
 import { addressVerificationJobs, companyApplications, userRoles } from "../../shared/schema";
 import { storage } from "../storage";
-import { getJobResult, validateYouverifyWebhookToken } from "./youverifyService";
+import { getJobResult, validateYouverifyWebhookToken, type YouverifyJobResult } from "./youverifyService";
 import { sendNewOrderNotificationEmail, ADMIN_NOTIFICATION_EMAIL } from "./emailService";
 
-interface YouverifyGpsCoordinates {
-  latitude: number;
-  longitude: number;
-}
-
-interface YouverifyWebhookData {
+// Webhook payload from Youverify — extends the same data shape returned by the API
+interface YouverifyWebhookData extends YouverifyJobResult {
   id?: string;
   referenceId?: string;
-  taskStatus?: string;
-  gpsCoordinates?: YouverifyGpsCoordinates;
-  buildingType?: string;
-  buildingColor?: string;
-  submissionDistanceInMeters?: number;
-  agentPhoto?: string;
-  agentSignature?: string;
-  summary?: string;
 }
 
 interface YouverifyWebhookPayload {
@@ -148,7 +136,7 @@ export async function processYouverifyWebhook(
   }
 
   // 7. Pull authoritative result from Youverify API (source of truth)
-  const jobResult = await getJobResult(referenceId) as YouverifyWebhookData | null;
+  const jobResult: YouverifyJobResult | null = await getJobResult(referenceId);
   const taskStatus: string | undefined =
     jobResult?.taskStatus ?? event.data?.taskStatus;
 
@@ -258,7 +246,7 @@ export async function processYouverifyWebhook(
   // 13. Send admin email notification
   try {
     const [app] = await db
-      .select({ companyName: companyApplications.companyName })
+      .select({ companyName1: companyApplications.companyName1 })
       .from(companyApplications)
       .where(eq(companyApplications.id, job.applicationId));
 
@@ -269,7 +257,7 @@ export async function processYouverifyWebhook(
 
     await sendNewOrderNotificationEmail(ADMIN_NOTIFICATION_EMAIL, {
       orderId: job.applicationId,
-      founderName: `Application #${job.applicationId}${app?.companyName ? ` — ${app.companyName}` : ""}`,
+      founderName: `Application #${job.applicationId}${app?.companyName1 ? ` — ${app.companyName1}` : ""}`,
       founderEmail: `Job #${job.id} | Verdict: ${statusLabel}`,
       totalAmount: 0,
       items: [

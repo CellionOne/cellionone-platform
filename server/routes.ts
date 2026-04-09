@@ -27,6 +27,15 @@ import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
 
 // Validation schemas
+const operatingAddressSchema = z.object({
+  line1: z.string().min(1, "Operating street address is required"),
+  line2: z.string().optional(),
+  city: z.string().min(1, "Operating city is required"),
+  state: z.string().min(1, "Operating state is required"),
+  postalCode: z.string().optional(),
+  country: z.string().optional(),
+});
+
 const createApplicationSchema = insertCompanyApplicationSchema.pick({
   applicationType: true,
   companyType: true,
@@ -35,7 +44,8 @@ const createApplicationSchema = insertCompanyApplicationSchema.pick({
   companyName3: true,
   businessDescription: true,
   registeredAddress: true,
-  operatingAddress: true,
+}).extend({
+  operatingAddress: operatingAddressSchema,
 });
 
 const updateApplicationSchema = insertCompanyApplicationSchema.partial();

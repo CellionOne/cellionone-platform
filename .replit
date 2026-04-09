@@ -62,3 +62,7 @@ PAYSTACK_CIE_PRO_PLAN_CODE = "PLN_izsapf1t62ez14t"
 
 [userenv.production]
 ADMIN_BOOTSTRAP_PASSWORD = "CellionAdmin2026!"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000

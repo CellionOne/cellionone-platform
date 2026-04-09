@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useRoute, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
@@ -12,9 +13,8 @@ import { LoadingSpinner, LoadingPage } from "@/components/loading-spinner";
 import { ReadinessPanel } from "@/components/readiness-panel";
 import { OfflineSyncStatus } from "@/components/offline-sync-status";
 import { useToast } from "@/hooks/use-toast";
-import { useUpload } from "@/hooks/use-upload";
 import { useCheckout } from "@/hooks/use-checkout";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import {
   Building2,
   FileText,
@@ -89,26 +89,36 @@ export default function ApplicationDetailsPage() {
   });
   const teamPeople = teamReadiness?.people ?? [];
 
-  const { uploadFile, isUploading: isFileUploading } = useUpload({
-    applicationId: parseInt(applicationId || "0", 10),
-  });
+  const [isFileUploading, setIsFileUploading] = useState(false);
 
   const uploadMutation = useMutation({
     mutationFn: async ({ checklistId, file }: { checklistId: number; file: File }) => {
-      const uploadResult = await uploadFile(file);
-      if (!uploadResult) {
-        throw new Error("Failed to upload file to storage");
+      setIsFileUploading(true);
+      try {
+        const csrfToken = await getCsrfToken();
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("checklistItemId", checklistId.toString());
+        formData.append("docType", "uploaded_document");
+
+        const response = await fetch(`/api/applications/${applicationId}/documents/upload`, {
+          method: "POST",
+          headers: {
+            ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+          },
+          credentials: "include",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ message: "Upload failed" }));
+          throw new Error(err.message || "Upload failed");
+        }
+
+        return response.json();
+      } finally {
+        setIsFileUploading(false);
       }
-      
-      const response = await apiRequest("POST", `/api/applications/${applicationId}/documents`, {
-        checklistItemId: checklistId.toString(),
-        storagePath: uploadResult.objectPath,
-        filename: file.name,
-        docType: "uploaded_document",
-      });
-      
-      if (!response.ok) throw new Error("Failed to save document record");
-      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId] });
@@ -263,46 +273,65 @@ export default function ApplicationDetailsPage() {
                 
                 <div className="divide-y mt-4">
                   {checklist.map((item) => (
-                    <div key={item.id} className="py-3 flex items-center justify-between" data-testid={`checklist-${item.key}`}>
-                      <div className="flex items-center gap-3">
-                        <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
-                          item.status === "accepted" || item.status === "provided"
-                            ? "bg-green-100 dark:bg-green-900/30"
-                            : "bg-muted"
-                        }`}>
-                          {item.status === "accepted" || item.status === "provided" ? (
-                            <CheckCircle2 className="h-4 w-4 text-green-600" />
-                          ) : (
-                            <FileText className="h-4 w-4 text-muted-foreground" />
+                    <div key={item.id} className="py-3" data-testid={`checklist-${item.key}`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${
+                            item.status === "accepted" || item.status === "provided"
+                              ? "bg-green-100 dark:bg-green-900/30"
+                              : "bg-muted"
+                          }`}>
+                            {item.status === "accepted" || item.status === "provided" ? (
+                              <CheckCircle2 className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <FileText className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">{item.label}</p>
+                            {item.required && <span className="text-xs text-muted-foreground">Required</span>}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <StatusBadge status={item.status || "missing"} />
+                          {(item.status === "missing" || item.status === "rejected") && (
+                            <div className="relative">
+                              <Input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                                disabled={uploadMutation.isPending || isFileUploading}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    uploadMutation.mutate({ checklistId: item.id, file });
+                                    e.target.value = "";
+                                  }
+                                }}
+                                data-testid={`upload-${item.key}`}
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="pointer-events-none"
+                                disabled={uploadMutation.isPending || isFileUploading}
+                              >
+                                {(uploadMutation.isPending || isFileUploading) ? (
+                                  <LoadingSpinner size="sm" />
+                                ) : (
+                                  <Upload className="h-4 w-4 mr-1" />
+                                )}
+                                {uploadMutation.isPending || isFileUploading ? "Uploading..." : "Upload"}
+                              </Button>
+                            </div>
                           )}
                         </div>
-                        <div>
-                          <p className="text-sm font-medium">{item.label}</p>
-                          {item.required && <span className="text-xs text-muted-foreground">Required</span>}
-                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <StatusBadge status={item.status || "missing"} />
-                        {(item.status === "missing" || item.status === "rejected") && (
-                          <div className="relative">
-                            <Input
-                              type="file"
-                              className="absolute inset-0 opacity-0 cursor-pointer"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  uploadMutation.mutate({ checklistId: item.id, file });
-                                }
-                              }}
-                              data-testid={`upload-${item.key}`}
-                            />
-                            <Button variant="outline" size="sm" className="pointer-events-none">
-                              <Upload className="h-4 w-4 mr-1" />
-                              Upload
-                            </Button>
-                          </div>
-                        )}
-                      </div>
+                      {(item.status === "missing" || item.status === "rejected") && (
+                        <p className="text-xs text-muted-foreground mt-1 ml-11">
+                          PDF, JPEG, PNG, DOC or DOCX &middot; max 10 MB
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -359,6 +388,14 @@ export default function ApplicationDetailsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
+                {progress < 100 && (
+                  <div className="flex items-start gap-2 mb-3 p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                    <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Upload all required documents before proceeding to payment.
+                    </p>
+                  </div>
+                )}
                 {payment ? (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -375,6 +412,7 @@ export default function ApplicationDetailsPage() {
                       <Button 
                         className="w-full" 
                         onClick={handlePayment}
+                        disabled={progress < 100}
                         data-testid="button-pay"
                       >
                         Pay Now
@@ -389,6 +427,7 @@ export default function ApplicationDetailsPage() {
                     <Button 
                       className="w-full" 
                       onClick={handlePayment}
+                      disabled={progress < 100}
                       data-testid="button-initiate-payment"
                     >
                       Pay Now

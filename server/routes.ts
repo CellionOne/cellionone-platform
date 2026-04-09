@@ -4115,6 +4115,96 @@ export async function registerRoutes(
     }
   });
 
+  // Upload a document for an application via multipart (avoids browser CORS with GCS presigned URLs)
+  const applicationDocUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+  });
+  app.post("/api/applications/:id/documents/upload", isAuthenticated, applicationDocUpload.single("file"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      const { checklistItemId, docType } = req.body;
+      const file = req.file;
+
+      if (!file) {
+        return res.status(400).json({ message: "No file provided" });
+      }
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+
+      const isOwner = application.founderUserId === userId;
+      const isAssignedLawyer = application.assignedLawyerUserId === userId;
+      const userRoles = await storage.getUserRoles(userId);
+      const isAdmin = userRoles.includes("admin");
+
+      if (!isOwner && !isAssignedLawyer && !isAdmin) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const allowedMime = [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+      ];
+      if (!allowedMime.includes(file.mimetype)) {
+        return res.status(400).json({ message: "File type not allowed. Upload PDF, JPEG, PNG, DOC or DOCX." });
+      }
+
+      const objectStorage = new ObjectStorageService();
+      const uploadURL = await objectStorage.getObjectEntityUploadURL();
+      const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+
+      const { default: nodeFetch } = await import("node-fetch");
+      const uploadResponse = await nodeFetch(uploadURL, {
+        method: "PUT",
+        body: file.buffer,
+        headers: {
+          "Content-Type": file.mimetype,
+          "Content-Length": String(file.buffer.length),
+        },
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
+      }
+
+      if (checklistItemId) {
+        await storage.updateChecklistItem(parseInt(checklistItemId), { status: "provided" });
+      }
+
+      const document = await storage.createDocument({
+        ownerUserId: userId,
+        applicationId,
+        category: "company",
+        docType: docType || "uploaded_document",
+        filename: file.originalname || "uploaded_file",
+        storagePath: objectPath,
+        isSensitive: true,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "upload_document",
+        entityType: "document_file",
+        entityId: document.id.toString(),
+        ipAddress: req.ip,
+      });
+
+      res.json({ document, objectPath });
+    } catch (error) {
+      console.error("Error uploading application document:", error);
+      res.status(500).json({ message: "Failed to upload document. Please try again." });
+    }
+  });
+
   // ============== LEGAL AI ROUTES ==============
   // AI SAFETY GUARDRAILS:
   // - AI outputs are labeled as suggestions requiring human review

@@ -4151,8 +4151,6 @@ export async function registerRoutes(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "image/jpeg",
         "image/png",
-        "image/gif",
-        "image/webp",
       ];
       if (!allowedMime.includes(file.mimetype)) {
         return res.status(400).json({ message: "File type not allowed. Upload PDF, JPEG, PNG, DOC or DOCX." });
@@ -4162,8 +4160,7 @@ export async function registerRoutes(
       const uploadURL = await objectStorage.getObjectEntityUploadURL();
       const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
 
-      const { default: nodeFetch } = await import("node-fetch");
-      const uploadResponse = await nodeFetch(uploadURL, {
+      const uploadResponse = await fetch(uploadURL, {
         method: "PUT",
         body: file.buffer,
         headers: {

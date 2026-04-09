@@ -28,6 +28,8 @@ import {
   ClipboardList,
   Building2,
   Lightbulb,
+  Landmark,
+  ExternalLink,
 } from "lucide-react";
 import type { PostIncorporationTask, CompanyProfile } from "@shared/schema";
 import { Link } from "wouter";
@@ -56,9 +58,17 @@ export default function PostIncChecklistPage() {
   const { data: tasks, isLoading: tasksLoading } = useQuery<PostIncorporationTask[]>({
     queryKey: ["/api/founder/company-profiles", effectiveProfileId, "checklist"],
     enabled: !!effectiveProfileId,
+    retry: (failCount, err: any) => {
+      // Don't retry 403s — they mean the company isn't verified yet (gated server-side)
+      if (err?.message?.startsWith("403:")) return false;
+      return failCount < 2;
+    },
   });
 
   const selectedProfile = profiles?.find(p => String(p.id) === effectiveProfileId);
+
+  // Is this a verified existing company? Surface BANK_ACCOUNT option when yes.
+  const isVerifiedExisting = selectedProfile?.isExistingCompany && selectedProfile.existingCompanyStatus === "verified";
 
   if (profilesLoading) {
     return (
@@ -223,6 +233,41 @@ export default function PostIncChecklistPage() {
                 description="No post-incorporation tasks have been generated for this company."
               />
             )}
+          </div>
+        )}
+
+        {/* BANK_ACCOUNT — surfaced for verified existing companies as an additional service */}
+        {isVerifiedExisting && (
+          <div className="space-y-3 pt-2" data-testid="section-additional-services">
+            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+              Additional Services
+            </h2>
+            <Card className="border-primary/20" data-testid="card-bank-account-service">
+              <CardContent className="pt-6">
+                <div className="flex items-start gap-4">
+                  <div className="rounded-lg bg-primary/10 p-2 shrink-0">
+                    <Landmark className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-sm" data-testid="text-bank-account-title">Corporate Bank Account Opening</p>
+                      <Badge variant="secondary" className="text-xs">Manual Pricing</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Open a corporate bank account at our partner banks. Fee varies by bank — our team will contact you with options and pricing after you submit your interest.
+                    </p>
+                    <div className="mt-3">
+                      <Link href="/founder/services?service=BANK_ACCOUNT">
+                        <Button size="sm" variant="outline" data-testid="button-request-bank-account">
+                          <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+                          Request Bank Account Opening
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
       </div>

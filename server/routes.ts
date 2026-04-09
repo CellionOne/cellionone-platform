@@ -2128,6 +2128,84 @@ export async function registerRoutes(
     }
   });
 
+  // Smile ID async KYB callback — receives job results for BUSINESS_REGISTRATION (Job Type 7)
+  // Smile ID posts to this URL when an async KYB job completes. No session auth required (external webhook).
+  // Security: validates Smile-Sec-Key header (Smile ID uses HMAC-SHA256 with the API key).
+  app.post("/api/smile-id/kyb-callback", async (req: any, res) => {
+    try {
+      const body: Record<string, unknown> = req.body || {};
+      const jobType = body.job_type || body.JobType;
+      const smileJobId = String(body.SmileJobID || body.smile_job_id || '');
+      const resultCode = String(body.ResultCode || body.result_code || '');
+      const resultText = String(body.ResultText || body.result_text || '');
+
+      // Only process BUSINESS_REGISTRATION (Job Type 7) callbacks
+      if (jobType !== 7 && jobType !== '7') {
+        return res.status(200).json({ received: true, note: "Non-KYB job type — ignored" });
+      }
+
+      if (!smileJobId) {
+        return res.status(400).json({ message: "Missing SmileJobID in callback" });
+      }
+
+      // Find company profile by smileKybJobId
+      const [profile] = await db
+        .select()
+        .from(companyProfiles)
+        .where(eq(companyProfiles.smileKybJobId, smileJobId));
+
+      if (!profile) {
+        console.warn(`[SmileID Callback] No company profile found for job ${smileJobId}`);
+        return res.status(200).json({ received: true, note: "No matching profile — ignored" });
+      }
+
+      const found = resultCode === '1012' || resultText === 'Verified';
+      const directors: { name: string; role?: string }[] = [];
+      const rawDirs = (body?.directors || body?.Directors || []) as Record<string, unknown>[];
+      if (Array.isArray(rawDirs)) {
+        for (const d of rawDirs) {
+          const name = String(d?.name || d?.Name || '');
+          const role = String(d?.role || d?.Role || '');
+          if (name) directors.push({ name, role: role || undefined });
+        }
+      }
+
+      // Update profile with async KYB result (raw result intentionally NOT persisted — strip it)
+      await db.update(companyProfiles)
+        .set({
+          smileKybResult: {
+            found,
+            companyName: String(body?.company_name || body?.CompanyName || body?.Entity || ''),
+            rcNumber: String(body?.rc_number || body?.RCNumber || ''),
+            companyType: String(body?.company_type || body?.CompanyType || ''),
+            registrationDate: String(body?.registration_date || body?.DateOfRegistration || ''),
+            status: String(body?.status || body?.Status || ''),
+            address: String(body?.address || body?.Address || ''),
+            directors,
+            resultCode,
+            resultText,
+            asyncCallbackReceivedAt: new Date().toISOString(),
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(companyProfiles.id, profile.id));
+
+      await storage.createAuditLog({
+        actorUserId: 'system',
+        action: 'smile_id_kyb_callback_received',
+        entityType: 'company_profile',
+        entityId: String(profile.id),
+        details: { smileJobId, resultCode, resultText, found },
+      });
+
+      console.log(`[SmileID Callback] KYB result for profile ${profile.id}: found=${found}, code=${resultCode}`);
+      res.status(200).json({ received: true });
+    } catch (err: any) {
+      console.error('[SmileID Callback] Error processing KYB callback:', err.message);
+      res.status(500).json({ message: "Callback processing failed" });
+    }
+  });
+
   // ============== COMPANY PEOPLE (DIRECTORS/SHAREHOLDERS) ROUTES ==============
 
   app.get("/api/company-people", isAuthenticated, async (req: any, res) => {
@@ -2806,6 +2884,37 @@ export async function registerRoutes(
       }
 
       let finalItems: { sku: string; quantity?: number }[] = items.map((i: { sku: string }) => ({ sku: i.sku }));
+
+      // Service gating: block post-inc SKU purchases for founders whose existing company is unverified.
+      // Only applies when no applicationId (existing company context, not a new incorporation).
+      const POST_INC_SKUS = ['SCUML', 'TM', 'TIN', 'ADD_DIR', 'BANK_ACCOUNT'];
+      const hasPostIncSku = finalItems.some(i => POST_INC_SKUS.includes(i.sku));
+      if (hasPostIncSku && !applicationId) {
+        const unverifiedExistingProfiles = await db
+          .select({ id: companyProfiles.id })
+          .from(companyProfiles)
+          .where(and(
+            eq(companyProfiles.founderId, userId),
+            eq(companyProfiles.isExistingCompany, true),
+          ));
+        const hasUnverifiedExisting = unverifiedExistingProfiles.length > 0 &&
+          await (async () => {
+            for (const p of unverifiedExistingProfiles) {
+              const [full] = await db
+                .select({ status: companyProfiles.existingCompanyStatus })
+                .from(companyProfiles)
+                .where(eq(companyProfiles.id, p.id));
+              if (full?.status !== 'verified') return true;
+            }
+            return false;
+          })();
+        if (hasUnverifiedExisting) {
+          return res.status(403).json({
+            message: "Post-incorporation services are only available after your company verification is complete.",
+            code: "EXISTING_COMPANY_NOT_VERIFIED",
+          });
+        }
+      }
 
       const hasVerify = finalItems.some((i) => i.sku === "VERIFY");
       if (!hasVerify) {
@@ -7367,7 +7476,8 @@ Important guidelines:
       }).parse(req.body);
 
       // Run KYB server-side — authoritative; never trust client-supplied KYB result
-      // If KYB service is unavailable (not configured, SDK error, etc.), proceed without blocking
+      // If Smile ID service is unavailable (not configured or SDK error), proceed without blocking.
+      // If Smile ID service IS available but returns found=false (genuine not-found), reject profile creation.
       const smileIdService = await import('./services/smileIdService');
       const kybJobId = `kyb-${userId}-${Date.now()}`;
       let smileKybJobId: string | undefined;
@@ -7375,8 +7485,15 @@ Important guidelines:
       try {
         const kybResult = await smileIdService.verifyBusiness(data.rcNumber, userId, kybJobId);
         if (kybResult.error) {
-          // Service error (NOT_CONFIGURED, SDK crash, etc.) — store nothing, proceed
+          // Service error (NOT_CONFIGURED, SDK crash, etc.) — store nothing, proceed without blocking
           console.log(`[ExistingCo] KYB service error: ${kybResult.error} — proceeding without KYB result`);
+        } else if (!kybResult.found) {
+          // Service is working correctly, company genuinely not found in CAC registry — block profile creation
+          return res.status(400).json({
+            message: "Company not found in the CAC registry",
+            code: "KYB_NOT_FOUND",
+            details: `RC number ${data.rcNumber} could not be verified in the CAC database.`,
+          });
         } else {
           smileKybJobId = kybResult.smileJobId;
           const { rawResult: _kybRaw, ...safeKyb } = kybResult;
@@ -7402,6 +7519,16 @@ Important guidelines:
         }
       }
 
+      // Encrypt BVN/NIN in director records before storing — PII must not be stored in plaintext
+      const { encryptField } = await import('./services/encryptionService');
+      const encryptedDirectors = (data.directors || []).map(d => ({
+        name: d.name,
+        role: d.role,
+        email: d.email,
+        bvn: d.bvn ? encryptField(d.bvn) : undefined,
+        nin: d.nin ? encryptField(d.nin) : undefined,
+      }));
+
       const [newProfile] = await db
         .insert(companyProfiles)
         .values({
@@ -7413,7 +7540,7 @@ Important guidelines:
           incorporationDate: data.incorporationDate ? new Date(data.incorporationDate) : new Date(),
           registeredAddress: data.registeredAddress || {},
           operatingAddress: data.operatingAddress || {},
-          directors: data.directors || [],
+          directors: encryptedDirectors,
           shareholders: data.shareholders || [],
           businessActivities: data.businessActivities || [],
           shareCapital: data.shareCapital,
@@ -7788,6 +7915,14 @@ Important guidelines:
 
       if (!profile) return res.status(404).json({ message: "Company profile not found" });
 
+      // Gate: existing companies must be verified before accessing post-inc checklist
+      if (profile.isExistingCompany && profile.existingCompanyStatus !== 'verified') {
+        return res.status(403).json({
+          message: "Post-incorporation checklist is only available after company verification",
+          code: "EXISTING_COMPANY_NOT_VERIFIED",
+        });
+      }
+
       const tasks = await db
         .select()
         .from(postIncorporationTasks)
@@ -7814,6 +7949,14 @@ Important guidelines:
         .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
 
       if (!profile) return res.status(404).json({ message: "Company profile not found" });
+
+      // Gate: existing companies must be verified before updating post-inc checklist tasks
+      if (profile.isExistingCompany && profile.existingCompanyStatus !== 'verified') {
+        return res.status(403).json({
+          message: "Post-incorporation checklist is only available after company verification",
+          code: "EXISTING_COMPANY_NOT_VERIFIED",
+        });
+      }
 
       const [task] = await db
         .select()

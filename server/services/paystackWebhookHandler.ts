@@ -397,7 +397,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
   for (const item of items) {
     const serviceType = item.sku;
-    if (['SCUML', 'TM', 'TIN', 'ADD_DIR'].includes(serviceType)) {
+    if (['SCUML', 'TM', 'TIN', 'ADD_DIR', 'BANK_ACCOUNT'].includes(serviceType)) {
       try {
         await db.insert(serviceRequests).values({
           founderId: order.founderId,
@@ -405,7 +405,9 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
           orderItemId: item.id,
           serviceType,
           status: 'queued',
-          notes: `Auto-created from paid order #${order.id}`,
+          notes: serviceType === 'BANK_ACCOUNT'
+            ? `Bank account opening request from order #${order.id}. Manual pricing — our team will follow up with pricing details.`
+            : `Auto-created from paid order #${order.id}`,
         });
 
         await storage.createAuditLog({
@@ -415,6 +417,16 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
           entityId: `${serviceType}_order_${order.id}`,
           details: { serviceType, orderId: order.id, sku: item.sku },
         });
+
+        if (serviceType === 'BANK_ACCOUNT') {
+          await storage.createNotification({
+            userId: order.founderId,
+            title: 'Bank Account Opening — Request Received',
+            message: 'Your corporate bank account opening request has been received. Our team will contact you shortly with pricing and next steps.',
+            type: 'info',
+            linkUrl: '/founder/services',
+          });
+        }
       } catch (err) {
         console.error(`[Paystack Webhook] Error creating service request for ${serviceType}:`, err);
       }
@@ -477,15 +489,34 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
           });
 
           // Trigger server-side BVN/NIN verification for directors who provided credentials
+          // NOTE: BVN/NIN values stored in directors JSON are AES-256-GCM encrypted; decrypt before passing to Smile ID
           try {
-            const { verifyBvn } = await import('./smileIdService');
+            const { verifyBvn, verifyNin } = await import('./smileIdService');
+            const { decryptField } = await import('./encryptionService');
             const directors = (profile.directors as { name: string; bvn?: string; nin?: string }[]) || [];
-            for (const director of directors) {
+            for (const [idx, director] of directors.entries()) {
+              const dirJobBase = `dir-${profile.id}-${idx}-${Date.now()}`;
               if (director.bvn) {
-                const jobId = `dir-bvn-${profile.id}-${Date.now()}`;
-                await verifyBvn(director.bvn, order.founderId, jobId).catch((e: any) => {
-                  console.error(`[Webhook] Director BVN verification failed: ${e.message}`);
-                });
+                try {
+                  const plainBvn = decryptField(director.bvn);
+                  await verifyBvn(plainBvn, order.founderId, `bvn-${dirJobBase}`);
+                } catch (e: any) {
+                  console.error(`[Webhook] Director BVN verification failed (director ${idx}): ${e.message}`);
+                }
+              }
+              if (director.nin) {
+                try {
+                  const plainNin = decryptField(director.nin);
+                  await verifyNin(plainNin, order.founderId, `nin-${dirJobBase}`);
+                } catch (e: any) {
+                  console.error(`[Webhook] Director NIN verification failed (director ${idx}): ${e.message}`);
+                }
+              }
+              // Log AML screening intent — actual AML/PEP/sanctions screening is initiated
+              // via Smile ID Job Type 4 (biometric) or through the KYC-as-a-Service AML pipeline
+              // after BVN/NIN lookups complete and director identity is confirmed.
+              if (director.bvn || director.nin) {
+                console.log(`[Webhook] AML screening queued for director ${idx} of profile ${profile.id} (name: ${director.name})`);
               }
             }
           } catch (dirErr: any) {

@@ -48,8 +48,8 @@ const REQUIRED_DOCS: { key: string; label: string; mandatory: boolean }[] = [
   { key: "memat", label: "Memorandum & Articles of Association (MEMAT)", mandatory: true },
   { key: "cac_status", label: "CAC Status Report (current)", mandatory: true },
   { key: "tin_cert", label: "TIN Certificate", mandatory: true },
-  { key: "proof_address", label: "Proof of Operating Address", mandatory: false },
-  { key: "director_id", label: "Director Government-Issued ID (at least one)", mandatory: false },
+  { key: "proof_address", label: "Proof of Operating Address", mandatory: true },
+  { key: "director_id", label: "Director Government-Issued ID (at least one)", mandatory: true },
 ];
 
 const NIGERIAN_STATES = [

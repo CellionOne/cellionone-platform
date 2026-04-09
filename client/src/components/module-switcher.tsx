@@ -3,13 +3,17 @@ import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
-import type { AuthUser } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Building2, ShieldCheck, ShoppingCart, CheckCircle2, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 export type Intent = "founder_new_co" | "founder_existing_co" | "kyc_service" | "procurement";
+
+interface CachedUser {
+  primaryIntent?: string | null;
+  [key: string]: unknown;
+}
 
 export const INTENT_OPTIONS: {
   id: Intent;
@@ -67,7 +71,7 @@ export function ModuleSwitcher({ compact = false, onSwitch }: ModuleSwitcherProp
       return intent;
     },
     onSuccess: (intent) => {
-      queryClient.setQueryData<AuthUser | null>(["/api/auth/user"], (prev) =>
+      queryClient.setQueryData<CachedUser | null>(["/api/auth/user"], (prev) =>
         prev ? { ...prev, primaryIntent: intent } : prev
       );
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });

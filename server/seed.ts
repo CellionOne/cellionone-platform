@@ -92,6 +92,8 @@ export async function seedDatabase() {
       { sku: "NGO", name: "Registration of Incorporated Trustees (NGO)", category: "incorporation", priceNgn: 25000000, cellionCutNgn: 4000000, metadata: { note: "Includes filing fees, newspaper publications, constitution and legal charges" } },
       { sku: "VERIFY", name: "Identity & Company Verification", category: "verification", priceNgn: 1000000, cellionCutNgn: 1000000, metadata: { note: "One-time verification fee per person. Covers BVN/NIN validation, government ID document verification, biometric selfie matching, and AML/sanctions screening through Smile ID." } },
       { sku: "ADD_DIR", name: "Add Director to Company", category: "post_incorporation", priceNgn: 7500000, cellionCutNgn: 2000000, metadata: { note: "Post-incorporation service to formally appoint a new director at the Corporate Affairs Commission (CAC). Includes Form CAC 7 filing and board resolution preparation." } },
+      { sku: "OFFICE_ONLY", name: "Registered Office Address (Office Only)", category: "registered_office", priceNgn: 7500000, cellionCutNgn: 7500000, metadata: { tier: "office_only", annual: true, note: "Annual registered office address at our Lagos premises. Includes official CAC-registered address and annual renewal." } },
+      { sku: "OFFICE_PLUS_MAIL", name: "Registered Office Address (Office + Mail Handling)", category: "registered_office", priceNgn: 15000000, cellionCutNgn: 15000000, metadata: { tier: "office_plus_mail", annual: true, note: "Annual registered office address plus mail receiving, scanning, and forwarding services." } },
     ];
     for (const item of catalogItems) {
       await db.insert(productCatalog).values(item).onConflictDoNothing();

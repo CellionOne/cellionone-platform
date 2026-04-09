@@ -39,6 +39,7 @@ function getSkuIcon(sku: string) {
   if (sku === "TIN") return Hash;
   if (sku === "SCUML") return FileText;
   if (sku === "ADD_DIR") return ClipboardList;
+  if (sku === "OFFICE_ONLY" || sku === "OFFICE_PLUS_MAIL") return MapPin;
   return FileText;
 }
 
@@ -48,6 +49,8 @@ function getSkuDescription(sku: string): string {
     SCUML: "Special Control Unit against Money Laundering certificate from the EFCC. Required for financial transactions.",
     TM: "Protect your brand name with a registered trademark. Covers both stages of the trademark process.",
     ADD_DIR: "Formally appoint a new director at the Corporate Affairs Commission. Includes Form CAC 7 filing and board resolution preparation.",
+    OFFICE_ONLY: "Use our prestigious Ikoyi, Lagos address as your official CAC-registered office address. Annual subscription.",
+    OFFICE_PLUS_MAIL: "Our Ikoyi address plus mail receiving, scanning, and forwarding services. Ideal for remote founders. Annual subscription.",
   };
   return descriptions[sku] || "";
 }
@@ -67,8 +70,16 @@ function getSkuBenefit(sku: string): string {
     SCUML: "Ready in 5 business days",
     TM: "Full brand name protection",
     ADD_DIR: "CAC-registered within 10 business days",
+    OFFICE_ONLY: "Annual — billed once with your incorporation",
+    OFFICE_PLUS_MAIL: "Annual — billed once with your incorporation",
   };
   return benefits[sku] || "";
+}
+
+function getSkuPriceLabel(sku: string, priceNgn: number): string {
+  const annualSkus = ["OFFICE_ONLY", "OFFICE_PLUS_MAIL"];
+  const formatted = formatNgn(priceNgn);
+  return annualSkus.includes(sku) ? `${formatted}/yr` : formatted;
 }
 
 export default function CheckoutPage() {
@@ -151,7 +162,7 @@ export default function CheckoutPage() {
   );
 
   const addOnProducts = useMemo(
-    () => products?.filter(p => p.category === "post_incorporation" && !p.requiresManualPricing) || [],
+    () => products?.filter(p => (p.category === "post_incorporation" || p.category === "registered_office") && !p.requiresManualPricing) || [],
     [products]
   );
 
@@ -192,6 +203,13 @@ export default function CheckoutPage() {
         const withoutIncorporation = prev.filter(s => !s.startsWith("CAC_") && s !== "NGO");
         if (prev.includes(sku)) return withoutIncorporation;
         return [...withoutIncorporation, sku];
+      }
+      const isOfficeType = sku === "OFFICE_ONLY" || sku === "OFFICE_PLUS_MAIL";
+      if (isOfficeType) {
+        const sibling = sku === "OFFICE_ONLY" ? "OFFICE_PLUS_MAIL" : "OFFICE_ONLY";
+        const withoutOffice = prev.filter(s => s !== sibling);
+        if (prev.includes(sku)) return withoutOffice.filter(s => s !== sku);
+        return [...withoutOffice, sku];
       }
       return prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku];
     });
@@ -303,7 +321,7 @@ export default function CheckoutPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-3 flex-shrink-0">
-                            <span className="font-semibold text-lg">{formatNgn(p.priceNgn)}</span>
+                            <span className="font-semibold text-lg">{getSkuPriceLabel(p.sku, p.priceNgn)}</span>
                             {isSelected ? (
                               <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
                                 <CheckCircle2 className="h-3 w-3 mr-1" /> Selected
@@ -402,7 +420,7 @@ export default function CheckoutPage() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-3 flex-shrink-0">
-                                <span className="font-semibold">{formatNgn(p.priceNgn)}</span>
+                                <span className="font-semibold">{getSkuPriceLabel(p.sku, p.priceNgn)}</span>
                                 <Button size="sm" variant="outline" data-testid={`button-add-recommended-${p.sku}`}>
                                   <Plus className="h-3 w-3 mr-1" /> Add
                                 </Button>
@@ -446,7 +464,7 @@ export default function CheckoutPage() {
                               </div>
                             </div>
                             <div className="flex items-center gap-3 flex-shrink-0">
-                              <span className="font-semibold">{formatNgn(p.priceNgn)}</span>
+                              <span className="font-semibold">{getSkuPriceLabel(p.sku, p.priceNgn)}</span>
                               {isSelected ? (
                                 <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
                                   <CheckCircle2 className="h-3 w-3 mr-1" /> Added
@@ -515,7 +533,7 @@ export default function CheckoutPage() {
                               </div>
                             </div>
                             <div className="flex items-center gap-3 flex-shrink-0">
-                              <span className="font-semibold text-lg">{formatNgn(p.priceNgn)}</span>
+                              <span className="font-semibold text-lg">{getSkuPriceLabel(p.sku, p.priceNgn)}</span>
                               {isSelected ? (
                                 <Badge variant="default" data-testid={`badge-selected-${p.sku}`}>
                                   <CheckCircle2 className="h-3 w-3 mr-1" /> Added
@@ -592,7 +610,7 @@ export default function CheckoutPage() {
                         </Button>
                         <span className="text-sm truncate">{p.name}</span>
                       </div>
-                      <span className="text-sm font-medium flex-shrink-0">{formatNgn(p.priceNgn)}</span>
+                      <span className="text-sm font-medium flex-shrink-0">{getSkuPriceLabel(p.sku, p.priceNgn)}</span>
                     </div>
                   ))}
 

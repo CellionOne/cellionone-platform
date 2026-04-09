@@ -325,6 +325,35 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
       }
     }
 
+    if (serviceType === 'OFFICE_ONLY' || serviceType === 'OFFICE_PLUS_MAIL') {
+      try {
+        const tier = serviceType === 'OFFICE_ONLY' ? 'office_only' : 'office_plus_mail';
+        const { registeredOfficeService } = await import('./registeredOfficeService');
+        if (order.applicationId) {
+          await registeredOfficeService.selectForApplication(order.applicationId, order.founderId, tier);
+        } else {
+          await registeredOfficeService.subscribeStandalone(order.founderId, tier);
+        }
+        await storage.createAuditLog({
+          actorUserId: order.founderId,
+          action: 'registered_office_activated_sku',
+          entityType: 'registered_office_subscription',
+          entityId: `${serviceType}_order_${order.id}`,
+          details: { tier, orderId: order.id, sku: serviceType, applicationId: order.applicationId },
+        });
+        await storage.createNotification({
+          userId: order.founderId,
+          title: 'Registered Office Activated',
+          message: `Your registered office subscription (${tier === 'office_plus_mail' ? 'Office + Mail' : 'Office Only'}) is now active for one year.`,
+          type: 'success',
+          linkUrl: '/founder/registered-office',
+        });
+        console.log(`[Paystack Webhook] Registered office (${tier}) activated for founder ${order.founderId}`);
+      } catch (err) {
+        console.error(`[Paystack Webhook] Error activating registered office for ${serviceType}:`, err);
+      }
+    }
+
     if (serviceType === 'VERIFY') {
       try {
         await db.update(users)

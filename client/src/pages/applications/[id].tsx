@@ -35,6 +35,7 @@ import {
   Hash,
   Shield,
   MapPin,
+  type LucideIcon,
 } from "lucide-react";
 import type { CompanyApplication, ApplicationChecklistItem, Payment, ClarificationRequest } from "@shared/schema";
 
@@ -87,9 +88,9 @@ interface Product {
   metadata: Record<string, unknown> | null;
 }
 
-const ADD_ON_SKUS = ["TIN", "SCUML", "TM"] as const;
+const ADD_ON_SKUS = ["TIN", "SCUML", "TM", "OFFICE_ONLY", "OFFICE_PLUS_MAIL"] as const;
 
-const ADD_ON_META: Record<string, { icon: any; label: string; description: string; benefit: string }> = {
+const ADD_ON_META: Record<string, { icon: LucideIcon; label: string; description: string; benefit: string; badge?: string }> = {
   TIN: {
     icon: Hash,
     label: "TIN Registration",
@@ -108,22 +109,21 @@ const ADD_ON_META: Record<string, { icon: any; label: string; description: strin
     description: "Protect your brand name with a registered trademark. Covers both stages of the trademark process.",
     benefit: "Full brand name protection",
   },
+  OFFICE_ONLY: {
+    icon: MapPin,
+    label: "Registered Office (Address Only)",
+    description: "Use our prestigious Ikoyi, Lagos address as your official CAC-registered office address.",
+    benefit: "Annual subscription",
+    badge: "/year",
+  },
+  OFFICE_PLUS_MAIL: {
+    icon: Mail,
+    label: "Registered Office + Mail Handling",
+    description: "Our Ikoyi address plus mail receiving, scanning, and forwarding. Ideal for remote founders.",
+    benefit: "Annual subscription",
+    badge: "/year",
+  },
 };
-
-const REGISTERED_OFFICE_TIERS = [
-  {
-    id: "office_only",
-    label: "Registered Office — Office Only",
-    description: "Use our Lagos address as your official CAC-registered address. Mail is held securely.",
-    priceDisplay: "₦75,000/year",
-  },
-  {
-    id: "office_plus_mail",
-    label: "Registered Office — Office + Mail Handling",
-    description: "Our address plus mail opening, scanning, and forwarding. Perfect for remote founders.",
-    priceDisplay: "₦150,000/year",
-  },
-];
 
 const statusTimeline = [
   { status: "draft", label: "Draft", icon: FileText },
@@ -167,9 +167,18 @@ export default function ApplicationDetailsPage() {
   );
 
   const toggleAddOn = (sku: string) => {
-    setSelectedAddOns(prev =>
-      prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku]
-    );
+    if (sku === "OFFICE_ONLY" || sku === "OFFICE_PLUS_MAIL") {
+      const sibling = sku === "OFFICE_ONLY" ? "OFFICE_PLUS_MAIL" : "OFFICE_ONLY";
+      setSelectedAddOns(prev =>
+        prev.includes(sku)
+          ? prev.filter(s => s !== sku)
+          : [...prev.filter(s => s !== sibling), sku]
+      );
+    } else {
+      setSelectedAddOns(prev =>
+        prev.includes(sku) ? prev.filter(s => s !== sku) : [...prev, sku]
+      );
+    }
   };
 
   const selectedAddOnProducts = addOnProducts.filter(p => selectedAddOns.includes(p.sku));
@@ -232,9 +241,8 @@ export default function ApplicationDetailsPage() {
   const handlePayment = () => {
     if (!applicationId) return;
     const params = new URLSearchParams({ applicationId });
-    if (selectedAddOns.length > 0) {
-      params.set("initSkus", selectedAddOns.join(","));
-    }
+    const allSkus = ["CAC_1M", ...selectedAddOns];
+    params.set("initSkus", allSkus.join(","));
     setLocation(`/founder/checkout?${params.toString()}`);
   };
 
@@ -602,7 +610,7 @@ export default function ApplicationDetailsPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-sm font-semibold">₦{(p.priceNgn / 100).toLocaleString()}</span>
+                            <span className="text-sm font-semibold">₦{(p.priceNgn / 100).toLocaleString()}{meta?.badge ?? ""}</span>
                             {isSelected ? (
                               <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center" data-testid={`addon-selected-${p.sku}`}>
                                 <X className="h-3 w-3 text-primary-foreground" />
@@ -621,29 +629,6 @@ export default function ApplicationDetailsPage() {
                     );
                   })}
 
-                  <div className="pt-1">
-                    <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5" />
-                      Registered Office Address (separate setup)
-                    </p>
-                    {REGISTERED_OFFICE_TIERS.map(tier => (
-                      <div key={tier.id} className="rounded-lg border border-dashed p-3 mb-2" data-testid={`addon-info-${tier.id}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium">{tier.label}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">{tier.description}</p>
-                          </div>
-                          <span className="text-sm font-semibold shrink-0">{tier.priceDisplay}</span>
-                        </div>
-                      </div>
-                    ))}
-                    <Link href="/founder/registered-office">
-                      <Button variant="outline" size="sm" className="w-full text-xs" data-testid="button-setup-registered-office">
-                        <MapPin className="h-3 w-3 mr-1.5" />
-                        Set Up Registered Office
-                      </Button>
-                    </Link>
-                  </div>
                 </CardContent>
               </Card>
             )}

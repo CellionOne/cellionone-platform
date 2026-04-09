@@ -205,6 +205,7 @@ export default function LawyerApplicationDetail() {
               applicationId={parseInt(applicationId!)} 
               checklist={checklist}
               documents={documents || []}
+              operatingAddress={application.operatingAddress}
             />
           </TabsContent>
 
@@ -424,16 +425,16 @@ function OverviewTab({
                 </p>
               </div>
             ) : null}
-            {(application as any).operatingAddress && (
+            {application.operatingAddress && (
               <div className="mt-3 pt-3 border-t">
                 <Label className="text-muted-foreground text-sm">Operating Address</Label>
                 <p className="font-medium">
                   {[
-                    (application as any).operatingAddress.line1,
-                    (application as any).operatingAddress.line2,
-                    (application as any).operatingAddress.city,
-                    (application as any).operatingAddress.state,
-                    (application as any).operatingAddress.postalCode,
+                    application.operatingAddress.line1,
+                    application.operatingAddress.line2,
+                    application.operatingAddress.city,
+                    application.operatingAddress.state,
+                    application.operatingAddress.postalCode,
                   ].filter(Boolean).join(", ")}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
@@ -596,11 +597,13 @@ function DocumentFileDetails({
 function DocumentsTab({ 
   applicationId, 
   checklist,
-  documents 
+  documents,
+  operatingAddress,
 }: { 
   applicationId: number;
   checklist: ApplicationChecklistItem[];
   documents: DocumentFile[];
+  operatingAddress?: { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string; } | null;
 }) {
   const { toast } = useToast();
   const [selectedDoc, setSelectedDoc] = useState<ApplicationChecklistItem | null>(null);
@@ -696,6 +699,20 @@ function DocumentsTab({
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
+                        {item.key === "address_proof" && operatingAddress && (
+                          <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800" data-testid="review-dialog-operating-address">
+                            <MapPin className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Declared Operating Address</p>
+                              <p className="text-sm text-amber-700 dark:text-amber-300">
+                                {[operatingAddress.line1, operatingAddress.line2, operatingAddress.city, operatingAddress.state, operatingAddress.postalCode].filter(Boolean).join(", ")}
+                              </p>
+                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                                Verify the uploaded document matches this address.
+                              </p>
+                            </div>
+                          </div>
+                        )}
                         {(() => {
                           const docFile = getDocumentFile(item);
                           return (

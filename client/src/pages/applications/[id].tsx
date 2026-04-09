@@ -37,6 +37,7 @@ import {
   MapPin,
   XCircle,
   Navigation,
+  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import type { CompanyApplication, ApplicationChecklistItem, Payment, ClarificationRequest } from "@shared/schema";
@@ -528,6 +529,11 @@ export default function ApplicationDetailsPage() {
                           {application.addressVerificationStatus === "agent_assigned" && (
                             <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400" data-testid="badge-address-agent-assigned">
                               <Navigation className="h-3 w-3" /> Field agent assigned — visit in progress
+                            </span>
+                          )}
+                          {application.addressVerificationStatus === "failed" && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-700 dark:text-gray-400 bg-gray-100 dark:bg-gray-800/50 px-2 py-0.5 rounded-full" data-testid="badge-address-failed">
+                              <AlertTriangle className="h-3 w-3" /> Address verification could not be completed — our team will be in touch
                             </span>
                           )}
                         </div>

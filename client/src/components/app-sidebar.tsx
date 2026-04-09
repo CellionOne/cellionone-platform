@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -213,12 +213,26 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
     { title: "Service Selection", url: "/welcome", icon: LayoutGrid },
   ];
 
-  const initialOpenGroups = founderGroups.reduce<Record<string, boolean>>((acc, g) => {
-    acc[g.label] = primaryIntent ? g.activeIntents.includes(primaryIntent) : false;
-    return acc;
-  }, {});
+  const computeOpenGroups = (intent: Intent | null) =>
+    founderGroups.reduce<Record<string, boolean>>((acc, g) => {
+      acc[g.label] = intent ? g.activeIntents.includes(intent) : false;
+      return acc;
+    }, {});
 
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(initialOpenGroups);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(
+    () => computeOpenGroups(primaryIntent)
+  );
+
+  useEffect(() => {
+    setOpenGroups((prev) => {
+      const next = { ...prev };
+      founderGroups.forEach((g) => {
+        const shouldBeOpen = primaryIntent ? g.activeIntents.includes(primaryIntent) : false;
+        if (shouldBeOpen) next[g.label] = true;
+      });
+      return next;
+    });
+  }, [primaryIntent]);
 
   const toggleGroup = (label: string) => {
     setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
@@ -304,6 +318,19 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
               <NavItemButton key={item.title} item={item} location={location} />
             ))}
           </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <div className="px-2">
+            <Button asChild className="w-full" data-testid="button-new-application">
+              <Link href="/applications/new">
+                <FileText className="h-4 w-4 mr-2" />
+                New Application
+              </Link>
+            </Button>
+          </div>
         </SidebarGroupContent>
       </SidebarGroup>
     </SidebarContent>

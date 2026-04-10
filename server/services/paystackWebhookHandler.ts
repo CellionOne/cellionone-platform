@@ -488,24 +488,12 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             linkUrl: '/founder/existing-company',
           });
 
-          // ── Automated Verification Pipeline ─────────────────────────────────
-          // 1. Authoritative KYB call (Smile ID Job Type 7) to re-confirm company status
-          // 2. TIN verification against FIRS database (if TIN provided)
-          // 3. Director BVN + NIN + AML/sanctions checks (encrypted PII decrypted in-flight)
-          // 4. Auto-approve if all checks pass; otherwise flag for human review
-          // ─────────────────────────────────────────────────────────────────────
-
-          // Typed director model — avoids `any` casts throughout the pipeline
+          // Post-payment pipeline: KYB (Smile ID Job Type 7) → TIN (FIRS) → director BVN/NIN/AML → auto-approve/flag
           interface PipelineDirector {
-            name: string;
-            email?: string;
-            role?: string;
-            bvn?: string;          // AES-256-GCM encrypted
-            nin?: string;          // AES-256-GCM encrypted
-            bvnVerified?: boolean;
-            ninVerified?: boolean;
-            amlIsHit?: boolean;
-            amlHitTypes?: string[];
+            name: string; email?: string; role?: string;
+            bvn?: string; nin?: string; // AES-256-GCM encrypted
+            bvnVerified?: boolean; ninVerified?: boolean;
+            amlIsHit?: boolean; amlHitTypes?: string[];
             biometricStatus?: string;
           }
 
@@ -513,9 +501,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             const { verifyBusiness, verifyTin, verifyBvn, verifyNin, performAmlCheck } = await import('./smileIdService');
             const { decryptField } = await import('./encryptionService');
 
-            // ── Step 1: Authoritative KYB ───────────────────────────────────
-            // Re-run KYB post-payment to confirm the company is still active in the
-            // live CAC registry at the point of transaction (not just at form submission).
+            // Step 1: Authoritative KYB — re-run post-payment to confirm company still active in CAC registry
             let kybPassed = false;
             let kybResultText = 'No KYB data';
             let freshKybResult: Record<string, unknown> | undefined;
@@ -582,7 +568,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               })
               .where(eq(companyProfiles.id, profile.id));
 
-            // ── Step 3: Director BVN + NIN + AML ────────────────────────────
+            // Step 3: Director BVN/NIN + AML — decrypts PII in-flight, never logs plaintext
             const directors: PipelineDirector[] = (profile.directors as PipelineDirector[] | null) || [];
             const updatedDirectors: PipelineDirector[] = [...directors];
 
@@ -676,8 +662,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               }
             }
 
-            // ── Step 4: Auto-approve decision ────────────────────────────────
-            // Build per-director report (typed — no any casts)
+            // Step 4: Build verification report and auto-approve / flag for review
             const directorsReport = updatedDirectors.map(dir => {
               const hasBvn = !!dir.bvn;
               const hasNin = !!dir.nin;
@@ -690,16 +675,13 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               };
             });
 
-            // Director pass criteria:
-            // • At least one of (BVN provided AND verified) OR (NIN provided AND NIN verified)
-            //   — prevents false positives where one ID fails but the other is not provided
-            // • AML must not have a hit
-            const directorsPass = updatedDirectors.every(dir => {
+            // Directors pass: must have ≥1 director AND each must have ≥1 verified ID (BVN or NIN) AND no AML hit.
+            // Empty array is an explicit fail — guards against API bypass reaching the webhook.
+            const directorsPass = updatedDirectors.length > 0 && updatedDirectors.every(dir => {
               const bvnPassedCheck = !!dir.bvn && dir.bvnVerified === true;
               const ninPassedCheck = !!dir.nin && dir.ninVerified === true;
-              const hasAtLeastOneVerifiedId = bvnPassedCheck || ninPassedCheck;
               const amlOk = dir.amlIsHit !== true;
-              return hasAtLeastOneVerifiedId && amlOk;
+              return (bvnPassedCheck || ninPassedCheck) && amlOk;
             });
 
             const allPass = kybPassed && tinPassed && directorsPass;

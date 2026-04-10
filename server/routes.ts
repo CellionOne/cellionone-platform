@@ -7749,9 +7749,22 @@ Important guidelines:
         }
       }
 
+      // Server-side director enforcement — mirrors UI gating; prevents API bypass
+      const directorList = data.directors || [];
+      if (directorList.length === 0) {
+        return res.status(400).json({ message: "At least one director is required", code: "DIRECTOR_REQUIRED" });
+      }
+      const directorMissingId = directorList.find(d => !d.bvn?.trim() && !d.nin?.trim());
+      if (directorMissingId) {
+        return res.status(400).json({
+          message: `Director "${directorMissingId.name}" must have at least a BVN or NIN for automated verification`,
+          code: "DIRECTOR_ID_REQUIRED",
+        });
+      }
+
       // Encrypt BVN/NIN in director records before storing — PII must not be stored in plaintext
       const { encryptField } = await import('./services/encryptionService');
-      const encryptedDirectors = (data.directors || []).map(d => ({
+      const encryptedDirectors = directorList.map(d => ({
         name: d.name,
         role: d.role,
         email: d.email,
@@ -7915,11 +7928,22 @@ Important guidelines:
         return res.status(400).json({ message: "Profile cannot be checked out in its current state" });
       }
 
-      // Documents are optional for checkout — they go into the secure vault for bank/legal use.
-      // The mandatory verification is fully automated (KYB + TIN + BVN/NIN + AML) via the pipeline.
+      // Server-side director enforcement at checkout — defence in depth (profile creation already validates)
+      const directors = (profile.directors as { name: string; bvn?: string; nin?: string }[]) || [];
+      if (directors.length === 0) {
+        return res.status(400).json({ message: "At least one director with BVN or NIN is required before checkout", code: "DIRECTOR_REQUIRED" });
+      }
+      const checkoutDirMissingId = directors.find(d => !d.bvn && !d.nin);
+      if (checkoutDirMissingId) {
+        return res.status(400).json({
+          message: `Director "${checkoutDirMissingId.name}" must have BVN or NIN for automated verification`,
+          code: "DIRECTOR_ID_REQUIRED",
+        });
+      }
+
+      // Documents are optional — they go into the secure vault for bank/legal use.
 
       // Pricing: ₦15,000 base (covers up to 2 directors) + ₦2,500 per additional director beyond 2
-      const directors = (profile.directors as { name: string; bvn?: string; nin?: string }[]) || [];
       const extraDirectors = Math.max(0, directors.length - 2);
       const items: { sku: string; quantity?: number }[] = [{ sku: "EXISTING_CO_VERIFY", quantity: 1 }];
       if (extraDirectors > 0) {

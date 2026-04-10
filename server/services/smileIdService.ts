@@ -569,13 +569,14 @@ export async function verifyBusiness(
     };
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
-    console.error('[SmileID] KYB error:', err);
+    const axiosData = (error as any)?.response?.data;
+    console.error('[SmileID] KYB error:', err.message, axiosData ? JSON.stringify(axiosData) : '');
     await storage.createAuditLog({
       actorUserId: userId,
       action: 'smile_id_kyb_error',
       entityType: 'company_profile',
       entityId: userId,
-      details: { rcNumber: cleanRc, error: err.message },
+      details: { rcNumber: cleanRc, error: err.message, responseData: axiosData },
     });
     return { found: false, error: err.message };
   }

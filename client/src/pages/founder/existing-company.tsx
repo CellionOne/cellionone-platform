@@ -334,7 +334,10 @@ export default function ExistingCompanyPage() {
 
   // ── Step Validation ──────────────────────────────────────────────────────────
 
-  const canProceedStep2 = companyName.trim().length >= 2 && (rcInput.trim() || kybResult?.rcNumber || "").length >= 2 && operatingAddress.line1.trim() && operatingAddress.city.trim() && operatingAddress.state.trim();
+  const operatingAddressValid = sameAddress
+    ? !!(registeredAddress.line1.trim() || operatingAddress.line1.trim()) // just needs some address
+    : !!(operatingAddress.line1.trim() && operatingAddress.city.trim() && operatingAddress.state.trim());
+  const canProceedStep2 = companyName.trim().length >= 2 && (rcInput.trim() || kybResult?.rcNumber || "").length >= 2 && operatingAddressValid;
   const uploadedKeys = new Set(uploadedDocs.map(d => d.key));
   const directorsWithId = directors.filter(d => d.bvn.trim() || d.nin.trim());
   const directorsWithoutId = directors.filter(d => !d.bvn.trim() && !d.nin.trim());

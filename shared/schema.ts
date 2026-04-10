@@ -31,6 +31,9 @@ export const founderProfiles = pgTable("founder_profiles", {
   signaturePath: varchar("signature_path", { length: 500 }),
   profileCompletion: integer("profile_completion").default(0),
   isProfileComplete: boolean("is_profile_complete").default(false),
+  kybPrefilled: boolean("kyb_prefilled").default(false),
+  kybSourceCompanyProfileId: integer("kyb_source_company_profile_id"),
+  lockedFields: json("locked_fields").$type<string[]>(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -131,6 +134,9 @@ export const identityVerifications = pgTable("identity_verifications", {
   idDocFileId: integer("id_doc_file_id"),
   livenessScore: integer("liveness_score"),
   notes: text("notes"),
+  identitySource: varchar("identity_source", { length: 50 }), // kyb_pipeline, manual, kyc_service
+  bvnNinVerified: boolean("bvn_nin_verified").default(false), // true when BVN/NIN confirmed before biometric
+  smileJobId: varchar("smile_job_id", { length: 255 }), // job ID for free biometric submission
   verifiedAt: timestamp("verified_at"),
   expiresAt: timestamp("expires_at"), // verification expires after 1 year
   createdAt: timestamp("created_at").defaultNow(),
@@ -822,6 +828,7 @@ export const directorBiometricInvites = pgTable("director_biometric_invites", {
   directorIndex: integer("director_index").notNull(),
   directorName: varchar("director_name", { length: 255 }).notNull(),
   directorEmail: varchar("director_email", { length: 255 }),
+  founderUserId: varchar("founder_user_id", { length: 255 }), // set when invite is for the founder's own identity verification
   smileJobId: varchar("smile_job_id", { length: 255 }),
   status: varchar("status", { length: 50 }).default("pending"), // pending | in_progress | completed | failed | expired
   expiresAt: timestamp("expires_at").notNull(),

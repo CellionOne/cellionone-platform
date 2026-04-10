@@ -49,6 +49,9 @@ import {
   Eraser,
   Info,
   ArrowRight,
+  Lock,
+  Sparkles,
+  X,
 } from "lucide-react";
 import { LiveCaptureWidget } from "@/components/live-capture-widget";
 import { InvitationBanner } from "@/components/invitation-banner";
@@ -108,6 +111,9 @@ interface PersonalProfile {
   profileCompletion: number;
   isProfileComplete: boolean;
   isVerified?: boolean;
+  kybPrefilled?: boolean;
+  kybSourceCompanyProfileId?: number | null;
+  lockedFields?: string[];
 }
 
 function ProfileBottomCTA() {
@@ -133,6 +139,38 @@ function ProfileBottomCTA() {
   );
 }
 
+function KybPrefilledBanner() {
+  const [dismissed, setDismissed] = useState(false);
+  const { data: profile } = useQuery<PersonalProfile>({ queryKey: ["/api/profile/personal"] });
+
+  if (!profile?.kybPrefilled || dismissed) return null;
+
+  const lockedCount = profile.lockedFields?.length ?? 0;
+  if (lockedCount === 0) return null;
+
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 dark:bg-primary/10 px-4 py-3" data-testid="banner-kyb-prefilled">
+      <Sparkles className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+      <div className="flex-1">
+        <p className="text-sm font-medium text-foreground">
+          Profile pre-filled from your verified company registration
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {lockedCount} field{lockedCount !== 1 ? "s were" : " was"} filled in automatically using data verified during your CAC registration and BVN/NIN check. These fields are locked to preserve your verified status.
+        </p>
+      </div>
+      <button
+        onClick={() => setDismissed(true)}
+        className="text-muted-foreground hover:text-foreground transition-colors"
+        data-testid="button-dismiss-kyb-banner"
+        aria-label="Dismiss"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 export default function PersonalProfilePage() {
   const { user } = useAuth();
   const roles = user?.roles || [];
@@ -146,6 +184,7 @@ export default function PersonalProfilePage() {
     >
       <div className="max-w-3xl mx-auto space-y-6 p-4 overflow-y-auto h-full">
         <InvitationBanner />
+        <KybPrefilledBanner />
         <ProfileHeader />
         <ProfileForm />
         <Separator />
@@ -224,6 +263,14 @@ function ProfileHeader() {
   );
 }
 
+function LockedFieldBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 border border-primary/20 rounded px-1.5 py-0.5 ml-2">
+      <Lock className="h-3 w-3" /> KYB-verified
+    </span>
+  );
+}
+
 function ProfileForm() {
   const { toast } = useToast();
   const [idDocUploading, setIdDocUploading] = useState(false);
@@ -257,6 +304,8 @@ function ProfileForm() {
   const { data: profile, isLoading } = useQuery<PersonalProfile>({
     queryKey: ["/api/profile/personal"],
   });
+
+  const isLocked = (fieldKey: string) => (profile?.lockedFields ?? []).includes(fieldKey);
 
   const form = useForm<ProfileFormData>({
     resolver: zodResolver(profileFormSchema),
@@ -342,9 +391,18 @@ function ProfileForm() {
                 name="fullName"
                 render={({ field }) => (
                   <FormItem className="md:col-span-2">
-                    <FormLabel>Full Legal Name</FormLabel>
+                    <FormLabel className="flex items-center">
+                      Full Legal Name
+                      {isLocked("fullName") && <LockedFieldBadge />}
+                    </FormLabel>
                     <FormControl>
-                      <Input placeholder="As on government ID" data-testid="input-full-name" {...field} />
+                      <Input
+                        placeholder="As on government ID"
+                        data-testid="input-full-name"
+                        readOnly={isLocked("fullName")}
+                        className={isLocked("fullName") ? "bg-muted/60 cursor-not-allowed" : ""}
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -356,9 +414,19 @@ function ProfileForm() {
                 name="phone"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Phone Number</FormLabel>
+                    <FormLabel className="flex items-center">
+                      Phone Number
+                      {isLocked("phone") && <LockedFieldBadge />}
+                    </FormLabel>
                     <FormControl>
-                      <Input type="tel" placeholder="+234 801 234 5678" data-testid="input-phone" {...field} />
+                      <Input
+                        type="tel"
+                        placeholder="+234 801 234 5678"
+                        data-testid="input-phone"
+                        readOnly={isLocked("phone")}
+                        className={isLocked("phone") ? "bg-muted/60 cursor-not-allowed" : ""}
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -440,9 +508,18 @@ function ProfileForm() {
                   name="addressLine1"
                   render={({ field }) => (
                     <FormItem className="md:col-span-2">
-                      <FormLabel>Address Line 1</FormLabel>
+                      <FormLabel className="flex items-center">
+                        Address Line 1
+                        {isLocked("addressLine1") && <LockedFieldBadge />}
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="Street address" data-testid="input-address1" {...field} />
+                        <Input
+                          placeholder="Street address"
+                          data-testid="input-address1"
+                          readOnly={isLocked("addressLine1")}
+                          className={isLocked("addressLine1") ? "bg-muted/60 cursor-not-allowed" : ""}
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -482,19 +559,31 @@ function ProfileForm() {
                   name="state"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>State</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-state">
-                            <SelectValue placeholder="Select state" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {NIGERIAN_STATES.map((s) => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <FormLabel className="flex items-center">
+                        State
+                        {isLocked("state") && <LockedFieldBadge />}
+                      </FormLabel>
+                      {isLocked("state") ? (
+                        <Input
+                          value={field.value}
+                          readOnly
+                          className="bg-muted/60 cursor-not-allowed"
+                          data-testid="input-state-locked"
+                        />
+                      ) : (
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-state">
+                              <SelectValue placeholder="Select state" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {NIGERIAN_STATES.map((s) => (
+                              <SelectItem key={s} value={s}>{s}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}

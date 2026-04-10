@@ -1656,6 +1656,9 @@ export async function registerRoutes(
         profileCompletion: profile.profileCompletion,
         isProfileComplete: profile.isProfileComplete,
         isVerified: userRow?.isIdentityVerified ?? false,
+        kybPrefilled: profile.kybPrefilled ?? false,
+        kybSourceCompanyProfileId: profile.kybSourceCompanyProfileId ?? null,
+        lockedFields: (profile.lockedFields as string[] | null) ?? [],
       });
     } catch (error) {
       console.error("Error getting personal profile:", error);
@@ -2414,10 +2417,138 @@ export async function registerRoutes(
         }
       }
       console.log(`[BiometricCallback] Job ${smileJobId}: ${passed ? 'PASS' : 'FAIL'} for director "${invite.directorName}"`);
+
+      // If the invite is linked to a founder's personal identity verification, update their record
+      if (invite.founderUserId) {
+        const [idVRec] = await db.select().from(identityVerifications)
+          .where(eq(identityVerifications.founderUserId, invite.founderUserId));
+        if (idVRec && idVRec.identitySource === 'kyb_pipeline') {
+          if (passed) {
+            const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+            await db.update(identityVerifications).set({
+              status: 'verified',
+              verifiedAt: new Date(),
+              expiresAt,
+              updatedAt: new Date(),
+            }).where(eq(identityVerifications.id, idVRec.id));
+            // Mark user as identity verified in the users table
+            await db.update(usersTable).set({
+              isIdentityVerified: true,
+              identityVerifiedAt: new Date(),
+              updatedAt: new Date(),
+            }).where(eq(usersTable.id, invite.founderUserId));
+            console.log(`[BiometricCallback] Founder identity verified for user ${invite.founderUserId}`);
+          } else {
+            await db.update(identityVerifications).set({
+              status: 'rejected',
+              notes: `Biometric liveness check failed — ${resultText}`,
+              updatedAt: new Date(),
+            }).where(eq(identityVerifications.id, idVRec.id));
+          }
+        }
+      }
+
       res.status(200).json({ received: true });
     } catch (err: any) {
       console.error('[BiometricCallback] Error:', err.message);
       res.status(500).json({ message: "Callback processing failed" });
+    }
+  });
+
+  // POST: founder submits biometric selfie for FREE (KYB-pipeline verified path — no payment required)
+  app.post("/api/founder/identity-verification/biometric", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const { selfieImageBase64 } = req.body as { selfieImageBase64?: string };
+      if (!selfieImageBase64) return res.status(400).json({ message: "selfieImageBase64 is required" });
+
+      // Only founders whose identity was pre-verified via KYB pipeline may use this free endpoint
+      const [idVerification] = await db.select().from(identityVerifications)
+        .where(eq(identityVerifications.founderUserId, userId));
+
+      if (!idVerification || idVerification.identitySource !== 'kyb_pipeline' || !idVerification.bvnNinVerified) {
+        return res.status(403).json({
+          message: "This endpoint is only available for founders whose identity was pre-verified during company registration. Please use the paid verification flow.",
+        });
+      }
+      if (idVerification.status === 'verified') {
+        return res.status(409).json({ message: "Your identity is already verified." });
+      }
+      if (idVerification.status === 'pending') {
+        return res.status(409).json({ message: "Your biometric submission is already being processed. Please wait." });
+      }
+
+      const isProd = process.env.NODE_ENV === 'production';
+      const PARTNER_ID = process.env.SMILE_ID_PARTNER_ID || '';
+      const API_KEY = process.env.SMILE_ID_API_KEY || '';
+
+      if (!PARTNER_ID || !API_KEY) {
+        if (isProd) return res.status(503).json({ message: "Identity verification service is temporarily unavailable." });
+        // Dev mode: mark as verified immediately (no Smile ID)
+        const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+        await db.update(identityVerifications).set({
+          status: 'verified', verifiedAt: new Date(), expiresAt, updatedAt: new Date(),
+        }).where(eq(identityVerifications.founderUserId, userId));
+        await db.update(usersTable).set({
+          isIdentityVerified: true, identityVerifiedAt: new Date(), updatedAt: new Date(),
+        }).where(eq(usersTable.id, userId));
+        return res.json({ success: true, message: "Biometric received — identity verified (dev mode)." });
+      }
+
+      try {
+        const smileIdentityCore = require('smile-identity-core');
+        const SID_SERVER = process.env.SMILE_ID_SERVER || '0';
+        const WebApi = smileIdentityCore.WebApi;
+        const callbackUrl = `${req.protocol}://${req.get('host')}/api/smile-id/biometric-callback`;
+        const connection = new WebApi(PARTNER_ID, callbackUrl, API_KEY, SID_SERVER);
+        const smileJobId = `founder-bio-${userId}-${Date.now()}`;
+        const partnerParams = { job_id: smileJobId, user_id: userId, job_type: 4 };
+        const idInfo = { country: 'NG', entered: true };
+        const images = [{ image_type_id: 2, image: selfieImageBase64 }];
+        const options = { return_job_status: false, return_image_links: false };
+        await connection.submit_job(partnerParams, images, idInfo, options);
+
+        // Create a director_biometric_invite record so the callback can resolve it back to this founder
+        const inviteToken = require('crypto').randomBytes(48).toString('hex');
+        const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+        // Find the linked company profile id
+        const companyProfileId = (await db.select({ id: companyProfiles.id })
+          .from(companyProfiles).where(eq(companyProfiles.founderId, userId)).limit(1))[0]?.id || 0;
+
+        await db.insert(directorBiometricInvites).values({
+          token: inviteToken,
+          companyProfileId,
+          directorIndex: 0,
+          directorName: 'Founder',
+          directorEmail: null,
+          status: 'pending',
+          smileJobId,
+          expiresAt,
+          founderUserId: userId,
+        } as any);
+
+        await db.update(identityVerifications).set({
+          status: 'pending',
+          smileJobId,
+          updatedAt: new Date(),
+        }).where(eq(identityVerifications.founderUserId, userId));
+
+        await storage.createAuditLog({
+          actorUserId: userId,
+          action: 'founder_free_biometric_submitted',
+          entityType: 'identity_verification',
+          entityId: userId,
+          details: { smileJobId, identitySource: 'kyb_pipeline' },
+        });
+
+        return res.json({ success: true, message: "Biometric submitted. You will be notified when verification is complete." });
+      } catch (smileErr: any) {
+        console.error(`[FreeBiometric] Smile ID submission failed: ${smileErr.message}`);
+        return res.status(500).json({ message: "Biometric submission failed. Please try again." });
+      }
+    } catch (err: any) {
+      console.error('[FreeBiometric] Error:', err.message);
+      res.status(500).json({ message: "Failed to submit biometric" });
     }
   });
 
@@ -3019,6 +3150,17 @@ export async function registerRoutes(
 
       const founderVerified = !!user?.isIdentityVerified;
 
+      // Fetch identity verification record to expose KYB pipeline status
+      const [idVerification] = await db.select({
+        status: identityVerifications.status,
+        identitySource: identityVerifications.identitySource,
+        bvnNinVerified: identityVerifications.bvnNinVerified,
+      }).from(identityVerifications).where(eq(identityVerifications.founderUserId, userId));
+
+      const isKybPipelineVerified = idVerification?.identitySource === 'kyb_pipeline' &&
+        idVerification?.bvnNinVerified === true &&
+        (idVerification?.status === 'in_progress' || idVerification?.status === 'pending');
+
       // Include ALL declared team members (draft/pending/accepted) scoped to this application
       const scopedPeople = applicationId
         ? allCompanyPeople.filter(p => p.applicationId === applicationId)
@@ -3033,7 +3175,9 @@ export async function registerRoutes(
         inviteStatus: p.inviteStatus,
       }));
 
-      const unverifiedCount = (founderVerified ? 0 : 1) + people.filter(p => !p.isVerified).length;
+      // KYB-pipeline founders don't owe a verification fee — they just need the biometric selfie
+      const founderNeedsFee = !founderVerified && !isKybPipelineVerified;
+      const unverifiedCount = (founderNeedsFee ? 1 : 0) + people.filter(p => !p.isVerified).length;
 
       res.json({
         founderVerified,
@@ -3044,6 +3188,9 @@ export async function registerRoutes(
         founderVerificationStatus: verificationStatus.status,
         founderExpiresAt: verificationStatus.expiresAt,
         founderDaysUntilExpiry: verificationStatus.daysUntilExpiry,
+        isKybPipelineVerified,
+        identitySource: idVerification?.identitySource ?? null,
+        bvnNinVerified: idVerification?.bvnNinVerified ?? false,
       });
     } catch (error) {
       console.error("Error fetching verification info:", error);

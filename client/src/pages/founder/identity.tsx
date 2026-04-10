@@ -1,5 +1,6 @@
+import { useState, useRef, useCallback } from "react";
 import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,8 +19,13 @@ import {
   AlertTriangle,
   CalendarClock,
   Camera,
+  Sparkles,
+  Lock,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface VerificationInfo {
   founderVerified: boolean;
@@ -31,6 +37,9 @@ interface VerificationInfo {
   founderVerificationStatus?: string;
   founderExpiresAt?: string | null;
   founderDaysUntilExpiry?: number | null;
+  isKybPipelineVerified?: boolean;
+  identitySource?: string | null;
+  bvnNinVerified?: boolean;
 }
 
 function formatNgn(kobo: number): string {
@@ -41,8 +50,121 @@ function formatRole(role: string): string {
   return role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function FreeBiometricCapture({ onSuccess }: { onSuccess: () => void }) {
+  const { toast } = useToast();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [streaming, setStreaming] = useState(false);
+  const [captured, setCaptured] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+
+  const startCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+        setStreaming(true);
+      }
+    } catch {
+      toast({ title: "Camera error", description: "Unable to access camera. Please allow camera permissions and try again.", variant: "destructive" });
+    }
+  }, [toast]);
+
+  const capture = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const ctx = canvasRef.current.getContext("2d")!;
+    canvasRef.current.width = videoRef.current.videoWidth;
+    canvasRef.current.height = videoRef.current.videoHeight;
+    ctx.drawImage(videoRef.current, 0, 0);
+    const dataUrl = canvasRef.current.toDataURL("image/jpeg", 0.85);
+    setCaptured(dataUrl);
+    // Stop camera stream
+    const stream = videoRef.current.srcObject as MediaStream | null;
+    stream?.getTracks().forEach(t => t.stop());
+    setStreaming(false);
+  }, []);
+
+  const biometricMutation = useMutation({
+    mutationFn: async (base64: string) => {
+      return apiRequest("POST", "/api/founder/identity-verification/biometric", {
+        selfieImageBase64: base64,
+      });
+    },
+    onSuccess: () => {
+      setSubmitted(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/checkout/verification-info"] });
+      toast({ title: "Biometric submitted!", description: "Your selfie is being processed. We'll notify you when verification is complete." });
+      onSuccess();
+    },
+    onError: (err: any) => {
+      toast({ title: "Submission failed", description: err?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const submit = () => {
+    if (!captured) return;
+    // Strip the data URL prefix to get pure base64
+    const base64 = captured.replace(/^data:image\/\w+;base64,/, "");
+    biometricMutation.mutate(base64);
+  };
+
+  if (submitted) {
+    return (
+      <div className="flex items-center gap-3 p-4 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800" data-testid="alert-biometric-submitted">
+        <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+        <div>
+          <p className="text-sm font-medium text-green-700 dark:text-green-400">Selfie submitted — processing</p>
+          <p className="text-xs text-green-600 dark:text-green-500 mt-0.5">You'll receive an email once verification is complete (usually within minutes).</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {!streaming && !captured && (
+        <Button onClick={startCamera} className="w-full" data-testid="button-start-camera">
+          <Camera className="h-4 w-4 mr-2" /> Start Camera
+        </Button>
+      )}
+
+      {streaming && (
+        <div className="space-y-3">
+          <div className="rounded-lg overflow-hidden border border-border bg-black">
+            <video ref={videoRef} className="w-full max-h-64 object-cover" playsInline muted />
+          </div>
+          <p className="text-xs text-muted-foreground text-center">Position your face clearly in the frame, then capture</p>
+          <Button onClick={capture} className="w-full" data-testid="button-capture-selfie">
+            <Camera className="h-4 w-4 mr-2" /> Capture Selfie
+          </Button>
+        </div>
+      )}
+
+      {captured && (
+        <div className="space-y-3">
+          <div className="rounded-lg overflow-hidden border border-border">
+            <img src={captured} alt="Captured selfie" className="w-full max-h-64 object-cover" />
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => { setCaptured(null); startCamera(); }} className="flex-1" data-testid="button-retake-selfie">
+              Retake
+            </Button>
+            <Button onClick={submit} disabled={biometricMutation.isPending} className="flex-1" data-testid="button-submit-selfie">
+              {biometricMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Submitting…</> : "Submit Selfie"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <canvas ref={canvasRef} className="hidden" />
+    </div>
+  );
+}
+
 export default function IdentityVerificationPage() {
   const { user } = useAuth();
+  const [selfieSuccess, setSelfieSuccess] = useState(false);
 
   const { data: verificationInfo, isLoading } = useQuery<VerificationInfo>({
     queryKey: ["/api/checkout/verification-info"],
@@ -55,6 +177,7 @@ export default function IdentityVerificationPage() {
   const founderExpiresAt = verificationInfo?.founderExpiresAt;
   const verificationExpired = verificationInfo?.founderVerificationStatus === "expired";
   const verificationExpiringSoon = founderVerified && daysUntilExpiry !== null && daysUntilExpiry <= 30;
+  const isKybPipelineVerified = verificationInfo?.isKybPipelineVerified ?? false;
 
   function formatExpiryDate(dateStr: string | null | undefined): string {
     if (!dateStr) return "N/A";
@@ -73,6 +196,17 @@ export default function IdentityVerificationPage() {
             Verification is required for all key persons before placing orders
           </p>
         </div>
+
+        {/* KYB pipeline banner — shown when BVN/NIN already verified via company registration */}
+        {!isLoading && isKybPipelineVerified && !founderVerified && !selfieSuccess && (
+          <Alert className="border-primary/40 bg-primary/5 dark:bg-primary/10" data-testid="alert-kyb-pipeline">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <AlertTitle className="text-primary">Your identity is partially verified — one step remaining</AlertTitle>
+            <AlertDescription>
+              Your BVN/NIN and AML check were completed automatically during your company registration. All you need to do is take a quick biometric selfie below — no payment required.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {!isLoading && verificationExpired && (
           <Alert variant="destructive" data-testid="alert-verification-expired">
@@ -119,7 +253,8 @@ export default function IdentityVerificationPage() {
               </div>
             </CardHeader>
           </Card>
-        ) : !isLoading ? (
+        ) : !isLoading && !isKybPipelineVerified ? (
+          /* Standard paid verification path — shown only for non-KYB founders */
           <Card data-testid="card-not-verified">
             <CardHeader>
               <div className="flex items-center gap-3">
@@ -163,8 +298,35 @@ export default function IdentityVerificationPage() {
           </Card>
         ) : null}
 
-        {/* Biometric selfie status — canonical step is on Personal Profile page */}
-        {!isLoading && (
+        {/* Free biometric selfie card for KYB-pipeline founders */}
+        {!isLoading && isKybPipelineVerified && !founderVerified && (
+          <Card className="border-primary/30" data-testid="card-free-biometric">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Camera className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    Biometric Selfie
+                    <Badge variant="outline" className="text-primary border-primary/40 bg-primary/5 text-xs gap-1">
+                      <Lock className="h-3 w-3" /> Free
+                    </Badge>
+                  </CardTitle>
+                  <CardDescription>
+                    Take a quick liveness selfie to complete your identity verification — no payment required
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <FreeBiometricCapture onSuccess={() => setSelfieSuccess(true)} />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Standard biometric selfie status card */}
+        {!isLoading && !isKybPipelineVerified && (
           <Card data-testid="card-biometric-step">
             <CardHeader className="pb-3">
               <div className="flex items-center gap-3">
@@ -225,17 +387,20 @@ export default function IdentityVerificationPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className={`flex items-center justify-between p-3 rounded-lg border ${verificationExpired ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20' : verificationExpiringSoon ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950/20' : 'border-border'}`} data-testid="row-founder-status">
+            <div className={`flex items-center justify-between p-3 rounded-lg border ${verificationExpired ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20' : verificationExpiringSoon ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-900 dark:bg-yellow-950/20' : isKybPipelineVerified && !founderVerified ? 'border-primary/30 bg-primary/5' : 'border-border'}`} data-testid="row-founder-status">
               <div className="flex items-center gap-3">
                 <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                   verificationExpired ? 'bg-red-100 dark:bg-red-900/50' :
                   founderVerified ? 'bg-green-100 dark:bg-green-900/50' :
+                  isKybPipelineVerified ? 'bg-primary/10' :
                   'bg-yellow-100 dark:bg-yellow-900/50'
                 }`}>
                   {verificationExpired ? (
                     <AlertTriangle className="h-4 w-4 text-red-600" />
                   ) : founderVerified ? (
                     <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  ) : isKybPipelineVerified ? (
+                    <Sparkles className="h-4 w-4 text-primary" />
                   ) : (
                     <Clock className="h-4 w-4 text-yellow-600" />
                   )}
@@ -248,14 +413,18 @@ export default function IdentityVerificationPage() {
                       Expires {formatExpiryDate(founderExpiresAt)}
                     </p>
                   )}
+                  {isKybPipelineVerified && !founderVerified && (
+                    <p className="text-xs text-primary/80 mt-0.5">BVN/NIN verified — selfie required to complete</p>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col items-end gap-1">
                 <Badge
-                  variant={verificationExpired ? "destructive" : founderVerified ? "default" : "secondary"}
+                  variant={verificationExpired ? "destructive" : founderVerified ? "default" : isKybPipelineVerified ? "outline" : "secondary"}
+                  className={isKybPipelineVerified && !founderVerified ? "border-primary/40 text-primary" : ""}
                   data-testid="badge-founder-verified"
                 >
-                  {verificationExpired ? "Expired" : founderVerified ? "Verified" : "Pending"}
+                  {verificationExpired ? "Expired" : founderVerified ? "Verified" : isKybPipelineVerified ? "BVN/NIN ✓" : "Pending"}
                 </Badge>
                 {verificationExpiringSoon && !verificationExpired && daysUntilExpiry !== null && (
                   <Badge variant="outline" className="text-yellow-700 border-yellow-400 bg-yellow-50 dark:text-yellow-300 dark:border-yellow-700 dark:bg-yellow-950/30 text-xs" data-testid="badge-founder-expiry-warning">
@@ -315,7 +484,11 @@ export default function IdentityVerificationPage() {
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-                <span>The verification fee is {verificationInfo?.verificationFeePerPerson ? formatNgn(verificationInfo.verificationFeePerPerson) : "a one-time fee"} per person, added to your checkout</span>
+                <span>Founders who registered an existing company have their BVN/NIN verified automatically — the biometric selfie is free</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                <span>Other founders pay a one-time {verificationInfo?.verificationFeePerPerson ? formatNgn(verificationInfo.verificationFeePerPerson) : "₦10,000"} fee, added to checkout</span>
               </li>
               <li className="flex items-start gap-2">
                 <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
@@ -326,12 +499,6 @@ export default function IdentityVerificationPage() {
                 <span>Protects both you and the legal professionals processing your requests</span>
               </li>
             </ul>
-            <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-border">
-              <p className="text-sm font-medium mb-2">Why do we charge for verification?</p>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Your {verificationInfo?.verificationFeePerPerson ? formatNgn(verificationInfo.verificationFeePerPerson) : "verification"} fee covers a comprehensive 4-step identity check powered by Cellion's verification engine. This includes: (1) BVN/NIN validation against national databases, (2) government-issued ID document authenticity verification, (3) biometric selfie with liveness detection to confirm you are who you claim to be, and (4) AML and sanctions screening. These checks are required to comply with Nigerian regulatory standards and to give banks, the CAC, and other third parties full confidence in your identity.
-              </p>
-            </div>
           </CardContent>
         </Card>
 

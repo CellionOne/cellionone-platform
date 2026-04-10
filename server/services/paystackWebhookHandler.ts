@@ -1,6 +1,6 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles, directorBiometricInvites } from '@shared/schema';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles, directorBiometricInvites, founderProfiles, identityVerifications } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { invalidateCieOrgTierCache } from '../routes/cieApiRoutes';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
@@ -490,7 +490,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
           // Post-payment pipeline: KYB (Smile ID Job Type 7) → TIN (FIRS) → director BVN/NIN/AML → auto-approve/flag
           interface PipelineDirector {
-            name: string; email?: string; role?: string;
+            name: string; email?: string; role?: string; phone?: string;
             bvn?: string; nin?: string; // AES-256-GCM encrypted
             bvnVerified?: boolean; ninVerified?: boolean;
             amlIsHit?: boolean; amlHitTypes?: string[];
@@ -766,7 +766,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     expiresAt,
                   });
                   if (director.email) {
-                    const appUrl = process.env.APP_URL || 'https://cellionone.com';
+                    const appUrl = process.env.REPLIT_DEV_DOMAIN || process.env.APP_URL || 'https://cellionone.com';
                     const biometricUrl = `${appUrl}/director-biometric?token=${inviteToken}`;
                     resendBio.emails.send({
                       from: fromBio,
@@ -780,6 +780,94 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                   console.error(`[Webhook] Failed to create biometric invite for director ${director.name}: ${msg}`);
                 }
               }
+            }
+
+            // Step 3b: Founder profile pre-fill from verified director data
+            // If the founder is listed as a director whose BVN/NIN passed, pre-fill their personal
+            // profile with verified data and mark them as partially identity-verified (biometric pending).
+            try {
+              const [founderUser] = await db.select({ email: users.email })
+                .from(users).where(eq(users.id, order.founderId));
+              const founderEmail = founderUser?.email?.toLowerCase();
+              if (founderEmail) {
+                const matchedDir = updatedDirectors.find(d =>
+                  d.email?.toLowerCase() === founderEmail &&
+                  (d.bvnVerified === true || d.ninVerified === true) &&
+                  d.amlChecked === true && d.amlIsHit === false
+                );
+                if (matchedDir) {
+                  const lockedFields: string[] = [];
+                  const profilePatch: Record<string, unknown> = {
+                    kybPrefilled: true,
+                    kybSourceCompanyProfileId: profile.id,
+                    updatedAt: new Date(),
+                  };
+                  if (matchedDir.name) {
+                    profilePatch.fullName = matchedDir.name;
+                    lockedFields.push('fullName');
+                  }
+                  if (matchedDir.bvn) {
+                    // bvn is already encrypted in the directors array; reuse it as-is
+                    profilePatch.bvnEncrypted = matchedDir.bvn;
+                    lockedFields.push('bvnEncrypted');
+                  }
+                  if (matchedDir.nin) {
+                    profilePatch.ninEncrypted = matchedDir.nin;
+                    lockedFields.push('ninEncrypted');
+                  }
+                  if (matchedDir.phone) {
+                    profilePatch.phone = matchedDir.phone;
+                    lockedFields.push('phone');
+                  }
+                  // Use company registered address as proxy for founder address
+                  const addr = profile.registeredAddress as { addressLine1?: string; addressState?: string; addressCountry?: string } | null;
+                  if (addr?.addressLine1) {
+                    profilePatch.addressLine1 = addr.addressLine1;
+                    lockedFields.push('addressLine1');
+                  }
+                  if (addr?.addressState) {
+                    profilePatch.state = addr.addressState;
+                    lockedFields.push('state');
+                  }
+                  profilePatch.lockedFields = lockedFields;
+
+                  // Upsert founder_profiles
+                  const [existingFProfile] = await db.select({ id: founderProfiles.id })
+                    .from(founderProfiles).where(eq(founderProfiles.userId, order.founderId));
+                  if (existingFProfile) {
+                    await db.update(founderProfiles).set(profilePatch as any).where(eq(founderProfiles.userId, order.founderId));
+                  } else {
+                    await db.insert(founderProfiles).values({ userId: order.founderId, ...(profilePatch as any) });
+                  }
+
+                  // Upsert identity_verifications: mark BVN/NIN verified, biometric pending
+                  const [existingIdV] = await db.select({ id: identityVerifications.id })
+                    .from(identityVerifications).where(eq(identityVerifications.founderUserId, order.founderId));
+                  if (existingIdV) {
+                    await db.update(identityVerifications).set({
+                      status: 'in_progress',
+                      method: 'automated',
+                      externalProvider: 'smile_id',
+                      identitySource: 'kyb_pipeline',
+                      bvnNinVerified: true,
+                      updatedAt: new Date(),
+                    }).where(eq(identityVerifications.id, existingIdV.id));
+                  } else {
+                    await db.insert(identityVerifications).values({
+                      founderUserId: order.founderId,
+                      status: 'in_progress',
+                      method: 'automated',
+                      externalProvider: 'smile_id',
+                      identitySource: 'kyb_pipeline',
+                      bvnNinVerified: true,
+                    });
+                  }
+                  console.log(`[Webhook] Founder profile pre-filled from KYB director data for user ${order.founderId} — fields: ${lockedFields.join(', ')}`);
+                }
+              }
+            } catch (prefillErr: unknown) {
+              const msg = prefillErr instanceof Error ? prefillErr.message : String(prefillErr);
+              console.error(`[Webhook] Founder profile pre-fill error (non-fatal): ${msg}`);
             }
 
             // Step 4: Build verification report and auto-approve / flag for review

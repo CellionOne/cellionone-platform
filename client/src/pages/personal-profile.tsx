@@ -380,7 +380,7 @@ function ProfileForm() {
   }
 
   return (
-    <Card>
+    <Card id="personal-info">
       <CardHeader>
         <CardTitle className="text-lg">Personal Information</CardTitle>
         <CardDescription>Provide your details as they appear on your government-issued ID</CardDescription>
@@ -628,7 +628,7 @@ function ProfileForm() {
 
             <Separator />
 
-            <div>
+            <div id="identity-docs">
               <h3 className="text-sm font-medium mb-4">Government ID</h3>
               <div className="space-y-4">
                 <FormField

@@ -2441,10 +2441,13 @@ export async function registerRoutes(
         if (idVRec && idVRec.identitySource === 'kyb_pipeline') {
           if (passed) {
             const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+            // Capture selfie URL from callback if Smile returns one
+            const selfieUrlFromCallback = String(body.selfie_url || body.SelfieUrl || body.portrait_url || '').trim() || null;
             await db.update(identityVerifications).set({
               status: 'verified',
               verifiedAt: new Date(),
               expiresAt,
+              ...(selfieUrlFromCallback ? { selfieUrl: selfieUrlFromCallback } : {}),
               updatedAt: new Date(),
             }).where(eq(identityVerifications.id, idVRec.id));
             // Mark user as identity verified in the users table

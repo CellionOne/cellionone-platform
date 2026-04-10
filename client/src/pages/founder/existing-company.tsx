@@ -744,11 +744,25 @@ export default function ExistingCompanyPage() {
               </div>
               <p className="text-xs text-muted-foreground">At least one of BVN or NIN is required per director.</p>
 
-              <Button variant="outline" size="sm" onClick={() => {
-                if (!newDir.name.trim()) return;
-                setDirectors(prev => [...prev, { ...newDir }]);
-                setNewDir({ name: "", role: "Director", email: "", bvn: "", nin: "" });
-              }} data-testid="button-add-director">
+              {newDir.name.trim() && !newDir.bvn.trim() && !newDir.nin.trim() && (
+                <p className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  Enter at least a BVN or NIN before adding this director.
+                </p>
+              )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!newDir.name.trim() || (!newDir.bvn.trim() && !newDir.nin.trim())}
+                onClick={() => {
+                  if (!newDir.name.trim()) return;
+                  if (!newDir.bvn.trim() && !newDir.nin.trim()) return;
+                  setDirectors(prev => [...prev, { ...newDir }]);
+                  setNewDir({ name: "", role: "Director", email: "", bvn: "", nin: "" });
+                }}
+                data-testid="button-add-director"
+              >
                 <Plus className="h-3.5 w-3.5 mr-1.5" />
                 Add Director
               </Button>

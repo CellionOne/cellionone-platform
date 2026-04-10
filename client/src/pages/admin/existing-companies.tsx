@@ -402,7 +402,7 @@ export default function AdminExistingCompaniesPage() {
                           ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
                           : <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
                         <span className="font-medium">CAC KYB:</span>
-                        <span className="text-muted-foreground">{(detail.verificationReport as VerificationReport).kybResultText || (detail.verificationReport as VerificationReport).kybPassed ? "Passed" : "Failed"}</span>
+                        <span className="text-muted-foreground">{(detail.verificationReport as VerificationReport).kybResultText || ((detail.verificationReport as VerificationReport).kybPassed ? "Passed" : "Failed")}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         {(detail.verificationReport as VerificationReport).tinPassed

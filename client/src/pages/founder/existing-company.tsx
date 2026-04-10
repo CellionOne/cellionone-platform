@@ -1,6 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -148,6 +148,16 @@ function AddressForm({ title, value, onChange }: {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
+interface CompanyProfileSummary {
+  id: number;
+  companyName: string | null;
+  rcNumber: string | null;
+  isExistingCompany: boolean;
+  existingCompanyStatus: string | null;
+  directors: DirectorEntry[] | null;
+  createdAt: string | null;
+}
+
 export default function ExistingCompanyPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -158,6 +168,7 @@ export default function ExistingCompanyPage() {
   const [kybResult, setKybResult] = useState<KybResult | null>(null);
   const [kybLoading, setKybLoading] = useState(false);
   const [kybError, setKybError] = useState<string | null>(null);
+  const [resumeDismissed, setResumeDismissed] = useState(false);
 
   // Step 2 fields
   const [companyName, setCompanyName] = useState("");
@@ -180,6 +191,29 @@ export default function ExistingCompanyPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeDocKey, setActiveDocKey] = useState<string | null>(null);
+
+  // ── On-mount profile recovery ─────────────────────────────────────────────
+  // Fetch existing company profiles to detect resumable drafts
+  const { data: allProfiles } = useQuery<CompanyProfileSummary[]>({
+    queryKey: ["/api/founder/company-profiles"],
+  });
+
+  const resumableProfile = (allProfiles || []).find(
+    p => p.isExistingCompany && (p.existingCompanyStatus === "draft" || p.existingCompanyStatus === "pending_payment")
+  ) ?? null;
+
+  // If we navigated here fresh (no createdProfileId set) and there is a resumable profile,
+  // pre-populate the in-memory profile ID automatically so uploads work right away.
+  useEffect(() => {
+    if (resumableProfile && !createdProfileId) {
+      setCreatedProfileId(resumableProfile.id);
+      if (resumableProfile.companyName) setCompanyName(resumableProfile.companyName);
+      if (resumableProfile.rcNumber) setRcInput(resumableProfile.rcNumber);
+      if (resumableProfile.directors && Array.isArray(resumableProfile.directors)) {
+        setDirectors(resumableProfile.directors);
+      }
+    }
+  }, [resumableProfile?.id]);
 
   // ── Step 1 validation ────────────────────────────────────────────────────────
   // KYB spec: only found=true permits advancing; genuine not-found BLOCKS progression
@@ -277,7 +311,16 @@ export default function ExistingCompanyPage() {
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !activeDocKey || !createdProfileId) return;
+    if (!file || !activeDocKey) return;
+    if (!createdProfileId) {
+      toast({
+        title: "Profile not found",
+        description: "Please resume your registration using the banner above before uploading documents.",
+        variant: "destructive",
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
     setUploadingDoc(activeDocKey);
     try {
@@ -366,6 +409,48 @@ export default function ExistingCompanyPage() {
             <p className="text-sm text-muted-foreground">Bring your already-incorporated company onto Cellion One</p>
           </div>
         </div>
+
+        {/* Resume Banner — shown when a resumable draft exists and user hasn't dismissed it */}
+        {resumableProfile && !resumeDismissed && step === 1 && createdProfileId === resumableProfile.id && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 flex items-start gap-3" data-testid="banner-resume">
+            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <Building2 className="h-4 w-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold">You have a registration in progress</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                <span className="font-medium">{resumableProfile.companyName || "Unnamed Company"}</span>
+                {resumableProfile.rcNumber && <span className="text-muted-foreground"> · RC {resumableProfile.rcNumber}</span>}
+                {" — "}
+                {resumableProfile.existingCompanyStatus === "pending_payment" ? "Awaiting payment" : "Draft saved"}
+              </p>
+              <div className="flex gap-2 mt-2.5">
+                {resumableProfile.existingCompanyStatus === "pending_payment" ? (
+                  <Button size="sm" onClick={() => setStep(5)} data-testid="button-resume-to-payment">
+                    <CreditCard className="h-3.5 w-3.5 mr-1.5" />
+                    Go to Payment
+                  </Button>
+                ) : (
+                  <Button size="sm" onClick={() => setStep(4)} data-testid="button-resume-to-documents">
+                    <ArrowRight className="h-3.5 w-3.5 mr-1.5" />
+                    Continue to Documents
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => setResumeDismissed(true)} data-testid="button-resume-dismiss">
+                  Start fresh instead
+                </Button>
+              </div>
+            </div>
+            <button
+              className="text-muted-foreground hover:text-foreground shrink-0 mt-0.5"
+              onClick={() => setResumeDismissed(true)}
+              data-testid="button-resume-close"
+              aria-label="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         {/* Progress Steps */}
         <div className="flex items-center gap-1.5">

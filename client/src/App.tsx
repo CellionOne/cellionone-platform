@@ -117,6 +117,7 @@ import BuildingManagerSubscribers from "@/pages/building-manager/subscribers";
 import BuildingManagerMailIntake from "@/pages/building-manager/mail-intake";
 import WelcomePage from "@/pages/welcome";
 import ExistingCompanyPage from "@/pages/founder/existing-company";
+import RegistrationsPage from "@/pages/founder/registrations";
 
 const INTENT_EXEMPT_PATHS = ["/welcome", "/settings", "/profile", "/notifications", "/login", "/register"];
 const INTENT_EXEMPT_ROLES = ["admin", "lawyer", "building_manager"];
@@ -271,6 +272,9 @@ function Router() {
       </Route>
       <Route path="/founder/existing-company">
         <ProtectedRoute component={ExistingCompanyPage} />
+      </Route>
+      <Route path="/founder/registrations">
+        <ProtectedRoute component={RegistrationsPage} />
       </Route>
       <Route path="/founder/dashboard">
         <ProtectedRoute component={FounderDashboard} />

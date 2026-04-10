@@ -88,6 +88,7 @@ const founderGroups: NavGroup[] = [
     items: [
       { title: "My Applications", url: "/founder/applications", icon: FileText },
       { title: "Register Existing Company", url: "/founder/existing-company", icon: ClipboardCheck },
+      { title: "My Registrations", url: "/founder/registrations", icon: ClipboardList },
       { title: "Directors & Shareholders", url: "/founder/company-people", icon: Users },
       { title: "Company Profile", url: "/founder/company-profile", icon: Briefcase },
       { title: "Post-Inc Checklist", url: "/founder/post-inc-checklist", icon: ListChecks },

@@ -100,7 +100,15 @@ export async function seedDatabase() {
       { sku: "BANK_ACCOUNT", name: "Corporate Bank Account Opening", category: "post_incorporation", priceNgn: 0, cellionCutNgn: 0, requiresManualPricing: true, metadata: { note: "Corporate bank account opening service. Fee varies by partner bank. Our team will contact you with pricing after submission." } },
     ];
     for (const item of catalogItems) {
-      await db.insert(productCatalog).values(item).onConflictDoNothing();
+      await db.insert(productCatalog).values(item).onConflictDoUpdate({
+        target: productCatalog.sku,
+        set: {
+          name: item.name,
+          priceNgn: item.priceNgn,
+          cellionCutNgn: item.cellionCutNgn,
+          metadata: item.metadata ?? null,
+        },
+      });
     }
     // Fix BANK_ACCOUNT requiresManualPricing column (previously only set in metadata)
     await db.update(productCatalog)

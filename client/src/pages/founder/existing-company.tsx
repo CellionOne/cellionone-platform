@@ -150,6 +150,7 @@ export default function ExistingCompanyPage() {
 
   const [step, setStep] = useState(1);
   const [rcInput, setRcInput] = useState("");
+  const [businessType, setBusinessType] = useState<"co" | "bn" | "it">("co");
   const [kybResult, setKybResult] = useState<KybResult | null>(null);
   const [kybLoading, setKybLoading] = useState(false);
   const [kybError, setKybError] = useState<string | null>(null);
@@ -191,7 +192,7 @@ export default function ExistingCompanyPage() {
     setKybError(null);
     setKybResult(null);
     try {
-      const res = await apiRequest("POST", "/api/founder/existing-company/kyb-lookup", { rcNumber: rcInput.trim() });
+      const res = await apiRequest("POST", "/api/founder/existing-company/kyb-lookup", { rcNumber: rcInput.trim(), businessType });
       const data: KybResult = await res.json();
       setKybResult(data);
       if (data.found) {
@@ -379,6 +380,21 @@ export default function ExistingCompanyPage() {
                   We verify your company details directly against the CAC registry database. Your company must be registered with the CAC to proceed.
                 </AlertDescription>
               </Alert>
+
+              <div className="space-y-2">
+                <Label htmlFor="business-type">Registration Type</Label>
+                <select
+                  id="business-type"
+                  value={businessType}
+                  onChange={e => { setBusinessType(e.target.value as "co" | "bn" | "it"); setKybResult(null); setKybError(null); }}
+                  data-testid="select-business-type"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="co">Limited Company (RC)</option>
+                  <option value="bn">Business Name (BN)</option>
+                  <option value="it">Incorporated Trustee (IT)</option>
+                </select>
+              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="rc-number">CAC RC Number</Label>

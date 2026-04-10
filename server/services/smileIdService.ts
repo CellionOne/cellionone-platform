@@ -514,6 +514,7 @@ export async function verifyBusiness(
   rcNumber: string,
   userId: string,
   jobId: string,
+  businessType: string = 'co',
 ): Promise<KybResult> {
   const cleanRc = rcNumber.replace(/^rc/i, '').trim();
 
@@ -528,20 +529,23 @@ export async function verifyBusiness(
     const connection = new IDApi(PARTNER_ID, API_KEY, SID_SERVER);
 
     const partnerParams = { job_id: jobId, user_id: userId, job_type: 7 };
-    const idInfo = { country: 'NG', id_type: 'BUSINESS_REGISTRATION', id_number: cleanRc };
+    const idInfo = { country: 'NG', id_type: 'BUSINESS_REGISTRATION', id_number: cleanRc, business_type: businessType };
 
-    const result = await connection.submit_job(partnerParams, idInfo, {}, {});
+    const result = await connection.submit_job(partnerParams, idInfo);
     const body: Record<string, unknown> = result?.body || result || {};
     const resultCode = body?.ResultCode || body?.result_code;
-    const found = resultCode === '1012' || body?.ResultText === 'Verified';
+    const found = resultCode === '1012' || body?.ResultText === 'Verified' || body?.ResultText === 'Business Verified';
+
+    // Smile ID returns company details nested under company_information
+    const ci = (body?.company_information || {}) as Record<string, unknown>;
 
     const directors: { name: string; role?: string }[] = [];
     const rawDirs = (body?.directors || body?.Directors || []) as Record<string, unknown>[];
     if (Array.isArray(rawDirs)) {
       for (const d of rawDirs) {
-        const name = String(d?.name || d?.Name || '');
-        const role = String(d?.role || d?.Role || '');
-        if (name) directors.push({ name, role: role || undefined });
+        const name = String(d?.name || d?.Name || '').trim();
+        const role = String(d?.role || d?.Role || '').trim();
+        if (name && name !== 'Not Available') directors.push({ name, role: role && role !== 'Not Available' ? role : undefined });
       }
     }
 
@@ -555,14 +559,14 @@ export async function verifyBusiness(
 
     return {
       found,
-      companyName: String(body?.company_name || body?.CompanyName || body?.Entity || ''),
-      rcNumber: String(body?.rc_number || body?.RCNumber || cleanRc),
-      companyType: String(body?.company_type || body?.CompanyType || ''),
-      registrationDate: String(body?.registration_date || body?.DateOfRegistration || ''),
-      status: String(body?.status || body?.Status || ''),
-      address: String(body?.address || body?.Address || ''),
-      shareCapital: String(body?.share_capital || body?.ShareCapital || ''),
-      tinNumber: String(body?.tin || body?.TIN || ''),
+      companyName: String(ci?.legal_name || body?.company_name || body?.CompanyName || body?.Entity || ''),
+      rcNumber: String(ci?.registration_number || body?.rc_number || body?.RCNumber || cleanRc),
+      companyType: String(ci?.company_type || body?.company_type || body?.CompanyType || ''),
+      registrationDate: String(ci?.registration_date || body?.registration_date || body?.DateOfRegistration || ''),
+      status: String(ci?.status || body?.status || body?.Status || ''),
+      address: [ci?.address, ci?.state, ci?.country].filter(Boolean).join(', ') || String(body?.address || body?.Address || ''),
+      shareCapital: String(ci?.authorized_shared_capital || body?.share_capital || body?.ShareCapital || ''),
+      tinNumber: String(ci?.tax_id && ci?.tax_id !== 'Not Available' ? ci?.tax_id : body?.tin || body?.TIN || ''),
       directors,
       smileJobId: String(body?.SmileJobID || ''),
       rawResult: body,

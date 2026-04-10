@@ -7639,11 +7639,14 @@ Important guidelines:
   app.post("/api/founder/existing-company/kyb-lookup", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const { rcNumber } = z.object({ rcNumber: z.string().min(1) }).parse(req.body);
+      const { rcNumber, businessType } = z.object({
+        rcNumber: z.string().min(1),
+        businessType: z.enum(['co', 'bn', 'it']).default('co'),
+      }).parse(req.body);
 
       const smileIdService = await import('./services/smileIdService');
       const jobId = `kyb-${userId}-${Date.now()}`;
-      const result = await smileIdService.verifyBusiness(rcNumber, userId, jobId);
+      const result = await smileIdService.verifyBusiness(rcNumber, userId, jobId, businessType);
 
       // Never return rawResult to the client; strip it
       const { rawResult: _raw, ...safeResult } = result;

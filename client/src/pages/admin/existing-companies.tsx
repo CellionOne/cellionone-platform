@@ -38,6 +38,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Send,
+  Trash2,
 } from "lucide-react";
 import type { CompanyProfile, ProfileChecklistItem } from "@shared/schema";
 
@@ -122,6 +123,8 @@ export default function AdminExistingCompaniesPage() {
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [showDispatchDialog, setShowDispatchDialog] = useState(false);
   const [selectedBankPartnerId, setSelectedBankPartnerId] = useState<string>("");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<CompanyProfile | null>(null);
   const [docReviewItemId, setDocReviewItemId] = useState<number | null>(null);
   const [docReviewNotes, setDocReviewNotes] = useState("");
 
@@ -231,6 +234,25 @@ export default function AdminExistingCompaniesPage() {
     enabled: showDispatchDialog && !!selected?.id,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/admin/existing-companies/${id}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to delete profile");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Profile deleted", description: "The company profile has been permanently removed." });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/existing-companies"] });
+      setShowDeleteConfirm(false);
+      setDeleteTarget(null);
+      setSelected(null);
+    },
+    onError: (e: Error) => toast({ title: "Delete failed", description: e.message, variant: "destructive" }),
+  });
+
   const reviewableStatuses = ["pending_review", "documents_under_review"];
 
   const formatAddress = (addr: AddressRecord | null | undefined): string => {
@@ -290,10 +312,21 @@ export default function AdminExistingCompaniesPage() {
                         {p.createdAt ? new Date(p.createdAt).toLocaleDateString("en-GB") : "—"}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setSelected(p)} data-testid={`button-view-${p.id}`}>
-                          <Eye className="h-3.5 w-3.5 mr-1" />
-                          Review
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => setSelected(p)} data-testid={`button-view-${p.id}`}>
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            Review
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => { setDeleteTarget(p); setShowDeleteConfirm(true); }}
+                            data-testid={`button-delete-${p.id}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -704,6 +737,35 @@ export default function AdminExistingCompaniesPage() {
               data-testid="button-confirm-reject"
             >
               {rejectMutation.isPending ? "Rejecting…" : "Confirm Rejection"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Confirmation Dialog ── */}
+      <Dialog open={showDeleteConfirm} onOpenChange={open => { if (!open) { setShowDeleteConfirm(false); setDeleteTarget(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="h-4 w-4" />
+              Delete Company Profile
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently delete the profile for <strong>{deleteTarget?.companyName}</strong> (RC {deleteTarget?.rcNumber || "—"}).
+              All associated checklist items and director verification records will also be removed. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowDeleteConfirm(false); setDeleteTarget(null); }}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+              disabled={deleteMutation.isPending}
+              data-testid="button-confirm-delete"
+            >
+              {deleteMutation.isPending ? "Deleting…" : "Delete permanently"}
             </Button>
           </DialogFooter>
         </DialogContent>

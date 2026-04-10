@@ -8166,6 +8166,38 @@ Important guidelines:
     }
   });
 
+  // DELETE /api/admin/existing-companies/:id — permanently remove a profile (admin only)
+  app.delete("/api/admin/existing-companies/:id", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
+      if (!profile) return res.status(404).json({ message: "Existing company profile not found" });
+
+      // Delete child records first to avoid FK violations
+      await db.delete(profileChecklistItems).where(eq(profileChecklistItems.companyProfileId, profileId));
+      await db.delete(directorBiometricInvites).where(eq(directorBiometricInvites.companyProfileId, profileId));
+
+      // Delete the profile itself
+      await db.delete(companyProfiles).where(eq(companyProfiles.id, profileId));
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "existing_company_deleted",
+        entityType: "company_profile",
+        entityId: profileId.toString(),
+        details: { companyName: profile.companyName, rcNumber: profile.rcNumber, founderId: profile.founderId },
+      });
+
+      res.json({ success: true, message: `Profile for ${profile.companyName} deleted.` });
+    } catch (err: any) {
+      console.error("[AdminDeleteProfile] Error:", err.message);
+      res.status(500).json({ message: "Failed to delete profile" });
+    }
+  });
+
   // ============== POST-INCORPORATION CHECKLIST ROUTES ==============
 
   app.get("/api/founder/company-profiles/:id/checklist", isAuthenticated, async (req: any, res) => {

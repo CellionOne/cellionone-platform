@@ -753,6 +753,7 @@ export const companyProfiles = pgTable("company_profiles", {
     kybPassed?: boolean;
     kybResultText?: string;
     kybFailReason?: string;
+    kybDirectorMismatches?: string[];
     kybSubmitted?: { rcNumber?: string; companyName?: string };
     kybMatched?: { registryName?: string; status?: string; type?: string; rcNumber?: string; registrationDate?: string };
     tinPassed?: boolean;

@@ -70,6 +70,7 @@ interface VerificationReport {
   kybPassed?: boolean;
   kybResultText?: string;
   kybFailReason?: string;
+  kybDirectorMismatches?: string[];
   kybSubmitted?: { rcNumber?: string; companyName?: string };
   kybMatched?: { registryName?: string; status?: string; type?: string; rcNumber?: string; registrationDate?: string };
   tinPassed?: boolean;
@@ -424,6 +425,9 @@ export default function AdminExistingCompaniesPage() {
                               <span className="ml-1 px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-mono">{vr.kybFailReason}</span>
                             )}
                           </div>
+                          {vr.kybDirectorMismatches && vr.kybDirectorMismatches.length > 0 && (
+                            <p className="ml-5 text-xs text-destructive">Directors not in CAC: {vr.kybDirectorMismatches.join(', ')}</p>
+                          )}
                           {(vr.kybSubmitted || vr.kybMatched) && (
                             <div className="grid grid-cols-2 gap-2 ml-5 text-xs text-muted-foreground">
                               {vr.kybSubmitted && (

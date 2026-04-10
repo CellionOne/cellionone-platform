@@ -499,6 +499,10 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             biometricStatus?: string;
           }
 
+          // Fetch founder email once for notifications
+          const founderUser = await storage.getUser(order.founderId);
+          const founderEmail = founderUser?.email ?? order.founderId;
+
           try {
             const { verifyBusiness, verifyTin, verifyBvn, verifyNin, performAmlCheck } = await import('./smileIdService');
             const { decryptField } = await import('./encryptionService');
@@ -513,10 +517,11 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               return na === nb || na.includes(nb) || nb.includes(na);
             };
 
-            // Step 1: Authoritative KYB — company found + active status + name/RC consistency
+            // Step 1: Authoritative KYB — company found + active status + name/RC consistency + director-CAC match
             let kybPassed = false;
             let kybResultText = 'No KYB data';
             let kybFailReason: string | undefined;
+            let kybDirectorMismatches: string[] = [];
             let freshKybResult: Record<string, unknown> | undefined;
             let kybMatchedData: { registryName?: string; status?: string; type?: string; rcNumber?: string; registrationDate?: string } | undefined;
             const KYB_ACTIVE_STATUSES = ['active', 'approved and active', 'registered'];
@@ -544,12 +549,30 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               } else {
                 const statusOk = KYB_ACTIVE_STATUSES.includes((kybJob.status || '').toLowerCase());
                 const regNameOk = kybJob.companyName ? nameMatch(profile.companyName, kybJob.companyName) : true;
+
+                // Director-CAC matching: if CAC returns a non-empty director list, every submitted director
+                // must be present in the CAC list (normalized name match). If CAC returns no directors,
+                // we skip the check (inconclusive) to avoid false negatives from incomplete CAC data.
+                const cacDirectors = (kybJob.directors || []) as { name: string; role?: string }[];
+                const submittedDirectors = (profile.directors as PipelineDirector[] | null) || [];
+                let directorCacOk = true;
+                if (cacDirectors.length > 0 && submittedDirectors.length > 0) {
+                  for (const sd of submittedDirectors) {
+                    const found = cacDirectors.some(cd => nameMatch(sd.name, cd.name));
+                    if (!found) kybDirectorMismatches.push(sd.name);
+                  }
+                  directorCacOk = kybDirectorMismatches.length === 0;
+                }
+
                 if (!statusOk) {
                   kybResultText = `Company status is not active: ${kybJob.status || 'unknown'}`;
                   kybFailReason = 'status_not_active';
                 } else if (!regNameOk) {
                   kybResultText = `Name mismatch: submitted "${profile.companyName}" vs registry "${kybJob.companyName}"`;
                   kybFailReason = 'name_mismatch';
+                } else if (!directorCacOk) {
+                  kybResultText = `Director(s) not found in CAC records: ${kybDirectorMismatches.join(', ')}`;
+                  kybFailReason = 'director_not_in_cac';
                 } else {
                   kybPassed = true;
                   kybResultText = kybJob.status || 'Active';
@@ -748,6 +771,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               kybPassed,
               kybResultText,
               kybFailReason,
+              kybDirectorMismatches: kybDirectorMismatches.length > 0 ? kybDirectorMismatches : undefined,
               kybSubmitted: { rcNumber: profile.rcNumber ?? undefined, companyName: profile.companyName },
               kybMatched: kybMatchedData,
               tinPassed,
@@ -799,7 +823,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               sendNewOrderNotificationEmail(ADMIN_NOTIFICATION_EMAIL, {
                 orderId: order.id,
                 founderName: profile.companyName,
-                founderEmail: order.founderId,
+                founderEmail: founderEmail,
                 totalAmount: order.totalAmount,
                 items: [{ sku: 'EXISTING_CO_VERIFY', name: `Manual review required — ${failReasons.join(', ')}`, unitPrice: 0 }],
               }).catch((e: Error) => console.error(`[Webhook] Admin pipeline-fail email error: ${e.message}`));

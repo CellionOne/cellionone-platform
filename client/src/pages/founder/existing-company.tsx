@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -160,6 +160,7 @@ interface CompanyProfileSummary {
 
 export default function ExistingCompanyPage() {
   const [, navigate] = useLocation();
+  const searchString = useSearch();
   const { toast } = useToast();
 
   const [step, setStep] = useState(1);
@@ -193,17 +194,26 @@ export default function ExistingCompanyPage() {
   const [activeDocKey, setActiveDocKey] = useState<string | null>(null);
 
   // ── On-mount profile recovery ─────────────────────────────────────────────
+  // Parse optional query params from registrations page: ?profileId=123&step=5
+  const queryParams = new URLSearchParams(searchString);
+  const qProfileId = queryParams.get("profileId") ? parseInt(queryParams.get("profileId")!, 10) : null;
+  const qStep = queryParams.get("step") ? parseInt(queryParams.get("step")!, 10) : null;
+
   // Fetch existing company profiles to detect resumable drafts
   const { data: allProfiles } = useQuery<CompanyProfileSummary[]>({
     queryKey: ["/api/founder/company-profiles"],
   });
 
-  const resumableProfile = (allProfiles || []).find(
-    p => p.isExistingCompany && (p.existingCompanyStatus === "draft" || p.existingCompanyStatus === "pending_payment")
-  ) ?? null;
+  // Prefer explicitly requested profileId, fall back to first resumable draft/pending-payment
+  const resumableProfile = (allProfiles || []).find(p => {
+    if (!p.isExistingCompany) return false;
+    if (qProfileId) return p.id === qProfileId;
+    return p.existingCompanyStatus === "draft" || p.existingCompanyStatus === "pending_payment";
+  }) ?? null;
 
   // If we navigated here fresh (no createdProfileId set) and there is a resumable profile,
   // pre-populate the in-memory profile ID automatically so uploads work right away.
+  // Also jump to the requested step if provided via query param.
   useEffect(() => {
     if (resumableProfile && !createdProfileId) {
       setCreatedProfileId(resumableProfile.id);
@@ -211,6 +221,10 @@ export default function ExistingCompanyPage() {
       if (resumableProfile.rcNumber) setRcInput(resumableProfile.rcNumber);
       if (resumableProfile.directors && Array.isArray(resumableProfile.directors)) {
         setDirectors(resumableProfile.directors);
+      }
+      // If a step was requested (e.g. step=5 from "Pay Now"), jump there directly
+      if (qStep && qStep >= 1 && qStep <= 5) {
+        setStep(qStep);
       }
     }
   }, [resumableProfile?.id]);

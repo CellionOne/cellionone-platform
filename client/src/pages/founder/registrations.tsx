@@ -169,7 +169,7 @@ export default function RegistrationsPage() {
                               <Button
                                 size="sm"
                                 variant="default"
-                                onClick={() => navigate("/founder/existing-company")}
+                                onClick={() => navigate(`/founder/existing-company?profileId=${profile.id}&step=5`)}
                                 data-testid={`button-pay-${profile.id}`}
                               >
                                 <CreditCard className="h-3.5 w-3.5 mr-1.5" />
@@ -179,7 +179,7 @@ export default function RegistrationsPage() {
                             {profile.existingCompanyStatus === "draft" && (
                               <Button
                                 size="sm"
-                                onClick={() => navigate("/founder/existing-company")}
+                                onClick={() => navigate(`/founder/existing-company?profileId=${profile.id}&step=4`)}
                                 data-testid={`button-resume-${profile.id}`}
                               >
                                 <RefreshCw className="h-3.5 w-3.5 mr-1.5" />

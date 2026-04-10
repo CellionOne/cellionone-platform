@@ -181,7 +181,7 @@ export default function ExistingCompanyPage() {
   // Service error (SDK crash, NOT_CONFIGURED etc) + network error → show warning + skip (dev mode)
   const kybServiceError = (kybResult?.found === false && !!kybResult?.error) || !!kybError;
   const kybGenuineNotFound = kybResult?.found === false && !kybResult?.error;
-  const canProceedStep1 = kybResult?.found === true;
+  const canProceedStep1 = kybResult?.found === true || kybServiceError;
 
   // ── KYB Lookup ──────────────────────────────────────────────────────────────
 
@@ -376,7 +376,7 @@ export default function ExistingCompanyPage() {
               <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription>
-                  We query the CAC registry via Smile ID's KYB service to pre-fill your company details. Your company must be registered with the CAC to proceed.
+                  We verify your company details directly against the CAC registry database. Your company must be registered with the CAC to proceed.
                 </AlertDescription>
               </Alert>
 
@@ -398,12 +398,20 @@ export default function ExistingCompanyPage() {
                 </div>
               </div>
 
-              {/* Network/service error — allow skip in dev mode */}
+              {/* Network/service error — allow manual entry fallback */}
               {kybError && (
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{kybError}</AlertDescription>
-                </Alert>
+                <>
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{kybError}</AlertDescription>
+                  </Alert>
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>
+                      You can still continue — fill in your company details manually on the next step. Our team will verify them against the CAC registry during the review process.
+                    </AlertDescription>
+                  </Alert>
+                </>
               )}
 
               {/* KYB Result */}
@@ -445,7 +453,7 @@ export default function ExistingCompanyPage() {
                         CAC registry lookup service is temporarily unavailable
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        The CAC registry must be queried before proceeding. Please try again in a few minutes. If this issue persists, contact{" "}
+                        Please try again in a few minutes, or continue to fill in your details manually. If this issue persists, contact{" "}
                         <a href="mailto:support@cellionone.com" className="underline text-primary">support@cellionone.com</a>.
                       </p>
                     </div>
@@ -456,7 +464,7 @@ export default function ExistingCompanyPage() {
               <div className="flex items-center justify-between pt-2">
                 <div />
                 <Button onClick={() => setStep(2)} disabled={!canProceedStep1} data-testid="button-step1-next">
-                  Continue
+                  {kybServiceError ? "Continue (manual entry)" : "Continue"}
                   <ArrowRight className="h-4 w-4 ml-1.5" />
                 </Button>
               </div>

@@ -3277,6 +3277,16 @@ export function registerKycServiceRoutes(app: Express) {
             const shortcutInviteToken = generateToken();
             const shortcutExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
             const subjectName = session.subjectName || session.subjectEmail;
+            // Shortcut billing: deduct at reduced "identity_only" tier (data retrieval, no Smile run)
+            const shortcutBillingType: billingService.VerificationType = "identity_only";
+            const shortcutCreditOk = await billingService.hasCredits(session.orgId, shortcutBillingType);
+            if (!shortcutCreditOk) {
+              return res.status(402).json({
+                message: "Insufficient verification credits.",
+                code: "INSUFFICIENT_CREDITS",
+                verificationType: shortcutBillingType,
+              });
+            }
             const [shortcutRequest] = await db.insert(kycVerificationRequests).values({
               orgId: session.orgId,
               type: session.type,
@@ -3292,6 +3302,7 @@ export function registerKycServiceRoutes(app: Express) {
                 sessionId: session.id,
                 identitySource: idV.identitySource,
                 verifiedAt: idV.verifiedAt,
+                billingType: shortcutBillingType,
               }),
             }).returning();
             await db.update(kycSessions).set({
@@ -3299,6 +3310,12 @@ export function registerKycServiceRoutes(app: Express) {
               updatedAt: new Date(),
               verificationRequestId: shortcutRequest.id,
             }).where(eq(kycSessions.id, session.id));
+            // Deduct reduced rate credit
+            try {
+              await billingService.deductCredit(session.orgId, shortcutBillingType, shortcutRequest.id);
+            } catch (creditErr) {
+              console.error("[KYC Session] Shortcut credit deduction error (non-blocking):", creditErr);
+            }
             return res.json({
               status: "verified",
               verificationRequestId: shortcutRequest.id,

@@ -1675,35 +1675,23 @@ export async function registerRoutes(
         nin, bvn, idType, idNumber,
       } = req.body;
 
-      // Enforce KYB-locked field immutability server-side
+      // Enforce KYB-locked field immutability server-side: silently preserve locked field values
       const existingForLock = await storage.getFounderProfile(userId);
       const lockedFields: string[] = Array.isArray(existingForLock?.lockedFields) ? (existingForLock.lockedFields as string[]) : [];
-      if (lockedFields.length > 0) {
-        const attemptedOverrides = lockedFields.filter(f => {
-          const bodyMap: Record<string, unknown> = { fullName, phone, addressLine1, state };
-          return f in bodyMap && bodyMap[f] !== undefined && bodyMap[f] !== null;
-        });
-        if (attemptedOverrides.length > 0) {
-          return res.status(403).json({
-            error: `The following fields are locked by KYB verification and cannot be edited: ${attemptedOverrides.join(", ")}`,
-            code: "LOCKED_FIELDS",
-            lockedFields: attemptedOverrides,
-          });
-        }
-      }
 
       const profileData: any = {
         userId,
-        fullName: lockedFields.includes("fullName") ? existingForLock!.fullName : fullName,
-        phone: lockedFields.includes("phone") ? existingForLock!.phone : phone,
+        // For locked fields, always keep the stored value regardless of what was sent
+        fullName: lockedFields.includes("fullName") && existingForLock?.fullName ? existingForLock.fullName : fullName,
+        phone: lockedFields.includes("phone") && existingForLock?.phone ? existingForLock.phone : phone,
         dateOfBirth,
         nationality,
         gender,
         occupation,
-        addressLine1: lockedFields.includes("addressLine1") ? existingForLock!.addressLine1 : addressLine1,
+        addressLine1: lockedFields.includes("addressLine1") && existingForLock?.addressLine1 ? existingForLock.addressLine1 : addressLine1,
         addressLine2,
         city,
-        state: lockedFields.includes("state") ? existingForLock!.state : state,
+        state: lockedFields.includes("state") && existingForLock?.state ? existingForLock.state : state,
         postalCode,
         country,
         idType,
@@ -3211,16 +3199,19 @@ export async function registerRoutes(
         inviteStatus: p.inviteStatus,
       }));
 
-      // KYB-pipeline founders don't owe a verification fee — they just need the biometric selfie
-      const founderNeedsFee = !founderVerified && !isKybPipelineVerified;
-      const unverifiedCount = (founderNeedsFee ? 1 : 0) + people.filter(p => !p.isVerified).length;
+      // Count unverified founders accurately — KYB-pipeline founders are still unverified until biometric completes
+      const founderIsUnverified = !founderVerified;
+      const founderNeedsFee = founderIsUnverified && !isKybPipelineVerified; // KYB path = free
+      const unverifiedPeople = people.filter(p => !p.isVerified).length;
+      const unverifiedCount = (founderIsUnverified ? 1 : 0) + unverifiedPeople;
+      const feeableUnverifiedCount = (founderNeedsFee ? 1 : 0) + unverifiedPeople;
 
       res.json({
         founderVerified,
         people,
         unverifiedCount,
         verificationFeePerPerson: 1000000,
-        totalVerificationFee: unverifiedCount * 1000000,
+        totalVerificationFee: feeableUnverifiedCount * 1000000,
         founderVerificationStatus: verificationStatus.status,
         founderExpiresAt: verificationStatus.expiresAt,
         founderDaysUntilExpiry: verificationStatus.daysUntilExpiry,

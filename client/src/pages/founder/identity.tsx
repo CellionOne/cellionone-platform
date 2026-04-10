@@ -168,6 +168,7 @@ interface PersonalProfileSnippet {
   hasNin: boolean;
   hasBvn: boolean;
   hasIdDocument: boolean;
+  hasPassportPhoto: boolean;
   kybPrefilled?: boolean;
 }
 
@@ -197,25 +198,31 @@ export default function IdentityVerificationPage() {
       key: "fullName",
       label: "Full legal name",
       done: !!(profile?.kybPrefilled || profile?.fullName),
-      section: "personal",
+      anchor: "/profile#personal-info",
     },
     {
       key: "phone",
       label: "Phone number",
       done: !!(profile?.kybPrefilled || profile?.phone),
-      section: "personal",
+      anchor: "/profile#personal-info",
     },
     {
       key: "identity",
       label: "NIN or BVN",
       done: !!(profile?.kybPrefilled || profile?.hasNin || profile?.hasBvn),
-      section: "identity",
+      anchor: "/profile#identity-docs",
     },
     {
       key: "idDoc",
       label: "Government ID document uploaded",
       done: !!(profile?.kybPrefilled || profile?.hasIdDocument),
-      section: "documents",
+      anchor: "/profile#identity-docs",
+    },
+    {
+      key: "selfie",
+      label: "Biometric passport photo",
+      done: !!(profile?.kybPrefilled || profile?.hasPassportPhoto || founderVerified),
+      anchor: "/profile#biometric",
     },
   ];
   const prereqsComplete = prereqs.every(p => p.done);
@@ -265,7 +272,7 @@ export default function IdentityVerificationPage() {
                       <span className={p.done ? "text-foreground" : "text-muted-foreground"}>{p.label}</span>
                     </span>
                     {!p.done && (
-                      <Link href="/profile" className="text-xs text-primary underline underline-offset-2 whitespace-nowrap" data-testid={`link-prereq-${p.key}`}>
+                      <Link href={p.anchor} className="text-xs text-primary underline underline-offset-2 whitespace-nowrap" data-testid={`link-prereq-${p.key}`}>
                         Complete →
                       </Link>
                     )}

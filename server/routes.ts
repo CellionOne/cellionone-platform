@@ -1675,10 +1675,37 @@ export async function registerRoutes(
         nin, bvn, idType, idNumber,
       } = req.body;
 
+      // Enforce KYB-locked field immutability server-side
+      const existingForLock = await storage.getFounderProfile(userId);
+      const lockedFields: string[] = Array.isArray(existingForLock?.lockedFields) ? (existingForLock.lockedFields as string[]) : [];
+      if (lockedFields.length > 0) {
+        const attemptedOverrides = lockedFields.filter(f => {
+          const bodyMap: Record<string, unknown> = { fullName, phone, addressLine1, state };
+          return f in bodyMap && bodyMap[f] !== undefined && bodyMap[f] !== null;
+        });
+        if (attemptedOverrides.length > 0) {
+          return res.status(403).json({
+            error: `The following fields are locked by KYB verification and cannot be edited: ${attemptedOverrides.join(", ")}`,
+            code: "LOCKED_FIELDS",
+            lockedFields: attemptedOverrides,
+          });
+        }
+      }
+
       const profileData: any = {
         userId,
-        fullName, phone, dateOfBirth, nationality, gender, occupation,
-        addressLine1, addressLine2, city, state, postalCode, country,
+        fullName: lockedFields.includes("fullName") ? existingForLock!.fullName : fullName,
+        phone: lockedFields.includes("phone") ? existingForLock!.phone : phone,
+        dateOfBirth,
+        nationality,
+        gender,
+        occupation,
+        addressLine1: lockedFields.includes("addressLine1") ? existingForLock!.addressLine1 : addressLine1,
+        addressLine2,
+        city,
+        state: lockedFields.includes("state") ? existingForLock!.state : state,
+        postalCode,
+        country,
         idType,
         ...(idNumber !== undefined && { idNumber }),
       };
@@ -1708,12 +1735,12 @@ export async function registerRoutes(
       }
 
       const completionFields = [
-        fullName, phone, dateOfBirth, nationality, gender, occupation,
-        addressLine1, city, state, country, idType,
+        profileData.fullName, profileData.phone, dateOfBirth, nationality, gender, occupation,
+        profileData.addressLine1, city, profileData.state, country, idType,
       ];
       const filled = completionFields.filter(Boolean).length;
       const total = completionFields.length;
-      const existing = await storage.getFounderProfile(userId);
+      const existing = existingForLock;
       const hasDocuments = (existing?.passportPhotoPath || req.body.passportPhotoPath) &&
                            (existing?.signaturePath || req.body.signaturePath) &&
                            (existing?.idDocumentPath || req.body.idDocumentPath);

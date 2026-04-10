@@ -130,6 +130,7 @@ type DispatchCompanyProfile = {
   checklistItems?: { label: string; required: boolean; status?: string | null }[];
   founderIdentityVerifiedAt?: Date | string | null;
   founderIdentitySource?: string | null;
+  founderSelfieUrl?: string | null;
 };
 
 async function sendDispatchEmail(
@@ -293,6 +294,7 @@ async function sendDispatchEmail(
             <tr><td style="width:40%;padding:4px 0;color:#666;">Verification Status</td><td style="padding:4px 0;"><strong style="color:#16a34a;">Verified ✓</strong></td></tr>
             <tr><td style="padding:4px 0;color:#666;">Verified At</td><td style="padding:4px 0;">${company.founderIdentityVerifiedAt ? new Date(company.founderIdentityVerifiedAt).toLocaleDateString("en-GB", { dateStyle: "full" }) : "—"}</td></tr>
             <tr><td style="padding:4px 0;color:#666;">Verification Source</td><td style="padding:4px 0;">${company.founderIdentitySource === "kyb_pipeline" ? "KYB Pipeline (BVN/NIN + Biometric)" : (company.founderIdentitySource || "—")}</td></tr>
+            ${company.founderSelfieUrl ? `<tr><td style="padding:4px 0;color:#666;">Biometric Selfie</td><td style="padding:4px 0;"><a href="${company.founderSelfieUrl}" style="color:#1e3a5f;">View Photo ↗</a></td></tr>` : ""}
           </table>
         </div>` : ""}
 
@@ -862,19 +864,22 @@ export function registerBankPortalRoutes(app: Express): void {
       // Fetch founder identity verification metadata for bank trust signal
       let founderIdentityVerifiedAt: Date | null = null;
       let founderIdentitySource: string | null = null;
+      let founderSelfieUrl: string | null = null;
       if (profile.founderId) {
         const [idVRecord] = await db.select({
           status: identityVerifications.status,
           verifiedAt: identityVerifications.verifiedAt,
           identitySource: identityVerifications.identitySource,
+          selfieUrl: identityVerifications.selfieUrl,
         }).from(identityVerifications).where(eq(identityVerifications.founderUserId, profile.founderId));
         if (idVRecord?.status === 'verified') {
           founderIdentityVerifiedAt = idVRecord.verifiedAt;
           founderIdentitySource = idVRecord.identitySource;
+          founderSelfieUrl = idVRecord.selfieUrl ?? null;
         }
       }
 
-      const profileWithChecklist = { ...profile, checklistItems: checklistRows, founderIdentityVerifiedAt, founderIdentitySource };
+      const profileWithChecklist = { ...profile, checklistItems: checklistRows, founderIdentityVerifiedAt, founderIdentitySource, founderSelfieUrl };
 
       // If no emails array but has legacy contactEmail, use that
       const emailsToSend = emails.length > 0 ? emails : (partner.contactEmail ? [{ label: "Contact", address: partner.contactEmail }] : []);

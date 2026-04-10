@@ -99,7 +99,7 @@ export function InvitationBanner() {
                       <p className="text-xs text-muted-foreground">
                         Your profile is complete. The next step is to verify your identity.
                       </p>
-                      <Link href="/founder/identity">
+                      <Link href="/profile#biometric">
                         <Button size="sm" variant="outline" className="w-full border-primary/40 text-primary" data-testid="button-verify-identity-banner">
                           <ShieldCheck className="h-3.5 w-3.5 mr-1" />
                           Verify Your Identity

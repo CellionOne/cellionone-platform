@@ -7,6 +7,7 @@ import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentServ
 import { sendNewOrderNotificationEmail, ADMIN_NOTIFICATION_EMAIL } from './emailService';
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
 import { createCandidate, submitBusinessAddressVerification } from './youverifyService';
+import { upsertVerifiedIndividualByUserId } from './verifiedEntityService';
 
 export interface PaystackWebhookEvent {
   event: string;
@@ -852,13 +853,15 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     await db.insert(founderProfiles).values({ userId: order.founderId, ...profilePatch });
                   }
 
-                  // Upsert identity_verifications: mark BVN/NIN verified, biometric pending
+                  // Upsert identity_verifications: mark fully verified via KYB pipeline (no selfie required)
+                  const now = new Date();
                   const idVPatch: Partial<InsertIdentityVerification> = {
-                    status: 'in_progress',
+                    status: 'verified',
                     method: 'automated',
                     externalProvider: 'smile_id',
                     identitySource: 'kyb_pipeline',
                     bvnNinVerified: true,
+                    verifiedAt: now,
                   };
                   const [existingIdV] = await db.select({ id: identityVerifications.id })
                     .from(identityVerifications).where(eq(identityVerifications.founderUserId, order.founderId));
@@ -867,7 +870,26 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                   } else {
                     await db.insert(identityVerifications).values({ founderUserId: order.founderId, ...idVPatch });
                   }
-                  console.log(`[Webhook] Founder profile pre-filled from KYB director data for user ${order.founderId} — fields: ${lockedFields.join(', ')}`);
+
+                  // Mark the founder as identity-verified on the users table
+                  await db.update(users)
+                    .set({ isIdentityVerified: true, identityVerifiedAt: now, updatedAt: now })
+                    .where(eq(users.id, order.founderId));
+
+                  // Mark any director biometric invite for this company profile as completed
+                  await db.update(directorBiometricInvites)
+                    .set({ status: 'completed', updatedAt: now })
+                    .where(and(
+                      eq(directorBiometricInvites.companyProfileId, profile.id),
+                      eq(directorBiometricInvites.founderUserId, order.founderId),
+                    ));
+
+                  // Register in the verified entity store
+                  await upsertVerifiedIndividualByUserId(order.founderId).catch((e: Error) =>
+                    console.error(`[Webhook] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
+                  );
+
+                  console.log(`[Webhook] Founder ${order.founderId} identity auto-verified via KYB pipeline — fields: ${lockedFields.join(', ')}`);
                 }
               }
             } catch (prefillErr: unknown) {

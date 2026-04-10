@@ -4530,11 +4530,31 @@ export async function registerRoutes(
   app.get("/api/founder/vault", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const [applications, documents] = await Promise.all([
+      const [applications, documents, existingProfiles] = await Promise.all([
         storage.getApplicationsByFounder(userId),
         storage.getDocumentsByUser(userId),
+        db.select().from(companyProfiles).where(and(eq(companyProfiles.founderId, userId), eq(companyProfiles.isExistingCompany, true))),
       ]);
-      res.json({ applications, documents });
+
+      // For each existing company profile, fetch its checklist document items
+      const companyDocuments: Array<{
+        profileId: number;
+        companyName: string;
+        status: string | null;
+        items: typeof profileChecklistItems.$inferSelect[];
+      }> = [];
+      for (const p of existingProfiles) {
+        const items = await db.select().from(profileChecklistItems)
+          .where(eq(profileChecklistItems.companyProfileId, p.id));
+        companyDocuments.push({
+          profileId: p.id,
+          companyName: p.companyName,
+          status: p.existingCompanyStatus,
+          items,
+        });
+      }
+
+      res.json({ applications, documents, companyDocuments });
     } catch (error) {
       console.error("Error fetching vault:", error);
       res.status(500).json({ message: "Failed to fetch vault" });
@@ -8103,6 +8123,29 @@ Important guidelines:
     } catch (error: any) {
       console.error("Error uploading company profile document:", error);
       res.status(500).json({ message: error.message || "Upload failed" });
+    }
+  });
+
+  // Download a document from the existing company profile checklist
+  app.get("/api/founder/company-profiles/:id/documents/:itemId/download", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const itemId = parseInt(req.params.itemId, 10);
+      if (isNaN(profileId) || isNaN(itemId)) return res.status(400).json({ message: "Invalid IDs" });
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const [item] = await db.select().from(profileChecklistItems).where(and(eq(profileChecklistItems.id, itemId), eq(profileChecklistItems.companyProfileId, profileId)));
+      if (!item || !item.filePath) return res.status(404).json({ message: "Document not found" });
+
+      const objectStorage = new ObjectStorageService();
+      const downloadURL = await objectStorage.getObjectEntityDownloadURL(item.filePath, 900);
+      res.redirect(downloadURL);
+    } catch (error: any) {
+      console.error("Error downloading checklist document:", error);
+      res.status(500).json({ message: error.message || "Download failed" });
     }
   });
 

@@ -208,7 +208,6 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
   const coreItems: NavItem[] = [
     { title: "Dashboard", url: "/founder/dashboard", icon: LayoutDashboard },
     { title: "Personal Profile", url: "/profile", icon: UserCircle },
-    { title: "Identity Verification", url: "/founder/identity", icon: User },
   ];
 
   const accountItems: NavItem[] = [

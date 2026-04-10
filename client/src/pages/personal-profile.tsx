@@ -130,7 +130,7 @@ function ProfileBottomCTA() {
           Identity verification unlocks company registration, orders, and service requests on the platform.
         </p>
       </div>
-      <Link href="/founder/identity">
+      <Link href="/profile#biometric">
         <Button size="lg" className="shrink-0 w-full sm:w-auto" data-testid="button-bottom-verify-identity">
           Verify Identity <ArrowRight className="h-4 w-4 ml-2" />
         </Button>
@@ -250,10 +250,10 @@ function ProfileHeader() {
         {profile?.isProfileComplete && (
           <div className="mt-4 flex items-center gap-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 px-4 py-3" data-testid="cta-profile-complete">
             <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-            <p className="text-sm font-medium text-green-800 dark:text-green-300 flex-1">Profile complete! Scroll down to proceed to identity verification.</p>
-            <Link href="/founder/identity">
+            <p className="text-sm font-medium text-green-800 dark:text-green-300 flex-1">Profile complete! Scroll down to verify your identity.</p>
+            <Link href="/profile#biometric">
               <Button size="sm" variant="outline" className="shrink-0 border-green-300 text-green-700 hover:bg-green-50 dark:border-green-700 dark:text-green-400" data-testid="button-go-to-identity-complete">
-                Go to Identity <ArrowRight className="h-4 w-4 ml-1" />
+                Verify Identity <ArrowRight className="h-4 w-4 ml-1" />
               </Button>
             </Link>
           </div>
@@ -961,21 +961,14 @@ function BiometricSection() {
             </div>
           </div>
         ) : isKybPrefilled ? (
-          <div className="space-y-4" data-testid="alert-kyb-biometric-redirect">
-            <div className="flex items-start gap-3 p-4 rounded-lg bg-primary/5 border border-primary/30">
-              <Sparkles className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-foreground">Your identity was pre-verified during registration</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Because your BVN/NIN was already confirmed through the CAC company registration process, your biometric selfie must be completed on the Identity Verification page — it is free of charge.
-                </p>
-              </div>
+          <div className="flex items-start gap-3 p-4 rounded-lg bg-primary/5 border border-primary/30" data-testid="alert-kyb-pending-review">
+            <Sparkles className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Identity verification in progress</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Your BVN/NIN was confirmed through your CAC company registration. Your identity is being automatically verified — no further action is required from you.
+              </p>
             </div>
-            <Link href="/founder/identity">
-              <Button className="w-full" data-testid="button-go-to-identity">
-                Go to Identity Verification <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-            </Link>
           </div>
         ) : submitMutation.isPending ? (
           <div className="flex items-center justify-center gap-3 py-8" data-testid="text-submitting-biometric">

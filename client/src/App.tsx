@@ -10,7 +10,6 @@ import { LoadingPage } from "@/components/loading-spinner";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/landing";
 import FounderDashboard from "@/pages/founder/dashboard";
-import FounderIdentity from "@/pages/founder/identity";
 import FounderApplications from "@/pages/founder/applications";
 import FounderVault from "@/pages/founder/vault";
 import FounderRegisteredOffice from "@/pages/founder/registered-office";
@@ -278,9 +277,6 @@ function Router() {
       </Route>
       <Route path="/founder/dashboard">
         <ProtectedRoute component={FounderDashboard} />
-      </Route>
-      <Route path="/founder/identity">
-        <ProtectedRoute component={FounderIdentity} />
       </Route>
       <Route path="/founder/applications">
         <ProtectedRoute component={FounderApplications} />

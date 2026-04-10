@@ -204,11 +204,14 @@ export default function ExistingCompanyPage() {
     queryKey: ["/api/founder/company-profiles"],
   });
 
-  // Prefer explicitly requested profileId, fall back to first resumable draft/pending-payment
+  // Prefer explicitly requested profileId, fall back to first resumable draft/pending-payment.
+  // When using profileId from URL, still constrain to resumable statuses so a founder can't
+  // accidentally jump into a non-resumable profile via a stale link.
   const resumableProfile = (allProfiles || []).find(p => {
     if (!p.isExistingCompany) return false;
-    if (qProfileId) return p.id === qProfileId;
-    return p.existingCompanyStatus === "draft" || p.existingCompanyStatus === "pending_payment";
+    const isResumable = p.existingCompanyStatus === "draft" || p.existingCompanyStatus === "pending_payment";
+    if (qProfileId) return p.id === qProfileId && isResumable;
+    return isResumable;
   }) ?? null;
 
   // If we navigated here fresh (no createdProfileId set) and there is a resumable profile,
@@ -450,7 +453,19 @@ export default function ExistingCompanyPage() {
                     Continue to Documents
                   </Button>
                 )}
-                <Button size="sm" variant="ghost" onClick={() => setResumeDismissed(true)} data-testid="button-resume-dismiss">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setResumeDismissed(true);
+                    setCreatedProfileId(null);
+                    setCompanyName("");
+                    setRcInput("");
+                    setDirectors([]);
+                    setStep(1);
+                  }}
+                  data-testid="button-resume-dismiss"
+                >
                   Start fresh instead
                 </Button>
               </div>

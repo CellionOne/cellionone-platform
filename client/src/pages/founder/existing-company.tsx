@@ -538,7 +538,7 @@ export default function ExistingCompanyPage() {
                       <Badge variant="secondary" className="text-xs shrink-0">CAC Verified</Badge>
                     </div>
                   ) : (
-                    <Input value={rcInput} onChange={e => setRcInput(e.target.value)} placeholder="RC1234567" data-testid="input-rc-number-step2" />
+                    <Input value={rcInput} onChange={e => { setRcInput(e.target.value); setKybResult(null); }} placeholder="RC1234567" data-testid="input-rc-number-step2" />
                   )}
                 </div>
                 <div>
@@ -883,7 +883,7 @@ export default function ExistingCompanyPage() {
                 <div className="flex gap-2">
                   {uploadedKeys.size === 0 && (
                     <Button variant="ghost" onClick={() => setStep(5)} data-testid="button-step4-skip">
-                      Skip for now
+                      Skip for now — upload from profile later
                       <ArrowRight className="h-4 w-4 ml-1.5" />
                     </Button>
                   )}

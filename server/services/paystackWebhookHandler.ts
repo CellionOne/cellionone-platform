@@ -505,7 +505,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             let kybPassed = false;
             let kybResultText = 'No KYB data';
             let freshKybResult: Record<string, unknown> | undefined;
-            let kybMatchedData: Record<string, string | undefined> = {};
+            let kybMatchedData: { registryName?: string; status?: string; type?: string; rcNumber?: string; registrationDate?: string } | undefined;
             try {
               // Derive Smile ID businessType from the stored companyType on the profile.
               // The initial KYB lookup (smileKybResult) does not carry businessType back,
@@ -520,11 +520,11 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               kybPassed = kybJob.found === true;
               kybResultText = kybJob.status || (kybPassed ? 'Active' : 'Not found in registry');
               kybMatchedData = {
-                registryName: kybJob.companyName,
-                status: kybJob.status,
-                type: kybJob.companyType,
-                rcNumber: kybJob.rcNumber,
-                registrationDate: kybJob.registrationDate,
+                registryName: kybJob.companyName ?? undefined,
+                status: kybJob.status ?? undefined,
+                type: kybJob.companyType ?? undefined,
+                rcNumber: kybJob.rcNumber ?? undefined,
+                registrationDate: kybJob.registrationDate ?? undefined,
               };
               const { rawResult: _kybRaw, ...safeKyb } = kybJob;
               freshKybResult = safeKyb as Record<string, unknown>;
@@ -539,7 +539,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             let tinPassed = !tinProvided; // pass by default if no TIN to verify
             let tinResultText = tinProvided ? 'Not checked' : 'Not provided';
             let freshTinResult: Record<string, unknown> | undefined;
-            let tinMatchedData: Record<string, string | boolean | undefined> = {};
+            let tinMatchedData: { found?: boolean; registryName?: string; status?: string } | undefined;
             if (tinProvided) {
               try {
                 const tinJob = await verifyTin(profile.tinNumber!, order.founderId, `tin-post-pay-${profile.id}-${Date.now()}`);
@@ -547,8 +547,8 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 tinResultText = tinPassed ? 'Verified with FIRS' : 'Not verified with FIRS';
                 tinMatchedData = {
                   found: tinJob.found,
-                  registryName: tinJob.companyName,
-                  status: tinJob.status,
+                  registryName: tinJob.companyName ?? undefined,
+                  status: tinJob.status ?? undefined,
                 };
                 const { rawResult: _tinRaw, ...safeTin } = tinJob;
                 freshTinResult = safeTin as Record<string, unknown>;
@@ -689,12 +689,12 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             const verificationReport = {
               kybPassed,
               kybResultText,
-              kybSubmitted: { rcNumber: profile.rcNumber, companyName: profile.companyName },
-              kybMatched: Object.keys(kybMatchedData).length ? kybMatchedData : undefined,
+              kybSubmitted: { rcNumber: profile.rcNumber ?? undefined, companyName: profile.companyName },
+              kybMatched: kybMatchedData,
               tinPassed,
               tinResultText,
               tinSubmitted: tinProvided ? { tinNumber: profile.tinNumber } : undefined,
-              tinMatched: Object.keys(tinMatchedData).length ? tinMatchedData : undefined,
+              tinMatched: tinMatchedData,
               directorsReport,
               autoApproved: allPass,
               completedAt: new Date().toISOString(),
@@ -702,7 +702,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
             const newStatus = allPass ? 'verified' : 'under_review';
             await db.update(companyProfiles)
-              .set({ existingCompanyStatus: newStatus, verificationReport, updatedAt: new Date() })
+              .set({ existingCompanyStatus: newStatus, verificationReport: verificationReport as typeof companyProfiles.$inferSelect['verificationReport'], updatedAt: new Date() })
               .where(eq(companyProfiles.id, profile.id));
 
             await storage.createAuditLog({

@@ -1910,7 +1910,8 @@ export type ContractMilestone = typeof contractMilestones.$inferSelect;
 export type InsertContractMilestone = z.infer<typeof insertContractMilestoneSchema>;
 
 // ============== BANKING PARTNERS ==============
-// Escrow custody partners. Only one may be isActive at a time.
+// Banking partners serving Cellion in one or more capacities.
+// serviceTypes: array of "account_opening" | "escrow_custody"
 // feeRateBps = basis points carved from Cellion's 1.5% service fee (e.g. 50 = 0.50%).
 // Max: 150 bps (1.50%), matching Cellion's service fee ceiling.
 // The buyer-facing total is never changed — this is internal revenue accounting.
@@ -1919,6 +1920,7 @@ export const bankPartners = pgTable("bank_partners", {
   name: varchar("name", { length: 255 }).notNull(),
   contactEmail: varchar("contact_email", { length: 255 }),
   emails: json("emails").$type<{ label: string; address: string }[]>().default([]),
+  serviceTypes: text("service_types").array().notNull().default(sql`ARRAY['escrow_custody']::text[]`),
   feeRateBps: integer("fee_rate_bps").notNull().default(0), // basis points, e.g. 50 = 0.50%
   isActive: boolean("is_active").notNull().default(false),
   notes: text("notes"),

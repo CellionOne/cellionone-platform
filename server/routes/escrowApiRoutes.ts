@@ -34,8 +34,9 @@ function generateEscrowReference(): string {
  * Cellion escrow service fee: 1.5% of principal
  * Minimum: ₦1,500 (150,000 kobo)  |  Maximum: ₦50,000 (5,000,000 kobo)
  *
- * When an activeBankPartner is present, a portion of the service fee is
- * carved out as bankCustodyFee (based on the partner's feeRateBps).
+ * When an activeBankPartner is present and has "escrow_custody" in their
+ * serviceTypes, a portion of the service fee is carved out as bankCustodyFee
+ * (based on the partner's feeRateBps).
  * The buyer-facing totalCharged does NOT change — this is internal accounting.
  *
  * Returns { serviceFee, bankCustodyFee, totalCharged } all in kobo.
@@ -654,14 +655,18 @@ export function registerEscrowApiRoutes(app: Express): void {
       const body = z.object({
         name: z.string().min(1).max(255),
         contactEmail: z.string().email().optional(),
-        feeRateBps: z.number().int().min(0).max(150), // max 150 bps (= 1.50%, matching Cellion's service fee cap)
+        serviceTypes: z.array(z.enum(["account_opening", "escrow_custody"])).min(1, "At least one service type is required"),
+        feeRateBps: z.number().int().min(0).max(150).optional().default(0), // max 150 bps (= 1.50%, matching Cellion's service fee cap); only relevant for escrow_custody
         notes: z.string().optional(),
       }).parse(req.body);
+
+      // Enforce: feeRateBps is only meaningful for escrow custody partners
+      const normalizedFeeRateBps = body.serviceTypes.includes("escrow_custody") ? (body.feeRateBps ?? 0) : 0;
 
       const initialEmails: { label: string; address: string }[] = body.contactEmail
         ? [{ label: "Primary Contact", address: body.contactEmail }]
         : [];
-      const partner = await storage.createBankPartner({ ...body, isActive: false, emails: initialEmails });
+      const partner = await storage.createBankPartner({ ...body, feeRateBps: normalizedFeeRateBps, isActive: false, emails: initialEmails });
 
       await storage.createAuditLog({
         actorUserId: (req as any).user?.claims?.sub,
@@ -701,11 +706,18 @@ export function registerEscrowApiRoutes(app: Express): void {
       const body = z.object({
         name: z.string().min(1).max(255).optional(),
         contactEmail: z.string().email().optional(),
-        feeRateBps: z.number().int().min(0).max(150).optional(), // max 150 bps = 1.50%
+        serviceTypes: z.array(z.enum(["account_opening", "escrow_custody"])).min(1, "At least one service type is required").optional(),
+        feeRateBps: z.number().int().min(0).max(150).optional(), // max 150 bps = 1.50%; only relevant for escrow_custody
         notes: z.string().optional(),
       }).parse(req.body);
 
-      const partner = await storage.updateBankPartner(id, body);
+      // Enforce: feeRateBps is only meaningful for escrow custody partners
+      const updateData = { ...body };
+      if (body.serviceTypes !== undefined && !body.serviceTypes.includes("escrow_custody")) {
+        updateData.feeRateBps = 0;
+      }
+
+      const partner = await storage.updateBankPartner(id, updateData);
       if (!partner) return res.status(404).json({ error: "Partner not found" });
 
       res.json(partner);

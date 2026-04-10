@@ -57,6 +57,7 @@ interface BankPartner {
   name: string;
   contactEmail: string | null;
   emails: BankEmail[];
+  serviceTypes: string[];
   feeRateBps: number;
   isActive: boolean;
   notes: string | null;
@@ -101,11 +102,12 @@ function feeLabel(bps: number) {
 type PartnerFormState = {
   name: string;
   contactEmail: string;
+  serviceTypes: string[];
   feeRateBps: string;
   notes: string;
 };
 
-const EMPTY_FORM: PartnerFormState = { name: "", contactEmail: "", feeRateBps: "", notes: "" };
+const EMPTY_FORM: PartnerFormState = { name: "", contactEmail: "", serviceTypes: ["escrow_custody"], feeRateBps: "", notes: "" };
 
 export default function AdminBankingPartnersPage() {
   const { toast } = useToast();
@@ -136,7 +138,8 @@ export default function AdminBankingPartnersPage() {
       const res = await apiRequest("POST", "/api/admin/banking-partners", {
         name: data.name.trim(),
         contactEmail: data.contactEmail.trim() || undefined,
-        feeRateBps: parseInt(data.feeRateBps, 10),
+        serviceTypes: data.serviceTypes,
+        feeRateBps: data.serviceTypes.includes("escrow_custody") ? parseInt(data.feeRateBps, 10) || 0 : 0,
         notes: data.notes.trim() || undefined,
       });
       if (!res.ok) {
@@ -159,7 +162,8 @@ export default function AdminBankingPartnersPage() {
       const res = await apiRequest("PATCH", `/api/admin/banking-partners/${id}`, {
         name: data.name.trim(),
         contactEmail: data.contactEmail.trim() || undefined,
-        feeRateBps: parseInt(data.feeRateBps, 10),
+        serviceTypes: data.serviceTypes,
+        feeRateBps: data.serviceTypes.includes("escrow_custody") ? parseInt(data.feeRateBps, 10) || 0 : 0,
         notes: data.notes.trim() || undefined,
       });
       if (!res.ok) {
@@ -282,6 +286,7 @@ export default function AdminBankingPartnersPage() {
     setForm({
       name: p.name,
       contactEmail: p.contactEmail || "",
+      serviceTypes: Array.isArray(p.serviceTypes) && p.serviceTypes.length > 0 ? p.serviceTypes : ["escrow_custody"],
       feeRateBps: String(p.feeRateBps),
       notes: p.notes || "",
     });
@@ -404,6 +409,12 @@ export default function AdminBankingPartnersPage() {
                               <Badge className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30">Active</Badge>
                             ) : (
                               <Badge variant="outline" className="text-muted-foreground">Inactive</Badge>
+                            )}
+                            {Array.isArray(p.serviceTypes) && p.serviceTypes.includes("account_opening") && (
+                              <Badge variant="outline" className="text-blue-700 dark:text-blue-400 border-blue-400/50 bg-blue-50 dark:bg-blue-950/30" data-testid={`badge-account-opening-${p.id}`}>Account Opening</Badge>
+                            )}
+                            {Array.isArray(p.serviceTypes) && p.serviceTypes.includes("escrow_custody") && (
+                              <Badge variant="outline" className="text-purple-700 dark:text-purple-400 border-purple-400/50 bg-purple-50 dark:bg-purple-950/30" data-testid={`badge-escrow-custody-${p.id}`}>Escrow Custody</Badge>
                             )}
                           </div>
                           <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-sm text-muted-foreground">
@@ -565,7 +576,7 @@ export default function AdminBankingPartnersPage() {
             <Button variant="outline" onClick={() => setAddOpen(false)} data-testid="button-cancel-add">Cancel</Button>
             <Button
               onClick={() => createMutation.mutate(form)}
-              disabled={createMutation.isPending || !form.name || !form.feeRateBps}
+              disabled={createMutation.isPending || !form.name || form.serviceTypes.length === 0 || (form.serviceTypes.includes("escrow_custody") && !form.feeRateBps)}
               data-testid="button-submit-add"
             >
               {createMutation.isPending ? <LoadingSpinner /> : "Add Partner"}
@@ -586,7 +597,7 @@ export default function AdminBankingPartnersPage() {
             <Button variant="outline" onClick={() => setEditPartner(null)} data-testid="button-cancel-edit">Cancel</Button>
             <Button
               onClick={() => editPartner && editMutation.mutate({ id: editPartner.id, data: form })}
-              disabled={editMutation.isPending || !form.name}
+              disabled={editMutation.isPending || !form.name || form.serviceTypes.length === 0 || (form.serviceTypes.includes("escrow_custody") && !form.feeRateBps)}
               data-testid="button-submit-edit"
             >
               {editMutation.isPending ? <LoadingSpinner /> : "Save Changes"}
@@ -749,6 +760,18 @@ export default function AdminBankingPartnersPage() {
 }
 
 function PartnerForm({ form, onChange }: { form: PartnerFormState; onChange: Dispatch<SetStateAction<PartnerFormState>> }) {
+  const hasEscrow = form.serviceTypes.includes("escrow_custody");
+  const hasAccountOpening = form.serviceTypes.includes("account_opening");
+
+  function toggleServiceType(type: string) {
+    onChange(f => {
+      const has = f.serviceTypes.includes(type);
+      const updated = has ? f.serviceTypes.filter(t => t !== type) : [...f.serviceTypes, type];
+      const clearedFee = !updated.includes("escrow_custody") ? { feeRateBps: "" } : {};
+      return { ...f, serviceTypes: updated, ...clearedFee };
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
@@ -761,24 +784,57 @@ function PartnerForm({ form, onChange }: { form: PartnerFormState; onChange: Dis
           data-testid="input-partner-name"
         />
       </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="fee-bps">Fee Carve-out (basis points) *</Label>
-        <Input
-          id="fee-bps"
-          type="number"
-          min={0}
-          max={150}
-          value={form.feeRateBps}
-          onChange={e => onChange(f => ({ ...f, feeRateBps: e.target.value }))}
-          placeholder="e.g. 50 = 0.50%"
-          data-testid="input-fee-bps"
-        />
-        {form.feeRateBps && !isNaN(parseInt(form.feeRateBps)) && (
-          <p className="text-xs text-muted-foreground">
-            = {feeLabel(parseInt(form.feeRateBps))} &nbsp;·&nbsp; Max 150 bps (1.50%)
-          </p>
+
+      <div className="space-y-2">
+        <Label>Services Provided *</Label>
+        <div className="space-y-2">
+          <label className="flex items-center gap-2.5 cursor-pointer" data-testid="label-account-opening">
+            <input
+              type="checkbox"
+              checked={hasAccountOpening}
+              onChange={() => toggleServiceType("account_opening")}
+              className="h-4 w-4 rounded border-border accent-primary"
+              data-testid="checkbox-account-opening"
+            />
+            <span className="text-sm">Corporate Account Opening</span>
+          </label>
+          <label className="flex items-center gap-2.5 cursor-pointer" data-testid="label-escrow-custody">
+            <input
+              type="checkbox"
+              checked={hasEscrow}
+              onChange={() => toggleServiceType("escrow_custody")}
+              className="h-4 w-4 rounded border-border accent-primary"
+              data-testid="checkbox-escrow-custody"
+            />
+            <span className="text-sm">Escrow Custody</span>
+          </label>
+        </div>
+        {form.serviceTypes.length === 0 && (
+          <p className="text-xs text-destructive">At least one service must be selected.</p>
         )}
       </div>
+
+      {hasEscrow && (
+        <div className="space-y-1.5">
+          <Label htmlFor="fee-bps">Fee Carve-out (basis points) *</Label>
+          <Input
+            id="fee-bps"
+            type="number"
+            min={0}
+            max={150}
+            value={form.feeRateBps}
+            onChange={e => onChange(f => ({ ...f, feeRateBps: e.target.value }))}
+            placeholder="e.g. 50 = 0.50%"
+            data-testid="input-fee-bps"
+          />
+          {form.feeRateBps && !isNaN(parseInt(form.feeRateBps)) && (
+            <p className="text-xs text-muted-foreground">
+              = {feeLabel(parseInt(form.feeRateBps))} &nbsp;·&nbsp; Max 150 bps (1.50%)
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="space-y-1.5">
         <Label htmlFor="contact-email">Legacy Contact Email (optional)</Label>
         <Input

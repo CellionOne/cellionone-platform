@@ -701,7 +701,7 @@ export default function ExistingCompanyPage() {
                               />
                             </div>
                             <div>
-                              <Label className="text-xs">BVN *</Label>
+                              <Label className="text-xs">BVN <span className="text-muted-foreground font-normal">(or NIN — one required)</span></Label>
                               <Input
                                 className="h-7 text-xs"
                                 value={d.bvn}
@@ -711,7 +711,7 @@ export default function ExistingCompanyPage() {
                               />
                             </div>
                             <div>
-                              <Label className="text-xs">NIN *</Label>
+                              <Label className="text-xs">NIN <span className="text-muted-foreground font-normal">(or BVN — one required)</span></Label>
                               <Input
                                 className="h-7 text-xs"
                                 value={d.nin}
@@ -759,11 +759,11 @@ export default function ExistingCompanyPage() {
                   <Input type="email" value={newDir.email} onChange={e => setNewDir(prev => ({ ...prev, email: e.target.value }))} placeholder="email@example.com" data-testid="input-new-director-email" />
                 </div>
                 <div>
-                  <Label>BVN *</Label>
+                  <Label>BVN <span className="text-muted-foreground font-normal text-xs">(or NIN — one required)</span></Label>
                   <Input value={newDir.bvn} onChange={e => setNewDir(prev => ({ ...prev, bvn: e.target.value }))} placeholder="11-digit BVN" data-testid="input-new-director-bvn" />
                 </div>
                 <div>
-                  <Label>NIN *</Label>
+                  <Label>NIN <span className="text-muted-foreground font-normal text-xs">(or BVN — one required)</span></Label>
                   <Input value={newDir.nin} onChange={e => setNewDir(prev => ({ ...prev, nin: e.target.value }))} placeholder="11-digit NIN" data-testid="input-new-director-nin" />
                 </div>
               </div>

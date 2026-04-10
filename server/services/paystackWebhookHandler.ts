@@ -809,9 +809,11 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
           } catch (pipelineErr: unknown) {
             const msg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
             console.error('[Webhook] Verification pipeline error:', msg);
-            // On pipeline failure, fall back to pending_review for manual admin handling
+            // On unhandled pipeline exception, route to under_review (consistent with status semantics)
+            // so admin can see the case in the review queue rather than a separate pending_review bucket.
+            const errorReport = { kybPassed: false, tinPassed: false, directorsPass: false, pipelineError: msg, autoApproved: false, completedAt: new Date().toISOString() };
             await db.update(companyProfiles)
-              .set({ existingCompanyStatus: 'pending_review', updatedAt: new Date() })
+              .set({ existingCompanyStatus: 'under_review', verificationReport: errorReport as typeof companyProfiles.$inferSelect['verificationReport'], updatedAt: new Date() })
               .where(eq(companyProfiles.id, profile.id));
           }
         }

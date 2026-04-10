@@ -222,9 +222,10 @@ export default function IdentityVerificationPage() {
     },
     {
       key: "selfie",
-      label: "Biometric passport photo",
-      done: !!(profile?.hasPassportPhoto || founderVerified),
-      anchor: "/profile#biometric",
+      label: "Biometric selfie",
+      // KYB-pipeline founders do their selfie right on this page — count as satisfied
+      done: !!(profile?.hasPassportPhoto || founderVerified || isKybPipelineVerified),
+      anchor: isKybPipelineVerified ? "#card-free-biometric" : "/profile#biometric",
     },
   ];
   const prereqsComplete = prereqs.every(p => p.done);
@@ -291,8 +292,9 @@ export default function IdentityVerificationPage() {
             <Sparkles className="h-4 w-4 text-primary" />
             <AlertTitle className="text-primary">You are also listed as a director — one step remaining</AlertTitle>
             <AlertDescription>
-              Your BVN/NIN and AML check were completed automatically during your company registration because you were listed as a director. Complete your biometric selfie below using the <strong>Start Camera</strong> button on your{" "}
-              <Link href="/profile#biometric" className="underline font-medium">Personal Profile</Link> — no payment required.
+              Your BVN/NIN and AML check were completed automatically during your company registration because you were listed as a director. Use the{" "}
+              <a href="#card-free-biometric" className="underline font-medium">Start Camera button in the card below</a>{" "}
+              to complete your biometric selfie — no payment required.
             </AlertDescription>
           </Alert>
         )}
@@ -389,7 +391,7 @@ export default function IdentityVerificationPage() {
 
         {/* Free biometric selfie card for KYB-pipeline founders */}
         {!isLoading && isKybPipelineVerified && !founderVerified && (
-          <Card className="border-primary/30" data-testid="card-free-biometric">
+          <Card id="card-free-biometric" className="border-primary/30" data-testid="card-free-biometric">
             <CardHeader className="pb-3">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">

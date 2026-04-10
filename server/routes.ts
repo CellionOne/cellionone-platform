@@ -2113,6 +2113,17 @@ export async function registerRoutes(
       const verification = await storage.getIdentityVerification(userId);
       const now = new Date();
       const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year
+
+      // Guard: if the founder is in the KYB pipeline (identitySource='kyb_pipeline'), they should use
+      // /api/founder/identity-verification/biometric (the free KYB endpoint) instead of this one.
+      // Reject the request to prevent routing errors and data corruption.
+      if (verification?.identitySource === 'kyb_pipeline' && verification?.bvnNinVerified) {
+        return res.status(403).json({
+          message: "Your identity was pre-verified during company registration. Please use the free biometric on the Identity Verification page — no payment required.",
+          redirectTo: "/founder/identity",
+        });
+      }
+
       await storage.upsertIdentityVerification({
         founderUserId: userId,
         status: passed ? 'verified' : (verification?.status ?? 'in_progress'),
@@ -2123,6 +2134,9 @@ export async function registerRoutes(
         notes: verification?.notes,
         verifiedAt: passed ? now : (verification?.verifiedAt ?? null),
         expiresAt: passed ? expiresAt : (verification?.expiresAt ?? null),
+        identitySource: verification?.identitySource ?? null,
+        bvnNinVerified: verification?.bvnNinVerified ?? false,
+        selfieUrl: verification?.selfieUrl ?? null,
       });
 
       // If liveness passed, mark user as identity-verified in the users table

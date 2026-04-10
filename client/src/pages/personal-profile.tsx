@@ -939,6 +939,7 @@ function BiometricSection() {
   });
 
   const isVerified = profile?.isVerified;
+  const isKybPrefilled = profile?.kybPrefilled ?? false;
 
   return (
     <Card id="biometric" data-testid="card-biometric-section" className="border-primary/30">
@@ -947,7 +948,7 @@ function BiometricSection() {
           <ShieldCheck className="h-5 w-5 text-primary" /> Verify My Identity — Biometric Selfie
         </CardTitle>
         <CardDescription>
-          Capture a live selfie to complete Step 3 of your identity verification. This is the canonical place to do this — you do not need to go anywhere else.
+          Capture a live selfie to complete your identity verification.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -958,6 +959,23 @@ function BiometricSection() {
               <p className="text-sm font-semibold text-green-700 dark:text-green-400">Identity verified</p>
               <p className="text-xs text-green-600 dark:text-green-500">Your biometric selfie has been confirmed. No further action needed.</p>
             </div>
+          </div>
+        ) : isKybPrefilled ? (
+          <div className="space-y-4" data-testid="alert-kyb-biometric-redirect">
+            <div className="flex items-start gap-3 p-4 rounded-lg bg-primary/5 border border-primary/30">
+              <Sparkles className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-foreground">Your identity was pre-verified during registration</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Because your BVN/NIN was already confirmed through the CAC company registration process, your biometric selfie must be completed on the Identity Verification page — it is free of charge.
+                </p>
+              </div>
+            </div>
+            <Link href="/founder/identity">
+              <Button className="w-full" data-testid="button-go-to-identity">
+                Go to Identity Verification <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </Link>
           </div>
         ) : submitMutation.isPending ? (
           <div className="flex items-center justify-center gap-3 py-8" data-testid="text-submitting-biometric">

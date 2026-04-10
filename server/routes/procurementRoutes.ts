@@ -4,7 +4,7 @@ import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { db } from "../db";
 import { eq, and } from "drizzle-orm";
-import { kycOrgMembers, kycOrganisations, identityVerifications } from "@shared/schema";
+import { kycOrgMembers, kycOrganisations, identityVerifications, verifiedEntities, users as usersTable } from "@shared/schema";
 import { calculateEscrowFee } from "./escrowApiRoutes";
 
 async function requireActiveOrg(orgId: number, res: Response): Promise<boolean> {
@@ -464,12 +464,30 @@ export function registerProcurementRoutes(app: Express) {
 
       if (!await requireActiveOrg(bid.supplierOrgId, res)) return;
 
-      // Gate: submitter must have a verified identity (platform KYC or KYB pipeline)
+      // Gate: submitter must have a verified identity (platform KYC/KYB pipeline OR verified_entities registry)
       const [idVerification] = await db.select({ status: identityVerifications.status })
         .from(identityVerifications)
         .where(eq(identityVerifications.founderUserId, userId))
         .limit(1);
-      if (!idVerification || idVerification.status !== 'verified') {
+      const platformVerified = idVerification?.status === 'verified';
+
+      // Also accept legacy path: user email exists in verifiedEntities (individual)
+      let registryVerified = false;
+      if (!platformVerified) {
+        const [userRecord] = await db.select({ email: usersTable.email })
+          .from(usersTable)
+          .where(eq(usersTable.id, userId))
+          .limit(1);
+        if (userRecord?.email) {
+          const [veRecord] = await db.select({ id: verifiedEntities.id })
+            .from(verifiedEntities)
+            .where(and(eq(verifiedEntities.email, userRecord.email), eq(verifiedEntities.entityType, 'individual')))
+            .limit(1);
+          registryVerified = !!veRecord;
+        }
+      }
+
+      if (!platformVerified && !registryVerified) {
         return res.status(403).json({
           message: "Identity verification required before submitting bids. Please complete your identity verification.",
           code: "IDENTITY_NOT_VERIFIED",

@@ -1698,7 +1698,8 @@ export async function registerRoutes(
         ...(idNumber !== undefined && { idNumber }),
       };
 
-      if (nin && typeof nin === 'string' && nin.length === 11) {
+      // NIN/BVN: skip update if the corresponding field is KYB-locked
+      if (nin && typeof nin === 'string' && nin.length === 11 && !lockedFields.includes('ninEncrypted')) {
         profileData.ninEncrypted = encryptionService.encrypt(nin);
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,
@@ -1710,7 +1711,7 @@ export async function registerRoutes(
         });
       }
 
-      if (bvn && typeof bvn === 'string' && bvn.length === 11) {
+      if (bvn && typeof bvn === 'string' && bvn.length === 11 && !lockedFields.includes('bvnEncrypted')) {
         profileData.bvnEncrypted = encryptionService.encrypt(bvn);
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,

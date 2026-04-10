@@ -197,6 +197,7 @@ export default function IdentityVerificationPage() {
     {
       key: "fullName",
       label: "Full legal name",
+      // kybPrefilled auto-satisfies only KYB-populated identity fields (name/phone/NIN/BVN)
       done: !!(profile?.kybPrefilled || profile?.fullName),
       anchor: "/profile#personal-info",
     },
@@ -215,13 +216,14 @@ export default function IdentityVerificationPage() {
     {
       key: "idDoc",
       label: "Government ID document uploaded",
-      done: !!(profile?.kybPrefilled || profile?.hasIdDocument),
+      // ID doc and selfie must be based on actual completion — kybPrefilled does not auto-satisfy these
+      done: !!profile?.hasIdDocument,
       anchor: "/profile#identity-docs",
     },
     {
       key: "selfie",
       label: "Biometric passport photo",
-      done: !!(profile?.kybPrefilled || profile?.hasPassportPhoto || founderVerified),
+      done: !!(profile?.hasPassportPhoto || founderVerified),
       anchor: "/profile#biometric",
     },
   ];

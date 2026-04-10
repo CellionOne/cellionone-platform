@@ -123,6 +123,16 @@ export default function DirectorBiometricPage() {
           </Card>
         )}
 
+        {/* Login suggestion for account holders */}
+        <Alert className="border-primary/30 bg-primary/5">
+          <AlertCircle className="h-4 w-4 text-primary" />
+          <AlertDescription className="text-sm">
+            <span className="font-medium">Already have a Cellion One account?</span>{" "}
+            <a href="/login" className="underline text-primary font-medium">Log in</a> and complete your selfie from your{" "}
+            <a href="/profile#biometric" className="underline text-primary">Personal Profile page</a> instead — no link needed.
+          </AlertDescription>
+        </Alert>
+
         {step === "error" && (
           <Card>
             <CardContent className="py-8 space-y-4">

@@ -751,11 +751,17 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               const emailSvcForBio = await import('./emailService');
               const { client: resendBio, fromEmail: fromBio } = await emailSvcForBio.getResendClient();
               const crypto = await import('crypto');
+              // Look up founder's email so we can skip the director invite email for them
+              const [founderUserForBio] = await db.select({ email: users.email, id: users.id })
+                .from(users).where(eq(users.id, order.founderId));
+              const founderEmailForBio = founderUserForBio?.email?.toLowerCase();
               for (let dirIdx = 0; dirIdx < updatedDirectors.length; dirIdx++) {
                 const director = updatedDirectors[dirIdx];
                 try {
                   const inviteToken = crypto.randomBytes(48).toString('hex');
                   const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+                  // If this director is the founder, link the invite to their user account
+                  const isFounderDirector = founderEmailForBio && director.email?.toLowerCase() === founderEmailForBio;
                   await db.insert(directorBiometricInvites).values({
                     token: inviteToken,
                     companyProfileId: profile.id,
@@ -764,8 +770,11 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     directorEmail: director.email || null,
                     status: 'pending',
                     expiresAt,
+                    // Link to founder's user account so they can complete via Personal Profile
+                    ...(isFounderDirector && founderUserForBio ? { founderUserId: founderUserForBio.id } : {}),
                   });
-                  if (director.email) {
+                  if (director.email && !isFounderDirector) {
+                    // External director — send the invite email
                     const appUrl = process.env.REPLIT_DEV_DOMAIN || process.env.APP_URL || 'https://cellionone.com';
                     const biometricUrl = `${appUrl}/director-biometric?token=${inviteToken}`;
                     resendBio.emails.send({
@@ -774,6 +783,8 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                       subject: `Action required: Complete identity verification — ${profile.companyName}`,
                       html: `<p>Hi ${director.name},</p><p>You have been listed as a director/officer of <strong>${profile.companyName}</strong> on Cellion One.</p><p>To complete your identity verification, please submit a biometric selfie using the secure link below. This link is valid for 48 hours and can only be used once.</p><p><a href="${biometricUrl}" style="font-weight:bold">Complete Biometric Verification</a></p><p>This step is required before the company can be fully verified on Cellion One.</p><p>The Cellion One Compliance Team</p>`,
                     }).catch((e: Error) => console.error(`[Webhook] Biometric invite email failed for director ${director.name}: ${e.message}`));
+                  } else if (isFounderDirector) {
+                    console.log(`[Webhook] Director ${director.name} is the founder — skipping email, they will complete biometric via Personal Profile`);
                   }
                 } catch (e: unknown) {
                   const msg = e instanceof Error ? e.message : String(e);

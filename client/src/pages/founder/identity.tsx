@@ -590,6 +590,38 @@ export default function IdentityVerificationPage() {
           </CardContent>
         </Card>
 
+        {/* Two-path clarity card — always shown to reduce confusion */}
+        <Card className="border-border/60" data-testid="card-selfie-paths">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Info className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base">Where to take your biometric selfie</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+              <p className="text-sm font-medium flex items-center gap-2">
+                <Users className="h-4 w-4 text-primary" />
+                You (the account holder)
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Complete your selfie on your{" "}
+                <Link href="/profile#biometric" className="text-primary underline underline-offset-2">Personal Profile page</Link>.
+                Use the <strong>Start Camera</strong> button in the "Verify My Identity — Biometric Selfie" section. The selfie is captured directly in your browser — no email link needed.
+              </p>
+            </div>
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+              <p className="text-sm font-medium flex items-center gap-2">
+                <Users className="h-4 w-4 text-muted-foreground" />
+                Directors & shareholders without an account
+              </p>
+              <p className="text-sm text-muted-foreground">
+                They receive an email with a secure link they can open on any device, including their phone. The link is valid for 48 hours. If their link expires, contact support to request a new one.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
         <Alert>
           <Info className="h-4 w-4" />
           <AlertTitle>Important</AlertTitle>

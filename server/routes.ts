@@ -8394,6 +8394,96 @@ Important guidelines:
     }
   });
 
+  // GET /api/admin/existing-companies/:id/biometric-invites — list all director biometric invites for a profile
+  app.get("/api/admin/existing-companies/:id/biometric-invites", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ message: "Invalid profile ID" });
+      const invites = await db.select().from(directorBiometricInvites)
+        .where(eq(directorBiometricInvites.companyProfileId, profileId))
+        .orderBy(directorBiometricInvites.directorIndex);
+      // Mark expired invites as expired on read
+      const now = new Date();
+      const result = invites.map(inv => ({
+        id: inv.id,
+        directorName: inv.directorName,
+        directorEmail: inv.directorEmail,
+        directorIndex: inv.directorIndex,
+        status: inv.expiresAt < now && inv.status === 'pending' ? 'expired' : inv.status,
+        expiresAt: inv.expiresAt,
+        completedAt: inv.completedAt,
+        resultCode: inv.resultCode,
+        resultText: inv.resultText,
+        founderUserId: inv.founderUserId,
+        createdAt: inv.createdAt,
+      }));
+      res.json(result);
+    } catch (err: any) {
+      console.error("[AdminBiometricInvites] Error listing invites:", err.message);
+      res.status(500).json({ message: "Failed to list invites" });
+    }
+  });
+
+  // POST /api/admin/existing-companies/:id/biometric-invites/:inviteId/resend — generate new token & re-send email
+  app.post("/api/admin/existing-companies/:id/biometric-invites/:inviteId/resend", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const inviteId = parseInt(req.params.inviteId, 10);
+      if (isNaN(profileId) || isNaN(inviteId)) return res.status(400).json({ message: "Invalid IDs" });
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const [invite] = await db.select().from(directorBiometricInvites)
+        .where(and(eq(directorBiometricInvites.id, inviteId), eq(directorBiometricInvites.companyProfileId, profileId)));
+      if (!invite) return res.status(404).json({ message: "Invite not found" });
+
+      if (invite.status === 'completed') {
+        return res.status(409).json({ message: "This director has already completed biometric verification." });
+      }
+      if (invite.founderUserId) {
+        return res.status(409).json({ message: "This director is a platform founder — they should complete biometric verification from their Personal Profile page." });
+      }
+      if (!invite.directorEmail) {
+        return res.status(400).json({ message: "This director has no email address — cannot resend invite." });
+      }
+
+      const crypto = await import('crypto');
+      const newToken = crypto.randomBytes(48).toString('hex');
+      const newExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+      await db.update(directorBiometricInvites).set({
+        token: newToken,
+        status: 'pending',
+        expiresAt: newExpiresAt,
+        updatedAt: new Date(),
+      }).where(eq(directorBiometricInvites.id, inviteId));
+
+      const appUrl = process.env.REPLIT_DEV_DOMAIN || process.env.APP_URL || 'https://cellionone.com';
+      const biometricUrl = `${appUrl}/director-biometric?token=${newToken}`;
+      const { sendEmail } = await import('./services/emailService');
+      await sendEmail({
+        to: invite.directorEmail,
+        subject: `Reminder: Complete identity verification — ${profile.companyName}`,
+        html: `<p>Hi ${invite.directorName},</p><p>This is a reminder that you have been listed as a director/officer of <strong>${profile.companyName}</strong> on Cellion One and your identity verification is still pending.</p><p>Please submit a biometric selfie using the secure link below. This link is valid for 48 hours and can only be used once.</p><p><a href="${biometricUrl}" style="font-weight:bold">Complete Biometric Verification</a></p><p>If you already have a Cellion One account, you can also log in and complete your selfie from your Personal Profile page instead.</p><p>The Cellion One Compliance Team</p>`,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "director_biometric_invite_resent",
+        entityType: "company_profile",
+        entityId: String(profileId),
+        details: { directorName: invite.directorName, directorEmail: invite.directorEmail, inviteId },
+      });
+
+      res.json({ success: true, message: `Invite resent to ${invite.directorEmail}` });
+    } catch (err: any) {
+      console.error("[AdminBiometricInvites] Error resending invite:", err.message);
+      res.status(500).json({ message: "Failed to resend invite" });
+    }
+  });
+
   // ============== POST-INCORPORATION CHECKLIST ROUTES ==============
 
   app.get("/api/founder/company-profiles/:id/checklist", isAuthenticated, async (req: any, res) => {

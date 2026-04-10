@@ -39,6 +39,9 @@ import {
   ThumbsDown,
   Send,
   Trash2,
+  RefreshCw,
+  Clock,
+  UserCheck,
 } from "lucide-react";
 import type { CompanyProfile, ProfileChecklistItem } from "@shared/schema";
 
@@ -85,6 +88,20 @@ interface VerificationReport {
 interface CompanyProfileDetail extends Omit<CompanyProfile, 'verificationReport'> {
   checklistItems?: ProfileChecklistItem[];
   verificationReport?: VerificationReport | null;
+}
+
+interface BiometricInvite {
+  id: number;
+  directorName: string;
+  directorEmail: string | null;
+  directorIndex: number;
+  status: string;
+  expiresAt: string;
+  completedAt: string | null;
+  resultCode: string | null;
+  resultText: string | null;
+  founderUserId: string | null;
+  createdAt: string;
 }
 
 // ── Status helpers ─────────────────────────────────────────────────────────────
@@ -279,6 +296,28 @@ export default function AdminExistingCompaniesPage() {
       setSelected(null);
     },
     onError: (e: Error) => toast({ title: "Delete failed", description: e.message, variant: "destructive" }),
+  });
+
+  const { data: biometricInvites = [], isLoading: biometricInvitesLoading } = useQuery<BiometricInvite[]>({
+    queryKey: ["/api/admin/existing-companies", selected?.id, "biometric-invites"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/existing-companies/${selected!.id}/biometric-invites`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+    enabled: !!selected?.id,
+  });
+
+  const resendBiometricMutation = useMutation({
+    mutationFn: async ({ profileId, inviteId }: { profileId: number; inviteId: number }) => {
+      const res = await apiRequest("POST", `/api/admin/existing-companies/${profileId}/biometric-invites/${inviteId}/resend`, {});
+      return res.json() as Promise<{ success: boolean; message: string }>;
+    },
+    onSuccess: (data) => {
+      toast({ title: "Invite resent", description: data.message });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/existing-companies", selected?.id, "biometric-invites"] });
+    },
+    onError: (e: Error) => toast({ title: "Resend failed", description: e.message, variant: "destructive" }),
   });
 
   const reviewableStatuses = ["pending_review", "documents_under_review", "under_review"];
@@ -622,6 +661,63 @@ export default function AdminExistingCompaniesPage() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Director Biometric Invites — status + admin resend */}
+                {!biometricInvitesLoading && biometricInvites.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-2">Director Biometric Invites</p>
+                    <div className="space-y-2">
+                      {biometricInvites.map(inv => {
+                        const isExpiredOrFailed = inv.status === 'expired' || inv.status === 'failed';
+                        const isCompleted = inv.status === 'completed';
+                        const isFounder = !!inv.founderUserId;
+                        return (
+                          <div key={inv.id} className={`rounded-md border p-2.5 flex items-center justify-between gap-3 ${isCompleted ? "border-green-500/30 bg-green-500/5" : isExpiredOrFailed ? "border-destructive/30 bg-destructive/5" : ""}`} data-testid={`row-biometric-invite-${inv.id}`}>
+                            <div className="flex items-center gap-2 min-w-0">
+                              {isCompleted
+                                ? <UserCheck className="h-4 w-4 text-green-600 shrink-0" />
+                                : isExpiredOrFailed
+                                  ? <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+                                  : <Clock className="h-4 w-4 text-muted-foreground shrink-0" />}
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{inv.directorName}</p>
+                                {inv.directorEmail && <p className="text-xs text-muted-foreground truncate">{inv.directorEmail}</p>}
+                                {isFounder && <p className="text-xs text-primary/80">Platform account holder — completes via Personal Profile</p>}
+                                {isCompleted && inv.completedAt && (
+                                  <p className="text-xs text-green-600">Completed {new Date(inv.completedAt).toLocaleDateString("en-GB")}</p>
+                                )}
+                                {!isCompleted && !isFounder && (
+                                  <p className="text-xs text-muted-foreground">Expires {new Date(inv.expiresAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Badge
+                                variant={isCompleted ? "secondary" : isExpiredOrFailed ? "destructive" : "outline"}
+                                className={`text-xs ${isCompleted ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" : ""}`}
+                                data-testid={`badge-invite-status-${inv.id}`}
+                              >
+                                {inv.status === 'completed' ? "Done" : inv.status === 'expired' ? "Expired" : inv.status === 'failed' ? "Failed" : inv.status === 'pending' ? "Awaiting" : inv.status === 'in_progress' ? "In Progress" : inv.status}
+                              </Badge>
+                              {isExpiredOrFailed && !isFounder && inv.directorEmail && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() => resendBiometricMutation.mutate({ profileId: detail.id, inviteId: inv.id })}
+                                  disabled={resendBiometricMutation.isPending}
+                                  data-testid={`button-resend-invite-${inv.id}`}
+                                >
+                                  {resendBiometricMutation.isPending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <><RefreshCw className="h-3 w-3 mr-1" /> Resend</>}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

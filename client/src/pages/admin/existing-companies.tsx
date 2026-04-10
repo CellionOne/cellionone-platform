@@ -67,8 +67,12 @@ interface DirectorVerificationEntry {
 interface VerificationReport {
   kybPassed?: boolean;
   kybResultText?: string;
+  kybSubmitted?: { rcNumber?: string; companyName?: string };
+  kybMatched?: { registryName?: string; status?: string; type?: string; rcNumber?: string; registrationDate?: string };
   tinPassed?: boolean;
   tinResultText?: string;
+  tinSubmitted?: { tinNumber?: string };
+  tinMatched?: { found?: boolean; registryName?: string; status?: string };
   directorsReport?: DirectorVerificationEntry[];
   autoApproved?: boolean;
   completedAt?: string;
@@ -333,6 +337,12 @@ export default function AdminExistingCompaniesPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {p.existingCompanyStatus === 'under_review' && (p as CompanyProfile & { verificationReport?: unknown }).verificationReport && (
+                            <Button variant="ghost" size="sm" className="text-amber-700 dark:text-amber-400" onClick={() => setSelected(p)} data-testid={`button-report-${p.id}`}>
+                              <FileText className="h-3.5 w-3.5 mr-1" />
+                              Verification Report
+                            </Button>
+                          )}
                           <Button variant="ghost" size="sm" onClick={() => setSelected(p)} data-testid={`button-view-${p.id}`}>
                             <Eye className="h-3.5 w-3.5 mr-1" />
                             Review
@@ -395,23 +405,74 @@ export default function AdminExistingCompaniesPage() {
                       }
                     </div>
 
-                    {/* KYB + TIN summary */}
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="flex items-center gap-1.5">
-                        {(detail.verificationReport as VerificationReport).kybPassed
-                          ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
-                          : <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
-                        <span className="font-medium">CAC KYB:</span>
-                        <span className="text-muted-foreground">{(detail.verificationReport as VerificationReport).kybResultText || ((detail.verificationReport as VerificationReport).kybPassed ? "Passed" : "Failed")}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {(detail.verificationReport as VerificationReport).tinPassed
-                          ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
-                          : <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
-                        <span className="font-medium">TIN:</span>
-                        <span className="text-muted-foreground">{(detail.verificationReport as VerificationReport).tinResultText || ((detail.verificationReport as VerificationReport).tinPassed ? "Passed" : "Failed")}</span>
-                      </div>
-                    </div>
+                    {/* KYB check — submitted vs matched */}
+                    {(() => {
+                      const vr = detail.verificationReport as VerificationReport;
+                      return (
+                        <div className="rounded border bg-background p-2.5 space-y-1.5 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            {vr.kybPassed
+                              ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                              : <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
+                            <span className="font-semibold">CAC KYB:</span>
+                            <span className="text-muted-foreground">{vr.kybResultText || (vr.kybPassed ? "Passed" : "Failed")}</span>
+                          </div>
+                          {(vr.kybSubmitted || vr.kybMatched) && (
+                            <div className="grid grid-cols-2 gap-2 ml-5 text-xs text-muted-foreground">
+                              {vr.kybSubmitted && (
+                                <div>
+                                  <p className="font-medium text-foreground/70 mb-0.5">Submitted</p>
+                                  {vr.kybSubmitted.rcNumber && <p>RC: {vr.kybSubmitted.rcNumber}</p>}
+                                  {vr.kybSubmitted.companyName && <p>Name: {vr.kybSubmitted.companyName}</p>}
+                                </div>
+                              )}
+                              {vr.kybMatched && (
+                                <div>
+                                  <p className="font-medium text-foreground/70 mb-0.5">Registry Match</p>
+                                  {vr.kybMatched.registryName && <p>Name: {vr.kybMatched.registryName}</p>}
+                                  {vr.kybMatched.type && <p>Type: {vr.kybMatched.type}</p>}
+                                  {vr.kybMatched.status && <p>Status: {vr.kybMatched.status}</p>}
+                                  {vr.kybMatched.registrationDate && <p>Reg. Date: {vr.kybMatched.registrationDate}</p>}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* TIN check — submitted vs matched */}
+                    {(() => {
+                      const vr = detail.verificationReport as VerificationReport;
+                      return (
+                        <div className="rounded border bg-background p-2.5 space-y-1.5 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            {vr.tinPassed
+                              ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                              : <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
+                            <span className="font-semibold">TIN / FIRS:</span>
+                            <span className="text-muted-foreground">{vr.tinResultText || (vr.tinPassed ? "Passed" : "Failed")}</span>
+                          </div>
+                          {(vr.tinSubmitted || vr.tinMatched) && (
+                            <div className="grid grid-cols-2 gap-2 ml-5 text-xs text-muted-foreground">
+                              {vr.tinSubmitted && (
+                                <div>
+                                  <p className="font-medium text-foreground/70 mb-0.5">Submitted</p>
+                                  {vr.tinSubmitted.tinNumber && <p>TIN: {vr.tinSubmitted.tinNumber}</p>}
+                                </div>
+                              )}
+                              {vr.tinMatched && (
+                                <div>
+                                  <p className="font-medium text-foreground/70 mb-0.5">FIRS Match</p>
+                                  {vr.tinMatched.registryName && <p>Name: {vr.tinMatched.registryName}</p>}
+                                  {vr.tinMatched.status && <p>Status: {vr.tinMatched.status}</p>}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Per-director results */}
                     {(detail.verificationReport as VerificationReport).directorsReport && (detail.verificationReport as VerificationReport).directorsReport!.length > 0 && (

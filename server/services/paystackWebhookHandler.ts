@@ -519,11 +519,27 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             let kybPassed = false;
             let kybResultText = 'No KYB data';
             let freshKybResult: Record<string, unknown> | undefined;
+            let kybMatchedData: Record<string, string | undefined> = {};
             try {
-              const businessType = (profile.smileKybResult as Record<string, unknown> | null)?.businessType as string | undefined || 'co';
+              // Derive Smile ID businessType from the stored companyType on the profile.
+              // The initial KYB lookup (smileKybResult) does not carry businessType back,
+              // so we derive it from the normalized companyType stored on the profile.
+              const companyTypeToBusinessType: Record<string, string> = {
+                LTD: 'co', PLC: 'co', LLP: 'co', LBG: 'co', UC: 'co',
+                Sole_Proprietorship: 'bn', Business_Name: 'bn', BN: 'bn',
+                Incorporated_Trustee: 'it', IT: 'it',
+              };
+              const businessType = companyTypeToBusinessType[profile.companyType || ''] || 'co';
               const kybJob = await verifyBusiness(profile.rcNumber || '', order.founderId, `kyb-post-pay-${profile.id}-${Date.now()}`, businessType);
               kybPassed = kybJob.found === true;
               kybResultText = kybJob.status || (kybPassed ? 'Active' : 'Not found in registry');
+              kybMatchedData = {
+                registryName: kybJob.companyName,
+                status: kybJob.status,
+                type: kybJob.companyType,
+                rcNumber: kybJob.rcNumber,
+                registrationDate: kybJob.registrationDate,
+              };
               const { rawResult: _kybRaw, ...safeKyb } = kybJob;
               freshKybResult = safeKyb as Record<string, unknown>;
             } catch (kybErr: unknown) {
@@ -537,11 +553,17 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             let tinPassed = !tinProvided; // pass by default if no TIN to verify
             let tinResultText = tinProvided ? 'Not checked' : 'Not provided';
             let freshTinResult: Record<string, unknown> | undefined;
+            let tinMatchedData: Record<string, string | boolean | undefined> = {};
             if (tinProvided) {
               try {
                 const tinJob = await verifyTin(profile.tinNumber!, order.founderId, `tin-post-pay-${profile.id}-${Date.now()}`);
                 tinPassed = tinJob.found === true;
                 tinResultText = tinPassed ? 'Verified with FIRS' : 'Not verified with FIRS';
+                tinMatchedData = {
+                  found: tinJob.found,
+                  registryName: tinJob.companyName,
+                  status: tinJob.status,
+                };
                 const { rawResult: _tinRaw, ...safeTin } = tinJob;
                 freshTinResult = safeTin as Record<string, unknown>;
               } catch (tinErr: unknown) {
@@ -685,8 +707,12 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             const verificationReport = {
               kybPassed,
               kybResultText,
+              kybSubmitted: { rcNumber: profile.rcNumber, companyName: profile.companyName },
+              kybMatched: Object.keys(kybMatchedData).length ? kybMatchedData : undefined,
               tinPassed,
               tinResultText,
+              tinSubmitted: tinProvided ? { tinNumber: profile.tinNumber } : undefined,
+              tinMatched: Object.keys(tinMatchedData).length ? tinMatchedData : undefined,
               directorsReport,
               autoApproved: allPass,
               completedAt: new Date().toISOString(),

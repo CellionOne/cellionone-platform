@@ -583,17 +583,42 @@ export default function ExistingCompanyPage() {
                 </div>
                 <div>
                   <Label>Share Capital</Label>
-                  <Input value={shareCapital} onChange={e => setShareCapital(e.target.value)} placeholder="e.g. ₦100,000" data-testid="input-share-capital" />
+                  {kybResult?.found && kybResult?.shareCapital ? (
+                    <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm" data-testid="display-share-capital">
+                      <span className="flex-1">{shareCapital}</span>
+                      <Badge variant="secondary" className="text-xs shrink-0">CAC Verified</Badge>
+                    </div>
+                  ) : (
+                    <Input value={shareCapital} onChange={e => setShareCapital(e.target.value)} placeholder="e.g. ₦100,000" data-testid="input-share-capital" />
+                  )}
                 </div>
               </div>
 
               <Separator />
 
-              <AddressForm
-                title="Registered Address (CAC)"
-                value={registeredAddress}
-                onChange={setRegisteredAddress}
-              />
+              {kybResult?.found && (registeredAddress.line1 || registeredAddress.state) ? (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Registered Address (CAC)</p>
+                  <div className="rounded-md border bg-muted/40 px-3 py-3 space-y-1 text-sm" data-testid="display-registered-address">
+                    {registeredAddress.line1 && <p>{registeredAddress.line1}</p>}
+                    {registeredAddress.line2 && <p>{registeredAddress.line2}</p>}
+                    <p className="text-muted-foreground">
+                      {[registeredAddress.city, registeredAddress.state, registeredAddress.postalCode, registeredAddress.country].filter(Boolean).join(", ")}
+                    </p>
+                    <Badge variant="secondary" className="text-xs mt-1">CAC Verified</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Info className="h-3 w-3" />
+                    This address is sourced from the CAC registry. Contact support if it is incorrect.
+                  </p>
+                </div>
+              ) : (
+                <AddressForm
+                  title="Registered Address (CAC)"
+                  value={registeredAddress}
+                  onChange={setRegisteredAddress}
+                />
+              )}
 
               <div className="flex items-center gap-2 pt-1">
                 <input

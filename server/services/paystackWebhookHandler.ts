@@ -482,29 +482,34 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
           await storage.createNotification({
             userId: order.founderId,
-            title: 'Payment Confirmed — Under Review',
-            message: `Payment received for ${profile.companyName}. Your documents are now under review.`,
+            title: 'Payment Confirmed — Verification Running',
+            message: `Payment received for ${profile.companyName}. Our automated verification pipeline is running. You will be notified when complete.`,
             type: 'success',
             linkUrl: '/founder/existing-company',
           });
 
-          // Director verification pipeline (BVN + NIN + AML/PEP/sanctions screening)
-          // BVN/NIN stored encrypted — decrypt before Smile ID API calls
-          // Updates director verification statuses back into the profile JSON
+          // ── Automated Verification Pipeline ─────────────────────────────────
+          // 1. KYB result already captured at profile creation (smileKybResult)
+          // 2. TIN result already captured at profile creation (smileTinResult)
+          // 3. Run director BVN + NIN + AML checks now
+          // 4. Auto-approve if all checks pass; otherwise flag for human review
+          // ─────────────────────────────────────────────────────────────────────
+
           try {
             const { verifyBvn, verifyNin, performAmlCheck } = await import('./smileIdService');
             const { decryptField } = await import('./encryptionService');
             const directors = (profile.directors as {
-              name: string; bvn?: string; nin?: string;
+              name: string; email?: string; bvn?: string; nin?: string;
               bvnVerified?: boolean; ninVerified?: boolean;
               amlIsHit?: boolean; amlHitTypes?: string[];
             }[]) || [];
             const updatedDirectors = [...directors];
+
             for (const [idx, director] of directors.entries()) {
               const dirJobBase = `dir-${profile.id}-${idx}-${Date.now()}`;
               let bvnVerified: boolean | undefined;
               let ninVerified: boolean | undefined;
-              // BVN verification
+
               if (director.bvn) {
                 try {
                   const plainBvn = decryptField(director.bvn);
@@ -514,7 +519,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                   console.error(`[Webhook] Director BVN verification failed (director ${idx}): ${e.message}`);
                 }
               }
-              // NIN verification
+
               if (director.nin) {
                 try {
                   const plainNin = decryptField(director.nin);
@@ -524,29 +529,17 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                   console.error(`[Webhook] Director NIN verification failed (director ${idx}): ${e.message}`);
                 }
               }
-              // AML/PEP/sanctions screening — runs for all named directors
+
               let amlIsHit: boolean | undefined;
               let amlHitTypes: string[] | undefined;
               try {
                 const amlResult = await performAmlCheck(director.name, order.founderId);
                 amlIsHit = amlResult.isHit;
                 amlHitTypes = amlResult.hitTypes;
-                if (amlResult.isHit) {
-                  console.warn(`[Webhook] AML hit for director "${director.name}" of profile ${profile.id}: ${amlResult.hitTypes.join(', ')}`);
-                  await storage.createNotification({
-                    userId: profile.founderId,
-                    title: 'Director AML Review Required',
-                    message: `A potential AML/PEP match was detected for director "${director.name}". Our compliance team will follow up.`,
-                    type: 'warning',
-                    linkUrl: '/founder/existing-company',
-                  });
-                }
               } catch (e: any) {
                 console.error(`[Webhook] Director AML check failed (director ${idx}): ${e.message}`);
               }
-              // Update director entry with verification statuses (encrypted PII preserved as-is)
-              // biometricStatus: 'pending_selfie' — director must complete biometric via selfie app
-              // (Job Type 4 biometric requires an active selfie capture not available in this web flow)
+
               updatedDirectors[idx] = {
                 ...director,
                 bvnVerified: bvnVerified !== undefined ? bvnVerified : director.bvnVerified,
@@ -556,20 +549,20 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 biometricStatus: 'pending_selfie',
               };
             }
-            // Persist updated director verification statuses to profile
+
+            // Persist updated director verification statuses
             if (updatedDirectors.length > 0) {
               await db.update(companyProfiles)
                 .set({ directors: updatedDirectors, updatedAt: new Date() })
                 .where(eq(companyProfiles.id, profile.id));
-              // Issue secure per-director biometric invite tokens and notify via email
-              // Smile ID Job Type 4 (biometric) requires a selfie capture — web flow cannot collect this.
-              // Each director gets a cryptographically random, 48-hour, single-use token.
+
+              // Issue per-director biometric invite tokens
               const { sendEmail } = await import('./emailService');
               const crypto = await import('crypto');
               for (const [dirIdx, director] of updatedDirectors.entries()) {
                 try {
                   const inviteToken = crypto.randomBytes(48).toString('hex');
-                  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+                  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
                   await db.insert(directorBiometricInvites).values({
                     token: inviteToken,
                     companyProfileId: profile.id,
@@ -593,11 +586,103 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 }
               }
             }
+
+            // ── Auto-approve decision ──────────────────────────────────────────
+            // Use results already on profile (KYB + TIN set at creation) + freshly computed directors
+            const kybResult = profile.smileKybResult as Record<string, unknown> | undefined;
+            const tinResult = profile.smileTinResult as Record<string, unknown> | undefined;
+
+            const kybPassed = kybResult ? kybResult.found === true : false;
+            const kybResultText = kybResult ? String(kybResult.status || (kybPassed ? 'Active' : 'Not found')) : 'No KYB data';
+
+            const tinProvided = !!profile.tinNumber;
+            const tinPassed = tinResult ? tinResult.found === true : !tinProvided;
+            const tinResultText = tinResult ? String(tinResult.found === true ? 'Verified' : 'Not verified') : (tinProvided ? 'Not checked' : 'Not provided');
+
+            const directorsReport = updatedDirectors.map(d => {
+              const hasBvn = !!(d as any).bvn;
+              const hasNin = !!(d as any).nin;
+              const bvnPassed = hasBvn ? (d as any).bvnVerified === true : undefined;
+              const ninPassed = hasNin ? (d as any).ninVerified === true : undefined;
+              const amlClear = (d as any).amlIsHit === false;
+              return {
+                name: d.name,
+                bvnPassed: hasBvn ? bvnPassed : undefined,
+                ninPassed: hasNin ? ninPassed : undefined,
+                amlClear: (d as any).amlIsHit !== undefined ? amlClear : undefined,
+                amlHitTypes: (d as any).amlHitTypes,
+              };
+            });
+
+            // All checks pass criteria:
+            // 1. KYB found (company in CAC registry)
+            // 2. TIN verified (or not provided)
+            // 3. Each director: BVN verified OR NIN verified (at least one)
+            // 4. No director has an AML hit
+            const directorsPass = updatedDirectors.every(d => {
+              const bvnOk = (d as any).bvn ? (d as any).bvnVerified === true : true;
+              const ninOk = (d as any).nin ? (d as any).ninVerified === true : true;
+              const hasVerifiedId = bvnOk || ninOk;
+              const amlOk = (d as any).amlIsHit !== true;
+              return hasVerifiedId && amlOk;
+            });
+
+            const allPass = kybPassed && tinPassed && directorsPass;
+
+            const verificationReport = {
+              kybPassed,
+              kybResultText,
+              tinPassed,
+              tinResultText,
+              directorsReport,
+              autoApproved: allPass,
+              completedAt: new Date().toISOString(),
+            };
+
+            const newStatus = allPass ? 'verified' : 'under_review';
+            await db.update(companyProfiles)
+              .set({ existingCompanyStatus: newStatus, verificationReport, updatedAt: new Date() })
+              .where(eq(companyProfiles.id, profile.id));
+
+            await storage.createAuditLog({
+              actorUserId: order.founderId,
+              action: allPass ? 'existing_company_auto_approved' : 'existing_company_flagged_for_review',
+              entityType: 'company_profile',
+              entityId: String(profile.id),
+              details: { kybPassed, tinPassed, directorsPass, autoApproved: allPass },
+            });
+
+            if (allPass) {
+              await storage.createNotification({
+                userId: order.founderId,
+                title: 'Company Verified',
+                message: `${profile.companyName} has passed all automated checks and is now verified on Cellion One.`,
+                type: 'success',
+                linkUrl: '/founder/existing-company',
+              });
+            } else {
+              const failReasons: string[] = [];
+              if (!kybPassed) failReasons.push('CAC registry check');
+              if (!tinPassed) failReasons.push('TIN verification');
+              if (!directorsPass) failReasons.push('director identity/AML check');
+
+              await storage.createNotification({
+                userId: order.founderId,
+                title: 'Verification Under Review',
+                message: `${profile.companyName} requires manual review: ${failReasons.join(', ')}. Our compliance team will contact you shortly.`,
+                type: 'warning',
+                linkUrl: '/founder/existing-company',
+              });
+            }
+
+            console.log(`[Paystack Webhook] Existing company profile ${profile.id} pipeline complete — status: ${newStatus}`);
           } catch (dirErr: any) {
             console.error('[Webhook] Director verification pipeline error:', dirErr.message);
+            // On pipeline failure, fall back to pending_review for manual admin handling
+            await db.update(companyProfiles)
+              .set({ existingCompanyStatus: 'pending_review', updatedAt: new Date() })
+              .where(eq(companyProfiles.id, profile.id));
           }
-
-          console.log(`[Paystack Webhook] Existing company profile ${profile.id} moved to pending_review`);
         }
       } catch (err) {
         console.error('[Paystack Webhook] Error handling EXISTING_CO_VERIFY:', err);

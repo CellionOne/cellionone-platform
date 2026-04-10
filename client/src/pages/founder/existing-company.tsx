@@ -32,8 +32,9 @@ import {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const VERIFICATION_FEE_NGN = 25000;
-const DIRECTOR_VERIFY_FEE_NGN = 10000;
+const BASE_FEE_NGN = 15000;
+const EXTRA_DIR_FEE_NGN = 2500;
+const INCLUDED_DIRECTORS = 2;
 
 const STEPS = [
   { id: 1, title: "RC Lookup", description: "Find your company in the CAC registry" },
@@ -43,13 +44,13 @@ const STEPS = [
   { id: 5, title: "Payment", description: "Complete payment to submit for verification" },
 ];
 
-const REQUIRED_DOCS: { key: string; label: string; mandatory: boolean }[] = [
-  { key: "coi", label: "Certificate of Incorporation (CAC CO2)", mandatory: true },
-  { key: "memat", label: "Memorandum & Articles of Association (MEMAT)", mandatory: true },
-  { key: "cac_status", label: "CAC Status Report (current)", mandatory: true },
-  { key: "tin_cert", label: "TIN Certificate", mandatory: true },
-  { key: "proof_address", label: "Proof of Operating Address", mandatory: true },
-  { key: "director_id", label: "Director Government-Issued ID (at least one)", mandatory: true },
+const VAULT_DOCS: { key: string; label: string }[] = [
+  { key: "coi", label: "Certificate of Incorporation (CAC CO2)" },
+  { key: "memat", label: "Memorandum & Articles of Association (MEMAT)" },
+  { key: "cac_status", label: "CAC Status Report (current)" },
+  { key: "tin_cert", label: "TIN Certificate" },
+  { key: "proof_address", label: "Proof of Operating Address" },
+  { key: "director_id", label: "Director Government-Issued ID (at least one)" },
 ];
 
 const NIGERIAN_STATES = [
@@ -70,6 +71,9 @@ interface KybResult {
   registrationDate?: string;
   status?: string;
   address?: string;
+  addressLine1?: string;
+  addressState?: string;
+  addressCountry?: string;
   shareCapital?: string;
   tinNumber?: string;
   directors?: { name: string; role?: string }[];
@@ -201,8 +205,13 @@ export default function ExistingCompanyPage() {
         setIncorporationDate(data.registrationDate || "");
         setShareCapital(data.shareCapital || "");
         setTinNumber(data.tinNumber || "");
-        if (data.address) {
-          setRegisteredAddress(prev => ({ ...prev, line1: data.address || "" }));
+        if (data.addressLine1 || data.address) {
+          setRegisteredAddress(prev => ({
+            ...prev,
+            line1: data.addressLine1 || data.address || "",
+            state: data.addressState || prev.state,
+            country: data.addressCountry || "Nigeria",
+          }));
         }
         if (data.directors && data.directors.length > 0) {
           setDirectors(data.directors.map(d => ({ name: d.name, role: d.role || "Director", email: "", bvn: "", nin: "" })));
@@ -290,7 +299,7 @@ export default function ExistingCompanyPage() {
         const filtered = prev.filter(d => d.key !== activeDocKey);
         return [...filtered, { key: activeDocKey!, fileName: file.name }];
       });
-      const docLabel = REQUIRED_DOCS.find(d => d.key === activeDocKey)?.label || activeDocKey;
+      const docLabel = VAULT_DOCS.find(d => d.key === activeDocKey)?.label || activeDocKey;
       toast({ title: "Document uploaded", description: `${docLabel} has been uploaded.` });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Please try again.";
@@ -327,10 +336,11 @@ export default function ExistingCompanyPage() {
 
   const canProceedStep2 = companyName.trim().length >= 2 && (rcInput.trim() || kybResult?.rcNumber || "").length >= 2 && operatingAddress.line1.trim() && operatingAddress.city.trim() && operatingAddress.state.trim();
   const uploadedKeys = new Set(uploadedDocs.map(d => d.key));
-  const mandatoryDocs = REQUIRED_DOCS.filter(d => d.mandatory);
-  const allMandatoryUploaded = mandatoryDocs.every(d => uploadedKeys.has(d.key));
-  const verifiableDirectors = directors.filter(d => d.bvn || d.nin);
-  const totalFee = VERIFICATION_FEE_NGN + verifiableDirectors.length * DIRECTOR_VERIFY_FEE_NGN;
+  const directorsWithId = directors.filter(d => d.bvn.trim() || d.nin.trim());
+  const directorsWithoutId = directors.filter(d => !d.bvn.trim() && !d.nin.trim());
+  const canProceedStep3 = directors.length > 0 && directorsWithoutId.length === 0;
+  const extraDirectors = Math.max(0, directors.length - INCLUDED_DIRECTORS);
+  const totalFee = BASE_FEE_NGN + extraDirectors * EXTRA_DIR_FEE_NGN;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -493,42 +503,82 @@ export default function ExistingCompanyPage() {
           <Card>
             <CardHeader>
               <CardTitle>Step 2: Confirm Company Details</CardTitle>
-              <CardDescription>Review and complete your company information. Fields pre-filled from the CAC registry can be edited.</CardDescription>
+              <CardDescription>
+                {kybResult?.found
+                  ? "Fields marked with a lock are sourced from the CAC registry and cannot be edited. Complete the remaining fields."
+                  : "Fill in your company details. Our team will verify them against the CAC registry."}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
+              {kybResult?.found && (
+                <Alert>
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  <AlertDescription className="text-green-700 dark:text-green-400">
+                    Company verified in the CAC registry. Key details are locked for accuracy.
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <Label>Registered Company Name *</Label>
-                  <Input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Full legal name" data-testid="input-company-name" />
+                  {kybResult?.found ? (
+                    <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm" data-testid="display-company-name">
+                      <span className="flex-1 font-medium">{companyName}</span>
+                      <Badge variant="secondary" className="text-xs shrink-0">CAC Verified</Badge>
+                    </div>
+                  ) : (
+                    <Input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Full legal name" data-testid="input-company-name" />
+                  )}
                 </div>
                 <div>
                   <Label>RC Number *</Label>
-                  <Input value={rcInput} onChange={e => setRcInput(e.target.value)} placeholder="RC1234567" data-testid="input-rc-number-step2" />
+                  {kybResult?.found ? (
+                    <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm" data-testid="display-rc-number">
+                      <span className="flex-1">{rcInput || kybResult?.rcNumber}</span>
+                      <Badge variant="secondary" className="text-xs shrink-0">CAC Verified</Badge>
+                    </div>
+                  ) : (
+                    <Input value={rcInput} onChange={e => setRcInput(e.target.value)} placeholder="RC1234567" data-testid="input-rc-number-step2" />
+                  )}
                 </div>
                 <div>
                   <Label>Company Type</Label>
-                  <Select value={companyType} onValueChange={setCompanyType}>
-                    <SelectTrigger data-testid="select-company-type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="LTD">Private Limited (LTD)</SelectItem>
-                      <SelectItem value="PLC">Public Limited (PLC)</SelectItem>
-                      <SelectItem value="LLP">Limited Liability Partnership</SelectItem>
-                      <SelectItem value="Sole_Proprietorship">Business Name</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {kybResult?.found ? (
+                    <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm" data-testid="display-company-type">
+                      <span className="flex-1">{companyType}</span>
+                      <Badge variant="secondary" className="text-xs shrink-0">CAC Verified</Badge>
+                    </div>
+                  ) : (
+                    <Select value={companyType} onValueChange={setCompanyType}>
+                      <SelectTrigger data-testid="select-company-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="LTD">Private Limited (LTD)</SelectItem>
+                        <SelectItem value="PLC">Public Limited (PLC)</SelectItem>
+                        <SelectItem value="LLP">Limited Liability Partnership</SelectItem>
+                        <SelectItem value="Sole_Proprietorship">Business Name</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div>
                   <Label>Incorporation Date</Label>
-                  <Input type="date" value={incorporationDate} onChange={e => setIncorporationDate(e.target.value)} data-testid="input-inc-date" />
+                  {kybResult?.found && incorporationDate ? (
+                    <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm" data-testid="display-inc-date">
+                      <span className="flex-1">{incorporationDate}</span>
+                      <Badge variant="secondary" className="text-xs shrink-0">CAC Verified</Badge>
+                    </div>
+                  ) : (
+                    <Input type="date" value={incorporationDate} onChange={e => setIncorporationDate(e.target.value)} data-testid="input-inc-date" />
+                  )}
                 </div>
                 <div>
                   <Label>TIN Number</Label>
                   <Input value={tinNumber} onChange={e => setTinNumber(e.target.value)} placeholder="e.g. 12345678-0001" data-testid="input-tin" />
                   <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                     <Info className="h-3 w-3" />
-                    We will verify your TIN against the FIRS database
+                    We will automatically verify your TIN with FIRS after payment
                   </p>
                 </div>
                 <div>
@@ -588,62 +638,72 @@ export default function ExistingCompanyPage() {
             <CardHeader>
               <CardTitle>Step 3: Directors & Officers</CardTitle>
               <CardDescription>
-                {directors.length > 0 && kybResult?.found
-                  ? "These directors were pre-filled from the CAC registry. Add BVN for each director you want to verify on Cellion One."
-                  : "Add the directors and officers of your company."}
+                Each director must have a BVN or NIN for automated identity verification. This is required for compliance and cannot be skipped.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertDescription>
+                  <span className="font-medium">BVN or NIN is required for every director.</span> After payment, we automatically verify each director's identity and run AML/sanctions checks against international databases.
+                </AlertDescription>
+              </Alert>
+
               {directors.length > 0 && (
                 <div className="space-y-3">
-                  {directors.map((d, i) => (
-                    <div key={i} className="flex items-start gap-3 rounded-lg border p-3">
-                      <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        <User className="h-4 w-4 text-primary" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-sm">{d.name}</p>
-                          <Badge variant="outline" className="text-xs">{d.role}</Badge>
+                  {directors.map((d, i) => {
+                    const hasId = d.bvn.trim() || d.nin.trim();
+                    return (
+                      <div key={i} className={`flex items-start gap-3 rounded-lg border p-3 ${!hasId ? "border-amber-500/40 bg-amber-500/5" : ""}`}>
+                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <User className="h-4 w-4 text-primary" />
                         </div>
-                        <div className="grid grid-cols-2 gap-2 mt-2">
-                          <div className="col-span-2 sm:col-span-1">
-                            <Label className="text-xs">Email</Label>
-                            <Input
-                              className="h-7 text-xs"
-                              value={d.email}
-                              onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, email: e.target.value } : dir))}
-                              placeholder="director@company.com"
-                              data-testid={`input-director-email-${i}`}
-                            />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-sm">{d.name}</p>
+                            <Badge variant="outline" className="text-xs">{d.role}</Badge>
+                            {!hasId && <Badge variant="secondary" className="text-xs text-amber-700 bg-amber-100 dark:bg-amber-900 dark:text-amber-300">BVN or NIN required</Badge>}
                           </div>
-                          <div>
-                            <Label className="text-xs">BVN (optional)</Label>
-                            <Input
-                              className="h-7 text-xs"
-                              value={d.bvn}
-                              onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, bvn: e.target.value } : dir))}
-                              placeholder="11-digit BVN"
-                              data-testid={`input-director-bvn-${i}`}
-                            />
+                          <div className="grid grid-cols-2 gap-2 mt-2">
+                            <div className="col-span-2 sm:col-span-1">
+                              <Label className="text-xs">Email (for biometric invite)</Label>
+                              <Input
+                                className="h-7 text-xs"
+                                value={d.email}
+                                onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, email: e.target.value } : dir))}
+                                placeholder="director@company.com"
+                                data-testid={`input-director-email-${i}`}
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">BVN *</Label>
+                              <Input
+                                className="h-7 text-xs"
+                                value={d.bvn}
+                                onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, bvn: e.target.value } : dir))}
+                                placeholder="11-digit BVN"
+                                data-testid={`input-director-bvn-${i}`}
+                              />
+                            </div>
+                            <div>
+                              <Label className="text-xs">NIN *</Label>
+                              <Input
+                                className="h-7 text-xs"
+                                value={d.nin}
+                                onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, nin: e.target.value } : dir))}
+                                placeholder="11-digit NIN"
+                                data-testid={`input-director-nin-${i}`}
+                              />
+                            </div>
                           </div>
-                          <div>
-                            <Label className="text-xs">NIN (optional)</Label>
-                            <Input
-                              className="h-7 text-xs"
-                              value={d.nin}
-                              onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, nin: e.target.value } : dir))}
-                              placeholder="11-digit NIN"
-                              data-testid={`input-director-nin-${i}`}
-                            />
-                          </div>
+                          {!hasId && <p className="text-xs text-amber-700 dark:text-amber-400 mt-1.5">Enter at least a BVN or NIN for this director to continue.</p>}
                         </div>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setDirectors(prev => prev.filter((_, idx) => idx !== i))} data-testid={`button-remove-director-${i}`}>
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setDirectors(prev => prev.filter((_, idx) => idx !== i))} data-testid={`button-remove-director-${i}`}>
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -670,18 +730,19 @@ export default function ExistingCompanyPage() {
                   </Select>
                 </div>
                 <div>
-                  <Label>Email</Label>
+                  <Label>Email (for biometric invite)</Label>
                   <Input type="email" value={newDir.email} onChange={e => setNewDir(prev => ({ ...prev, email: e.target.value }))} placeholder="email@example.com" data-testid="input-new-director-email" />
                 </div>
                 <div>
-                  <Label>BVN (optional)</Label>
+                  <Label>BVN *</Label>
                   <Input value={newDir.bvn} onChange={e => setNewDir(prev => ({ ...prev, bvn: e.target.value }))} placeholder="11-digit BVN" data-testid="input-new-director-bvn" />
                 </div>
                 <div>
-                  <Label>NIN (optional)</Label>
+                  <Label>NIN *</Label>
                   <Input value={newDir.nin} onChange={e => setNewDir(prev => ({ ...prev, nin: e.target.value }))} placeholder="11-digit NIN" data-testid="input-new-director-nin" />
                 </div>
               </div>
+              <p className="text-xs text-muted-foreground">At least one of BVN or NIN is required per director.</p>
 
               <Button variant="outline" size="sm" onClick={() => {
                 if (!newDir.name.trim()) return;
@@ -692,12 +753,10 @@ export default function ExistingCompanyPage() {
                 Add Director
               </Button>
 
-              {verifiableDirectors.length > 0 && (
-                <Alert>
-                  <Info className="h-4 w-4" />
-                  <AlertDescription>
-                    {verifiableDirectors.length} director{verifiableDirectors.length > 1 ? "s" : ""} with BVN will be verified as part of your submission — ₦{DIRECTOR_VERIFY_FEE_NGN.toLocaleString()} per person.
-                  </AlertDescription>
+              {directors.length === 0 && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>At least one director must be added to continue.</AlertDescription>
                 </Alert>
               )}
 
@@ -708,7 +767,7 @@ export default function ExistingCompanyPage() {
                 </Button>
                 <Button
                   onClick={handleEnterDocStep}
-                  disabled={createProfileMutation.isPending}
+                  disabled={createProfileMutation.isPending || !canProceedStep3}
                   data-testid="button-step3-next"
                 >
                   {createProfileMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
@@ -726,13 +785,20 @@ export default function ExistingCompanyPage() {
             <CardHeader>
               <CardTitle>Step 4: Upload Company Documents</CardTitle>
               <CardDescription>
-                Upload the required documents. The first four are mandatory before proceeding.
+                All documents are optional at this stage. They are stored in your secure Cellion vault for bank account opening and future legal transactions.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <Alert>
+                <Info className="h-4 w-4" />
+                <AlertDescription>
+                  <span className="font-medium">No documents required to proceed.</span> Your company will be verified automatically using KYB, TIN, and director identity checks. Documents uploaded here go into your secure vault and may be requested by banks or government agencies.
+                </AlertDescription>
+              </Alert>
+
               <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={handleFileChange} data-testid="input-file-upload" />
 
-              {REQUIRED_DOCS.map((doc) => {
+              {VAULT_DOCS.map((doc) => {
                 const uploaded = uploadedDocs.find(d => d.key === doc.key);
                 const isUploading = uploadingDoc === doc.key;
                 return (
@@ -742,15 +808,12 @@ export default function ExistingCompanyPage() {
                         {uploaded ? <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" /> : <FileText className="h-4 w-4 text-muted-foreground" />}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {doc.label}
-                          {doc.mandatory && <span className="text-red-500 ml-1">*</span>}
-                        </p>
+                        <p className="text-sm font-medium truncate">{doc.label}</p>
                         {uploaded && <p className="text-xs text-muted-foreground truncate">{uploaded.fileName}</p>}
                       </div>
                     </div>
                     <Button
-                      variant={uploaded ? "outline" : "default"}
+                      variant={uploaded ? "outline" : "secondary"}
                       size="sm"
                       onClick={() => handleFileSelect(doc.key)}
                       disabled={isUploading}
@@ -764,15 +827,13 @@ export default function ExistingCompanyPage() {
                 );
               })}
 
-              <p className="text-xs text-muted-foreground">Accepted formats: PDF, JPEG, PNG, DOC, DOCX (max 10 MB each)</p>
+              <p className="text-xs text-muted-foreground">Accepted formats: PDF, JPEG, PNG, DOC, DOCX (max 10 MB each). Documents are encrypted at rest.</p>
 
-              {!allMandatoryUploaded && (
-                <Alert>
-                  <Info className="h-4 w-4" />
-                  <AlertDescription>
-                    Documents marked with <span className="text-red-500 font-medium">*</span> are required before you can proceed.
-                  </AlertDescription>
-                </Alert>
+              {uploadedKeys.size > 0 && (
+                <div className="flex items-center gap-1.5 text-sm text-green-700 dark:text-green-400">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>{uploadedKeys.size} of {VAULT_DOCS.length} documents uploaded to your vault</span>
+                </div>
               )}
 
               <div className="flex items-center justify-between pt-2">
@@ -780,10 +841,18 @@ export default function ExistingCompanyPage() {
                   <ArrowLeft className="h-4 w-4 mr-1.5" />
                   Back
                 </Button>
-                <Button onClick={() => setStep(5)} disabled={!allMandatoryUploaded} data-testid="button-step4-next">
-                  Continue
-                  <ArrowRight className="h-4 w-4 ml-1.5" />
-                </Button>
+                <div className="flex gap-2">
+                  {uploadedKeys.size === 0 && (
+                    <Button variant="ghost" onClick={() => setStep(5)} data-testid="button-step4-skip">
+                      Skip for now
+                      <ArrowRight className="h-4 w-4 ml-1.5" />
+                    </Button>
+                  )}
+                  <Button onClick={() => setStep(5)} data-testid="button-step4-next">
+                    {uploadedKeys.size > 0 ? "Continue" : "Continue without documents"}
+                    <ArrowRight className="h-4 w-4 ml-1.5" />
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -794,24 +863,24 @@ export default function ExistingCompanyPage() {
           <Card>
             <CardHeader>
               <CardTitle>Step 5: Payment</CardTitle>
-              <CardDescription>Review the fee summary then complete payment via Paystack to submit for verification.</CardDescription>
+              <CardDescription>Review the fee summary then complete payment via Paystack to start the automated verification.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="rounded-lg border divide-y">
                 <div className="flex items-center justify-between px-4 py-3">
                   <div>
                     <p className="font-medium text-sm">Existing Company Verification</p>
-                    <p className="text-xs text-muted-foreground">KYB check, TIN lookup & legal team document review</p>
+                    <p className="text-xs text-muted-foreground">KYB (CAC registry), TIN verification, up to {INCLUDED_DIRECTORS} director checks (BVN/NIN + AML)</p>
                   </div>
-                  <p className="font-semibold">₦{VERIFICATION_FEE_NGN.toLocaleString()}</p>
+                  <p className="font-semibold">₦{BASE_FEE_NGN.toLocaleString()}</p>
                 </div>
-                {verifiableDirectors.length > 0 && (
+                {extraDirectors > 0 && (
                   <div className="flex items-center justify-between px-4 py-3">
                     <div>
-                      <p className="font-medium text-sm">Director Identity Verification</p>
-                      <p className="text-xs text-muted-foreground">{verifiableDirectors.length} director{verifiableDirectors.length > 1 ? "s" : ""} with BVN × ₦{DIRECTOR_VERIFY_FEE_NGN.toLocaleString()}</p>
+                      <p className="font-medium text-sm">Additional Directors</p>
+                      <p className="text-xs text-muted-foreground">{extraDirectors} extra director{extraDirectors > 1 ? "s" : ""} × ₦{EXTRA_DIR_FEE_NGN.toLocaleString()} each</p>
                     </div>
-                    <p className="font-semibold">₦{(verifiableDirectors.length * DIRECTOR_VERIFY_FEE_NGN).toLocaleString()}</p>
+                    <p className="font-semibold">₦{(extraDirectors * EXTRA_DIR_FEE_NGN).toLocaleString()}</p>
                   </div>
                 )}
                 <div className="flex items-center justify-between px-4 py-3 bg-muted/30">
@@ -823,18 +892,19 @@ export default function ExistingCompanyPage() {
               <Alert>
                 <CreditCard className="h-4 w-4" />
                 <AlertDescription>
-                  You will be redirected to Paystack to complete payment securely. Once confirmed, our legal team will review your documents and verify your company within 1–2 business days.
+                  You will be redirected to Paystack to complete payment securely. Once confirmed, our automated pipeline verifies your company instantly — no waiting for a human review.
                 </AlertDescription>
               </Alert>
 
               <div className="rounded-lg border p-4 space-y-2">
-                <p className="text-sm font-medium">What happens next</p>
+                <p className="text-sm font-medium">What happens after payment</p>
                 <ol className="text-sm text-muted-foreground space-y-1.5 list-decimal list-inside">
-                  <li>You complete payment on Paystack's secure page</li>
-                  <li>Payment is confirmed and your company enters our review queue</li>
-                  <li>We cross-check your details against the CAC registry</li>
-                  <li>Our legal team reviews your uploaded documents</li>
-                  <li>You receive an email once verified — post-inc services unlock immediately</li>
+                  <li>Payment confirmed on Paystack's secure page</li>
+                  <li>Automated KYB cross-check with the live CAC registry</li>
+                  <li>Automated TIN verification with FIRS</li>
+                  <li>Director BVN/NIN identity checks + AML/sanctions screening</li>
+                  <li>If all checks pass — company is instantly marked Verified</li>
+                  <li>If any check requires review — our compliance team contacts you within 1 business day</li>
                 </ol>
               </div>
 

@@ -7915,24 +7915,15 @@ Important guidelines:
         return res.status(400).json({ message: "Profile cannot be checked out in its current state" });
       }
 
-      // Server-side: enforce all mandatory documents are uploaded before checkout
-      const checklistItems = await db.select().from(profileChecklistItems).where(eq(profileChecklistItems.companyProfileId, profileId));
-      const missingMandatory = checklistItems.filter(item => item.required && (!item.filePath || item.status === 'missing'));
-      if (missingMandatory.length > 0) {
-        const missingLabels = missingMandatory.map(i => i.label).join(', ');
-        return res.status(400).json({
-          message: `Missing required documents before checkout: ${missingLabels}`,
-          code: "MISSING_REQUIRED_DOCUMENTS",
-          missing: missingMandatory.map(i => ({ key: i.key, label: i.label })),
-        });
-      }
+      // Documents are optional for checkout — they go into the secure vault for bank/legal use.
+      // The mandatory verification is fully automated (KYB + TIN + BVN/NIN + AML) via the pipeline.
 
-      // Build SKU list: 1× EXISTING_CO_VERIFY + N× VERIFY (per director)
+      // Pricing: ₦15,000 base (covers up to 2 directors) + ₦2,500 per additional director beyond 2
       const directors = (profile.directors as { name: string; bvn?: string; nin?: string }[]) || [];
-      const verifiableDirectors = directors.filter(d => d.bvn || d.nin);
+      const extraDirectors = Math.max(0, directors.length - 2);
       const items: { sku: string; quantity?: number }[] = [{ sku: "EXISTING_CO_VERIFY", quantity: 1 }];
-      if (verifiableDirectors.length > 0) {
-        items.push({ sku: "VERIFY", quantity: verifiableDirectors.length });
+      if (extraDirectors > 0) {
+        items.push({ sku: "EXISTING_CO_EXTRA_DIR", quantity: extraDirectors });
       }
 
       const orderService = await import('./services/orderService');

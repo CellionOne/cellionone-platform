@@ -713,7 +713,7 @@ export type LegalChatMessage = typeof legalChatMessages.$inferSelect;
 export type InsertLegalChatMessage = z.infer<typeof insertLegalChatMessageSchema>;
 
 // ============== COMPANY PROFILE ==============
-// existingCompanyStatus values: draft | pending_payment | pending_review | documents_under_review | verified | rejected
+// existingCompanyStatus values: draft | pending_payment | pending_review | documents_under_review | under_review | verified | rejected
 export const companyProfiles = pgTable("company_profiles", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id"),
@@ -749,6 +749,21 @@ export const companyProfiles = pgTable("company_profiles", {
   smileKybResult: json("smile_kyb_result").$type<Record<string, unknown>>(),
   smileTinJobId: varchar("smile_tin_job_id", { length: 100 }),
   smileTinResult: json("smile_tin_result").$type<Record<string, unknown>>(),
+  verificationReport: json("verification_report").$type<{
+    kybPassed?: boolean;
+    kybResultText?: string;
+    tinPassed?: boolean;
+    tinResultText?: string;
+    directorsReport?: {
+      name: string;
+      bvnPassed?: boolean;
+      ninPassed?: boolean;
+      amlClear?: boolean;
+      amlHitTypes?: string[];
+    }[];
+    autoApproved?: boolean;
+    completedAt?: string;
+  }>(),
   existingCoVerifyOrderId: integer("existing_co_verify_order_id"),
   profileDocuments: json("profile_documents").$type<{ docType: string; label: string; filePath?: string; uploadedAt?: string }[]>(),
   adminReviewNotes: text("admin_review_notes"),

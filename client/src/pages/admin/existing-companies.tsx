@@ -57,8 +57,25 @@ interface DirectorRecord {
   amlHitTypes?: string[];
   biometricStatus?: 'pending_selfie' | 'completed' | 'failed';
 }
-interface CompanyProfileDetail extends CompanyProfile {
+interface DirectorVerificationEntry {
+  name: string;
+  bvnPassed?: boolean;
+  ninPassed?: boolean;
+  amlClear?: boolean;
+  amlHitTypes?: string[];
+}
+interface VerificationReport {
+  kybPassed?: boolean;
+  kybResultText?: string;
+  tinPassed?: boolean;
+  tinResultText?: string;
+  directorsReport?: DirectorVerificationEntry[];
+  autoApproved?: boolean;
+  completedAt?: string;
+}
+interface CompanyProfileDetail extends Omit<CompanyProfile, 'verificationReport'> {
   checklistItems?: ProfileChecklistItem[];
+  verificationReport?: VerificationReport | null;
 }
 
 // ── Status helpers ─────────────────────────────────────────────────────────────
@@ -68,6 +85,7 @@ const STATUS_LABELS: Record<string, string> = {
   pending_payment: "Pending Payment",
   pending_review: "Pending Review",
   documents_under_review: "Under Review",
+  under_review: "Auto-Flagged for Review",
   verified: "Verified",
   rejected: "Rejected",
 };
@@ -77,6 +95,7 @@ const STATUS_VARIANTS: Record<string, "default" | "secondary" | "destructive" | 
   pending_payment: "secondary",
   pending_review: "secondary",
   documents_under_review: "secondary",
+  under_review: "destructive",
   verified: "default",
   rejected: "destructive",
 };
@@ -253,7 +272,7 @@ export default function AdminExistingCompaniesPage() {
     onError: (e: Error) => toast({ title: "Delete failed", description: e.message, variant: "destructive" }),
   });
 
-  const reviewableStatuses = ["pending_review", "documents_under_review"];
+  const reviewableStatuses = ["pending_review", "documents_under_review", "under_review"];
 
   const formatAddress = (addr: AddressRecord | null | undefined): string => {
     if (!addr) return "—";
@@ -274,6 +293,7 @@ export default function AdminExistingCompaniesPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="under_review">Auto-Flagged for Review</SelectItem>
               <SelectItem value="pending_review">Pending Review</SelectItem>
               <SelectItem value="documents_under_review">Under Review</SelectItem>
               <SelectItem value="verified">Verified</SelectItem>
@@ -364,30 +384,100 @@ export default function AdminExistingCompaniesPage() {
                   <span>{detail.incorporationDate ? new Date(detail.incorporationDate).toLocaleDateString("en-GB") : "—"}</span>
                 </div>
 
-                {/* KYB Result (admin only) */}
-                {detail.smileKybResult && (
-                  <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Smile ID KYB Result</p>
-                    {Object.entries(detail.smileKybResult as Record<string, unknown>).map(([k, v]) => (
-                      <div key={k} className="flex gap-2 text-xs">
-                        <span className="text-muted-foreground capitalize">{k.replace(/_/g, " ")}:</span>
-                        <span>{String(v)}</span>
+                {/* Automated Verification Report — shown when pipeline has run */}
+                {detail.verificationReport && (
+                  <div className={`rounded-lg border p-3 space-y-3 ${(detail.verificationReport as VerificationReport).autoApproved ? "border-green-500/40 bg-green-500/5" : "border-amber-500/40 bg-amber-500/5"}`}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Automated Verification Report</p>
+                      {(detail.verificationReport as VerificationReport).autoApproved
+                        ? <Badge className="text-xs bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">All Checks Passed</Badge>
+                        : <Badge variant="destructive" className="text-xs">Manual Review Required</Badge>
+                      }
+                    </div>
+
+                    {/* KYB + TIN summary */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        {(detail.verificationReport as VerificationReport).kybPassed
+                          ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                          : <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
+                        <span className="font-medium">CAC KYB:</span>
+                        <span className="text-muted-foreground">{(detail.verificationReport as VerificationReport).kybResultText || (detail.verificationReport as VerificationReport).kybPassed ? "Passed" : "Failed"}</span>
                       </div>
-                    ))}
+                      <div className="flex items-center gap-1.5">
+                        {(detail.verificationReport as VerificationReport).tinPassed
+                          ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                          : <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
+                        <span className="font-medium">TIN:</span>
+                        <span className="text-muted-foreground">{(detail.verificationReport as VerificationReport).tinResultText || ((detail.verificationReport as VerificationReport).tinPassed ? "Passed" : "Failed")}</span>
+                      </div>
+                    </div>
+
+                    {/* Per-director results */}
+                    {(detail.verificationReport as VerificationReport).directorsReport && (detail.verificationReport as VerificationReport).directorsReport!.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Director Checks</p>
+                        {(detail.verificationReport as VerificationReport).directorsReport!.map((dr, i) => (
+                          <div key={i} className="rounded-md border bg-background p-2 space-y-1">
+                            <p className="text-xs font-medium">{dr.name}</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {dr.bvnPassed !== undefined && (
+                                <Badge variant={dr.bvnPassed ? "secondary" : "destructive"} className="text-xs">
+                                  BVN: {dr.bvnPassed ? "Passed" : "Failed"}
+                                </Badge>
+                              )}
+                              {dr.ninPassed !== undefined && (
+                                <Badge variant={dr.ninPassed ? "secondary" : "destructive"} className="text-xs">
+                                  NIN: {dr.ninPassed ? "Passed" : "Failed"}
+                                </Badge>
+                              )}
+                              {dr.amlClear !== undefined && (
+                                <Badge variant={dr.amlClear ? "secondary" : "destructive"} className="text-xs">
+                                  AML: {dr.amlClear ? "Clear" : `Hit — ${dr.amlHitTypes?.join(", ") || "Review"}`}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {(detail.verificationReport as VerificationReport).completedAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Pipeline completed: {new Date((detail.verificationReport as VerificationReport).completedAt!).toLocaleString("en-GB")}
+                      </p>
+                    )}
                   </div>
+                )}
+
+                {/* KYB Result (admin raw data) */}
+                {detail.smileKybResult && (
+                  <details className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                    <summary className="text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer select-none">Raw KYB Data (Smile ID)</summary>
+                    <div className="mt-2 space-y-1">
+                      {Object.entries(detail.smileKybResult as Record<string, unknown>).map(([k, v]) => (
+                        <div key={k} className="flex gap-2 text-xs">
+                          <span className="text-muted-foreground capitalize">{k.replace(/_/g, " ")}:</span>
+                          <span>{String(v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 )}
 
                 {/* TIN Result */}
                 {detail.smileTinResult && (
-                  <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">TIN Verification Result</p>
-                    {Object.entries(detail.smileTinResult as Record<string, unknown>).map(([k, v]) => (
-                      <div key={k} className="flex gap-2 text-xs">
-                        <span className="text-muted-foreground capitalize">{k.replace(/_/g, " ")}:</span>
-                        <span>{String(v)}</span>
-                      </div>
-                    ))}
-                  </div>
+                  <details className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                    <summary className="text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer select-none">Raw TIN Data (Smile ID)</summary>
+                    <div className="mt-2 space-y-1">
+                      {Object.entries(detail.smileTinResult as Record<string, unknown>).map(([k, v]) => (
+                        <div key={k} className="flex gap-2 text-xs">
+                          <span className="text-muted-foreground capitalize">{k.replace(/_/g, " ")}:</span>
+                          <span>{String(v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 )}
 
                 {/* Addresses */}

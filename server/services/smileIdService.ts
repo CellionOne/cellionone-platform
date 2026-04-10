@@ -497,12 +497,32 @@ export interface KybResult {
   registrationDate?: string;
   status?: string;
   address?: string;
+  addressLine1?: string;
+  addressState?: string;
+  addressCountry?: string;
   shareCapital?: string;
   tinNumber?: string;
   directors?: { name: string; role?: string }[];
   smileJobId?: string;
   error?: string;
   rawResult?: Record<string, unknown>;
+}
+
+const COMPANY_TYPE_MAP: Record<string, string> = {
+  PRIVATE_COMPANY_LIMITED_BY_SHARES: 'LTD',
+  PUBLIC_LIMITED_COMPANY: 'PLC',
+  LIMITED_LIABILITY_PARTNERSHIP: 'LLP',
+  BUSINESS_NAME: 'Sole_Proprietorship',
+  INCORPORATED_TRUSTEE: 'IT',
+  PRIVATE_UNLIMITED_COMPANY: 'LTD',
+  COMPANY_LIMITED_BY_GUARANTEE: 'LTD',
+  SOLE_PROPRIETORSHIP: 'Sole_Proprietorship',
+};
+
+function mapCompanyType(raw: string): string {
+  if (!raw) return '';
+  const upper = raw.toUpperCase().replace(/[\s-]/g, '_');
+  return COMPANY_TYPE_MAP[upper] || raw;
 }
 
 /**
@@ -557,14 +577,23 @@ export async function verifyBusiness(
       details: { rcNumber: cleanRc, found, smileJobId: body?.SmileJobID },
     });
 
+    const rawRegDate = String(ci?.registration_date || body?.registration_date || body?.DateOfRegistration || '');
+    const registrationDate = rawRegDate.length >= 10 ? rawRegDate.slice(0, 10) : rawRegDate;
+    const rawCompanyType = String(ci?.company_type || body?.company_type || body?.CompanyType || '');
+    const addressLine1 = String(ci?.address || body?.address || body?.Address || '');
+    const addressState = String(ci?.state || body?.state || '');
+    const addressCountry = String(ci?.country || body?.country || 'Nigeria');
     return {
       found,
       companyName: String(ci?.legal_name || body?.company_name || body?.CompanyName || body?.Entity || ''),
       rcNumber: String(ci?.registration_number || body?.rc_number || body?.RCNumber || cleanRc),
-      companyType: String(ci?.company_type || body?.company_type || body?.CompanyType || ''),
-      registrationDate: String(ci?.registration_date || body?.registration_date || body?.DateOfRegistration || ''),
+      companyType: mapCompanyType(rawCompanyType) || rawCompanyType,
+      registrationDate,
       status: String(ci?.status || body?.status || body?.Status || ''),
-      address: [ci?.address, ci?.state, ci?.country].filter(Boolean).join(', ') || String(body?.address || body?.Address || ''),
+      address: [addressLine1, addressState, addressCountry].filter(Boolean).join(', '),
+      addressLine1,
+      addressState,
+      addressCountry,
       shareCapital: String(ci?.authorized_shared_capital || body?.share_capital || body?.ShareCapital || ''),
       tinNumber: String(ci?.tax_id && ci?.tax_id !== 'Not Available' ? ci?.tax_id : body?.tin || body?.TIN || ''),
       directors,

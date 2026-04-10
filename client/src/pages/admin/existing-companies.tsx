@@ -673,6 +673,7 @@ export default function AdminExistingCompaniesPage() {
                       {biometricInvites.map(inv => {
                         const isExpiredOrFailed = inv.status === 'expired' || inv.status === 'failed';
                         const isCompleted = inv.status === 'completed';
+                        const isFounderSelfie = inv.status === 'founder_selfie';
                         const isFounder = !!inv.founderUserId;
                         return (
                           <div key={inv.id} className={`rounded-md border p-2.5 flex items-center justify-between gap-3 ${isCompleted ? "border-green-500/30 bg-green-500/5" : isExpiredOrFailed ? "border-destructive/30 bg-destructive/5" : ""}`} data-testid={`row-biometric-invite-${inv.id}`}>
@@ -681,7 +682,9 @@ export default function AdminExistingCompaniesPage() {
                                 ? <UserCheck className="h-4 w-4 text-green-600 shrink-0" />
                                 : isExpiredOrFailed
                                   ? <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
-                                  : <Clock className="h-4 w-4 text-muted-foreground shrink-0" />}
+                                  : isFounderSelfie
+                                    ? <UserCheck className="h-4 w-4 text-primary shrink-0" />
+                                    : <Clock className="h-4 w-4 text-muted-foreground shrink-0" />}
                               <div className="min-w-0">
                                 <p className="text-sm font-medium truncate">{inv.directorName}</p>
                                 {inv.directorEmail && <p className="text-xs text-muted-foreground truncate">{inv.directorEmail}</p>}
@@ -700,7 +703,7 @@ export default function AdminExistingCompaniesPage() {
                                 className={`text-xs ${isCompleted ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" : ""}`}
                                 data-testid={`badge-invite-status-${inv.id}`}
                               >
-                                {inv.status === 'completed' ? "Done" : inv.status === 'expired' ? "Expired" : inv.status === 'failed' ? "Failed" : inv.status === 'pending' ? "Awaiting" : inv.status === 'in_progress' ? "In Progress" : inv.status}
+                                {inv.status === 'completed' ? "Done" : inv.status === 'expired' ? "Expired" : inv.status === 'failed' ? "Failed" : inv.status === 'pending' ? "Awaiting" : inv.status === 'in_progress' ? "In Progress" : inv.status === 'founder_selfie' ? "Via Profile" : inv.status}
                               </Badge>
                               {isExpiredOrFailed && !isFounder && inv.directorEmail && (
                                 <Button

@@ -830,7 +830,7 @@ export const directorBiometricInvites = pgTable("director_biometric_invites", {
   directorEmail: varchar("director_email", { length: 255 }),
   founderUserId: varchar("founder_user_id", { length: 255 }), // set when invite is for the founder's own identity verification
   smileJobId: varchar("smile_job_id", { length: 255 }),
-  status: varchar("status", { length: 50 }).default("pending"), // pending | in_progress | completed | failed | expired
+  status: varchar("status", { length: 50 }).default("pending"), // pending | founder_selfie | in_progress | completed | failed | expired
   expiresAt: timestamp("expires_at").notNull(),
   completedAt: timestamp("completed_at"),
   resultCode: varchar("result_code", { length: 20 }),

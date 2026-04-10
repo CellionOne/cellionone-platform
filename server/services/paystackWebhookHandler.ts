@@ -768,7 +768,9 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     directorIndex: dirIdx,
                     directorName: director.name,
                     directorEmail: director.email || null,
-                    status: 'pending',
+                    // founder_selfie = this is the platform founder; they complete via Personal Profile
+                    // pending = external director; they receive an email link
+                    status: isFounderDirector ? 'founder_selfie' : 'pending',
                     expiresAt,
                     // Link to founder's user account so they can complete via Personal Profile
                     ...(isFounderDirector && founderUserForBio ? { founderUserId: founderUserForBio.id } : {}),

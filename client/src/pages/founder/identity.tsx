@@ -289,9 +289,10 @@ export default function IdentityVerificationPage() {
         {!isLoading && isKybPipelineVerified && !founderVerified && !selfieSuccess && (
           <Alert className="border-primary/40 bg-primary/5 dark:bg-primary/10" data-testid="alert-kyb-pipeline">
             <Sparkles className="h-4 w-4 text-primary" />
-            <AlertTitle className="text-primary">Your identity is partially verified — one step remaining</AlertTitle>
+            <AlertTitle className="text-primary">You are also listed as a director — one step remaining</AlertTitle>
             <AlertDescription>
-              Your BVN/NIN and AML check were completed automatically during your company registration. All you need to do is take a quick biometric selfie below — no payment required.
+              Your BVN/NIN and AML check were completed automatically during your company registration because you were listed as a director. Complete your biometric selfie below using the <strong>Start Camera</strong> button on your{" "}
+              <Link href="/profile#biometric" className="underline font-medium">Personal Profile</Link> — no payment required.
             </AlertDescription>
           </Alert>
         )}

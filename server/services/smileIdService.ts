@@ -706,6 +706,7 @@ export async function performAmlCheck(
       signature,
       timestamp,
       full_name: fullName,
+      user_id: userId,
       countries: options?.nationality ? [options.nationality.toUpperCase()] : ['NG'],
     };
     if (options?.dateOfBirth) requestBody.dob = options.dateOfBirth;

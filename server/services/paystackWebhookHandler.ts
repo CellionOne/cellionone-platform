@@ -585,6 +585,54 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               kybFailReason = 'service_error';
             }
 
+            // KYB fallback: if the fresh post-payment KYB check failed (not found OR service error),
+            // fall back to the stored KYB result from Step 1 (run server-side during profile creation).
+            // This prevents Smile ID API intermittent failures from incorrectly routing a company
+            // to manual review when the Step-1 lookup already confirmed it in the CAC registry.
+            if (!kybPassed && profile.smileKybResult) {
+              try {
+                const stored = profile.smileKybResult as Record<string, unknown>;
+                if (stored.found === true) {
+                  const storedStatus = String(stored.status || '');
+                  const storedName = String(stored.companyName || '');
+                  const storedDirs = (Array.isArray(stored.directors) ? stored.directors : []) as { name: string; role?: string }[];
+                  const submittedDirs = (profile.directors as PipelineDirector[] | null) || [];
+
+                  const statusOkFb = KYB_ACTIVE_STATUSES.includes(storedStatus.toLowerCase());
+                  const regNameOkFb = storedName ? nameMatch(profile.companyName, storedName) : true;
+                  let dirCacOkFb = true;
+                  const storedMismatches: string[] = [];
+                  if (storedDirs.length > 0 && submittedDirs.length > 0) {
+                    for (const sd of submittedDirs) {
+                      const dirFound = storedDirs.some(cd => nameMatch(sd.name, String(cd.name || '')));
+                      if (!dirFound) storedMismatches.push(sd.name);
+                    }
+                    dirCacOkFb = storedMismatches.length === 0;
+                  }
+
+                  if (statusOkFb && regNameOkFb && dirCacOkFb) {
+                    kybPassed = true;
+                    kybFailReason = undefined;
+                    kybDirectorMismatches = [];
+                    kybResultText = `${storedStatus || 'Active'} (Step-1 KYB)`;
+                    kybMatchedData = {
+                      registryName: storedName,
+                      status: storedStatus,
+                      type: String(stored.companyType || ''),
+                      rcNumber: String(stored.rcNumber || ''),
+                      registrationDate: String(stored.registrationDate || ''),
+                    };
+                    console.log(`[Webhook] Profile ${profile.id}: fresh KYB failed, using stored Step-1 KYB (status=${storedStatus}, name=${storedName})`);
+                  } else {
+                    console.log(`[Webhook] Profile ${profile.id}: stored KYB fallback also did not pass — statusOk=${statusOkFb}, nameOk=${regNameOkFb}, dirOk=${dirCacOkFb}`);
+                    if (storedMismatches.length > 0) kybDirectorMismatches = storedMismatches;
+                  }
+                }
+              } catch (fbErr: unknown) {
+                console.error(`[Webhook] KYB fallback evaluation error for profile ${profile.id}:`, fbErr);
+              }
+            }
+
             // Step 2: TIN verification — found + company name consistent with profile
             const tinProvided = !!profile.tinNumber;
             let tinPassed = !tinProvided;

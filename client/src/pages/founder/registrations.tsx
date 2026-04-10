@@ -17,6 +17,7 @@ import {
   RefreshCw,
   CreditCard,
   Eye,
+  Loader2,
 } from "lucide-react";
 
 interface CompanyProfile {
@@ -37,7 +38,7 @@ function statusConfig(status: string | null) {
     case "pending_payment":
       return { label: "Pending Payment", variant: "outline" as const, icon: CreditCard, description: "Awaiting payment to begin verification" };
     case "pending_review":
-      return { label: "Pending Review", variant: "outline" as const, icon: Clock, description: "Payment received — verification in progress" };
+      return { label: "Verifying…", variant: "outline" as const, icon: Loader2, description: "Payment received — automated verification running. This page will update automatically." };
     case "under_review":
       return { label: "Under Review", variant: "outline" as const, icon: AlertCircle, description: "Verification flagged — admin is reviewing" };
     case "verified":
@@ -59,6 +60,11 @@ export default function RegistrationsPage() {
 
   const { data: allProfiles, isLoading } = useQuery<CompanyProfile[]>({
     queryKey: ["/api/founder/company-profiles"],
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      const hasPending = Array.isArray(data) && data.some(p => p.existingCompanyStatus === "pending_review");
+      return hasPending ? 4000 : false;
+    },
   });
 
   const profiles = (allProfiles || []).filter(p => p.isExistingCompany);
@@ -142,7 +148,7 @@ export default function RegistrationsPage() {
                             {profile.companyName || "Unnamed Company"}
                           </h3>
                           <Badge variant={cfg.variant} className="text-xs" data-testid={`badge-status-${profile.id}`}>
-                            <StatusIcon className="h-3 w-3 mr-1" />
+                            <StatusIcon className={`h-3 w-3 mr-1 ${profile.existingCompanyStatus === "pending_review" ? "animate-spin" : ""}`} />
                             {cfg.label}
                           </Badge>
                         </div>

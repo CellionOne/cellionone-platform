@@ -7,7 +7,7 @@ import { isAuthenticated } from "../replit_integrations/auth";
 import { getResendClient, ADMIN_NOTIFICATION_EMAIL } from "../services/emailService";
 import { db } from "../db";
 import { eq, desc } from "drizzle-orm";
-import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems } from "@shared/schema";
+import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications } from "@shared/schema";
 
 const SALT_ROUNDS = 10;
 const INVITE_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -128,6 +128,8 @@ type DispatchCompanyProfile = {
   smileKybResult?: Record<string, unknown> | null;
   existingCompanyStatus?: string | null;
   checklistItems?: { label: string; required: boolean; status?: string | null }[];
+  founderIdentityVerifiedAt?: Date | string | null;
+  founderIdentitySource?: string | null;
 };
 
 async function sendDispatchEmail(
@@ -282,6 +284,17 @@ async function sendDispatchEmail(
             <tbody>${docsHtml}</tbody>
           </table>` : "<p style='color:#999;'>No document records available.</p>"}
         </div>
+
+        <!-- Founder Identity Verification -->
+        ${(company.founderIdentityVerifiedAt || company.founderIdentitySource) ? `
+        <div style="border: 1px solid #e2e8f0; border-top: none; padding: 20px;">
+          <h2 style="color: #1e3a5f; font-size: 17px; margin-top: 0;">Founder Identity Verification</h2>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr><td style="width:40%;padding:4px 0;color:#666;">Verification Status</td><td style="padding:4px 0;"><strong style="color:#16a34a;">Verified ✓</strong></td></tr>
+            <tr><td style="padding:4px 0;color:#666;">Verified At</td><td style="padding:4px 0;">${company.founderIdentityVerifiedAt ? new Date(company.founderIdentityVerifiedAt).toLocaleDateString("en-GB", { dateStyle: "full" }) : "—"}</td></tr>
+            <tr><td style="padding:4px 0;color:#666;">Verification Source</td><td style="padding:4px 0;">${company.founderIdentitySource === "kyb_pipeline" ? "KYB Pipeline (BVN/NIN + Biometric)" : (company.founderIdentitySource || "—")}</td></tr>
+          </table>
+        </div>` : ""}
 
         <!-- Certificate Reference -->
         ${company.cellionCertRef ? `
@@ -845,7 +858,23 @@ export function registerBankPortalRoutes(app: Express): void {
       // Enrich with checklist items for document audit section in dossier email
       const checklistRows = await db.select().from(profileChecklistItems)
         .where(eq(profileChecklistItems.companyProfileId, companyProfileId));
-      const profileWithChecklist = { ...profile, checklistItems: checklistRows };
+
+      // Fetch founder identity verification metadata for bank trust signal
+      let founderIdentityVerifiedAt: Date | null = null;
+      let founderIdentitySource: string | null = null;
+      if (profile.founderId) {
+        const [idVRecord] = await db.select({
+          status: identityVerifications.status,
+          verifiedAt: identityVerifications.verifiedAt,
+          identitySource: identityVerifications.identitySource,
+        }).from(identityVerifications).where(eq(identityVerifications.founderUserId, profile.founderId));
+        if (idVRecord?.status === 'verified') {
+          founderIdentityVerifiedAt = idVRecord.verifiedAt;
+          founderIdentitySource = idVRecord.identitySource;
+        }
+      }
+
+      const profileWithChecklist = { ...profile, checklistItems: checklistRows, founderIdentityVerifiedAt, founderIdentitySource };
 
       // If no emails array but has legacy contactEmail, use that
       const emailsToSend = emails.length > 0 ? emails : (partner.contactEmail ? [{ label: "Contact", address: partner.contactEmail }] : []);

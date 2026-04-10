@@ -88,7 +88,7 @@ function FreeBiometricCapture({ onSuccess }: { onSuccess: () => void }) {
   const biometricMutation = useMutation({
     mutationFn: async (base64: string) => {
       return apiRequest("POST", "/api/founder/identity-verification/biometric", {
-        selfieImageBase64: base64,
+        imageBase64: base64,
       });
     },
     onSuccess: () => {
@@ -162,12 +162,25 @@ function FreeBiometricCapture({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+interface PersonalProfileSnippet {
+  fullName: string | null;
+  phone: string | null;
+  hasNin: boolean;
+  hasBvn: boolean;
+  hasIdDocument: boolean;
+  kybPrefilled?: boolean;
+}
+
 export default function IdentityVerificationPage() {
   const { user } = useAuth();
   const [selfieSuccess, setSelfieSuccess] = useState(false);
 
   const { data: verificationInfo, isLoading } = useQuery<VerificationInfo>({
     queryKey: ["/api/checkout/verification-info"],
+  });
+
+  const { data: profile } = useQuery<PersonalProfileSnippet>({
+    queryKey: ["/api/profile/personal"],
   });
 
   const founderVerified = verificationInfo?.founderVerified ?? false;
@@ -178,6 +191,34 @@ export default function IdentityVerificationPage() {
   const verificationExpired = verificationInfo?.founderVerificationStatus === "expired";
   const verificationExpiringSoon = founderVerified && daysUntilExpiry !== null && daysUntilExpiry <= 30;
   const isKybPipelineVerified = verificationInfo?.isKybPipelineVerified ?? false;
+
+  const prereqs = [
+    {
+      key: "fullName",
+      label: "Full legal name",
+      done: !!(profile?.kybPrefilled || profile?.fullName),
+      section: "personal",
+    },
+    {
+      key: "phone",
+      label: "Phone number",
+      done: !!(profile?.kybPrefilled || profile?.phone),
+      section: "personal",
+    },
+    {
+      key: "identity",
+      label: "NIN or BVN",
+      done: !!(profile?.kybPrefilled || profile?.hasNin || profile?.hasBvn),
+      section: "identity",
+    },
+    {
+      key: "idDoc",
+      label: "Government ID document uploaded",
+      done: !!(profile?.kybPrefilled || profile?.hasIdDocument),
+      section: "documents",
+    },
+  ];
+  const prereqsComplete = prereqs.every(p => p.done);
 
   function formatExpiryDate(dateStr: string | null | undefined): string {
     if (!dateStr) return "N/A";
@@ -196,6 +237,44 @@ export default function IdentityVerificationPage() {
             Verification is required for all key persons before placing orders
           </p>
         </div>
+
+        {/* Prerequisites checklist — hidden once fully verified */}
+        {!isLoading && !allVerified && !selfieSuccess && profile && (
+          <Card data-testid="card-prerequisites">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                {prereqsComplete
+                  ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  : <Info className="h-4 w-4 text-muted-foreground" />}
+                Profile Prerequisites
+              </CardTitle>
+              <CardDescription>
+                {prereqsComplete
+                  ? "All profile requirements are met. You can proceed with verification."
+                  : "Complete the following in your profile before verifying your identity."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <ul className="space-y-2" data-testid="list-prerequisites">
+                {prereqs.map((p) => (
+                  <li key={p.key} className="flex items-center justify-between gap-3" data-testid={`prereq-item-${p.key}`}>
+                    <span className="flex items-center gap-2 text-sm">
+                      {p.done
+                        ? <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" />
+                        : <XCircle className="h-4 w-4 text-destructive flex-shrink-0" />}
+                      <span className={p.done ? "text-foreground" : "text-muted-foreground"}>{p.label}</span>
+                    </span>
+                    {!p.done && (
+                      <Link href="/profile" className="text-xs text-primary underline underline-offset-2 whitespace-nowrap" data-testid={`link-prereq-${p.key}`}>
+                        Complete →
+                      </Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
 
         {/* KYB pipeline banner — shown when BVN/NIN already verified via company registration */}
         {!isLoading && isKybPipelineVerified && !founderVerified && !selfieSuccess && (

@@ -47,18 +47,21 @@ export async function calculateApplicationReadiness(
     .where(eq(payments.applicationId, applicationId));
 
   const identityVerified = identityVerification?.status === "verified";
+  const identityFromPreviousRegistration =
+    identityVerified && identityVerification?.identitySource === 'kyb_pipeline';
   const paymentComplete = payment?.status === "completed" || 
     application.paymentState === "paid_escrowed" || 
     application.paymentState === "released_to_lawyer";
 
-  return computeReadinessScore(application, documents, identityVerified, paymentComplete);
+  return computeReadinessScore(application, documents, identityVerified, paymentComplete, identityFromPreviousRegistration);
 }
 
 export function computeReadinessScore(
   application: CompanyApplication,
   documents: Array<{ docType: string; qualityStatus?: string | null }>,
   identityVerified: boolean,
-  paymentComplete: boolean
+  paymentComplete: boolean,
+  identityFromPreviousRegistration = false
 ): ReadinessResult {
   const breakdown: ReadinessBreakdownCategory[] = [];
   const nextSteps: string[] = [];
@@ -120,7 +123,11 @@ export function computeReadinessScore(
   }
 
   const verificationItems: ReadinessBreakdownItem[] = [
-    { name: "Identity Verification", status: identityVerified ? "complete" : "incomplete" },
+    {
+      name: "Identity Verification",
+      status: identityVerified ? "complete" : "incomplete",
+      note: identityFromPreviousRegistration ? "Verified from previous company registration" : undefined,
+    },
     { name: "Payment", status: paymentComplete ? "complete" : "incomplete" },
   ];
   const verificationScore = Math.round((verificationItems.filter(i => i.status === "complete").length / verificationItems.length) * 100);

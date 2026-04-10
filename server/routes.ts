@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, type InsertDirectorBiometricInvite } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne } from "drizzle-orm";
 import * as services from "./services";
@@ -2437,6 +2437,9 @@ export async function registerRoutes(
               identityVerifiedAt: new Date(),
               updatedAt: new Date(),
             }).where(eq(usersTable.id, invite.founderUserId));
+            // Add to verified entities registry so downstream services (KYC, procurement) recognise this identity
+            const { upsertVerifiedIndividualByUserId } = await import('./services/verifiedEntityService');
+            await upsertVerifiedIndividualByUserId(invite.founderUserId);
             console.log(`[BiometricCallback] Founder identity verified for user ${invite.founderUserId}`);
           } else {
             await db.update(identityVerifications).set({
@@ -2459,8 +2462,8 @@ export async function registerRoutes(
   app.post("/api/founder/identity-verification/biometric", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
-      const { selfieImageBase64 } = req.body as { selfieImageBase64?: string };
-      if (!selfieImageBase64) return res.status(400).json({ message: "selfieImageBase64 is required" });
+      const { imageBase64 } = req.body as { imageBase64?: string };
+      if (!imageBase64) return res.status(400).json({ message: "imageBase64 is required" });
 
       // Only founders whose identity was pre-verified via KYB pipeline may use this free endpoint
       const [idVerification] = await db.select().from(identityVerifications)
@@ -2476,6 +2479,11 @@ export async function registerRoutes(
       }
       if (idVerification.status === 'pending') {
         return res.status(409).json({ message: "Your biometric submission is already being processed. Please wait." });
+      }
+      if (idVerification.status !== 'in_progress') {
+        return res.status(403).json({
+          message: `Identity verification is in state '${idVerification.status}', expected 'in_progress'. Contact support if you believe this is an error.`,
+        });
       }
 
       const isProd = process.env.NODE_ENV === 'production';
@@ -2504,7 +2512,7 @@ export async function registerRoutes(
         const smileJobId = `founder-bio-${userId}-${Date.now()}`;
         const partnerParams = { job_id: smileJobId, user_id: userId, job_type: 4 };
         const idInfo = { country: 'NG', entered: true };
-        const images = [{ image_type_id: 2, image: selfieImageBase64 }];
+        const images = [{ image_type_id: 2, image: imageBase64 }];
         const options = { return_job_status: false, return_image_links: false };
         await connection.submit_job(partnerParams, images, idInfo, options);
 
@@ -2515,7 +2523,7 @@ export async function registerRoutes(
         const companyProfileId = (await db.select({ id: companyProfiles.id })
           .from(companyProfiles).where(eq(companyProfiles.founderId, userId)).limit(1))[0]?.id || 0;
 
-        await db.insert(directorBiometricInvites).values({
+        const invitePayload: InsertDirectorBiometricInvite = {
           token: inviteToken,
           companyProfileId,
           directorIndex: 0,
@@ -2525,7 +2533,8 @@ export async function registerRoutes(
           smileJobId,
           expiresAt,
           founderUserId: userId,
-        } as any);
+        };
+        await db.insert(directorBiometricInvites).values(invitePayload);
 
         await db.update(identityVerifications).set({
           status: 'pending',

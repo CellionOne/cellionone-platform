@@ -4,7 +4,7 @@ import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { db } from "../db";
 import { eq, and } from "drizzle-orm";
-import { kycOrgMembers, kycOrganisations } from "@shared/schema";
+import { kycOrgMembers, kycOrganisations, identityVerifications } from "@shared/schema";
 import { calculateEscrowFee } from "./escrowApiRoutes";
 
 async function requireActiveOrg(orgId: number, res: Response): Promise<boolean> {
@@ -463,6 +463,18 @@ export function registerProcurementRoutes(app: Express) {
       if (!member) return res.status(403).json({ message: "Not authorized" });
 
       if (!await requireActiveOrg(bid.supplierOrgId, res)) return;
+
+      // Gate: submitter must have a verified identity (platform KYC or KYB pipeline)
+      const [idVerification] = await db.select({ status: identityVerifications.status })
+        .from(identityVerifications)
+        .where(eq(identityVerifications.founderUserId, userId))
+        .limit(1);
+      if (!idVerification || idVerification.status !== 'verified') {
+        return res.status(403).json({
+          message: "Identity verification required before submitting bids. Please complete your identity verification.",
+          code: "IDENTITY_NOT_VERIFIED",
+        });
+      }
 
       const updated = await storage.updateBidStatus(id, "submitted");
 

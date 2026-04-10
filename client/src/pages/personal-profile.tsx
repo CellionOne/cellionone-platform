@@ -265,7 +265,10 @@ function ProfileHeader() {
 
 function LockedFieldBadge() {
   return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 border border-primary/20 rounded px-1.5 py-0.5 ml-2">
+    <span
+      title="This field was verified during your company registration and cannot be edited."
+      className="inline-flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 border border-primary/20 rounded px-1.5 py-0.5 ml-2 cursor-help"
+    >
       <Lock className="h-3 w-3" /> KYB-verified
     </span>
   );
@@ -400,6 +403,7 @@ function ProfileForm() {
                         placeholder="As on government ID"
                         data-testid="input-full-name"
                         readOnly={isLocked("fullName")}
+                        title={isLocked("fullName") ? "This field was verified during your company registration and cannot be edited." : undefined}
                         className={isLocked("fullName") ? "bg-muted/60 cursor-not-allowed" : ""}
                         {...field}
                       />
@@ -424,6 +428,7 @@ function ProfileForm() {
                         placeholder="+234 801 234 5678"
                         data-testid="input-phone"
                         readOnly={isLocked("phone")}
+                        title={isLocked("phone") ? "This field was verified during your company registration and cannot be edited." : undefined}
                         className={isLocked("phone") ? "bg-muted/60 cursor-not-allowed" : ""}
                         {...field}
                       />
@@ -517,6 +522,7 @@ function ProfileForm() {
                           placeholder="Street address"
                           data-testid="input-address1"
                           readOnly={isLocked("addressLine1")}
+                          title={isLocked("addressLine1") ? "This field was verified during your company registration and cannot be edited." : undefined}
                           className={isLocked("addressLine1") ? "bg-muted/60 cursor-not-allowed" : ""}
                           {...field}
                         />
@@ -567,6 +573,7 @@ function ProfileForm() {
                         <Input
                           value={field.value}
                           readOnly
+                          title="This field was verified during your company registration and cannot be edited."
                           className="bg-muted/60 cursor-not-allowed"
                           data-testid="input-state-locked"
                         />

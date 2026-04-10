@@ -1,6 +1,6 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles, directorBiometricInvites, founderProfiles, identityVerifications } from '@shared/schema';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles, directorBiometricInvites, founderProfiles, identityVerifications, type InsertFounderProfile, type InsertIdentityVerification } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { invalidateCieOrgTierCache } from '../routes/cieApiRoutes';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
@@ -797,10 +797,9 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 );
                 if (matchedDir) {
                   const lockedFields: string[] = [];
-                  const profilePatch: Record<string, unknown> = {
+                  const profilePatch: Partial<InsertFounderProfile> = {
                     kybPrefilled: true,
                     kybSourceCompanyProfileId: profile.id,
-                    updatedAt: new Date(),
                   };
                   if (matchedDir.name) {
                     profilePatch.fullName = matchedDir.name;
@@ -835,32 +834,25 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                   const [existingFProfile] = await db.select({ id: founderProfiles.id })
                     .from(founderProfiles).where(eq(founderProfiles.userId, order.founderId));
                   if (existingFProfile) {
-                    await db.update(founderProfiles).set(profilePatch as any).where(eq(founderProfiles.userId, order.founderId));
+                    await db.update(founderProfiles).set(profilePatch).where(eq(founderProfiles.userId, order.founderId));
                   } else {
-                    await db.insert(founderProfiles).values({ userId: order.founderId, ...(profilePatch as any) });
+                    await db.insert(founderProfiles).values({ userId: order.founderId, ...profilePatch });
                   }
 
                   // Upsert identity_verifications: mark BVN/NIN verified, biometric pending
+                  const idVPatch: Partial<InsertIdentityVerification> = {
+                    status: 'in_progress',
+                    method: 'automated',
+                    externalProvider: 'smile_id',
+                    identitySource: 'kyb_pipeline',
+                    bvnNinVerified: true,
+                  };
                   const [existingIdV] = await db.select({ id: identityVerifications.id })
                     .from(identityVerifications).where(eq(identityVerifications.founderUserId, order.founderId));
                   if (existingIdV) {
-                    await db.update(identityVerifications).set({
-                      status: 'in_progress',
-                      method: 'automated',
-                      externalProvider: 'smile_id',
-                      identitySource: 'kyb_pipeline',
-                      bvnNinVerified: true,
-                      updatedAt: new Date(),
-                    }).where(eq(identityVerifications.id, existingIdV.id));
+                    await db.update(identityVerifications).set(idVPatch).where(eq(identityVerifications.id, existingIdV.id));
                   } else {
-                    await db.insert(identityVerifications).values({
-                      founderUserId: order.founderId,
-                      status: 'in_progress',
-                      method: 'automated',
-                      externalProvider: 'smile_id',
-                      identitySource: 'kyb_pipeline',
-                      bvnNinVerified: true,
-                    });
+                    await db.insert(identityVerifications).values({ founderUserId: order.founderId, ...idVPatch });
                   }
                   console.log(`[Webhook] Founder profile pre-filled from KYB director data for user ${order.founderId} — fields: ${lockedFields.join(', ')}`);
                 }

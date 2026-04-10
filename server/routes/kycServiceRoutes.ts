@@ -9,7 +9,7 @@ import {
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
   kycApiKeys, kycApiUsageLogs, kycBillingAccounts, kycBillingRequests, kycCreditTransactions, kycInvoices,
   kycSessions, kycSanctionsLogs, kycStrReports, kycVerifiedIdentityData,
-  sensitiveDataAccessLogs,
+  sensitiveDataAccessLogs, identityVerifications,
   users, userRoles,
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
   type KycSupplierProfile, type KycSubmittedDocument, type KycSupplierPerson,
@@ -3256,15 +3256,36 @@ export function registerKycServiceRoutes(app: Express) {
         session.type === "supplier" ? "supplier" :
         selfieRequired ? "individual" : "identity_only";
 
+      // ── Shortcut: if subject is a platform user with verified identity, skip credit deduction ──
+      let skipCreditDeduction = false;
+      if (session.subjectEmail) {
+        const [subjectUser] = await db.select({ id: users.id })
+          .from(users)
+          .where(eq(users.email, session.subjectEmail))
+          .limit(1);
+        if (subjectUser?.id) {
+          const [idV] = await db.select({ status: identityVerifications.status })
+            .from(identityVerifications)
+            .where(eq(identityVerifications.founderUserId, subjectUser.id))
+            .limit(1);
+          if (idV?.status === 'verified') {
+            skipCreditDeduction = true;
+            console.log(`[KYC Session] Subject ${session.subjectEmail} is a platform-verified user — bypassing credit deduction`);
+          }
+        }
+      }
+
       // ── Credit check — gate session before storing anything ────────────────
-      const creditOk = await billingService.hasCredits(session.orgId, verificationType);
-      if (!creditOk) {
-        console.warn(`[KYC Session] Org ${session.orgId} has insufficient credits for ${verificationType} verification`);
-        return res.status(402).json({
-          message: "Insufficient verification credits. Please top up your account to continue.",
-          code: "INSUFFICIENT_CREDITS",
-          verificationType,
-        });
+      if (!skipCreditDeduction) {
+        const creditOk = await billingService.hasCredits(session.orgId, verificationType);
+        if (!creditOk) {
+          console.warn(`[KYC Session] Org ${session.orgId} has insufficient credits for ${verificationType} verification`);
+          return res.status(402).json({
+            message: "Insufficient verification credits. Please top up your account to continue.",
+            code: "INSUFFICIENT_CREDITS",
+            verificationType,
+          });
+        }
       }
 
       // Create a verification request for this session
@@ -3517,12 +3538,14 @@ export function registerKycServiceRoutes(app: Express) {
         .set(sessionUpdatePayload)
         .where(eq(kycVerificationRequests.id, request.id));
 
-      // ── Deduct credit (always — checks were run regardless of outcome) ─────
-      try {
-        await billingService.deductCredit(session.orgId, verificationType, request.id);
-      } catch (creditErr) {
-        // Log but don't roll back — the verification was already processed
-        console.error("[KYC Session] Credit deduction error (non-blocking):", creditErr);
+      // ── Deduct credit (skip if subject is a platform-verified user) ─────────
+      if (!skipCreditDeduction) {
+        try {
+          await billingService.deductCredit(session.orgId, verificationType, request.id);
+        } catch (creditErr) {
+          // Log but don't roll back — the verification was already processed
+          console.error("[KYC Session] Credit deduction error (non-blocking):", creditErr);
+        }
       }
 
       // Mark session completed

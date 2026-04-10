@@ -494,6 +494,8 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             bvn?: string; nin?: string; // AES-256-GCM encrypted
             bvnVerified?: boolean; ninVerified?: boolean;
             amlIsHit?: boolean; amlHitTypes?: string[];
+            amlChecked?: boolean; // true only when AML service returned a definitive result
+            amlCheckError?: string;
             biometricStatus?: string;
           }
 
@@ -642,13 +644,18 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
               let amlIsHit: boolean | undefined;
               let amlHitTypes: string[] | undefined;
+              let amlChecked = false;
+              let amlCheckError: string | undefined;
               try {
                 const amlRes = await performAmlCheck(director.name, order.founderId);
                 amlIsHit = amlRes.isHit;
                 amlHitTypes = amlRes.hitTypes;
+                amlChecked = true; // service returned a definitive result
               } catch (e: unknown) {
                 const msg = e instanceof Error ? e.message : String(e);
+                amlCheckError = msg;
                 console.error(`[Webhook] Director AML check failed (idx ${idx}): ${msg}`);
+                // amlChecked stays false — pipeline will route to under_review
               }
 
               updatedDirectors[idx] = {
@@ -657,6 +664,8 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 ninVerified: ninVerified !== undefined ? ninVerified : director.ninVerified,
                 amlIsHit: amlIsHit !== undefined ? amlIsHit : director.amlIsHit,
                 amlHitTypes: amlHitTypes !== undefined ? amlHitTypes : director.amlHitTypes,
+                amlChecked,
+                amlCheckError,
                 biometricStatus: 'pending_selfie',
               };
             }
@@ -706,21 +715,30 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             const directorsReport = updatedDirectors.map(dir => {
               const hasBvn = !!dir.bvn;
               const hasNin = !!dir.nin;
+              // amlStatus: 'clear' | 'hit' | 'error' | 'pending'
+              const amlStatus = !dir.amlChecked
+                ? (dir.amlCheckError ? 'error' : 'pending')
+                : (dir.amlIsHit === false ? 'clear' : 'hit');
               return {
                 name: dir.name,
                 bvnPassed: hasBvn ? dir.bvnVerified === true : undefined,
                 ninPassed: hasNin ? dir.ninVerified === true : undefined,
-                amlClear: dir.amlIsHit !== undefined ? dir.amlIsHit === false : undefined,
+                amlClear: dir.amlChecked ? dir.amlIsHit === false : undefined, // undefined = not completed
+                amlStatus,
+                amlCheckError: dir.amlCheckError,
                 amlHitTypes: dir.amlHitTypes,
               };
             });
 
-            // Directors pass: must have ≥1 director AND each must have ≥1 verified ID (BVN or NIN) AND no AML hit.
+            // Directors pass: must have ≥1 director AND each must have ≥1 verified ID (BVN or NIN)
+            // AND AML check completed (fail-closed) AND no AML hit.
             // Empty array is an explicit fail — guards against API bypass reaching the webhook.
             const directorsPass = updatedDirectors.length > 0 && updatedDirectors.every(dir => {
               const bvnPassedCheck = !!dir.bvn && dir.bvnVerified === true;
               const ninPassedCheck = !!dir.nin && dir.ninVerified === true;
-              const amlOk = dir.amlIsHit !== true;
+              // Fail-closed: require explicit amlIsHit === false (completed + clear).
+              // undefined means AML did not complete (service error) — routes to under_review.
+              const amlOk = dir.amlChecked === true && dir.amlIsHit === false;
               return (bvnPassedCheck || ninPassedCheck) && amlOk;
             });
 

@@ -765,6 +765,8 @@ export const companyProfiles = pgTable("company_profiles", {
       bvnPassed?: boolean;
       ninPassed?: boolean;
       amlClear?: boolean;
+      amlStatus?: 'clear' | 'hit' | 'error' | 'pending';
+      amlCheckError?: string;
       amlHitTypes?: string[];
     }[];
     autoApproved?: boolean;

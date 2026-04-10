@@ -62,6 +62,8 @@ interface DirectorVerificationEntry {
   bvnPassed?: boolean;
   ninPassed?: boolean;
   amlClear?: boolean;
+  amlStatus?: 'clear' | 'hit' | 'error' | 'pending';
+  amlCheckError?: string;
   amlHitTypes?: string[];
 }
 interface VerificationReport {
@@ -500,11 +502,19 @@ export default function AdminExistingCompaniesPage() {
                                   NIN: {dr.ninPassed ? "Passed" : "Failed"}
                                 </Badge>
                               )}
-                              {dr.amlClear !== undefined && (
-                                <Badge variant={dr.amlClear ? "secondary" : "destructive"} className="text-xs">
-                                  AML: {dr.amlClear ? "Clear" : `Hit — ${dr.amlHitTypes?.join(", ") || "Review"}`}
-                                </Badge>
-                              )}
+                              {(dr.amlClear !== undefined || dr.amlStatus) && (() => {
+                                const status = dr.amlStatus || (dr.amlClear ? 'clear' : 'hit');
+                                const variant = status === 'clear' ? 'secondary' : status === 'error' || status === 'hit' ? 'destructive' : 'outline';
+                                const label = status === 'clear' ? 'AML Clear' : status === 'hit' ? `AML Hit — ${dr.amlHitTypes?.join(", ") || "Review"}` : status === 'error' ? `AML Error` : 'AML Pending';
+                                return (
+                                  <div className="space-y-0.5">
+                                    <Badge variant={variant} className="text-xs">{label}</Badge>
+                                    {(status === 'error') && dr.amlCheckError && (
+                                      <p className="text-[10px] text-muted-foreground ml-0.5">{dr.amlCheckError}</p>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         ))}

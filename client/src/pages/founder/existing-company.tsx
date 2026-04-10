@@ -412,7 +412,7 @@ export default function ExistingCompanyPage() {
                   <Input
                     id="rc-number"
                     value={rcInput}
-                    onChange={e => setRcInput(e.target.value)}
+                    onChange={e => { setRcInput(e.target.value); setKybResult(null); setKybError(null); }}
                     placeholder="e.g. RC1234567 or 1234567"
                     data-testid="input-rc-number"
                     onKeyDown={e => e.key === "Enter" && handleKybLookup()}

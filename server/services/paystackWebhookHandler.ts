@@ -734,6 +734,15 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 type: 'warning',
                 linkUrl: '/founder/existing-company',
               });
+
+              // Notify admin by email so the compliance team can act promptly
+              sendNewOrderNotificationEmail(ADMIN_NOTIFICATION_EMAIL, {
+                orderId: order.id,
+                founderName: profile.companyName,
+                founderEmail: order.founderId,
+                totalAmount: order.totalAmount,
+                items: [{ sku: 'EXISTING_CO_VERIFY', name: `Manual review required — ${failReasons.join(', ')}`, unitPrice: 0 }],
+              }).catch((e: Error) => console.error(`[Webhook] Admin pipeline-fail email error: ${e.message}`));
             }
 
             console.log(`[Paystack Webhook] Existing company profile ${profile.id} pipeline complete — status: ${newStatus}`);

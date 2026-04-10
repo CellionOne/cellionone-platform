@@ -501,15 +501,24 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             const { verifyBusiness, verifyTin, verifyBvn, verifyNin, performAmlCheck } = await import('./smileIdService');
             const { decryptField } = await import('./encryptionService');
 
-            // Step 1: Authoritative KYB — re-run post-payment to confirm company still active in CAC registry
+            // Normalise company names for comparison: uppercase, strip common legal suffixes, strip punctuation
+            const normalizeCoName = (s: string) =>
+              s.toUpperCase()
+                .replace(/\b(LIMITED|LTD|PUBLIC LIMITED COMPANY|PLC|LLC|LLP|CO|COMPANY|INC|INCORPORATED)\b/g, '')
+                .replace(/[^A-Z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+            const nameMatch = (a: string, b: string) => {
+              const na = normalizeCoName(a); const nb = normalizeCoName(b);
+              return na === nb || na.includes(nb) || nb.includes(na);
+            };
+
+            // Step 1: Authoritative KYB — company found + active status + name/RC consistency
             let kybPassed = false;
             let kybResultText = 'No KYB data';
+            let kybFailReason: string | undefined;
             let freshKybResult: Record<string, unknown> | undefined;
             let kybMatchedData: { registryName?: string; status?: string; type?: string; rcNumber?: string; registrationDate?: string } | undefined;
+            const KYB_ACTIVE_STATUSES = ['active', 'approved and active', 'registered'];
             try {
-              // Derive Smile ID businessType from the stored companyType on the profile.
-              // The initial KYB lookup (smileKybResult) does not carry businessType back,
-              // so we derive it from the normalized companyType stored on the profile.
               const companyTypeToBusinessType: Record<string, string> = {
                 LTD: 'co', PLC: 'co', LLP: 'co', LBG: 'co', UC: 'co',
                 Sole_Proprietorship: 'bn', Business_Name: 'bn', BN: 'bn',
@@ -517,8 +526,6 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               };
               const businessType = companyTypeToBusinessType[profile.companyType || ''] || 'co';
               const kybJob = await verifyBusiness(profile.rcNumber || '', order.founderId, `kyb-post-pay-${profile.id}-${Date.now()}`, businessType);
-              kybPassed = kybJob.found === true;
-              kybResultText = kybJob.status || (kybPassed ? 'Active' : 'Not found in registry');
               kybMatchedData = {
                 registryName: kybJob.companyName ?? undefined,
                 status: kybJob.status ?? undefined,
@@ -528,23 +535,41 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               };
               const { rawResult: _kybRaw, ...safeKyb } = kybJob;
               freshKybResult = safeKyb as Record<string, unknown>;
+
+              if (!kybJob.found) {
+                kybResultText = 'Not found in CAC registry';
+                kybFailReason = 'not_found';
+              } else {
+                const statusOk = KYB_ACTIVE_STATUSES.includes((kybJob.status || '').toLowerCase());
+                const regNameOk = kybJob.companyName ? nameMatch(profile.companyName, kybJob.companyName) : true;
+                if (!statusOk) {
+                  kybResultText = `Company status is not active: ${kybJob.status || 'unknown'}`;
+                  kybFailReason = 'status_not_active';
+                } else if (!regNameOk) {
+                  kybResultText = `Name mismatch: submitted "${profile.companyName}" vs registry "${kybJob.companyName}"`;
+                  kybFailReason = 'name_mismatch';
+                } else {
+                  kybPassed = true;
+                  kybResultText = kybJob.status || 'Active';
+                }
+              }
             } catch (kybErr: unknown) {
               const msg = kybErr instanceof Error ? kybErr.message : String(kybErr);
               console.error(`[Webhook] Post-payment KYB failed for profile ${profile.id}: ${msg}`);
               kybResultText = `KYB check error: ${msg}`;
+              kybFailReason = 'service_error';
             }
 
-            // ── Step 2: TIN Verification ─────────────────────────────────────
+            // Step 2: TIN verification — found + company name consistent with profile
             const tinProvided = !!profile.tinNumber;
-            let tinPassed = !tinProvided; // pass by default if no TIN to verify
+            let tinPassed = !tinProvided;
             let tinResultText = tinProvided ? 'Not checked' : 'Not provided';
+            let tinFailReason: string | undefined;
             let freshTinResult: Record<string, unknown> | undefined;
             let tinMatchedData: { found?: boolean; registryName?: string; status?: string } | undefined;
             if (tinProvided) {
               try {
                 const tinJob = await verifyTin(profile.tinNumber!, order.founderId, `tin-post-pay-${profile.id}-${Date.now()}`);
-                tinPassed = tinJob.found === true;
-                tinResultText = tinPassed ? 'Verified with FIRS' : 'Not verified with FIRS';
                 tinMatchedData = {
                   found: tinJob.found,
                   registryName: tinJob.companyName ?? undefined,
@@ -552,10 +577,25 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 };
                 const { rawResult: _tinRaw, ...safeTin } = tinJob;
                 freshTinResult = safeTin as Record<string, unknown>;
+
+                if (!tinJob.found) {
+                  tinResultText = 'TIN not found in FIRS database';
+                  tinFailReason = 'not_found';
+                } else {
+                  const tinNameOk = tinJob.companyName ? nameMatch(profile.companyName, tinJob.companyName) : true;
+                  if (!tinNameOk) {
+                    tinResultText = `TIN name mismatch: profile "${profile.companyName}" vs FIRS "${tinJob.companyName}"`;
+                    tinFailReason = 'name_mismatch';
+                  } else {
+                    tinPassed = true;
+                    tinResultText = 'Verified with FIRS';
+                  }
+                }
               } catch (tinErr: unknown) {
                 const msg = tinErr instanceof Error ? tinErr.message : String(tinErr);
                 console.error(`[Webhook] Post-payment TIN verification failed for profile ${profile.id}: ${msg}`);
                 tinResultText = `TIN check error: ${msg}`;
+                tinFailReason = 'service_error';
               }
             }
 
@@ -689,10 +729,12 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             const verificationReport = {
               kybPassed,
               kybResultText,
+              kybFailReason,
               kybSubmitted: { rcNumber: profile.rcNumber ?? undefined, companyName: profile.companyName },
               kybMatched: kybMatchedData,
               tinPassed,
               tinResultText,
+              tinFailReason,
               tinSubmitted: tinProvided ? { tinNumber: profile.tinNumber } : undefined,
               tinMatched: tinMatchedData,
               directorsReport,

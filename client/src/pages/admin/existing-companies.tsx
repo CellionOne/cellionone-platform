@@ -67,10 +67,12 @@ interface DirectorVerificationEntry {
 interface VerificationReport {
   kybPassed?: boolean;
   kybResultText?: string;
+  kybFailReason?: string;
   kybSubmitted?: { rcNumber?: string; companyName?: string };
   kybMatched?: { registryName?: string; status?: string; type?: string; rcNumber?: string; registrationDate?: string };
   tinPassed?: boolean;
   tinResultText?: string;
+  tinFailReason?: string;
   tinSubmitted?: { tinNumber?: string };
   tinMatched?: { found?: boolean; registryName?: string; status?: string };
   directorsReport?: DirectorVerificationEntry[];
@@ -410,12 +412,15 @@ export default function AdminExistingCompaniesPage() {
                       const vr = detail.verificationReport as VerificationReport;
                       return (
                         <div className="rounded border bg-background p-2.5 space-y-1.5 text-xs">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             {vr.kybPassed
                               ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
                               : <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
                             <span className="font-semibold">CAC KYB:</span>
                             <span className="text-muted-foreground">{vr.kybResultText || (vr.kybPassed ? "Passed" : "Failed")}</span>
+                            {!vr.kybPassed && vr.kybFailReason && (
+                              <span className="ml-1 px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-mono">{vr.kybFailReason}</span>
+                            )}
                           </div>
                           {(vr.kybSubmitted || vr.kybMatched) && (
                             <div className="grid grid-cols-2 gap-2 ml-5 text-xs text-muted-foreground">
@@ -446,12 +451,15 @@ export default function AdminExistingCompaniesPage() {
                       const vr = detail.verificationReport as VerificationReport;
                       return (
                         <div className="rounded border bg-background p-2.5 space-y-1.5 text-xs">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             {vr.tinPassed
                               ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
                               : <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
                             <span className="font-semibold">TIN / FIRS:</span>
                             <span className="text-muted-foreground">{vr.tinResultText || (vr.tinPassed ? "Passed" : "Failed")}</span>
+                            {!vr.tinPassed && vr.tinFailReason && (
+                              <span className="ml-1 px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-mono">{vr.tinFailReason}</span>
+                            )}
                           </div>
                           {(vr.tinSubmitted || vr.tinMatched) && (
                             <div className="grid grid-cols-2 gap-2 ml-5 text-xs text-muted-foreground">

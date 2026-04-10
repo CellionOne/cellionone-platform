@@ -752,10 +752,12 @@ export const companyProfiles = pgTable("company_profiles", {
   verificationReport: json("verification_report").$type<{
     kybPassed?: boolean;
     kybResultText?: string;
+    kybFailReason?: string;
     kybSubmitted?: { rcNumber?: string; companyName?: string };
     kybMatched?: { registryName?: string; status?: string; type?: string; rcNumber?: string; registrationDate?: string };
     tinPassed?: boolean;
     tinResultText?: string;
+    tinFailReason?: string;
     tinSubmitted?: { tinNumber?: string };
     tinMatched?: { found?: boolean; registryName?: string; status?: string };
     directorsReport?: {

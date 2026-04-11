@@ -1006,14 +1006,14 @@ export function registerBankPortalRoutes(app: Express): void {
 
   // ─── Founder Bank Dispatch Endpoints ─────────────────────────────────────────
 
-  // GET /api/founder/bank-partners — returns all registered bank partner names for the bank selection dialog
+  // GET /api/founder/bank-partners — returns active bank partner list for the bank dispatch dialog
   app.get("/api/founder/bank-partners", isAuthenticated, async (req: Request, res: Response) => {
     try {
       const userId = await getFounderUserId(req);
       if (!userId) return res.status(403).json({ error: "Forbidden" });
 
       const all = await storage.listBankPartners();
-      const partners = all.map(p => ({ id: p.id, name: p.name }));
+      const partners = all.filter(p => p.isActive).map(p => ({ id: p.id, name: p.name }));
       res.json(partners);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1041,7 +1041,7 @@ export function registerBankPortalRoutes(app: Express): void {
       }
 
       const partner = await storage.getBankPartner(bankPartnerId);
-      if (!partner) return res.status(404).json({ error: "Bank partner not found" });
+      if (!partner || !partner.isActive) return res.status(404).json({ error: "Bank partner not found or no longer active" });
 
       const emails: { label: string; address: string }[] = Array.isArray(partner.emails) ? partner.emails : [];
       if (emails.length === 0 && !partner.contactEmail) {

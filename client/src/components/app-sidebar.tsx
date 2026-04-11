@@ -201,11 +201,17 @@ interface AppSidebarProps {
 }
 
 function NavItemButton({ item, location }: { item: NavItem; location: string }) {
+  const itemBasePath = item.url.split("?")[0];
+  const locationBasePath = location.split("?")[0];
+  const isActive =
+    locationBasePath === itemBasePath ||
+    locationBasePath.startsWith(itemBasePath + "/");
+
   return (
     <SidebarMenuItem key={item.title}>
       <SidebarMenuButton
         asChild
-        isActive={location === item.url || location.startsWith(item.url.split("?")[0] + "/")}
+        isActive={isActive}
         data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-").replace(/[()]/g, "")}`}
       >
         <Link href={item.url}>

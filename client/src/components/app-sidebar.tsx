@@ -166,34 +166,61 @@ const buildingManagerItems: NavItem[] = [
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
-const adminItems: NavItem[] = [
-  { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
-  { title: "Personal Profile", url: "/profile", icon: UserCircle },
-  { title: "Users", url: "/admin/users", icon: Users },
-  { title: "Applications", url: "/admin/applications", icon: FileText },
-  { title: "Lawyer Applications", url: "/admin/lawyer-applications", icon: UserPlus },
-  { title: "Mailroom", url: "/admin/mailroom", icon: Mail },
-  { title: "Receipts", url: "/admin/receipts", icon: Receipt },
-  { title: "AI Events", url: "/admin/ai-events", icon: Brain },
-  { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },
-  { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
-  { title: "Proposals", url: "/admin/proposals", icon: FileText },
-  { title: "Registered Offices", url: "/admin/registered-offices", icon: Building2 },
-  { title: "Marketplace", url: "/procurement/marketplace", icon: Store },
-  { title: "My RFQs", url: "/procurement/my-rfqs", icon: FileSearch },
-  { title: "My Bids", url: "/procurement/my-bids", icon: Gavel },
-  { title: "Contracts", url: "/procurement/contracts", icon: FileSignature },
-  { title: "Invoices", url: "/procurement/invoices", icon: Receipt },
-  { title: "KYC Oversight", url: "/admin/kyc", icon: ShieldCheck },
-  { title: "Field Verifications", url: "/admin/field-verifications", icon: MapPin },
-  { title: "Existing Companies", url: "/admin/existing-companies", icon: Building2 },
-  { title: "My Verifications", url: "/kyc/my-verifications", icon: ClipboardCheck },
-  { title: "Escrow Dashboard", url: "/admin/escrow-dashboard", icon: Vault },
-  { title: "Banking Partners", url: "/admin/banking-partners", icon: Banknote },
-  { title: "CIE Engine", url: "/admin/cie", icon: BarChart3 },
-  { title: "Security", url: "/admin/security", icon: ShieldAlert },
-  { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },
-  { title: "Settings", url: "/settings", icon: Settings },
+const adminGroups: { label: string; items: NavItem[] }[] = [
+  {
+    label: "Overview",
+    items: [
+      { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
+    ],
+  },
+  {
+    label: "User Management",
+    items: [
+      { title: "Users", url: "/admin/users", icon: Users },
+      { title: "Lawyer Applications", url: "/admin/lawyer-applications", icon: UserPlus },
+    ],
+  },
+  {
+    label: "Incorporation & KYC",
+    items: [
+      { title: "Applications", url: "/admin/applications", icon: FileText },
+      { title: "Existing Companies", url: "/admin/existing-companies", icon: Building2 },
+      { title: "KYC Oversight", url: "/admin/kyc", icon: ShieldCheck },
+      { title: "Field Verifications", url: "/admin/field-verifications", icon: MapPin },
+    ],
+  },
+  {
+    label: "Business Services",
+    items: [
+      { title: "Registered Offices", url: "/admin/registered-offices", icon: Building2 },
+      { title: "Mailroom", url: "/admin/mailroom", icon: Mail },
+      { title: "Orders", url: "/admin/orders", icon: ShoppingCart },
+      { title: "Proposals", url: "/admin/proposals", icon: FileText },
+    ],
+  },
+  {
+    label: "Financial & Escrow",
+    items: [
+      { title: "Receipts", url: "/admin/receipts", icon: Receipt },
+      { title: "Escrow Dashboard", url: "/admin/escrow-dashboard", icon: Vault },
+      { title: "Banking Partners", url: "/admin/banking-partners", icon: Banknote },
+    ],
+  },
+  {
+    label: "Intelligence",
+    items: [
+      { title: "CIE Engine", url: "/admin/cie", icon: BarChart3 },
+      { title: "AI Events", url: "/admin/ai-events", icon: Brain },
+    ],
+  },
+  {
+    label: "Platform Administration",
+    items: [
+      { title: "Feature Flags", url: "/admin/feature-flags", icon: Flag },
+      { title: "Security", url: "/admin/security", icon: ShieldAlert },
+      { title: "Audit Logs", url: "/admin/audit-logs", icon: ClipboardList },
+    ],
+  },
 ];
 
 interface AppSidebarProps {
@@ -354,6 +381,46 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
   );
 }
 
+function AdminSidebar({ location }: { location: string }) {
+  const allGroupLabels = adminGroups.map((g) => g.label);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(allGroupLabels.map((l) => [l, true]))
+  );
+
+  const toggleGroup = (label: string) => {
+    setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+  };
+
+  return (
+    <SidebarContent>
+      {adminGroups.map((group) => {
+        const isOpen = openGroups[group.label] ?? true;
+        return (
+          <Collapsible key={group.label} open={isOpen} onOpenChange={() => toggleGroup(group.label)}>
+            <SidebarGroup>
+              <SidebarGroupLabel asChild>
+                <CollapsibleTrigger className="flex w-full items-center justify-between">
+                  {group.label}
+                  <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isOpen ? "" : "-rotate-90"}`} />
+                </CollapsibleTrigger>
+              </SidebarGroupLabel>
+              <CollapsibleContent>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {group.items.map((item) => (
+                      <NavItemButton key={item.title} item={item} location={location} />
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </CollapsibleContent>
+            </SidebarGroup>
+          </Collapsible>
+        );
+      })}
+    </SidebarContent>
+  );
+}
+
 export function AppSidebar({ role }: AppSidebarProps) {
   const [location] = useLocation();
   const { user, logout } = useAuth();
@@ -372,9 +439,7 @@ export function AppSidebar({ role }: AppSidebarProps) {
   const nonFounderItems =
     role === "lawyer"
       ? lawyerItems
-      : role === "building_manager"
-        ? buildingManagerItems
-        : adminItems;
+      : buildingManagerItems;
 
   const getInitials = () => {
     if (user?.firstName && user?.lastName) {
@@ -424,6 +489,8 @@ export function AppSidebar({ role }: AppSidebarProps) {
 
       {role === "founder" ? (
         <FounderSidebar location={location} primaryIntent={primaryIntent} />
+      ) : role === "admin" ? (
+        <AdminSidebar location={location} />
       ) : (
         <SidebarContent>
           <SidebarGroup>

@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, type InsertDirectorBiometricInvite } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne } from "drizzle-orm";
 import * as services from "./services";
@@ -1700,7 +1700,7 @@ export async function registerRoutes(
 
       // NIN/BVN: skip update if the corresponding field is KYB-locked
       if (nin && typeof nin === 'string' && nin.length === 11 && !lockedFields.includes('ninEncrypted')) {
-        profileData.ninEncrypted = encryptionService.encrypt(nin);
+        profileData.ninEncrypted = encryptionService.encryptField(nin);
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,
           targetUserId: userId,
@@ -1712,7 +1712,7 @@ export async function registerRoutes(
       }
 
       if (bvn && typeof bvn === 'string' && bvn.length === 11 && !lockedFields.includes('bvnEncrypted')) {
-        profileData.bvnEncrypted = encryptionService.encrypt(bvn);
+        profileData.bvnEncrypted = encryptionService.encryptField(bvn);
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,
           targetUserId: userId,
@@ -4569,6 +4569,17 @@ export async function registerRoutes(
     }
   });
 
+  // Standard vault document slots — must match EXISTING_CO_DOCS keys used during profile creation
+  const VAULT_DOC_SLOTS: { key: string; label: string }[] = [
+    { key: "coi", label: "Certificate of Incorporation" },
+    { key: "memat", label: "MEMAT (Memorandum & Articles of Association)" },
+    { key: "cac_status", label: "CAC Status Report" },
+    { key: "tin_cert", label: "TIN Certificate" },
+    { key: "proof_address", label: "Proof of Operating Address" },
+    { key: "director_id", label: "Director(s) Government-Issued ID" },
+  ];
+  const VAULT_DOC_LABEL: Record<string, string> = Object.fromEntries(VAULT_DOC_SLOTS.map(s => [s.key, s.label]));
+
   app.get("/api/founder/vault", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
@@ -4578,7 +4589,7 @@ export async function registerRoutes(
         db.select().from(companyProfiles).where(and(eq(companyProfiles.founderId, userId), eq(companyProfiles.isExistingCompany, true))),
       ]);
 
-      // For each existing company profile, fetch its checklist document items
+      // For each existing company profile, auto-create any missing standard checklist slots, then return all items
       const companyDocuments: Array<{
         profileId: number;
         companyName: string;
@@ -4586,14 +4597,25 @@ export async function registerRoutes(
         items: typeof profileChecklistItems.$inferSelect[];
       }> = [];
       for (const p of existingProfiles) {
-        const items = await db.select().from(profileChecklistItems)
+        const existingItems = await db.select().from(profileChecklistItems)
           .where(eq(profileChecklistItems.companyProfileId, p.id));
-        companyDocuments.push({
-          profileId: p.id,
-          companyName: p.companyName,
-          status: p.existingCompanyStatus,
-          items,
-        });
+        const existingKeys = new Set(existingItems.map(i => i.key));
+        const missingSlots = VAULT_DOC_SLOTS.filter(s => !existingKeys.has(s.key));
+        if (missingSlots.length > 0) {
+          await db.insert(profileChecklistItems).values(
+            missingSlots.map(s => ({
+              companyProfileId: p.id,
+              key: s.key,
+              label: s.label,
+              status: "missing" as const,
+            }))
+          );
+          const allItems = await db.select().from(profileChecklistItems)
+            .where(eq(profileChecklistItems.companyProfileId, p.id));
+          companyDocuments.push({ profileId: p.id, companyName: p.companyName, status: p.existingCompanyStatus, items: allItems });
+        } else {
+          companyDocuments.push({ profileId: p.id, companyName: p.companyName, status: p.existingCompanyStatus, items: existingItems });
+        }
       }
 
       res.json({ applications, documents, companyDocuments });
@@ -8130,9 +8152,13 @@ Important guidelines:
       const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
       if (!profile) return res.status(404).json({ message: "Profile not found" });
 
-      // Verify this checklist item belongs to the profile
-      const [checklistItem] = await db.select().from(profileChecklistItems).where(and(eq(profileChecklistItems.companyProfileId, profileId), eq(profileChecklistItems.key, docKey)));
-      if (!checklistItem) return res.status(404).json({ message: "Document checklist item not found" });
+      // Ensure the checklist slot exists (upsert: create if missing, then re-select)
+      const [existingSlot] = await db.select().from(profileChecklistItems)
+        .where(and(eq(profileChecklistItems.companyProfileId, profileId), eq(profileChecklistItems.key, docKey)));
+      if (!existingSlot) {
+        const fallbackLabel = VAULT_DOC_LABEL[docKey] ?? docKey;
+        await db.insert(profileChecklistItems).values({ companyProfileId: profileId, key: docKey, label: fallbackLabel, status: "missing" });
+      }
 
       const allowedMime = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png"];
       if (!allowedMime.includes(file.mimetype)) return res.status(400).json({ message: "File type not allowed. Upload PDF, JPEG, PNG, DOC or DOCX." });
@@ -8401,6 +8427,74 @@ Important guidelines:
           })
         ).catch(() => {});
       }
+
+      // Pre-fill the founder's personal profile from verified director data (non-blocking)
+      step = "prefill";
+      (async () => {
+        const directors = (profile.directors as any[]) || [];
+        const founderEmailLower = founderEmail?.toLowerCase();
+
+        // Strategy (A): email match — director email === founder account email
+        let prefillDir: any = founderEmailLower
+          ? directors.find((d: any) => d.email?.toLowerCase() === founderEmailLower && (d.bvnVerified === true || d.ninVerified === true))
+          : null;
+
+        // Strategy (B): fallback — exactly ONE verified director when no email match
+        if (!prefillDir) {
+          const verifiedDirs = directors.filter((d: any) => d.bvnVerified === true || d.ninVerified === true);
+          if (verifiedDirs.length === 1) prefillDir = verifiedDirs[0];
+        }
+
+        if (!prefillDir) return;
+
+        // Guard: skip if already KYB-prefilled
+        const [existingFP] = await db.select({ id: founderProfiles.id, kybPrefilled: founderProfiles.kybPrefilled })
+          .from(founderProfiles).where(eq(founderProfiles.userId, profile.founderId));
+        if (existingFP?.kybPrefilled) return;
+
+        const lockedFields: string[] = [];
+        const profilePatch: Partial<InsertFounderProfile> = { kybPrefilled: true, kybSourceCompanyProfileId: profile.id };
+        if (prefillDir.name) { profilePatch.fullName = prefillDir.name; lockedFields.push('fullName'); }
+        if (prefillDir.bvn) { profilePatch.bvnEncrypted = prefillDir.bvn; lockedFields.push('bvnEncrypted'); }
+        if (prefillDir.nin) { profilePatch.ninEncrypted = prefillDir.nin; lockedFields.push('ninEncrypted'); }
+        if (prefillDir.phone) { profilePatch.phone = prefillDir.phone; lockedFields.push('phone'); }
+        const addr = profile.registeredAddress as { line1?: string; state?: string } | null;
+        if (addr?.line1) { profilePatch.addressLine1 = addr.line1; lockedFields.push('addressLine1'); }
+        if (addr?.state) { profilePatch.state = addr.state; lockedFields.push('state'); }
+        profilePatch.lockedFields = lockedFields;
+
+        if (existingFP) {
+          await db.update(founderProfiles).set(profilePatch).where(eq(founderProfiles.userId, profile.founderId));
+        } else {
+          await db.insert(founderProfiles).values({ userId: profile.founderId, ...profilePatch });
+        }
+
+        // Auto-verify identity if this director passed AML
+        if (prefillDir.amlChecked === true && prefillDir.amlIsHit === false) {
+          const now = new Date();
+          const idVPatch: Partial<InsertIdentityVerification> = {
+            status: 'verified', method: 'automated', externalProvider: 'smile_id',
+            identitySource: 'kyb_pipeline', bvnNinVerified: true, verifiedAt: now,
+          };
+          const [existingIdV] = await db.select({ id: identityVerifications.id, status: identityVerifications.status })
+            .from(identityVerifications).where(eq(identityVerifications.founderUserId, profile.founderId));
+          if (existingIdV) {
+            if (existingIdV.status !== 'verified') {
+              await db.update(identityVerifications).set(idVPatch).where(eq(identityVerifications.id, existingIdV.id));
+            }
+          } else {
+            await db.insert(identityVerifications).values({ founderUserId: profile.founderId, ...idVPatch });
+          }
+          await db.update(usersTable)
+            .set({ isIdentityVerified: true, identityVerifiedAt: now, updatedAt: now })
+            .where(eq(usersTable.id, profile.founderId));
+          upsertVerifiedIndividualByUserId(profile.founderId).catch((e: Error) =>
+            console.error(`[Approve] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
+          );
+        }
+
+        console.log(`[Approve] Founder ${profile.founderId} KYB pre-fill applied from director '${prefillDir.name}' — fields: ${lockedFields.join(', ')}`);
+      })().catch(err => console.error('[Approve] Pre-fill error (non-fatal):', err?.message));
 
       res.json(updated);
     } catch (error: any) {

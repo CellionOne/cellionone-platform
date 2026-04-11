@@ -48,13 +48,12 @@ const categoryConfig: Record<string, { label: string; icon: React.ElementType }>
 };
 
 const STANDARD_VAULT_DOCS: { key: string; label: string; hint: string }[] = [
-  { key: "certificate_of_incorporation", label: "Certificate of Incorporation", hint: "PDF, JPG, or PNG — up to 10 MB" },
-  { key: "memart", label: "Memorandum & Articles of Association (MEMART)", hint: "PDF — up to 10 MB" },
-  { key: "status_report", label: "Status Report (CAC 1.1 / CAC 7 / BN-01)", hint: "PDF — up to 10 MB" },
-  { key: "tin_printout", label: "TIN Registration Printout", hint: "PDF, JPG, or PNG — up to 10 MB" },
-  { key: "proof_of_address", label: "Proof of Address (Utility Bill / Tenancy Agreement)", hint: "PDF, JPG, or PNG — up to 10 MB" },
-  { key: "nin_slip", label: "NIN Slip / National ID Card", hint: "PDF, JPG, or PNG — up to 10 MB" },
-  { key: "proof_of_id", label: "Proof of Identity (International Passport / Driver's Licence)", hint: "PDF, JPG, or PNG — up to 10 MB" },
+  { key: "coi", label: "Certificate of Incorporation", hint: "PDF, JPG, or PNG — up to 10 MB" },
+  { key: "memat", label: "Memorandum & Articles of Association (MEMART)", hint: "PDF — up to 10 MB" },
+  { key: "cac_status", label: "CAC Status Report (CAC 1.1 / CAC 7 / BN-01)", hint: "PDF — up to 10 MB" },
+  { key: "tin_cert", label: "TIN Certificate", hint: "PDF, JPG, or PNG — up to 10 MB" },
+  { key: "proof_address", label: "Proof of Operating Address (Utility Bill / Tenancy Agreement)", hint: "PDF, JPG, or PNG — up to 10 MB" },
+  { key: "director_id", label: "Director Government-Issued ID", hint: "PDF, JPG, or PNG — up to 10 MB" },
 ];
 
 function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {

@@ -811,12 +811,20 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               const [founderUser] = await db.select({ email: users.email })
                 .from(users).where(eq(users.id, order.founderId));
               const founderEmail = founderUser?.email?.toLowerCase();
-              if (founderEmail) {
-                // (A) Pre-fill condition: BVN or NIN verified, AML not required
-                const prefillDir = updatedDirectors.find(d =>
-                  d.email?.toLowerCase() === founderEmail &&
-                  (d.bvnVerified === true || d.ninVerified === true)
-                );
+              {
+                // (A) Pre-fill condition: email match — BVN or NIN verified, AML not required
+                let prefillDir = founderEmail
+                  ? updatedDirectors.find(d =>
+                      d.email?.toLowerCase() === founderEmail &&
+                      (d.bvnVerified === true || d.ninVerified === true)
+                    )
+                  : undefined;
+
+                // (B) Fallback: exactly one verified director (when submitter didn't list their account email as director email)
+                if (!prefillDir) {
+                  const verifiedDirs = updatedDirectors.filter(d => d.bvnVerified === true || d.ninVerified === true);
+                  if (verifiedDirs.length === 1) prefillDir = verifiedDirs[0];
+                }
 
                 if (prefillDir) {
                   const lockedFields: string[] = [];
@@ -842,13 +850,14 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     lockedFields.push('phone');
                   }
                   // Use company registered address as proxy for founder address
-                  const addr = profile.registeredAddress as { addressLine1?: string; addressState?: string; addressCountry?: string } | null;
-                  if (addr?.addressLine1) {
-                    profilePatch.addressLine1 = addr.addressLine1;
+                  // registeredAddress shape: { line1, line2, city, state, postalCode, country }
+                  const addr = profile.registeredAddress as { line1?: string; state?: string } | null;
+                  if (addr?.line1) {
+                    profilePatch.addressLine1 = addr.line1;
                     lockedFields.push('addressLine1');
                   }
-                  if (addr?.addressState) {
-                    profilePatch.state = addr.addressState;
+                  if (addr?.state) {
+                    profilePatch.state = addr.state;
                     lockedFields.push('state');
                   }
                   profilePatch.lockedFields = lockedFields;
@@ -864,15 +873,16 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
                   const now = new Date();
 
-                  // (B) Auto-verify condition: independent search — any matching director with
-                  // BVN/NIN verified AND AML explicitly clean. Evaluated separately from prefillDir
-                  // so a second director with a clear AML result is not missed if the first matched
-                  // director had an AML hit.
-                  const verifyDir = updatedDirectors.find(d =>
-                    d.email?.toLowerCase() === founderEmail &&
-                    (d.bvnVerified === true || d.ninVerified === true) &&
-                    d.amlChecked === true && d.amlIsHit === false
-                  );
+                  // Auto-verify condition: any director with email matching founder email,
+                  // BVN/NIN verified AND AML explicitly clean.
+                  // Requires email match to safely confirm identity (founderEmail guard prevents false positives).
+                  const verifyDir = founderEmail
+                    ? updatedDirectors.find(d =>
+                        d.email?.toLowerCase() === founderEmail &&
+                        (d.bvnVerified === true || d.ninVerified === true) &&
+                        d.amlChecked === true && d.amlIsHit === false
+                      )
+                    : undefined;
 
                   if (verifyDir) {
                     // Full auto-verify: mark identity as fully verified

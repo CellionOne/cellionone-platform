@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,12 +14,6 @@ type BankSession = {
   bankPartnerId: number;
   bankName?: string;
 };
-
-async function getCsrfToken(): Promise<string> {
-  const res = await fetch("/api/csrf-token", { credentials: "include" });
-  const data = await res.json();
-  return data.csrfToken;
-}
 
 export default function BankAccountPage() {
   const [, setLocation] = useLocation();
@@ -36,29 +31,21 @@ export default function BankAccountPage() {
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
-      const csrf = await getCsrfToken();
-      await fetch("/api/bank-portal/logout", {
-        method: "POST",
-        credentials: "include",
-        headers: { "x-csrf-token": csrf },
-      });
+      await apiRequest("POST", "/api/bank-portal/logout");
     },
-    onSuccess: () => setLocation("/bank/login"),
-    onError: () => setLocation("/bank/login"),
+    onSuccess: () => {
+      queryClient.clear();
+      setLocation("/bank/login");
+    },
+    onError: () => {
+      queryClient.clear();
+      setLocation("/bank/login");
+    },
   });
 
   const changePasswordMutation = useMutation({
     mutationFn: async () => {
-      const csrf = await getCsrfToken();
-      const res = await fetch("/api/bank-portal/change-password", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "x-csrf-token": csrf,
-        },
-        body: JSON.stringify({ currentPassword, newPassword }),
-      });
+      const res = await apiRequest("POST", "/api/bank-portal/change-password", { currentPassword, newPassword });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to change password");
       return data;

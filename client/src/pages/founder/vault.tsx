@@ -339,7 +339,7 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                             <div>
                               <p className="text-sm font-medium">{bank.name}</p>
                               {sentDate ? (
-                                <p className="text-xs text-green-600 dark:text-green-400">Sent {sentDate}</p>
+                                <p className="text-xs text-green-600 dark:text-green-400">Already sent on {sentDate}</p>
                               ) : (
                                 <p className="text-xs text-muted-foreground">Not yet sent</p>
                               )}
@@ -351,7 +351,7 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                             onClick={() => handleSelectBank(bank)}
                             data-testid={`button-select-bank-${bank.id}`}
                           >
-                            {sentDate ? "Resend" : "Select"}
+                            {sentDate ? "Send Dossier Again" : "Send Dossier"}
                           </Button>
                         </div>
                       );

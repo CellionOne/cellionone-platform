@@ -16,7 +16,7 @@ import * as services from "./services";
 import { registeredOfficeService } from "./services/registeredOfficeService";
 import { mailroomService } from "./services/mailroomService";
 import * as verificationService from "./services/verificationService";
-import { upsertVerifiedCompanyDirect } from "./services/verifiedEntityService";
+import { upsertVerifiedCompanyDirect, upsertVerifiedIndividualByUserId } from "./services/verifiedEntityService";
 import { registerKycServiceRoutes } from "./routes/kycServiceRoutes";
 import { registerKycApiRoutes } from "./routes/kycApiRoutes";
 import { registerProcurementRoutes } from "./routes/procurementRoutes";
@@ -1733,7 +1733,7 @@ export async function registerRoutes(
       const hasDocuments = (existing?.passportPhotoPath || req.body.passportPhotoPath) &&
                            (existing?.signaturePath || req.body.signaturePath) &&
                            (existing?.idDocumentPath || req.body.idDocumentPath);
-      const hasIds = (existing?.ninEncrypted || profileData.ninEncrypted) &&
+      const hasIds = (existing?.ninEncrypted || profileData.ninEncrypted) ||
                      (existing?.bvnEncrypted || profileData.bvnEncrypted);
 
       const docScore = hasDocuments ? 15 : 0;
@@ -1870,7 +1870,7 @@ export async function registerRoutes(
         const sig = docType === 'signature' ? objectPath : existing.signaturePath;
         const idDoc = docType === 'id_document' ? objectPath : existing.idDocumentPath;
         const hasDocuments = pp && sig && idDoc;
-        const hasIds = existing.ninEncrypted && existing.bvnEncrypted;
+        const hasIds = existing.ninEncrypted || existing.bvnEncrypted;
         const completionFields = [
           existing.fullName, existing.phone, existing.dateOfBirth, existing.nationality,
           existing.gender, existing.occupation, existing.addressLine1, existing.city,
@@ -1957,7 +1957,7 @@ export async function registerRoutes(
         const sig = docType === 'signature' ? objectPath : existing.signaturePath;
         const idDoc = docType === 'id_document' ? objectPath : existing.idDocumentPath;
         const hasDocuments = pp && sig && idDoc;
-        const hasIds = existing.ninEncrypted && existing.bvnEncrypted;
+        const hasIds = existing.ninEncrypted || existing.bvnEncrypted;
         const docScore = hasDocuments ? 15 : 0;
         const idScore = hasIds ? 15 : 0;
         profileData.profileCompletion = Math.round((filled / total) * 70) + docScore + idScore;
@@ -2052,6 +2052,27 @@ export async function registerRoutes(
         userAgent: req.headers['user-agent'],
       });
 
+      if (result.success) {
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+        await storage.upsertIdentityVerification({
+          founderUserId: userId,
+          status: 'verified',
+          method: 'automated',
+          externalProvider: 'smile_id',
+          identitySource: 'direct_verification',
+          bvnNinVerified: true,
+          verifiedAt: now,
+          expiresAt,
+        });
+        await db.update(usersTable)
+          .set({ isIdentityVerified: true, identityVerifiedAt: now, updatedAt: now })
+          .where(eq(usersTable.id, userId));
+        await upsertVerifiedIndividualByUserId(userId).catch((e: Error) =>
+          console.error(`[BVN Verify] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
+        );
+      }
+
       res.json(result);
     } catch (error) {
       console.error("Error verifying BVN:", error);
@@ -2080,6 +2101,27 @@ export async function registerRoutes(
         ipAddress: req.ip,
         userAgent: req.headers['user-agent'],
       });
+
+      if (result.success) {
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+        await storage.upsertIdentityVerification({
+          founderUserId: userId,
+          status: 'verified',
+          method: 'automated',
+          externalProvider: 'smile_id',
+          identitySource: 'direct_verification',
+          bvnNinVerified: true,
+          verifiedAt: now,
+          expiresAt,
+        });
+        await db.update(usersTable)
+          .set({ isIdentityVerified: true, identityVerifiedAt: now, updatedAt: now })
+          .where(eq(usersTable.id, userId));
+        await upsertVerifiedIndividualByUserId(userId).catch((e: Error) =>
+          console.error(`[NIN Verify] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
+        );
+      }
 
       res.json(result);
     } catch (error) {
@@ -2119,8 +2161,8 @@ export async function registerRoutes(
       // Reject the request to prevent routing errors and data corruption.
       if (verification?.identitySource === 'kyb_pipeline' && verification?.bvnNinVerified) {
         return res.status(403).json({
-          message: "Your identity was pre-verified during company registration. Please use the free biometric on the Identity Verification page — no payment required.",
-          redirectTo: "/founder/identity",
+          message: "Your identity was pre-verified during company registration. No further action is required.",
+          redirectTo: "/profile",
         });
       }
 

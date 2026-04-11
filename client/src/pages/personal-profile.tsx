@@ -190,8 +190,6 @@ export default function PersonalProfilePage() {
         <Separator />
         <IdentitySection />
         <Separator />
-        <BiometricSection />
-        <Separator />
         <DocumentsSection />
         <ProfileBottomCTA />
       </div>

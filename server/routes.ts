@@ -8439,18 +8439,21 @@ Important guidelines:
           ? directors.find((d: any) => d.email?.toLowerCase() === founderEmailLower && (d.bvnVerified === true || d.ninVerified === true))
           : null;
 
-        // Strategy (B): fallback — exactly ONE verified director when no email match
+        // Strategy (B): fallback — exactly ONE verified director with no AML hit when no email match
+        // Excludes AML-hit directors (amlIsHit === true); allows clean (false) or not-yet-run (undefined/null)
         if (!prefillDir) {
-          const verifiedDirs = directors.filter((d: any) => d.bvnVerified === true || d.ninVerified === true);
+          const verifiedDirs = directors.filter((d: any) =>
+            (d.bvnVerified === true || d.ninVerified === true) && d.amlIsHit !== true
+          );
           if (verifiedDirs.length === 1) prefillDir = verifiedDirs[0];
         }
 
         if (!prefillDir) return;
 
-        // Guard: skip if already KYB-prefilled
-        const [existingFP] = await db.select({ id: founderProfiles.id, kybPrefilled: founderProfiles.kybPrefilled })
+        // Check for existing profile (for upsert), but do NOT skip if already kybPrefilled —
+        // a later admin approval of a different company should update the pre-fill source.
+        const [existingFP] = await db.select({ id: founderProfiles.id })
           .from(founderProfiles).where(eq(founderProfiles.userId, profile.founderId));
-        if (existingFP?.kybPrefilled) return;
 
         const lockedFields: string[] = [];
         const profilePatch: Partial<InsertFounderProfile> = { kybPrefilled: true, kybSourceCompanyProfileId: profile.id };

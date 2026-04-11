@@ -820,9 +820,12 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     )
                   : undefined;
 
-                // (B) Fallback: exactly one verified director (when submitter didn't list their account email as director email)
+                // (B) Fallback: exactly one verified director with no AML hit
+                // Excludes AML-hit directors; allows clean (amlIsHit=false) or not-yet-run (amlIsHit=null/undefined)
                 if (!prefillDir) {
-                  const verifiedDirs = updatedDirectors.filter(d => d.bvnVerified === true || d.ninVerified === true);
+                  const verifiedDirs = updatedDirectors.filter(d =>
+                    (d.bvnVerified === true || d.ninVerified === true) && d.amlIsHit !== true
+                  );
                   if (verifiedDirs.length === 1) prefillDir = verifiedDirs[0];
                 }
 

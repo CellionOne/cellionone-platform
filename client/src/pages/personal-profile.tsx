@@ -122,6 +122,7 @@ function ProfileBottomCTA() {
   });
   const completion = profile?.profileCompletion || 0;
   if (completion < 80) return null;
+  if (profile?.isVerified) return null;
   return (
     <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-6 flex flex-col sm:flex-row items-center gap-4" data-testid="cta-bottom-identity">
       <div className="flex-1 text-center sm:text-left">
@@ -130,7 +131,7 @@ function ProfileBottomCTA() {
           Identity verification unlocks company registration, orders, and service requests on the platform.
         </p>
       </div>
-      <Link href="/profile#biometric">
+      <Link href="/profile#identity">
         <Button size="lg" className="shrink-0 w-full sm:w-auto" data-testid="button-bottom-verify-identity">
           Verify Identity <ArrowRight className="h-4 w-4 ml-2" />
         </Button>
@@ -245,11 +246,11 @@ function ProfileHeader() {
           </div>
           <Progress value={completion} className="h-2" data-testid="progress-completion" />
         </div>
-        {profile?.isProfileComplete && (
+        {profile?.isProfileComplete && !profile?.isVerified && (
           <div className="mt-4 flex items-center gap-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 px-4 py-3" data-testid="cta-profile-complete">
             <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-            <p className="text-sm font-medium text-green-800 dark:text-green-300 flex-1">Profile complete! Scroll down to verify your identity.</p>
-            <Link href="/profile#biometric">
+            <p className="text-sm font-medium text-green-800 dark:text-green-300 flex-1">Profile complete! Scroll down to verify your BVN or NIN.</p>
+            <Link href="/profile#identity">
               <Button size="sm" variant="outline" className="shrink-0 border-green-300 text-green-700 hover:bg-green-50 dark:border-green-700 dark:text-green-400" data-testid="button-go-to-identity-complete">
                 Verify Identity <ArrowRight className="h-4 w-4 ml-1" />
               </Button>
@@ -804,7 +805,7 @@ function IdentitySection() {
   }
 
   return (
-    <Card>
+    <Card id="identity" data-testid="card-identity-section">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
           <ShieldCheck className="h-5 w-5" /> Identity Numbers

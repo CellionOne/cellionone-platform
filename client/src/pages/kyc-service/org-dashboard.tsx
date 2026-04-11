@@ -16,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import {
   Users,
   ClipboardCheck,
@@ -149,10 +149,12 @@ export default function OrgDashboard() {
 
   const bulkImportMutation = useMutation({
     mutationFn: async (formData: FormData) => {
+      const csrf = await getCsrfToken();
       const res = await fetch(`/api/kyc-service/organisations/${orgId}/verification-requests/bulk`, {
         method: "POST",
         body: formData,
         credentials: "include",
+        headers: csrf ? { "X-CSRF-Token": csrf } : {},
       });
       if (!res.ok) throw new Error(await res.text());
       return res.json();

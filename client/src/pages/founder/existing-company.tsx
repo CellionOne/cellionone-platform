@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import {
   Building2,
   ArrowRight,
@@ -345,10 +345,12 @@ export default function ExistingCompanyPage() {
       formData.append("file", file);
       formData.append("docKey", activeDocKey);
 
+      const csrf = await getCsrfToken();
       const res = await fetch(`/api/founder/company-profiles/${createdProfileId}/documents/upload`, {
         method: "POST",
         body: formData,
         credentials: "include",
+        headers: csrf ? { "X-CSRF-Token": csrf } : {},
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({ message: "Upload failed" }));

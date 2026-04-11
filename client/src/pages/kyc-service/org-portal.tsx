@@ -20,7 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, ClipboardCheck, Link2, Users, ShieldAlert, BarChart3,
@@ -348,8 +348,10 @@ function VerificationsSection({ orgId, isAdmin, isOrgActive }: { orgId: string; 
 
   const bulkImportMutation = useMutation({
     mutationFn: async (formData: FormData) => {
+      const csrf = await getCsrfToken();
       const res = await fetch(`/api/kyc-service/organisations/${orgId}/verification-requests/bulk`, {
         method: "POST", body: formData, credentials: "include",
+        headers: csrf ? { "X-CSRF-Token": csrf } : {},
       });
       if (!res.ok) throw new Error(await res.text());
       return res.json();

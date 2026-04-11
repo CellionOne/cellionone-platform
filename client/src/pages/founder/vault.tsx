@@ -10,7 +10,7 @@ import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { ReceiptsList } from "@/components/receipts-list";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import {
   FolderOpen,
   FileText,
@@ -66,10 +66,12 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("docKey", docKey);
+      const csrfToken = await getCsrfToken();
       const res = await fetch(`/api/founder/company-profiles/${group.profileId}/documents/upload`, {
         method: "POST",
         body: formData,
         credentials: "include",
+        headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {},
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ message: "Upload failed" }));

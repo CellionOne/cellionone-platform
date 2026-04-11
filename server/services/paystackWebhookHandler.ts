@@ -796,40 +796,49 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               }
             }
 
-            // Step 3b: Founder profile pre-fill from verified director data
-            // If the founder is listed as a director whose BVN/NIN passed, pre-fill their personal
-            // profile with verified data and mark them as partially identity-verified (biometric pending).
+            // Step 3b: Founder profile pre-fill and (conditional) identity auto-verify from KYB data.
+            //
+            // Two separate conditions are evaluated:
+            // (A) PREFILL: director email matches founder email AND BVN or NIN was verified.
+            //     AML outcome is irrelevant — we always pre-fill when we have verified ID data,
+            //     even when the company ends up Under Review due to AML issues.
+            // (B) AUTO-VERIFY: director from (A) AND AML explicitly returned clean
+            //     (amlChecked=true AND amlIsHit=false). Only then do we mark
+            //     isIdentityVerified=true and upsert identity_verifications as 'verified'.
+            //     If (A) matches but (B) does not, we record status='in_progress' and leave
+            //     isIdentityVerified untouched — admin review will decide.
             try {
               const [founderUser] = await db.select({ email: users.email })
                 .from(users).where(eq(users.id, order.founderId));
               const founderEmail = founderUser?.email?.toLowerCase();
               if (founderEmail) {
-                const matchedDir = updatedDirectors.find(d =>
+                // (A) Pre-fill condition: BVN or NIN verified, AML not required
+                const prefillDir = updatedDirectors.find(d =>
                   d.email?.toLowerCase() === founderEmail &&
-                  (d.bvnVerified === true || d.ninVerified === true) &&
-                  d.amlChecked === true && d.amlIsHit === false
+                  (d.bvnVerified === true || d.ninVerified === true)
                 );
-                if (matchedDir) {
+
+                if (prefillDir) {
                   const lockedFields: string[] = [];
                   const profilePatch: Partial<InsertFounderProfile> = {
                     kybPrefilled: true,
                     kybSourceCompanyProfileId: profile.id,
                   };
-                  if (matchedDir.name) {
-                    profilePatch.fullName = matchedDir.name;
+                  if (prefillDir.name) {
+                    profilePatch.fullName = prefillDir.name;
                     lockedFields.push('fullName');
                   }
-                  if (matchedDir.bvn) {
+                  if (prefillDir.bvn) {
                     // bvn is already encrypted in the directors array; reuse it as-is
-                    profilePatch.bvnEncrypted = matchedDir.bvn;
+                    profilePatch.bvnEncrypted = prefillDir.bvn;
                     lockedFields.push('bvnEncrypted');
                   }
-                  if (matchedDir.nin) {
-                    profilePatch.ninEncrypted = matchedDir.nin;
+                  if (prefillDir.nin) {
+                    profilePatch.ninEncrypted = prefillDir.nin;
                     lockedFields.push('ninEncrypted');
                   }
-                  if (matchedDir.phone) {
-                    profilePatch.phone = matchedDir.phone;
+                  if (prefillDir.phone) {
+                    profilePatch.phone = prefillDir.phone;
                     lockedFields.push('phone');
                   }
                   // Use company registered address as proxy for founder address
@@ -844,7 +853,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                   }
                   profilePatch.lockedFields = lockedFields;
 
-                  // Upsert founder_profiles
+                  // Upsert founder_profiles (always runs when BVN/NIN is verified)
                   const [existingFProfile] = await db.select({ id: founderProfiles.id })
                     .from(founderProfiles).where(eq(founderProfiles.userId, order.founderId));
                   if (existingFProfile) {
@@ -853,43 +862,69 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     await db.insert(founderProfiles).values({ userId: order.founderId, ...profilePatch });
                   }
 
-                  // Upsert identity_verifications: mark fully verified via KYB pipeline (no selfie required)
                   const now = new Date();
-                  const idVPatch: Partial<InsertIdentityVerification> = {
-                    status: 'verified',
-                    method: 'automated',
-                    externalProvider: 'smile_id',
-                    identitySource: 'kyb_pipeline',
-                    bvnNinVerified: true,
-                    verifiedAt: now,
-                  };
-                  const [existingIdV] = await db.select({ id: identityVerifications.id })
-                    .from(identityVerifications).where(eq(identityVerifications.founderUserId, order.founderId));
-                  if (existingIdV) {
-                    await db.update(identityVerifications).set(idVPatch).where(eq(identityVerifications.id, existingIdV.id));
+
+                  // (B) Auto-verify condition: pre-fill candidate AND AML explicitly clean
+                  const verifyDir = (
+                    prefillDir.amlChecked === true && prefillDir.amlIsHit === false
+                  ) ? prefillDir : null;
+
+                  if (verifyDir) {
+                    // Full auto-verify: mark identity as fully verified
+                    const idVPatch: Partial<InsertIdentityVerification> = {
+                      status: 'verified',
+                      method: 'automated',
+                      externalProvider: 'smile_id',
+                      identitySource: 'kyb_pipeline',
+                      bvnNinVerified: true,
+                      verifiedAt: now,
+                    };
+                    const [existingIdV] = await db.select({ id: identityVerifications.id })
+                      .from(identityVerifications).where(eq(identityVerifications.founderUserId, order.founderId));
+                    if (existingIdV) {
+                      await db.update(identityVerifications).set(idVPatch).where(eq(identityVerifications.id, existingIdV.id));
+                    } else {
+                      await db.insert(identityVerifications).values({ founderUserId: order.founderId, ...idVPatch });
+                    }
+
+                    // Mark the founder as identity-verified on the users table
+                    await db.update(users)
+                      .set({ isIdentityVerified: true, identityVerifiedAt: now, updatedAt: now })
+                      .where(eq(users.id, order.founderId));
+
+                    // Mark any director biometric invite for this company profile as completed
+                    await db.update(directorBiometricInvites)
+                      .set({ status: 'completed', updatedAt: now })
+                      .where(and(
+                        eq(directorBiometricInvites.companyProfileId, profile.id),
+                        eq(directorBiometricInvites.founderUserId, order.founderId),
+                      ));
+
+                    // Register in the verified entity store
+                    await upsertVerifiedIndividualByUserId(order.founderId).catch((e: Error) =>
+                      console.error(`[Webhook] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
+                    );
+
+                    console.log(`[Webhook] Founder ${order.founderId} identity auto-verified via KYB pipeline — fields: ${lockedFields.join(', ')}`);
                   } else {
-                    await db.insert(identityVerifications).values({ founderUserId: order.founderId, ...idVPatch });
+                    // Pre-fill only — AML pending or flagged; record in_progress and leave isIdentityVerified untouched
+                    const idVPatch: Partial<InsertIdentityVerification> = {
+                      status: 'in_progress',
+                      method: 'automated',
+                      externalProvider: 'smile_id',
+                      identitySource: 'kyb_pipeline',
+                      bvnNinVerified: true,
+                    };
+                    const [existingIdV] = await db.select({ id: identityVerifications.id })
+                      .from(identityVerifications).where(eq(identityVerifications.founderUserId, order.founderId));
+                    if (existingIdV) {
+                      await db.update(identityVerifications).set(idVPatch).where(eq(identityVerifications.id, existingIdV.id));
+                    } else {
+                      await db.insert(identityVerifications).values({ founderUserId: order.founderId, ...idVPatch });
+                    }
+
+                    console.log(`[Webhook] Founder ${order.founderId} profile pre-filled from KYB — AML pending/flagged, identity not auto-verified — fields: ${lockedFields.join(', ')}`);
                   }
-
-                  // Mark the founder as identity-verified on the users table
-                  await db.update(users)
-                    .set({ isIdentityVerified: true, identityVerifiedAt: now, updatedAt: now })
-                    .where(eq(users.id, order.founderId));
-
-                  // Mark any director biometric invite for this company profile as completed
-                  await db.update(directorBiometricInvites)
-                    .set({ status: 'completed', updatedAt: now })
-                    .where(and(
-                      eq(directorBiometricInvites.companyProfileId, profile.id),
-                      eq(directorBiometricInvites.founderUserId, order.founderId),
-                    ));
-
-                  // Register in the verified entity store
-                  await upsertVerifiedIndividualByUserId(order.founderId).catch((e: Error) =>
-                    console.error(`[Webhook] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
-                  );
-
-                  console.log(`[Webhook] Founder ${order.founderId} identity auto-verified via KYB pipeline — fields: ${lockedFields.join(', ')}`);
                 }
               }
             } catch (prefillErr: unknown) {

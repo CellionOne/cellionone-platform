@@ -117,6 +117,7 @@ import BuildingManagerMailIntake from "@/pages/building-manager/mail-intake";
 import WelcomePage from "@/pages/welcome";
 import ExistingCompanyPage from "@/pages/founder/existing-company";
 import RegistrationsPage from "@/pages/founder/registrations";
+import FounderRegistrationServicesPage from "@/pages/founder/registration-services";
 
 const INTENT_EXEMPT_PATHS = ["/welcome", "/settings", "/profile", "/notifications", "/login", "/register"];
 const INTENT_EXEMPT_ROLES = ["admin", "lawyer", "building_manager"];
@@ -242,6 +243,9 @@ function RoleBasedRedirect() {
     if (user.primaryIntent === "procurement") {
       return <Redirect to="/procurement/marketplace" />;
     }
+    if (user.primaryIntent === "founder_reg_services") {
+      return <Redirect to="/founder/registration-services" />;
+    }
     return <Redirect to="/founder/dashboard" />;
   } else {
     // Unknown role - log error and redirect to login
@@ -274,6 +278,9 @@ function Router() {
       </Route>
       <Route path="/founder/registrations">
         <ProtectedRoute component={RegistrationsPage} />
+      </Route>
+      <Route path="/founder/registration-services">
+        <ProtectedRoute component={FounderRegistrationServicesPage} />
       </Route>
       <Route path="/founder/dashboard">
         <ProtectedRoute component={FounderDashboard} />

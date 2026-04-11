@@ -24,7 +24,6 @@ import {
   Building2,
   LayoutDashboard,
   FileText,
-  User,
   UserCircle,
   FolderOpen,
   Settings,
@@ -60,6 +59,9 @@ import {
   Info,
   LayoutGrid,
   MapPin,
+  Hash,
+  Shield,
+  Landmark,
 } from "lucide-react";
 import {
   Tooltip,
@@ -90,10 +92,8 @@ const founderGroups: NavGroup[] = [
       { title: "Register Existing Company", url: "/founder/existing-company", icon: ClipboardCheck },
       { title: "My Registrations", url: "/founder/registrations", icon: ClipboardList },
       { title: "Directors & Shareholders", url: "/founder/company-people", icon: Users },
-      { title: "Company Profile", url: "/founder/company-profile", icon: Briefcase },
       { title: "Post-Inc Checklist", url: "/founder/post-inc-checklist", icon: ListChecks },
       { title: "Compliance Calendar", url: "/founder/compliance", icon: Calendar },
-      { title: "Document Vault", url: "/founder/vault", icon: FolderOpen },
     ],
     activeIntents: ["founder_new_co", "founder_existing_co"],
   },
@@ -102,10 +102,23 @@ const founderGroups: NavGroup[] = [
     items: [
       { title: "Registered Office", url: "/founder/registered-office", icon: Building2 },
       { title: "Mail Handling", url: "/founder/mail", icon: Mail },
+      { title: "Open Bank Account", url: "/founder/vault", icon: Landmark },
+      { title: "Document Vault", url: "/founder/vault", icon: FolderOpen },
       { title: "Legal AI", url: "/founder/legal-assistant", icon: MessageSquare },
       { title: "Data Sharing", url: "/founder/data-sharing", icon: Share2 },
     ],
     activeIntents: ["founder_new_co", "founder_existing_co"],
+  },
+  {
+    label: "Registration Services",
+    items: [
+      { title: "SCUML Registration", url: "/founder/registration-services?service=SCUML", icon: ShieldCheck },
+      { title: "TIN Registration", url: "/founder/registration-services?service=TIN", icon: Hash },
+      { title: "Trademark", url: "/founder/registration-services?service=TM", icon: Shield },
+      { title: "Add a Director (CAC)", url: "/founder/registration-services?service=ADD_DIR", icon: UserPlus },
+      { title: "My Service Orders", url: "/founder/orders", icon: Receipt },
+    ],
+    activeIntents: ["founder_reg_services"],
   },
   {
     label: "KYC & Verification",
@@ -192,8 +205,8 @@ function NavItemButton({ item, location }: { item: NavItem; location: string }) 
     <SidebarMenuItem key={item.title}>
       <SidebarMenuButton
         asChild
-        isActive={location === item.url || location.startsWith(item.url + "/")}
-        data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}
+        isActive={location === item.url || location.startsWith(item.url.split("?")[0] + "/")}
+        data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-").replace(/[()]/g, "")}`}
       >
         <Link href={item.url}>
           <item.icon className="h-4 w-4" />
@@ -208,6 +221,7 @@ function FounderSidebar({ location, primaryIntent }: { location: string; primary
   const coreItems: NavItem[] = [
     { title: "Dashboard", url: "/founder/dashboard", icon: LayoutDashboard },
     { title: "Personal Profile", url: "/profile", icon: UserCircle },
+    { title: "Company Profile", url: "/founder/company-profile", icon: Briefcase },
   ];
 
   const accountItems: NavItem[] = [

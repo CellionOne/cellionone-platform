@@ -47,6 +47,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Link } from "wouter";
 import {
   Users,
   UserPlus,
@@ -65,6 +67,7 @@ import {
   PenTool,
   CreditCard,
   Fingerprint,
+  Info,
 } from "lucide-react";
 
 interface CompanyPerson {
@@ -115,6 +118,17 @@ export default function CompanyPeoplePage() {
           </div>
           <InviteDialog />
         </div>
+
+        <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800/50 dark:bg-blue-900/20">
+          <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          <AlertDescription className="text-xs text-blue-800 dark:text-blue-200">
+            <strong>Invite Person vs. CAC Filing:</strong> Adding someone here invites them to your Cellion One company profile for internal management, KYC, and compliance — it does <em>not</em> register them with the Corporate Affairs Commission. To formally appoint a new director at the CAC, use the{" "}
+            <Link href="/founder/registration-services?service=ADD_DIR" className="underline font-medium">
+              Add a Director (CAC Filing)
+            </Link>{" "}
+            service.
+          </AlertDescription>
+        </Alert>
 
         <ReadinessSummary />
         <PeopleList />

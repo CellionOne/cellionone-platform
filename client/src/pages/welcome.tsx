@@ -3,12 +3,12 @@ import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, ShieldCheck, ShoppingCart, CheckCircle2 } from "lucide-react";
+import { Building2, ShieldCheck, ShoppingCart, CheckCircle2, ClipboardList } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useState } from "react";
 
-type Intent = "founder_new_co" | "founder_existing_co" | "kyc_service" | "procurement";
+type Intent = "founder_new_co" | "founder_existing_co" | "founder_reg_services" | "kyc_service" | "procurement";
 
 const INTENT_OPTIONS: { id: Intent; icon: React.ElementType; title: string; description: string }[] = [
   {
@@ -22,6 +22,12 @@ const INTENT_OPTIONS: { id: Intent; icon: React.ElementType; title: string; desc
     icon: CheckCircle2,
     title: "Manage an Existing Company",
     description: "Already incorporated? Register your existing company to access compliance tools, legal assistance, and document management.",
+  },
+  {
+    id: "founder_reg_services",
+    icon: ClipboardList,
+    title: "Registration & Statutory Services",
+    description: "Apply for SCUML, TIN, Trademark registration, or formally add a director at the CAC — handled by our registered lawyers.",
   },
   {
     id: "kyc_service",
@@ -57,6 +63,8 @@ export default function WelcomePage() {
         navigate("/founder/dashboard");
       } else if (intent === "founder_existing_co") {
         navigate("/founder/existing-company");
+      } else if (intent === "founder_reg_services") {
+        navigate("/founder/registration-services");
       } else if (intent === "kyc_service") {
         navigate("/kyc/orgs");
       } else if (intent === "procurement") {

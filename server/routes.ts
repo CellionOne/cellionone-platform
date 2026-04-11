@@ -534,7 +534,7 @@ export async function registerRoutes(
   app.post("/api/me/intent", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const VALID_INTENTS = ["founder_new_co", "founder_existing_co", "kyc_service", "procurement"] as const;
+      const VALID_INTENTS = ["founder_new_co", "founder_existing_co", "founder_reg_services", "kyc_service", "procurement"] as const;
       const schema = z.object({ intent: z.enum(VALID_INTENTS) });
       const { intent } = schema.parse(req.body);
 

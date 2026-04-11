@@ -4,11 +4,11 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, ShieldCheck, ShoppingCart, CheckCircle2, Loader2 } from "lucide-react";
+import { Building2, ShieldCheck, ShoppingCart, CheckCircle2, Loader2, ClipboardList } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-export type Intent = "founder_new_co" | "founder_existing_co" | "kyc_service" | "procurement";
+export type Intent = "founder_new_co" | "founder_existing_co" | "founder_reg_services" | "kyc_service" | "procurement";
 
 interface CachedUser {
   primaryIntent?: string | null;
@@ -31,7 +31,13 @@ export const INTENT_OPTIONS: {
     id: "founder_existing_co",
     icon: CheckCircle2,
     title: "Manage an Existing Company",
-    description: "Access compliance tools, legal assistance, and document management.",
+    description: "Bring your already-registered company onto the platform for compliance, banking, and legal services.",
+  },
+  {
+    id: "founder_reg_services",
+    icon: ClipboardList,
+    title: "Registration & Statutory Services",
+    description: "Apply for SCUML, TIN, Trademark registration, or formally add a director at the CAC.",
   },
   {
     id: "kyc_service",
@@ -50,6 +56,7 @@ export const INTENT_OPTIONS: {
 function intentToRoute(intent: Intent): string {
   if (intent === "founder_new_co") return "/founder/dashboard";
   if (intent === "founder_existing_co") return "/founder/existing-company";
+  if (intent === "founder_reg_services") return "/founder/registration-services";
   if (intent === "kyc_service") return "/kyc/orgs";
   return "/procurement/marketplace";
 }

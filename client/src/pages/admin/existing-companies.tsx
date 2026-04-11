@@ -215,7 +215,17 @@ export default function AdminExistingCompaniesPage() {
       setSelected(null);
       setApproveNotes("");
     },
-    onError: () => toast({ title: "Error", description: "Failed to approve.", variant: "destructive" }),
+    onError: (err: Error) => {
+      let description = "Failed to approve.";
+      try {
+        const match = err?.message?.match(/^\d+: (.+)$/s);
+        if (match) {
+          const parsed = JSON.parse(match[1]);
+          description = parsed.detail ? `${parsed.detail} (step: ${parsed.step})` : parsed.message;
+        }
+      } catch {}
+      toast({ title: "Approval failed", description, variant: "destructive" });
+    },
   });
 
   const rejectMutation = useMutation({

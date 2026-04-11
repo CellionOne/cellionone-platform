@@ -8346,14 +8346,17 @@ Important guidelines:
   });
 
   app.post("/api/admin/existing-companies/:id/approve", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    let step = "parse";
     try {
       const adminId = getUserId(req);
       const profileId = parseInt(req.params.id, 10);
       const { notes } = z.object({ notes: z.string().optional() }).parse(req.body);
 
+      step = "select_profile";
       const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
       if (!profile) return res.status(404).json({ message: "Profile not found" });
 
+      step = "update_profile";
       const [updated] = await db.update(companyProfiles)
         .set({
           existingCompanyStatus: "verified",
@@ -8366,6 +8369,7 @@ Important guidelines:
         .where(eq(companyProfiles.id, profileId))
         .returning();
 
+      step = "audit_log";
       await storage.createAuditLog({
         actorUserId: adminId,
         action: "existing_company_approved",
@@ -8374,7 +8378,7 @@ Important guidelines:
         details: { companyName: profile.companyName, notes },
       });
 
-      // In-app notification for founder (required)
+      step = "notification";
       await storage.createNotification({
         userId: profile.founderId,
         title: "Company Verified",
@@ -8383,23 +8387,26 @@ Important guidelines:
         linkUrl: "/founder/post-inc-checklist",
       });
 
-      // Email notification (non-blocking)
-      const { sendEmail } = await import('./services/emailService');
+      step = "email";
+      const approveEmailSvc = await import('./services/emailService');
       const founderUsers = await db.select().from(usersTable).where(eq(usersTable.id, profile.founderId));
       const founderEmail = founderUsers[0]?.email;
       if (founderEmail) {
-        sendEmail({
-          to: founderEmail,
-          subject: "Your company has been verified — Cellion One",
-          html: `<p>Hi,</p><p>Great news! Your existing company <strong>${profile.companyName}</strong> has been verified on Cellion One. You can now access all post-incorporation services for your company.</p><p>Log in to your dashboard to get started.</p><p>The Cellion One Team</p>`,
-        }).catch(() => {});
+        approveEmailSvc.getResendClient().then(({ client: resendClient, fromEmail }) =>
+          resendClient.emails.send({
+            from: fromEmail,
+            to: founderEmail,
+            subject: "Your company has been verified — Cellion One",
+            html: `<p>Hi,</p><p>Great news! Your existing company <strong>${profile.companyName}</strong> has been verified on Cellion One. You can now access all post-incorporation services for your company.</p><p>Log in to your dashboard to get started.</p><p>The Cellion One Team</p>`,
+          })
+        ).catch(() => {});
       }
 
       res.json(updated);
     } catch (error: any) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
-      console.error("Error approving existing company:", error);
-      res.status(500).json({ message: "Failed to approve" });
+      console.error(`[Approve] FAILED at step '${step}':`, error?.message ?? error, error?.stack);
+      res.status(500).json({ message: "Failed to approve", detail: error?.message, step });
     }
   });
 
@@ -8442,15 +8449,18 @@ Important guidelines:
       });
 
       // Email notification (non-blocking)
-      const { sendEmail } = await import('./services/emailService');
+      const rejectEmailSvc = await import('./services/emailService');
       const founderUsers = await db.select().from(usersTable).where(eq(usersTable.id, profile.founderId));
       const founderEmail = founderUsers[0]?.email;
       if (founderEmail) {
-        sendEmail({
-          to: founderEmail,
-          subject: "Action required: Company verification update — Cellion One",
-          html: `<p>Hi,</p><p>Unfortunately, your existing company <strong>${profile.companyName}</strong> could not be verified at this time.</p><p><strong>Reason:</strong> ${reason}</p><p>Please log in to your dashboard and re-submit with the corrected information or documents.</p><p>The Cellion One Team</p>`,
-        }).catch(() => {});
+        rejectEmailSvc.getResendClient().then(({ client: resendClient, fromEmail }) =>
+          resendClient.emails.send({
+            from: fromEmail,
+            to: founderEmail,
+            subject: "Action required: Company verification update — Cellion One",
+            html: `<p>Hi,</p><p>Unfortunately, your existing company <strong>${profile.companyName}</strong> could not be verified at this time.</p><p><strong>Reason:</strong> ${reason}</p><p>Please log in to your dashboard and re-submit with the corrected information or documents.</p><p>The Cellion One Team</p>`,
+          })
+        ).catch(() => {});
       }
 
       res.json(updated);
@@ -8561,8 +8571,10 @@ Important guidelines:
 
       const appUrl = process.env.REPLIT_DEV_DOMAIN || process.env.APP_URL || 'https://cellionone.com';
       const biometricUrl = `${appUrl}/director-biometric?token=${newToken}`;
-      const { sendEmail } = await import('./services/emailService');
-      await sendEmail({
+      const biometricEmailSvc = await import('./services/emailService');
+      const { client: biometricResend, fromEmail: biometricFrom } = await biometricEmailSvc.getResendClient();
+      await biometricResend.emails.send({
+        from: biometricFrom,
         to: invite.directorEmail,
         subject: `Reminder: Complete identity verification — ${profile.companyName}`,
         html: `<p>Hi ${invite.directorName},</p><p>This is a reminder that you have been listed as a director/officer of <strong>${profile.companyName}</strong> on Cellion One and your identity verification is still pending.</p><p>Please submit a biometric selfie using the secure link below. This link is valid for 48 hours and can only be used once.</p><p><a href="${biometricUrl}" style="font-weight:bold">Complete Biometric Verification</a></p><p>If you already have a Cellion One account, you can also log in and complete your selfie from your Personal Profile page instead.</p><p>The Cellion One Compliance Team</p>`,

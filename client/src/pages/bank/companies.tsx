@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Building2, Search, LogOut, Loader2, ChevronRight, CalendarDays } from "lucide-react";
+import { Building2, Search, LogOut, Loader2, ChevronRight, CalendarDays, UserCircle } from "lucide-react";
 import { format } from "date-fns";
 
 type BankSession = {
@@ -109,6 +109,12 @@ export default function BankCompaniesPage() {
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span className="hidden sm:inline">{session.email}</span>
+            <Button variant="ghost" size="sm" asChild data-testid="button-bank-account">
+              <Link href="/bank/account">
+                <UserCircle className="h-4 w-4" />
+                <span className="ml-1 hidden sm:inline">Account</span>
+              </Link>
+            </Button>
             <Button
               variant="ghost"
               size="sm"

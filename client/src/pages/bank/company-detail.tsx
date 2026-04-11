@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import {
   Building2, ArrowLeft, LogOut, Loader2, CheckCircle, XCircle, Clock,
-  FileText, User, MapPin, Send, AlertCircle, Users, ShieldCheck
+  FileText, User, MapPin, Send, AlertCircle, Users, ShieldCheck, UserCircle
 } from "lucide-react";
 import { format } from "date-fns";
 import {
@@ -203,16 +203,24 @@ export default function BankCompanyDetailPage() {
               <p className="text-xs text-muted-foreground mt-0.5">{session.bankName || `Partner #${session.bankPartnerId}`}</p>
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => logoutMutation.mutate()}
-            disabled={logoutMutation.isPending}
-            data-testid="button-bank-logout"
-          >
-            {logoutMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-            <span className="ml-1 hidden sm:inline">Sign Out</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" asChild data-testid="button-bank-account">
+              <Link href="/bank/account">
+                <UserCircle className="h-4 w-4" />
+                <span className="ml-1 hidden sm:inline">Account</span>
+              </Link>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => logoutMutation.mutate()}
+              disabled={logoutMutation.isPending}
+              data-testid="button-bank-logout"
+            >
+              {logoutMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+              <span className="ml-1 hidden sm:inline">Sign Out</span>
+            </Button>
+          </div>
         </div>
       </header>
 

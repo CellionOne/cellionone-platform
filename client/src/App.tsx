@@ -72,6 +72,7 @@ import BankForgotPasswordPage from "@/pages/bank/forgot-password";
 import BankResetPasswordPage from "@/pages/bank/reset-password";
 import BankCompaniesPage from "@/pages/bank/companies";
 import BankCompanyDetailPage from "@/pages/bank/company-detail";
+import BankAccountPage from "@/pages/bank/account";
 import LoginPage from "@/pages/auth/login";
 import RegisterPage from "@/pages/auth/register";
 import ForgotPasswordPage from "@/pages/auth/forgot-password";
@@ -476,6 +477,7 @@ function Router() {
       <Route path="/bank/set-password" component={BankSetPasswordPage} />
       <Route path="/bank/forgot-password" component={BankForgotPasswordPage} />
       <Route path="/bank/reset-password" component={BankResetPasswordPage} />
+      <Route path="/bank/account" component={BankAccountPage} />
       <Route path="/bank/companies/:id" component={BankCompanyDetailPage} />
       <Route path="/bank/companies" component={BankCompaniesPage} />
       <Route path="/bank" component={BankPortalLogin} />

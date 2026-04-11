@@ -864,10 +864,15 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
                   const now = new Date();
 
-                  // (B) Auto-verify condition: pre-fill candidate AND AML explicitly clean
-                  const verifyDir = (
-                    prefillDir.amlChecked === true && prefillDir.amlIsHit === false
-                  ) ? prefillDir : null;
+                  // (B) Auto-verify condition: independent search — any matching director with
+                  // BVN/NIN verified AND AML explicitly clean. Evaluated separately from prefillDir
+                  // so a second director with a clear AML result is not missed if the first matched
+                  // director had an AML hit.
+                  const verifyDir = updatedDirectors.find(d =>
+                    d.email?.toLowerCase() === founderEmail &&
+                    (d.bvnVerified === true || d.ninVerified === true) &&
+                    d.amlChecked === true && d.amlIsHit === false
+                  );
 
                   if (verifyDir) {
                     // Full auto-verify: mark identity as fully verified
@@ -907,20 +912,23 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
                     console.log(`[Webhook] Founder ${order.founderId} identity auto-verified via KYB pipeline — fields: ${lockedFields.join(', ')}`);
                   } else {
-                    // Pre-fill only — AML pending or flagged; record in_progress and leave isIdentityVerified untouched
-                    const idVPatch: Partial<InsertIdentityVerification> = {
-                      status: 'in_progress',
-                      method: 'automated',
-                      externalProvider: 'smile_id',
-                      identitySource: 'kyb_pipeline',
-                      bvnNinVerified: true,
-                    };
-                    const [existingIdV] = await db.select({ id: identityVerifications.id })
+                    // Pre-fill only — AML pending or flagged; record in_progress unless already verified.
+                    // Guard: never downgrade a previously-verified identity_verifications record.
+                    const [existingIdV] = await db.select({ id: identityVerifications.id, status: identityVerifications.status })
                       .from(identityVerifications).where(eq(identityVerifications.founderUserId, order.founderId));
-                    if (existingIdV) {
-                      await db.update(identityVerifications).set(idVPatch).where(eq(identityVerifications.id, existingIdV.id));
-                    } else {
-                      await db.insert(identityVerifications).values({ founderUserId: order.founderId, ...idVPatch });
+                    if (existingIdV?.status !== 'verified') {
+                      const idVPatch: Partial<InsertIdentityVerification> = {
+                        status: 'in_progress',
+                        method: 'automated',
+                        externalProvider: 'smile_id',
+                        identitySource: 'kyb_pipeline',
+                        bvnNinVerified: true,
+                      };
+                      if (existingIdV) {
+                        await db.update(identityVerifications).set(idVPatch).where(eq(identityVerifications.id, existingIdV.id));
+                      } else {
+                        await db.insert(identityVerifications).values({ founderUserId: order.founderId, ...idVPatch });
+                      }
                     }
 
                     console.log(`[Webhook] Founder ${order.founderId} profile pre-filled from KYB — AML pending/flagged, identity not auto-verified — fields: ${lockedFields.join(', ')}`);

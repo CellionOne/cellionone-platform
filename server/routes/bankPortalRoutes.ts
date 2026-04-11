@@ -45,6 +45,13 @@ async function isAdmin(req: Request): Promise<boolean> {
   return roles.includes("admin");
 }
 
+async function getFounderUserId(req: Request): Promise<string | null> {
+  const userId = (req as any).user?.claims?.sub;
+  if (!userId) return null;
+  const roles = await storage.getUserRoles(userId);
+  return roles.includes("founder") ? userId : null;
+}
+
 async function getBankPortalSession(req: Request): Promise<{ email: string; bankPartnerId: number } | null> {
   const session = (req as any).session;
   if (!session?.bankPortalEmail || !session?.bankPortalPartnerId) return null;
@@ -992,6 +999,126 @@ export function registerBankPortalRoutes(app: Express): void {
       });
 
       res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Founder Bank Dispatch Endpoints ─────────────────────────────────────────
+
+  // GET /api/founder/bank-partners — returns all registered bank partner names for the bank selection dialog
+  app.get("/api/founder/bank-partners", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      const userId = await getFounderUserId(req);
+      if (!userId) return res.status(403).json({ error: "Forbidden" });
+
+      const all = await storage.listBankPartners();
+      const partners = all.map(p => ({ id: p.id, name: p.name }));
+      res.json(partners);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/founder/company-profiles/:id/bank-dispatch — founder-initiated dossier dispatch
+  app.post("/api/founder/company-profiles/:id/bank-dispatch", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      const userId = await getFounderUserId(req);
+      if (!userId) return res.status(403).json({ error: "Forbidden" });
+
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ error: "Invalid profile ID" });
+
+      const { bankPartnerId } = z.object({
+        bankPartnerId: z.number().int().positive(),
+      }).parse(req.body);
+
+      const [profile] = await db.select().from(companyProfiles).where(eq(companyProfiles.id, profileId));
+      if (!profile) return res.status(404).json({ error: "Company profile not found" });
+      if (profile.founderId !== userId) return res.status(403).json({ error: "Forbidden" });
+      if (profile.existingCompanyStatus !== "verified") {
+        return res.status(400).json({ error: "Only verified companies can be dispatched to a bank" });
+      }
+
+      const partner = await storage.getBankPartner(bankPartnerId);
+      if (!partner) return res.status(404).json({ error: "Bank partner not found" });
+
+      const emails: { label: string; address: string }[] = Array.isArray(partner.emails) ? partner.emails : [];
+      if (emails.length === 0 && !partner.contactEmail) {
+        return res.status(400).json({ error: "This bank has no registered email addresses. Contact Cellion support." });
+      }
+
+      const checklistRows = await db.select().from(profileChecklistItems).where(eq(profileChecklistItems.companyProfileId, profileId));
+
+      let founderIdentityVerifiedAt: Date | null = null;
+      let founderIdentitySource: string | null = null;
+      let founderSelfieUrl: string | null = null;
+      const [idVRecord] = await db.select({
+        status: identityVerifications.status,
+        verifiedAt: identityVerifications.verifiedAt,
+        identitySource: identityVerifications.identitySource,
+        selfieUrl: identityVerifications.selfieUrl,
+      }).from(identityVerifications).where(eq(identityVerifications.founderUserId, userId));
+      if (idVRecord?.status === "verified") {
+        founderIdentityVerifiedAt = idVRecord.verifiedAt;
+        founderIdentitySource = idVRecord.identitySource;
+        founderSelfieUrl = idVRecord.selfieUrl ?? null;
+      }
+
+      const profileWithChecklist = { ...profile, checklistItems: checklistRows, founderIdentityVerifiedAt, founderIdentitySource, founderSelfieUrl };
+      const emailsToSend = emails.length > 0 ? emails : (partner.contactEmail ? [{ label: "Contact", address: partner.contactEmail }] : []);
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl);
+
+      const dispatch = await storage.createBankCompanyDispatch({
+        companyProfileId: profileId,
+        bankPartnerId,
+        sentByUserId: userId,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "founder_bank_dispatch_sent",
+        entityType: "bank_company_dispatch",
+        entityId: String(dispatch.id),
+        details: { companyProfileId: profileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName },
+      });
+
+      res.status(201).json({ ...dispatch, bankName: partner.name });
+    } catch (e: any) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/founder/company-profiles/:id/dispatches — dispatch history for a verified company profile
+  app.get("/api/founder/company-profiles/:id/dispatches", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      const userId = await getFounderUserId(req);
+      if (!userId) return res.status(403).json({ error: "Forbidden" });
+
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ error: "Invalid profile ID" });
+
+      const [profile] = await db.select({ id: companyProfiles.id, founderId: companyProfiles.founderId })
+        .from(companyProfiles).where(eq(companyProfiles.id, profileId));
+      if (!profile) return res.status(404).json({ error: "Profile not found" });
+      if (profile.founderId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      const dispatches = await storage.listBankCompanyDispatches({ companyProfileId: profileId });
+
+      const enriched = await Promise.all(dispatches.map(async d => {
+        const partner = await storage.getBankPartner(d.bankPartnerId);
+        return {
+          id: d.id,
+          bankPartnerId: d.bankPartnerId,
+          bankName: partner?.name || `Bank #${d.bankPartnerId}`,
+          sentAt: d.sentAt,
+        };
+      }));
+
+      res.json(enriched);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

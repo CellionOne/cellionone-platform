@@ -4593,6 +4593,7 @@ export async function registerRoutes(
       const companyDocuments: Array<{
         profileId: number;
         companyName: string;
+        rcNumber: string | null;
         status: string | null;
         items: typeof profileChecklistItems.$inferSelect[];
       }> = [];
@@ -4612,9 +4613,9 @@ export async function registerRoutes(
           );
           const allItems = await db.select().from(profileChecklistItems)
             .where(eq(profileChecklistItems.companyProfileId, p.id));
-          companyDocuments.push({ profileId: p.id, companyName: p.companyName, status: p.existingCompanyStatus, items: allItems });
+          companyDocuments.push({ profileId: p.id, companyName: p.companyName, rcNumber: p.rcNumber ?? null, status: p.existingCompanyStatus, items: allItems });
         } else {
-          companyDocuments.push({ profileId: p.id, companyName: p.companyName, status: p.existingCompanyStatus, items: existingItems });
+          companyDocuments.push({ profileId: p.id, companyName: p.companyName, rcNumber: p.rcNumber ?? null, status: p.existingCompanyStatus, items: existingItems });
         }
       }
 

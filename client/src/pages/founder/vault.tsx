@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Link } from "wouter";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { ReceiptsList } from "@/components/receipts-list";
@@ -23,12 +24,16 @@ import {
   CheckCircle2,
   Loader2,
   Landmark,
+  Send,
+  ArrowLeft,
+  BanknoteIcon,
 } from "lucide-react";
 import type { DocumentFile, CompanyApplication, ProfileChecklistItem } from "@shared/schema";
 
 interface CompanyDocumentGroup {
   profileId: number;
   companyName: string;
+  rcNumber?: string | null;
   status: string | null;
   items: ProfileChecklistItem[];
 }
@@ -37,6 +42,18 @@ interface VaultData {
   applications: CompanyApplication[];
   documents: DocumentFile[];
   companyDocuments: CompanyDocumentGroup[];
+}
+
+interface BankPartner {
+  id: number;
+  name: string;
+}
+
+interface DispatchRecord {
+  id: number;
+  bankPartnerId: number;
+  bankName: string;
+  sentAt: string;
 }
 
 const categoryConfig: Record<string, { label: string; icon: React.ElementType }> = {
@@ -60,6 +77,41 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
   const { toast } = useToast();
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [step, setStep] = useState<"select" | "confirm">("select");
+  const [selectedBank, setSelectedBank] = useState<BankPartner | null>(null);
+
+  const isVerified = group.status === "verified";
+
+  const bankPartnersQuery = useQuery<BankPartner[]>({
+    queryKey: ["/api/founder/bank-partners"],
+    enabled: isVerified,
+  });
+
+  const dispatchesQuery = useQuery<DispatchRecord[]>({
+    queryKey: ["/api/founder/company-profiles", group.profileId, "dispatches"],
+    enabled: isVerified,
+  });
+
+  const dispatchMutation = useMutation({
+    mutationFn: () =>
+      apiRequest("POST", `/api/founder/company-profiles/${group.profileId}/bank-dispatch`, {
+        bankPartnerId: selectedBank!.id,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", group.profileId, "dispatches"] });
+      toast({
+        title: "Dossier sent",
+        description: `Your verified company dossier has been sent to ${selectedBank?.name}.`,
+      });
+      setDialogOpen(false);
+      setStep("select");
+      setSelectedBank(null);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Dispatch failed", description: err.message, variant: "destructive" });
+    },
+  });
 
   const uploadMutation = useMutation({
     mutationFn: async ({ docKey, file }: { docKey: string; file: File }) => {
@@ -97,110 +149,312 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
   };
 
   const itemsByKey = Object.fromEntries(group.items.map(i => [i.key, i]));
-  const isVerified = group.status === "verified";
+
+  const dispatchedByBankId: Record<number, DispatchRecord> = {};
+  for (const d of dispatchesQuery.data || []) {
+    if (!dispatchedByBankId[d.bankPartnerId]) dispatchedByBankId[d.bankPartnerId] = d;
+  }
+
+  const uploadedDocs = STANDARD_VAULT_DOCS.filter(
+    d => itemsByKey[d.key]?.status === "provided" && itemsByKey[d.key]?.filePath
+  );
+
+  const handleOpenDialog = () => {
+    setStep("select");
+    setSelectedBank(null);
+    setDialogOpen(true);
+  };
+
+  const handleSelectBank = (bank: BankPartner) => {
+    setSelectedBank(bank);
+    setStep("confirm");
+  };
+
+  const handleBack = () => {
+    setStep("select");
+    setSelectedBank(null);
+  };
+
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setStep("select");
+    setSelectedBank(null);
+  };
 
   return (
-    <Card data-testid={`card-company-docs-${group.profileId}`}>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">{group.companyName}</CardTitle>
-          </div>
-          <Badge variant={isVerified ? "default" : "secondary"} className={isVerified ? "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/40 dark:text-green-300" : ""}>
-            {isVerified ? "Verified" : group.status ?? "In Review"}
-          </Badge>
-        </div>
-        <CardDescription>
-          Upload the standard bank KYC documents for this company. These documents are shared with the bank when you request corporate account opening.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="divide-y">
-          {STANDARD_VAULT_DOCS.map(({ key, label, hint }) => {
-            const item = itemsByKey[key];
-            const isUploaded = item?.status === "provided" && !!item.filePath;
-            const isUploading = uploadingKey === key && uploadMutation.isPending;
-
-            return (
-              <div
-                key={key}
-                className="flex items-center justify-between py-3 first:pt-0 last:pb-0 gap-3"
-                data-testid={`vault-doc-row-${key}`}
-              >
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${isUploaded ? "bg-green-100 dark:bg-green-900/40" : "bg-muted"}`}>
-                    {isUploaded
-                      ? <CheckCircle2 className="h-4 w-4 text-green-600" />
-                      : <FileText className="h-4 w-4 text-muted-foreground" />
-                    }
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{label}</p>
-                    <p className="text-xs text-muted-foreground">{isUploaded ? "Uploaded" : hint}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  {isUploaded && item?.filePath && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      asChild
-                      data-testid={`button-download-vault-${key}`}
-                    >
-                      <a href={`/api/founder/company-profiles/${group.profileId}/documents/${item.id}/download`} download>
-                        <Download className="h-4 w-4" />
-                      </a>
-                    </Button>
-                  )}
-                  <input
-                    ref={el => { fileInputRefs.current[key] = el; }}
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                    className="hidden"
-                    onChange={e => handleFileSelect(key, e.target.files?.[0])}
-                    data-testid={`input-file-${key}`}
-                  />
-                  <Button
-                    variant={isUploaded ? "outline" : "default"}
-                    size="sm"
-                    disabled={isUploading}
-                    onClick={() => fileInputRefs.current[key]?.click()}
-                    data-testid={`button-upload-${key}`}
-                  >
-                    {isUploading
-                      ? <Loader2 className="h-4 w-4 animate-spin" />
-                      : <Upload className="h-4 w-4" />
-                    }
-                    <span className="ml-1.5">{isUploaded ? "Replace" : "Upload"}</span>
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {isVerified && (
-          <div className="mt-6 rounded-lg border border-primary/20 bg-primary/5 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="flex items-start gap-3 flex-1">
-              <Landmark className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-foreground">Ready to open a corporate bank account?</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Upload the documents above first. They will be forwarded to the bank when your request is reviewed.
-                </p>
-              </div>
+    <>
+      <Card data-testid={`card-company-docs-${group.profileId}`}>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              <CardTitle className="text-lg">{group.companyName}</CardTitle>
             </div>
-            <Button size="sm" asChild className="shrink-0 w-full sm:w-auto" data-testid="button-open-bank-account-vault">
-              <Link href={`/founder/service-request?service=BANK_ACCOUNT`}>
-                Request Bank Account
-              </Link>
-            </Button>
+            <Badge variant={isVerified ? "default" : "secondary"} className={isVerified ? "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/40 dark:text-green-300" : ""}>
+              {isVerified ? "Verified" : group.status ?? "In Review"}
+            </Badge>
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <CardDescription>
+            Upload the standard bank KYC documents for this company. These documents are shared with the bank when you request corporate account opening.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="divide-y">
+            {STANDARD_VAULT_DOCS.map(({ key, label, hint }) => {
+              const item = itemsByKey[key];
+              const isUploaded = item?.status === "provided" && !!item.filePath;
+              const isUploading = uploadingKey === key && uploadMutation.isPending;
+
+              return (
+                <div
+                  key={key}
+                  className="flex items-center justify-between py-3 first:pt-0 last:pb-0 gap-3"
+                  data-testid={`vault-doc-row-${key}`}
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${isUploaded ? "bg-green-100 dark:bg-green-900/40" : "bg-muted"}`}>
+                      {isUploaded
+                        ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        : <FileText className="h-4 w-4 text-muted-foreground" />
+                      }
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{label}</p>
+                      <p className="text-xs text-muted-foreground">{isUploaded ? "Uploaded" : hint}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isUploaded && item?.filePath && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        asChild
+                        data-testid={`button-download-vault-${key}`}
+                      >
+                        <a href={`/api/founder/company-profiles/${group.profileId}/documents/${item.id}/download`} download>
+                          <Download className="h-4 w-4" />
+                        </a>
+                      </Button>
+                    )}
+                    <input
+                      ref={el => { fileInputRefs.current[key] = el; }}
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      className="hidden"
+                      onChange={e => handleFileSelect(key, e.target.files?.[0])}
+                      data-testid={`input-file-${key}`}
+                    />
+                    <Button
+                      variant={isUploaded ? "outline" : "default"}
+                      size="sm"
+                      disabled={isUploading}
+                      onClick={() => fileInputRefs.current[key]?.click()}
+                      data-testid={`button-upload-${key}`}
+                    >
+                      {isUploading
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <Upload className="h-4 w-4" />
+                      }
+                      <span className="ml-1.5">{isUploaded ? "Replace" : "Upload"}</span>
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {isVerified && (
+            <div className="mt-6 rounded-lg border border-primary/20 bg-primary/5 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+              <div className="flex items-start gap-3 flex-1">
+                <Landmark className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Ready to open a corporate bank account?</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Select a partner bank below. Your verified KYB dossier and uploaded documents will be sent automatically — no forms to fill.
+                  </p>
+                  {(dispatchesQuery.data?.length ?? 0) > 0 && (
+                    <p className="text-xs text-primary mt-1">
+                      Already sent to: {dispatchesQuery.data!.map(d => d.bankName).join(", ")}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                className="shrink-0 w-full sm:w-auto"
+                onClick={handleOpenDialog}
+                data-testid="button-open-bank-account-vault"
+              >
+                <Send className="h-4 w-4 mr-1.5" />
+                Send to Bank
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={dialogOpen} onOpenChange={handleCloseDialog}>
+        <DialogContent className="max-w-lg" data-testid="dialog-bank-dispatch">
+          {step === "select" && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <BanknoteIcon className="h-5 w-5 text-primary" />
+                  Select a Partner Bank
+                </DialogTitle>
+                <DialogDescription>
+                  Choose which bank to send <strong>{group.companyName}</strong>'s verified dossier to. The bank will receive your KYB result, AML-cleared director details, and uploaded documents.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="py-2">
+                {bankPartnersQuery.isLoading ? (
+                  <div className="flex justify-center py-8">
+                    <LoadingSpinner size="md" />
+                  </div>
+                ) : (bankPartnersQuery.data?.length ?? 0) === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Landmark className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                    <p className="text-sm">No partner banks are available at this time.</p>
+                    <p className="text-xs mt-1">Contact Cellion support for assistance.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {bankPartnersQuery.data!.map(bank => {
+                      const previousDispatch = dispatchedByBankId[bank.id];
+                      const sentDate = previousDispatch
+                        ? new Date(previousDispatch.sentAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                        : null;
+                      return (
+                        <div
+                          key={bank.id}
+                          className="flex items-center justify-between py-3 first:pt-0 last:pb-0 gap-3"
+                          data-testid={`bank-option-${bank.id}`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                              <Landmark className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium">{bank.name}</p>
+                              {sentDate ? (
+                                <p className="text-xs text-green-600 dark:text-green-400">Sent {sentDate}</p>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">Not yet sent</p>
+                              )}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant={sentDate ? "outline" : "default"}
+                            onClick={() => handleSelectBank(bank)}
+                            data-testid={`button-select-bank-${bank.id}`}
+                          >
+                            {sentDate ? "Resend" : "Select"}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {step === "confirm" && selectedBank && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Send className="h-5 w-5 text-primary" />
+                  Confirm Dispatch to {selectedBank.name}
+                </DialogTitle>
+                <DialogDescription>
+                  The following verified information will be sent to <strong>{selectedBank.name}</strong>. No forms to fill — this is pulled directly from your verified company profile.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 py-2">
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Company</span>
+                    <span className="text-sm font-medium">{group.companyName}</span>
+                  </div>
+                  {group.rcNumber && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">RC Number</span>
+                      <span className="text-sm font-medium">{group.rcNumber}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Verification Status</span>
+                    <Badge className="bg-green-100 text-green-800 border-green-200 dark:bg-green-900/40 dark:text-green-300 text-xs">
+                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                      Verified
+                    </Badge>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div>
+                  <p className="text-sm font-medium mb-2">Included in dossier</p>
+                  <ul className="space-y-1.5">
+                    <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />
+                      KYB Verification Result (Smile ID / CAC lookup)
+                    </li>
+                    <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />
+                      Director AML screening results
+                    </li>
+                    <li className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0" />
+                      Shareholder register
+                    </li>
+                    {uploadedDocs.length > 0 ? (
+                      uploadedDocs.map(d => (
+                        <li key={d.key} className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                          {d.label}
+                        </li>
+                      ))
+                    ) : (
+                      <li className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                        <FileText className="h-3.5 w-3.5 shrink-0" />
+                        No vault documents uploaded yet — the bank may request them separately
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+
+              <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleBack}
+                  disabled={dispatchMutation.isPending}
+                  data-testid="button-back-bank-select"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-1.5" />
+                  Back
+                </Button>
+                <Button
+                  onClick={() => dispatchMutation.mutate()}
+                  disabled={dispatchMutation.isPending}
+                  data-testid="button-confirm-dispatch"
+                >
+                  {dispatchMutation.isPending
+                    ? <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> Sending…</>
+                    : <><Send className="h-4 w-4 mr-1.5" /> Confirm & Send to {selectedBank.name}</>
+                  }
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

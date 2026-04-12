@@ -187,7 +187,7 @@ export function registerKybApiRoutes(app: Express) {
         data: rows.map(buildLookupResponse),
         limit: limitParam,
         offset: offsetParam,
-        pageCount: rows.length,
+        returnedCount: rows.length,
       });
     } catch (err: any) {
       console.error("[KYB API] List lookups error:", err);

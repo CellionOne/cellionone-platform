@@ -2456,7 +2456,7 @@ export default function ApiDocsPage() {
   "data": [ /* array of lookup records */ ],
   "limit": 50,
   "offset": 0,
-  "pageCount": 12
+  "returnedCount": 12
 }`} />
               </EndpointSection>
 

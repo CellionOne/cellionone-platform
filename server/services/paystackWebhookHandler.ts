@@ -89,6 +89,16 @@ export async function processWebhook(
     case 'charge.failed':
       await handleChargeFailed(event.data, payload);
       break;
+    case 'charge.attempt':
+      // Titan DVA Inbound Transfer Approval — respond with approve/reject
+      return await handleTitanInboundApproval(event.data);
+    case 'transfer.success':
+      await handleTransferSuccess(event.data);
+      break;
+    case 'transfer.failed':
+    case 'transfer.reversed':
+      await handleTransferFailed(event.data);
+      break;
     case 'invoice.payment_failed':
       await handleCieInvoicePaymentFailed(event.data);
       break;
@@ -106,6 +116,19 @@ async function handleChargeSuccess(data: PaystackWebhookEvent['data'], rawPayloa
   const reference = data.reference;
   const metaType = (data.metadata as any)?.type;
 
+  // DVA bank transfer — match by receiver account number
+  if ((data as any).channel === 'dedicated_nuban') {
+    const receiverAccount = (data as any).authorization?.receiver_bank_account_number
+      || (data as any).dedicated_nuban?.account_number;
+    if (receiverAccount) {
+      const { handleDvaEscrowFunded } = await import('../routes/escrowApiRoutes');
+      await handleDvaEscrowFunded(receiverAccount, reference, data.amount);
+    } else {
+      console.error('[Paystack Webhook] dedicated_nuban charge.success missing receiver_bank_account_number');
+    }
+    return;
+  }
+
   if (metaType === 'cie_subscription') {
     await handleCieSubscriptionSuccess(data);
   } else if (metaType === 'procurement_escrow') {
@@ -121,6 +144,53 @@ async function handleChargeSuccess(data: PaystackWebhookEvent['data'], rawPayloa
   } else {
     await handleLegacyPaymentSuccess(data);
   }
+}
+
+async function handleTransferSuccess(data: any): Promise<void> {
+  const transferRef = data.reference;
+  if (!transferRef) {
+    console.error('[Paystack Webhook] transfer.success missing reference');
+    return;
+  }
+  // Only handle escrow transfers (co_esc_ prefix)
+  if (!transferRef.startsWith('co_esc_')) {
+    console.log(`[Paystack Webhook] transfer.success ref ${transferRef} — not an escrow transfer, skipping`);
+    return;
+  }
+  const { handleEscrowTransferSuccess } = await import('../routes/escrowApiRoutes');
+  await handleEscrowTransferSuccess(transferRef);
+}
+
+async function handleTransferFailed(data: any): Promise<void> {
+  const transferRef = data.reference;
+  if (!transferRef) {
+    console.error('[Paystack Webhook] transfer.failed/reversed missing reference');
+    return;
+  }
+  if (!transferRef.startsWith('co_esc_')) {
+    console.log(`[Paystack Webhook] transfer.failed ref ${transferRef} — not an escrow transfer, skipping`);
+    return;
+  }
+  const { handleEscrowTransferFailed } = await import('../routes/escrowApiRoutes');
+  await handleEscrowTransferFailed(transferRef);
+}
+
+async function handleTitanInboundApproval(data: any): Promise<{ processed: boolean; event: string; approvalResponse?: any }> {
+  const dvaAccountNumber = data?.authorization?.receiver_bank_account_number
+    || data?.dedicated_nuban?.account_number
+    || data?.account_number;
+  const incomingAmount = data?.amount;
+
+  if (!dvaAccountNumber || !incomingAmount) {
+    console.error('[Paystack Webhook] charge.attempt missing dva account or amount — rejecting');
+    return { processed: true, event: 'charge.attempt', approvalResponse: { data: { approve: false } } };
+  }
+
+  const { evaluateDvaTransferApproval } = await import('../routes/escrowApiRoutes');
+  const { approve, reason } = await evaluateDvaTransferApproval(dvaAccountNumber, incomingAmount);
+  console.log(`[Paystack Webhook] Titan DVA approval for ${dvaAccountNumber} amount=${incomingAmount}: ${approve} — ${reason}`);
+
+  return { processed: true, event: 'charge.attempt', approvalResponse: { data: { approve } } };
 }
 
 async function handleProcurementEscrowSuccess(data: PaystackWebhookEvent['data']): Promise<void> {

@@ -2049,13 +2049,25 @@ export const escrowApiTransactions = pgTable("escrow_api_transactions", {
   totalCharged: integer("total_charged"),   // amount + serviceFee — what buyer actually pays
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
   status: varchar("status", { length: 30 }).notNull().default("pending_payment"),
-  // pending_payment | funded | released | disputed | refunded | expired
+  // pending_payment | funded | pending_transfer | released | disputed | refunded | expired
   buyerName: varchar("buyer_name", { length: 255 }).notNull(),
   buyerEmail: varchar("buyer_email", { length: 255 }).notNull(),
   beneficiaryName: varchar("beneficiary_name", { length: 255 }).notNull(),
   beneficiaryEmail: varchar("beneficiary_email", { length: 255 }).notNull(),
-  paystackReference: varchar("paystack_reference", { length: 255 }),
-  paystackPaymentUrl: varchar("paystack_payment_url", { length: 512 }),
+  // DVA fields — Dedicated Virtual Account assigned per escrow deal
+  dvaId: varchar("dva_id", { length: 100 }),                    // Paystack DVA ID
+  dvaAccountNumber: varchar("dva_account_number", { length: 20 }), // NUBAN account number buyer transfers to
+  dvaBankName: varchar("dva_bank_name", { length: 100 }),        // e.g. "Titan Trust Bank" or "Wema Bank"
+  dvaBankCode: varchar("dva_bank_code", { length: 20 }),         // e.g. "titan-paystack" or "wema-bank"
+  // Beneficiary (seller) bank details — validated via Paystack /bank/resolve at creation
+  beneficiaryAccountNumber: varchar("beneficiary_account_number", { length: 20 }),
+  beneficiaryBankCode: varchar("beneficiary_bank_code", { length: 20 }),
+  beneficiaryAccountName: varchar("beneficiary_account_name", { length: 255 }), // name from Paystack resolution
+  // Transfer fields — used when releasing funds
+  paystackTransferRecipientCode: varchar("paystack_transfer_recipient_code", { length: 100 }), // Paystack recipient code
+  paystackTransferReference: varchar("paystack_transfer_reference", { length: 100 }), // reference for the transfer
+  paystackReference: varchar("paystack_reference", { length: 255 }), // DVA charge reference (set when funded)
+  paystackPaymentUrl: varchar("paystack_payment_url", { length: 512 }), // legacy — kept nullable for old rows
   releaseConditions: text("release_conditions"),
   releasedTo: varchar("released_to", { length: 255 }),
   disputeReason: text("dispute_reason"),
@@ -2071,6 +2083,8 @@ export const escrowApiTransactions = pgTable("escrow_api_transactions", {
   index("idx_escrow_api_org").on(table.orgId),
   index("idx_escrow_api_ref").on(table.reference),
   index("idx_escrow_api_status").on(table.status),
+  index("idx_escrow_api_dva").on(table.dvaAccountNumber),
+  index("idx_escrow_api_transfer_ref").on(table.paystackTransferReference),
 ]);
 
 export const insertEscrowApiTransactionSchema = createInsertSchema(escrowApiTransactions).omit({ id: true, createdAt: true, updatedAt: true });

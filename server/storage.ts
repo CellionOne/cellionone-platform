@@ -371,6 +371,9 @@ export interface IStorage {
   // Escrow API Transactions — expiry helpers
   getExpiredPendingEscrowTransactions(): Promise<EscrowApiTransaction[]>;
   bulkExpireEscrowTransactions(ids: number[]): Promise<number[]>;
+  // Escrow API Transactions — DVA / transfer webhook lookups
+  getEscrowApiTransactionByDvaAccount(accountNumber: string): Promise<EscrowApiTransaction | undefined>;
+  getEscrowApiTransactionByTransferRef(transferRef: string): Promise<EscrowApiTransaction | undefined>;
 
   // Procurement Invoices
   createProcurementInvoice(data: InsertProcurementInvoice): Promise<ProcurementInvoice>;
@@ -1863,6 +1866,18 @@ export class DatabaseStorage implements IStorage {
       ))
       .returning({ id: escrowApiTransactions.id });
     return updated.map((r) => r.id);
+  }
+
+  async getEscrowApiTransactionByDvaAccount(accountNumber: string): Promise<EscrowApiTransaction | undefined> {
+    const [tx] = await db.select().from(escrowApiTransactions)
+      .where(eq(escrowApiTransactions.dvaAccountNumber, accountNumber));
+    return tx;
+  }
+
+  async getEscrowApiTransactionByTransferRef(transferRef: string): Promise<EscrowApiTransaction | undefined> {
+    const [tx] = await db.select().from(escrowApiTransactions)
+      .where(eq(escrowApiTransactions.paystackTransferReference, transferRef));
+    return tx;
   }
 
   // Procurement Invoices

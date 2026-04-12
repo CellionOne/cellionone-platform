@@ -89,6 +89,12 @@ app.post(
         return res.status(400).json({ error: result.error });
       }
 
+      // For Titan DVA inbound transfer approval (charge.attempt),
+      // respond with the approval decision instead of the generic received message
+      if (result.approvalResponse) {
+        return res.status(200).json(result.approvalResponse);
+      }
+
       res.status(200).json({ received: true, event: result.event });
     } catch (error: any) {
       console.error('[Paystack Webhook] Error:', error.message);

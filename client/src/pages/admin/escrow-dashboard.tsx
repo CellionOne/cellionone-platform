@@ -61,6 +61,7 @@ const statusConfig: Record<string, { label: string; variant: "default" | "second
   pending: { label: "Pending", variant: "outline" },
   pending_payment: { label: "Pending Payment", variant: "outline" },
   funded: { label: "Funded", variant: "default" },
+  pending_transfer: { label: "Transfer In Progress", variant: "default" },
   released: { label: "Released", variant: "secondary" },
   disputed: { label: "Disputed", variant: "destructive" },
   refunded: { label: "Refunded", variant: "secondary" },
@@ -291,6 +292,21 @@ export default function AdminEscrowDashboard() {
                             {tx.bankCustodyFee > 0 && tx.serviceFee > 0 && (
                               <span className="col-span-2 text-green-600 dark:text-green-400">
                                 Cellion net: {formatAmount(tx.serviceFee - tx.bankCustodyFee, tx.currency)} of {formatAmount(tx.serviceFee, tx.currency)} fee
+                              </span>
+                            )}
+                            {tx.dvaAccountNumber && (
+                              <span className="col-span-2 font-mono text-blue-600 dark:text-blue-400" data-testid={`text-dva-${tx.id}`}>
+                                DVA: {tx.dvaAccountNumber} · {tx.dvaBankName ?? "—"}
+                              </span>
+                            )}
+                            {tx.beneficiaryAccountNumber && (
+                              <span className="col-span-2 font-mono text-xs" data-testid={`text-bene-acct-${tx.id}`}>
+                                Seller A/C: {tx.beneficiaryAccountNumber} ({tx.beneficiaryBankCode}) — {tx.beneficiaryAccountName ?? "unverified"}
+                              </span>
+                            )}
+                            {tx.paystackTransferCode && (
+                              <span className="col-span-2 font-mono text-xs" data-testid={`text-transfer-code-${tx.id}`}>
+                                Transfer: {tx.paystackTransferCode}
                               </span>
                             )}
                             {tx.disputeReason && (

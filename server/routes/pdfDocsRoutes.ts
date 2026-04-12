@@ -446,16 +446,18 @@ function generateEscrowPdf(res: Response) {
   writeHeader(
     doc,
     "Escrow-as-a-Service API Guide",
-    "Cellion One — Secure Fund Holding via REST API v1.0"
+    "Cellion One — DVA-Backed Secure Fund Holding via REST API v2.0"
   );
 
   writeToc(doc, [
     { title: "Overview" },
+    { title: "How It Works (DVA Flow)" },
     { title: "Base URL" },
     { title: "Authentication & Scopes" },
     { title: "Fee Structure" },
     { title: "Transaction Status Lifecycle" },
     { title: "Endpoints" },
+    { title: "GET /api/v1/escrow/banks", indent: true },
     { title: "POST /api/v1/escrow/transactions", indent: true },
     { title: "GET /api/v1/escrow/transactions", indent: true },
     { title: "GET /api/v1/escrow/transactions/:reference", indent: true },
@@ -467,8 +469,22 @@ function generateEscrowPdf(res: Response) {
   ]);
 
   sectionTitle(doc, "Overview");
-  bodyText(doc, "The Cellion One Escrow-as-a-Service API lets your platform hold buyer funds securely in a Cellion-managed escrow account until both parties confirm fulfilment. Funds are collected via Paystack and released to the beneficiary only when your platform calls the release endpoint. No separate bank integrations required.");
+  bodyText(doc, "The Cellion One Escrow-as-a-Service API lets your platform hold buyer funds securely using Paystack Dedicated Virtual Accounts (DVAs). Each escrow deal gets a unique Nigerian bank account number. The buyer transfers funds directly to that account, Paystack confirms receipt, and funds are only moved to the seller after your platform calls the release endpoint.");
   bodyText(doc, "Common use cases:\n  - B2B marketplaces: hold supplier payment until goods are delivered\n  - Freelancer platforms: release payment after work is accepted\n  - Trade finance: secure payment before shipping\n  - Real-estate: hold deposit until title documents are exchanged");
+
+  sectionTitle(doc, "How It Works (DVA Flow)");
+  const flowSteps = [
+    "1. Your platform calls POST /escrow/transactions with buyer and validated beneficiary (seller) bank details.",
+    "2. Cellion validates the seller's bank account via Paystack resolution, then creates a Dedicated Virtual Account (DVA) — a unique NUBAN — and returns it to your platform.",
+    "3. Your platform shows the buyer the DVA account number and bank name. The buyer makes a standard bank transfer to that account.",
+    "4. Paystack receives the transfer and fires a charge.success webhook to Cellion. Cellion marks the escrow as funded and sends escrow.funded to your webhook URL.",
+    "5. When conditions are met, your platform calls POST /escrow/:reference/release. Cellion initiates a Paystack Transfer to the seller's account and responds with status pending_transfer.",
+    "6. Paystack confirms the transfer and fires transfer.success to Cellion. Cellion marks the escrow as released and sends escrow.released to your webhook URL.",
+  ];
+  for (const step of flowSteps) {
+    bodyText(doc, step);
+  }
+  doc.moveDown(0.3);
 
   sectionTitle(doc, "Base URL");
   codeBlock(doc, "https://cellionone.com/api/v1/escrow");
@@ -491,13 +507,13 @@ function generateEscrowPdf(res: Response) {
   -d '{ ... }'`);
 
   sectionTitle(doc, "Fee Structure");
-  bodyText(doc, "Cellion charges a service fee on the escrow principal. This fee is added to the buyer's total at payment time — the beneficiary receives the full principal amount upon release.");
+  bodyText(doc, "Cellion charges a service fee on the escrow principal. The fee is included in the total amount the buyer must transfer to the DVA. The seller receives the full principal.");
   const feeRows: [string, string][] = [
     ["Rate", "1.5% of escrow principal"],
     ["Minimum fee", "N1,500"],
     ["Maximum fee", "N50,000"],
-    ["Who pays", "Buyer (added to Paystack payment amount)"],
-    ["Beneficiary receives", "Full principal (100%)"],
+    ["Who pays", "Buyer (total transfer = principal + service fee)"],
+    ["Seller receives", "Full principal (100%)"],
   ];
   for (const [key, val] of feeRows) {
     doc.fill(BRAND_GREEN).font("Helvetica-Bold").fontSize(9).text(key, 52, doc.y, { width: 140, lineBreak: false });
@@ -508,12 +524,13 @@ function generateEscrowPdf(res: Response) {
 
   sectionTitle(doc, "Transaction Status Lifecycle");
   const statusRows: [string, string][] = [
-    ["pending_payment", "Transaction created; awaiting buyer payment via Paystack"],
-    ["funded", "Paystack confirmed payment; funds held in escrow"],
-    ["released", "Platform called /release; funds disbursed to beneficiary"],
-    ["disputed", "Platform called /dispute; transaction under review"],
-    ["refunded", "Admin marked as refunded; buyer refund processed"],
-    ["expired", "Payment link expired (expiresIn days passed); transaction closed"],
+    ["pending_payment", "DVA created; awaiting buyer bank transfer"],
+    ["funded", "Paystack confirmed transfer; funds held in escrow"],
+    ["pending_transfer", "Release initiated; Paystack transfer in progress"],
+    ["released", "Transfer confirmed; funds disbursed to seller's bank account"],
+    ["disputed", "Platform raised dispute; transaction under review"],
+    ["refunded", "Admin processed refund; buyer refund initiated via Paystack"],
+    ["expired", "Deal expired (expiresIn days passed without payment)"],
   ];
   for (const [status, statusDesc] of statusRows) {
     doc.fill(BRAND_GREEN).font("Courier").fontSize(8).text(status, 52, doc.y, { width: 140, lineBreak: false });
@@ -524,70 +541,88 @@ function generateEscrowPdf(res: Response) {
 
   sectionTitle(doc, "Endpoints");
 
+  endpointHeading(doc, "GET", "/api/v1/escrow/banks", "List Nigerian banks for beneficiary selection");
+  bodyText(doc, "Returns the full Paystack bank list (cached 5 min). Use this to populate a bank selector in your UI when the seller enters their bank account details. Requires escrow:read or escrow:write scope.");
+  bodyText(doc, "Response:");
+  codeBlock(doc, `{
+  "banks": [
+    { "name": "Access Bank", "code": "044", "longcode": "044150149" },
+    { "name": "GTBank", "code": "058", "longcode": "058152036" }
+  ],
+  "count": 52
+}`);
+
   endpointHeading(doc, "POST", "/api/v1/escrow/transactions", "Create a new escrow transaction");
-  bodyText(doc, "Creates an escrow transaction and returns a Paystack payment URL to send to the buyer. Status is pending_payment until the buyer completes payment.\n\nRequires escrow:write scope.");
+  bodyText(doc, "Creates a DVA-backed escrow transaction. Validates the seller's bank account, creates a Paystack DVA, and returns the account number for the buyer to transfer to. Requires escrow:write scope.");
   bodyText(doc, "Request Body:");
-  paramRow(doc, "amount", "integer", true, "Principal in kobo (N1 = 100 kobo). Minimum 100000 (N1,000).");
-  paramRow(doc, "description", "string", true, "Description of what the escrow covers (max 500 chars).");
+  paramRow(doc, "amount", "integer", true, "Principal in kobo (N1 = 100 kobo). Min 100,000 (N1,000).");
+  paramRow(doc, "description", "string", true, "Description of what the escrow covers (5-500 chars).");
   paramRow(doc, "buyerName", "string", true, "Full name of the buyer.");
-  paramRow(doc, "buyerEmail", "string", true, "Buyer's email — Paystack sends the payment link here.");
-  paramRow(doc, "beneficiaryName", "string", true, "Full name of the beneficiary.");
-  paramRow(doc, "beneficiaryEmail", "string", true, "Beneficiary's email address.");
+  paramRow(doc, "buyerEmail", "string", true, "Buyer's email address.");
+  paramRow(doc, "beneficiaryName", "string", true, "Full name of the seller/beneficiary.");
+  paramRow(doc, "beneficiaryEmail", "string", true, "Seller's email address.");
+  paramRow(doc, "beneficiaryAccountNumber", "string", true, "Seller's NUBAN bank account number (10 digits).");
+  paramRow(doc, "beneficiaryBankCode", "string", true, "Paystack bank code for the seller's bank (from /banks).");
   paramRow(doc, "releaseConditions", "string", false, "Conditions that must be met before release.");
-  paramRow(doc, "expiresIn", "integer", false, "Days before the payment link expires (1-365).");
+  paramRow(doc, "expiresIn", "integer", false, "Days before the DVA expires (1-365).");
   paramRow(doc, "metadata", "object", false, "Arbitrary key-value pairs for your reference.");
   doc.moveDown(0.3);
   bodyText(doc, "Example Request:");
   codeBlock(doc, `{
-  "amount": 500000,
-  "description": "Website redesign project Phase 1",
+  "amount": 50000000,
+  "description": "Supply contract — 500 units industrial valves",
   "buyerName": "Emeka Obi",
-  "buyerEmail": "emeka@example.com",
-  "beneficiaryName": "TechBuild Ltd",
-  "beneficiaryEmail": "pay@techbuild.ng",
-  "releaseConditions": "Release on buyer approval of deliverables",
-  "expiresIn": 7
+  "buyerEmail": "emeka@buyer.ng",
+  "beneficiaryName": "ValvesTech Nigeria Ltd",
+  "beneficiaryEmail": "accounts@valvestech.ng",
+  "beneficiaryAccountNumber": "0123456789",
+  "beneficiaryBankCode": "058",
+  "releaseConditions": "Release on signed delivery confirmation",
+  "expiresIn": 14
 }`);
-  bodyText(doc, "Success Response (201):");
+  bodyText(doc, "Success Response (201) — buyer transfers to dvaAccountNumber:");
   codeBlock(doc, `{
   "reference": "CO-ESC-2026-A3F7D2B1",
   "status": "pending_payment",
-  "amount": 500000,
-  "serviceFee": 7500,
-  "totalCharged": 507500,
+  "amount": 50000000,
+  "serviceFee": 750000,
+  "totalCharged": 50750000,
   "currency": "NGN",
-  "buyerName": "Emeka Obi",
-  "paystackPaymentUrl": "https://checkout.paystack.com/xyz123",
-  "expiresAt": "2026-04-19T10:00:00.000Z",
+  "dvaAccountNumber": "9101234567",
+  "dvaBankName": "Titan Trust Bank",
+  "dvaBankCode": "titan-paystack",
+  "beneficiaryAccountName": "VALVESTECH NIGERIA LIMITED",
+  "instructions": "Buyer should transfer N507,500.00 to account 9101234567 ...",
+  "expiresAt": "2026-04-26T10:00:00.000Z",
   "createdAt": "2026-04-12T10:00:00.000Z"
 }`);
 
   endpointHeading(doc, "GET", "/api/v1/escrow/transactions", "List all escrow transactions");
-  bodyText(doc, "Returns transactions sorted by createdAt descending. Supports optional ?status= filter.\n\nRequires escrow:read or escrow:write scope.");
+  bodyText(doc, "Returns transactions sorted by createdAt descending. Supports optional ?status= filter. Requires escrow:read or escrow:write scope.");
   codeBlock(doc, "GET /api/v1/escrow/transactions?status=funded");
 
   endpointHeading(doc, "GET", "/api/v1/escrow/transactions/:reference", "Get a single transaction");
-  bodyText(doc, "Retrieve a transaction by its reference. Only your organisation's transactions are accessible.\n\nRequires escrow:read or escrow:write scope.");
+  bodyText(doc, "Retrieve a transaction by its reference. Only your organisation's transactions are accessible. Requires escrow:read or escrow:write scope.");
   codeBlock(doc, "GET /api/v1/escrow/transactions/CO-ESC-2026-A3F7D2B1");
 
-  endpointHeading(doc, "POST", "/api/v1/escrow/transactions/:reference/release", "Release funds to beneficiary");
-  bodyText(doc, "Releases held funds to the beneficiary. Transaction must be in funded status. This action is irreversible.\n\nRequires escrow:write scope.");
-  codeBlock(doc, `POST /api/v1/escrow/transactions/CO-ESC-2026-A3F7D2B1/release
-X-API-Key: co_live_...
-
-// Response
-{
-  "success": true,
-  "transaction": { "status": "released", "releasedAt": "..." }
+  endpointHeading(doc, "POST", "/api/v1/escrow/transactions/:reference/release", "Release funds to seller");
+  bodyText(doc, "Initiates a Paystack Transfer to the seller's validated bank account. Transaction must be in funded status. Release is asynchronous — listen for the escrow.released webhook for final confirmation. Requires escrow:write scope.");
+  bodyText(doc, "Response (202 — transfer initiated):");
+  codeBlock(doc, `{
+  "reference": "CO-ESC-2026-A3F7D2B1",
+  "status": "pending_transfer",
+  "amount": 50000000,
+  "currency": "NGN",
+  "transferReference": "co_esc_rel_1744000000_ab12cd34",
+  "message": "Transfer initiated. Listen for the escrow.released webhook event."
 }`);
 
   endpointHeading(doc, "POST", "/api/v1/escrow/transactions/:reference/dispute", "Raise a dispute");
-  bodyText(doc, "Marks the transaction as disputed. Transaction must be in funded status.\n\nRequires escrow:write scope.");
-  paramRow(doc, "reason", "string", true, "Description of the dispute (max 1000 chars).");
+  bodyText(doc, "Marks the transaction as disputed. Transaction must be in funded or pending_payment status. Requires escrow:write scope.");
+  paramRow(doc, "reason", "string", true, "Description of the dispute (min 10 chars).");
   doc.moveDown(0.3);
-  codeBlock(doc, `POST /api/v1/escrow/transactions/CO-ESC-2026-A3F7D2B1/dispute
-{
-  "reason": "Goods were not delivered as specified"
+  codeBlock(doc, `{
+  "reason": "Goods were not delivered as specified in the contract"
 }`);
 
   sectionTitle(doc, "Webhook Events");
@@ -596,35 +631,56 @@ X-API-Key: co_live_...
   const events: { name: string; desc: string; payload: string }[] = [
     {
       name: "escrow.funded",
-      desc: "Fired when Paystack confirms the buyer's payment.",
+      desc: "Fired when Paystack confirms the buyer's bank transfer to the DVA.",
       payload: `{
   "event": "escrow.funded",
   "timestamp": "2026-04-12T09:15:00.000Z",
   "data": {
     "reference": "CO-ESC-2026-A3F7D2B1",
     "status": "funded",
-    "amount": 500000,
+    "amount": 50000000,
     "currency": "NGN",
     "buyerName": "Emeka Obi",
+    "dvaAccountNumber": "9101234567",
+    "dvaBankName": "Titan Trust Bank",
     "fundedAt": "2026-04-12T09:15:00.000Z"
   }
 }`,
     },
     {
       name: "escrow.released",
-      desc: "Fired when funds are released to the beneficiary.",
+      desc: "Fired when Paystack confirms the transfer to the seller's bank account (async).",
       payload: `{
   "event": "escrow.released",
+  "timestamp": "2026-04-15T14:05:00.000Z",
   "data": {
     "reference": "CO-ESC-2026-A3F7D2B1",
     "status": "released",
-    "releasedAt": "2026-04-15T14:00:00.000Z"
+    "amount": 50000000,
+    "currency": "NGN",
+    "releasedTo": "VALVESTECH NIGERIA LIMITED",
+    "releasedAt": "2026-04-15T14:05:00.000Z"
+  }
+}`,
+    },
+    {
+      name: "escrow.release_failed",
+      desc: "Fired when the Paystack transfer to the seller fails. Escrow reverts to funded — retry /release.",
+      payload: `{
+  "event": "escrow.release_failed",
+  "timestamp": "2026-04-15T14:02:00.000Z",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "status": "funded",
+    "amount": 50000000,
+    "currency": "NGN",
+    "reason": "Bank transfer failed — funds remain in escrow. Retry release."
   }
 }`,
     },
     {
       name: "escrow.disputed",
-      desc: "Fired when a dispute is raised by the platform.",
+      desc: "Fired when a dispute is raised by your platform.",
       payload: `{
   "event": "escrow.disputed",
   "data": {
@@ -642,26 +698,24 @@ X-API-Key: co_live_...
   "event": "escrow.refunded",
   "data": {
     "reference": "CO-ESC-2026-A3F7D2B1",
-    "amount": 500000,
+    "amount": 50000000,
     "currency": "NGN",
     "buyerName": "Emeka Obi",
-    "beneficiaryName": "TechBuild Ltd",
     "refundedAt": "2026-04-16T10:00:00.000Z"
   }
 }`,
     },
     {
       name: "escrow.expired",
-      desc: "Fired when a pending_payment transaction passes its expiresAt timestamp.",
+      desc: "Fired when a pending_payment DVA passes its expiresIn date without receiving a transfer.",
       payload: `{
   "event": "escrow.expired",
   "data": {
     "reference": "CO-ESC-2026-A3F7D2B1",
-    "amount": 500000,
+    "amount": 50000000,
     "currency": "NGN",
     "buyerName": "Emeka Obi",
-    "beneficiaryName": "TechBuild Ltd",
-    "expiredAt": "2026-04-19T10:00:00.000Z"
+    "expiredAt": "2026-04-26T10:00:00.000Z"
   }
 }`,
     },
@@ -689,9 +743,13 @@ if (sig !== expected) return res.status(401).send('Invalid signature');`);
   const errorRows: [string, string, string][] = [
     ["ESCROW_UNAVAILABLE", "503", "Escrow service is currently disabled (feature flag)"],
     ["INVALID_API_KEY", "401", "API key missing, invalid, or lacks required escrow scope"],
+    ["ACCOUNT_RESOLUTION_FAILED", "400", "Beneficiary account number / bank code could not be resolved"],
+    ["DVA_CREATION_FAILED", "502", "Paystack could not assign a virtual account — retry shortly"],
+    ["MISSING_BENEFICIARY_ACCOUNT", "400", "No validated beneficiary account on record for this escrow"],
+    ["RECIPIENT_CREATION_FAILED", "502", "Paystack failed to create a transfer recipient"],
+    ["TRANSFER_INITIATION_FAILED", "502", "Paystack failed to initiate the transfer"],
     ["TRANSACTION_NOT_FOUND", "404", "Reference does not exist or belongs to another org"],
     ["INVALID_STATUS", "400", "Transaction is not in the required status for this action"],
-    ["ALREADY_REFUNDED", "400", "Transaction has already been marked as refunded"],
     ["RATE_LIMIT_EXCEEDED", "429", "60 req/min per API key — retry with exponential backoff"],
     ["VALIDATION_ERROR", "400", "Request body failed validation — see error message field"],
   ];

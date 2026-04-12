@@ -2831,7 +2831,7 @@ export function registerKycServiceRoutes(app: Express) {
 
       const schema = z.object({
         quantity: z.number().int().min(10, "Minimum purchase is 10 credits"),
-        verificationType: z.enum(["identity_only", "individual", "supplier"]),
+        verificationType: z.enum(["identity_only", "individual", "supplier", "kyb"]),
       });
       const data = schema.parse(req.body);
 

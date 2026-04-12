@@ -1591,9 +1591,10 @@ function BillingTab({ orgId }: { orgId: string }) {
 
   const individualPrice = 1000000;
   const supplierPrice = 10000000;
+  const kybPrice = 500000;
 
   function getPurchaseTotal(): number {
-    const unitPrice = purchaseType === "supplier" ? supplierPrice : individualPrice;
+    const unitPrice = purchaseType === "supplier" ? supplierPrice : purchaseType === "kyb" ? kybPrice : individualPrice;
     return unitPrice * purchaseQuantity;
   }
 
@@ -1831,6 +1832,7 @@ function BillingTab({ orgId }: { orgId: string }) {
                 <SelectContent>
                   <SelectItem value="individual">Individual ({formatCurrency(individualPrice)}/credit)</SelectItem>
                   <SelectItem value="supplier">Supplier ({formatCurrency(supplierPrice)}/credit)</SelectItem>
+                  <SelectItem value="kyb">KYB — Company Registry ({formatCurrency(kybPrice)}/credit)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

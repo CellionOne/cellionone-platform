@@ -104,24 +104,11 @@ export function registerKybApiRoutes(app: Express) {
         });
       }
 
-      // ── Classify the result ───────────────────────────────────────────────
-      // NOT_CONFIGURED   → development/sandbox with no Smile ID credentials;
-      //                    treat as not_found (no service error), no credit deduction.
-      // Any other error  → upstream CAC registry failure; treat as service error,
-      //                    return 502, no credit deduction.
-      // found=true       → company located; deduct credit.
-      // found=false      → RC not registered; still a valid lookup, deduct credit.
-
-      const isServiceError = result.error && result.error !== "NOT_CONFIGURED";
-      const isNotConfigured = result.error === "NOT_CONFIGURED";
-
-      if (isServiceError) {
+      // Any result.error (including NOT_CONFIGURED) means the registry service
+      // could not complete the lookup — treat as service error, no credit deduction.
+      if (result.error) {
         await db.update(kybLookups)
-          .set({
-            status: "error",
-            errorMessage: String(result.error),
-            updatedAt: new Date(),
-          })
+          .set({ status: "error", errorMessage: String(result.error), updatedAt: new Date() })
           .where(eq(kybLookups.id, lookup.id));
 
         return res.status(502).json({
@@ -133,7 +120,6 @@ export function registerKybApiRoutes(app: Express) {
 
       const status = result.found ? "found" : "not_found";
 
-      // Update lookup record with results
       const [updated] = await db.update(kybLookups)
         .set({
           status,
@@ -152,18 +138,15 @@ export function registerKybApiRoutes(app: Express) {
         .where(eq(kybLookups.id, lookup.id))
         .returning();
 
-      // Deduct credit only for genuine lookup outcomes (found or not_found).
-      // NOT_CONFIGURED (no Smile ID credentials) does not deduct.
-      if (!isNotConfigured) {
-        try {
-          await billingService.deductCredit(orgId, "kyb", lookup.id);
-          await db.update(kybLookups)
-            .set({ creditDeducted: true, updatedAt: new Date() })
-            .where(eq(kybLookups.id, lookup.id));
-          updated.creditDeducted = true;
-        } catch (billingErr: any) {
-          console.error("[KYB API] Credit deduction error:", billingErr);
-        }
+      // Deduct credit for genuine lookup outcomes (found or not_found).
+      try {
+        await billingService.deductCredit(orgId, "kyb", lookup.id);
+        await db.update(kybLookups)
+          .set({ creditDeducted: true, updatedAt: new Date() })
+          .where(eq(kybLookups.id, lookup.id));
+        updated.creditDeducted = true;
+      } catch (billingErr: any) {
+        console.error("[KYB API] Credit deduction error:", billingErr);
       }
 
       // Audit log

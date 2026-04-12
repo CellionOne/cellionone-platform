@@ -2390,9 +2390,20 @@ const KYC_PRICING_TIERS = [
     bgColor: "bg-blue-50 dark:bg-blue-950/30",
     borderColor: "border-blue-200 dark:border-blue-800",
   },
+  {
+    id: "kyb" as const,
+    label: "KYB — Company Registry Lookup",
+    description: "CAC registry lookup: RC number → company details + directors.",
+    priceNaira: 5_000,
+    checks: ["CAC registry lookup via RC number", "Company details + directors list", "Synchronous result"],
+    timing: "Instant",
+    color: "text-teal-600 dark:text-teal-400",
+    bgColor: "bg-teal-50 dark:bg-teal-950/30",
+    borderColor: "border-teal-200 dark:border-teal-800",
+  },
 ] as const;
 
-type KycVerificationType = "identity_only" | "individual" | "supplier";
+type KycVerificationType = "identity_only" | "individual" | "supplier" | "kyb";
 
 function formatNaira(amount: number): string {
   return `₦${amount.toLocaleString("en-NG")}`;

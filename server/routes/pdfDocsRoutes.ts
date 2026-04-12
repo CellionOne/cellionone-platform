@@ -105,6 +105,20 @@ function writePageNumbers(doc: PDFKit.PDFDocument) {
   }
 }
 
+function writeToc(doc: PDFKit.PDFDocument, entries: { title: string; indent?: boolean }[]) {
+  sectionTitle(doc, "Table of Contents");
+  for (const entry of entries) {
+    const x = entry.indent ? 72 : 52;
+    const bullet = entry.indent ? "  ↳  " : "• ";
+    doc.fill(entry.indent ? TEXT_MUTED : TEXT_DARK)
+      .font(entry.indent ? "Helvetica" : "Helvetica-Bold")
+      .fontSize(10)
+      .text(`${bullet}${entry.title}`, x, doc.y, { lineBreak: true });
+    doc.moveDown(0.2);
+  }
+  doc.moveDown(0.5);
+}
+
 // ─── KYC PDF ─────────────────────────────────────────────────────────────────
 
 function generateKycPdf(res: Response) {
@@ -118,6 +132,26 @@ function generateKycPdf(res: Response) {
     "KYC Verification API Guide",
     "Identity & Corporate Due Diligence API — REST Reference v1.0"
   );
+
+  writeToc(doc, [
+    { title: "Overview" },
+    { title: "Base URL" },
+    { title: "Authentication" },
+    { title: "Rate Limits" },
+    { title: "Credit Pricing" },
+    { title: "Endpoints — Instant ID Lookups" },
+    { title: "POST /api/v1/kyc/lookup/bvn", indent: true },
+    { title: "POST /api/v1/kyc/lookup/nin", indent: true },
+    { title: "Endpoints — Full KYC Sessions" },
+    { title: "POST /api/v1/kyc/sessions", indent: true },
+    { title: "GET /api/v1/kyc/sessions/:id", indent: true },
+    { title: "Endpoints — Corporate Supplier Verification" },
+    { title: "POST /api/v1/kyc/supplier/verify", indent: true },
+    { title: "GET /api/v1/kyc/supplier/:id", indent: true },
+    { title: "Webhooks" },
+    { title: "Error Codes" },
+    { title: "Support" },
+  ]);
 
   sectionTitle(doc, "Overview");
   bodyText(doc, "The Cellion One KYC API lets you verify individuals and corporate entities programmatically. Use it to run BVN/NIN lookups, full biometric KYC, and supplier due-diligence — all via a secure REST interface authenticated by API key.");
@@ -253,6 +287,20 @@ function generateKybPdf(res: Response) {
     "KYB Company Registry API Guide",
     "Nigerian CAC Registry Lookup API — REST Reference v1.0"
   );
+
+  writeToc(doc, [
+    { title: "Overview" },
+    { title: "Base URL" },
+    { title: "Authentication" },
+    { title: "Credit Pricing" },
+    { title: "businessType Codes" },
+    { title: "Endpoints" },
+    { title: "POST /api/v1/kyb/lookup", indent: true },
+    { title: "GET /api/v1/kyb/lookups", indent: true },
+    { title: "GET /api/v1/kyb/lookups/:reference", indent: true },
+    { title: "Error Codes" },
+    { title: "Support" },
+  ]);
 
   sectionTitle(doc, "Overview");
   bodyText(doc, "The Cellion One KYB (Know Your Business) API provides programmatic access to the Nigerian Corporate Affairs Commission (CAC) registry via Smile ID. Use it to verify a company's registration number, retrieve its official name, registration date, company type, and directors list — all in a single API call.");

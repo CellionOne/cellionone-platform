@@ -78,18 +78,21 @@ export function registerKybApiRoutes(app: Express) {
       }).returning();
 
       // Call Smile ID KYB
+      // NOTE: verifyBusiness() catches all errors internally and returns
+      // { found: false, error: string } rather than throwing. We must inspect
+      // result.error to distinguish a genuine "not found" from a service failure.
       const userId = `kyb_api_org_${orgId}`;
       const jobId = reference;
       let result: smileId.KybResult;
 
       try {
         result = await smileId.verifyBusiness(cleanRc, userId, jobId, body.businessType);
-      } catch (smileErr: any) {
-        // Update lookup to error state
+      } catch (unexpectedErr: any) {
+        // This branch is a last-resort safety net for unexpected synchronous throws.
         await db.update(kybLookups)
           .set({
             status: "error",
-            errorMessage: smileErr?.message || "Verification service error",
+            errorMessage: unexpectedErr?.message || "Verification service error",
             updatedAt: new Date(),
           })
           .where(eq(kybLookups.id, lookup.id));
@@ -101,12 +104,34 @@ export function registerKybApiRoutes(app: Express) {
         });
       }
 
-      // Determine status
-      const status = result.error === "NOT_CONFIGURED"
-        ? "not_found"
-        : result.found
-          ? "found"
-          : "not_found";
+      // ── Classify the result ───────────────────────────────────────────────
+      // NOT_CONFIGURED   → development/sandbox with no Smile ID credentials;
+      //                    treat as not_found (no service error), no credit deduction.
+      // Any other error  → upstream CAC registry failure; treat as service error,
+      //                    return 502, no credit deduction.
+      // found=true       → company located; deduct credit.
+      // found=false      → RC not registered; still a valid lookup, deduct credit.
+
+      const isServiceError = result.error && result.error !== "NOT_CONFIGURED";
+      const isNotConfigured = result.error === "NOT_CONFIGURED";
+
+      if (isServiceError) {
+        await db.update(kybLookups)
+          .set({
+            status: "error",
+            errorMessage: String(result.error),
+            updatedAt: new Date(),
+          })
+          .where(eq(kybLookups.id, lookup.id));
+
+        return res.status(502).json({
+          error: "Company registry lookup failed",
+          code: "REGISTRY_SERVICE_ERROR",
+          reference,
+        });
+      }
+
+      const status = result.found ? "found" : "not_found";
 
       // Update lookup record with results
       const [updated] = await db.update(kybLookups)
@@ -121,16 +146,16 @@ export function registerKybApiRoutes(app: Express) {
           tinNumber: result.tinNumber || null,
           directors: result.directors && result.directors.length > 0 ? result.directors : null,
           rawResult: result.rawResult || null,
-          errorMessage: result.error ? String(result.error) : null,
+          errorMessage: null,
           updatedAt: new Date(),
         })
         .where(eq(kybLookups.id, lookup.id))
         .returning();
 
-      // Deduct credit (after successful call, regardless of found/not_found)
-      if (result.error !== "NOT_CONFIGURED") {
+      // Deduct credit only for genuine lookup outcomes (found or not_found).
+      // NOT_CONFIGURED (no Smile ID credentials) does not deduct.
+      if (!isNotConfigured) {
         try {
-          // Create a placeholder request ID using the lookup ID
           await billingService.deductCredit(orgId, "kyb", lookup.id);
           await db.update(kybLookups)
             .set({ creditDeducted: true, updatedAt: new Date() })

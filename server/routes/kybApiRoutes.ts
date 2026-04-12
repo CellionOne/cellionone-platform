@@ -174,7 +174,7 @@ export function registerKybApiRoutes(app: Express) {
   app.get("/api/v1/kyb/lookups", authenticateApiKey("verify:business"), async (req: ApiKeyRequest, res: Response) => {
     try {
       const orgId = req.apiKeyContext!.orgId!;
-      const limitParam = Math.min(parseInt(String(req.query.limit || "50"), 10) || 50, 200);
+      const limitParam = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10) || 50, 1), 200);
       const offsetParam = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
 
       const rows = await db.select().from(kybLookups)

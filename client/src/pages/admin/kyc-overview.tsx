@@ -54,6 +54,8 @@ import {
   Fingerprint,
   Camera,
   Search,
+  Settings,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -712,8 +714,20 @@ export default function AdminKycOverview() {
                                     variant="ghost"
                                     onClick={() => setSelectedOrgId(org.id)}
                                     data-testid={`button-view-org-${org.id}`}
+                                    title="View details"
                                   >
                                     <Eye className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    asChild
+                                    data-testid={`button-open-settings-${org.id}`}
+                                    title="Configure org settings"
+                                  >
+                                    <a href={`/kyc/org/${org.id}/settings`} target="_blank" rel="noreferrer">
+                                      <ExternalLink className="h-4 w-4" />
+                                    </a>
                                   </Button>
                                   {org.status === "pending_review" ? (
                                     <>
@@ -1299,6 +1313,15 @@ export default function AdminKycOverview() {
                   </div>
                 </div>
               )}
+
+              <DialogFooter className="mt-2">
+                <Button variant="outline" asChild data-testid="button-open-org-settings">
+                  <a href={`/kyc/org/${selectedOrgId}/settings`} target="_blank" rel="noreferrer">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Configure Settings
+                  </a>
+                </Button>
+              </DialogFooter>
             </>
           ) : null}
         </DialogContent>

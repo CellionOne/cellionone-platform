@@ -1847,11 +1847,18 @@ export class DatabaseStorage implements IStorage {
       ));
   }
 
-  async bulkExpireEscrowTransactions(ids: number[]): Promise<void> {
-    if (ids.length === 0) return;
-    await db.update(escrowApiTransactions)
+  async bulkExpireEscrowTransactions(ids: number[]): Promise<number[]> {
+    if (ids.length === 0) return [];
+    const updated = await db.update(escrowApiTransactions)
       .set({ status: "expired", updatedAt: new Date() })
-      .where(inArray(escrowApiTransactions.id, ids));
+      .where(and(
+        inArray(escrowApiTransactions.id, ids),
+        eq(escrowApiTransactions.status, "pending_payment"),
+        isNotNull(escrowApiTransactions.expiresAt),
+        lt(escrowApiTransactions.expiresAt, new Date()),
+      ))
+      .returning({ id: escrowApiTransactions.id });
+    return updated.map((r) => r.id);
   }
 
   // Procurement Invoices

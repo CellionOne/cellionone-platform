@@ -3,7 +3,7 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { db } from "../db";
 import { eq, desc } from "drizzle-orm";
-import { kycWebhookConfigs, escrowTransactions, userRoles, escrowApiTransactions } from "@shared/schema";
+import { kycWebhookConfigs, escrowTransactions, userRoles } from "@shared/schema";
 import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth";
 import { isAuthenticated } from "../replit_integrations/auth";
 import crypto from "crypto";
@@ -803,13 +803,19 @@ export function registerEscrowApiRoutes(app: Express): void {
  */
 export async function runEscrowExpiry(): Promise<void> {
   try {
-    const expired = await storage.getExpiredPendingEscrowTransactions();
-    if (expired.length === 0) return;
+    const candidates = await storage.getExpiredPendingEscrowTransactions();
+    if (candidates.length === 0) return;
 
-    const ids = expired.map((tx) => tx.id);
-    await storage.bulkExpireEscrowTransactions(ids);
+    const candidateIds = candidates.map((tx) => tx.id);
+    const actuallyExpiredIds = await storage.bulkExpireEscrowTransactions(candidateIds);
 
-    for (const tx of expired) {
+    if (actuallyExpiredIds.length === 0) return;
+
+    const actuallyExpiredSet = new Set(actuallyExpiredIds);
+    const expiredAt = new Date().toISOString();
+
+    for (const tx of candidates) {
+      if (!actuallyExpiredSet.has(tx.id)) continue;
       await deliverEscrowWebhook(tx.orgId, "escrow.expired", {
         reference: tx.reference,
         amount: tx.amount,
@@ -817,11 +823,11 @@ export async function runEscrowExpiry(): Promise<void> {
         buyerName: tx.buyerName,
         buyerEmail: tx.buyerEmail,
         beneficiaryName: tx.beneficiaryName,
-        expiredAt: new Date().toISOString(),
+        expiredAt,
       });
     }
 
-    console.log(`[EscrowExpiry] Expired ${expired.length} stale transactions.`);
+    console.log(`[EscrowExpiry] Expired ${actuallyExpiredIds.length} stale transactions.`);
   } catch (err: any) {
     console.error("[EscrowExpiry] Auto-expiry run failed:", err.message);
   }

@@ -368,6 +368,10 @@ export interface IStorage {
   getEscrowByContract(contractId: number): Promise<EscrowTransaction[]>;
   updateEscrowStatus(id: number, status: string): Promise<EscrowTransaction | undefined>;
 
+  // Escrow API Transactions — expiry helpers
+  getExpiredPendingEscrowTransactions(): Promise<EscrowApiTransaction[]>;
+  bulkExpireEscrowTransactions(ids: number[]): Promise<number[]>;
+
   // Procurement Invoices
   createProcurementInvoice(data: InsertProcurementInvoice): Promise<ProcurementInvoice>;
   getProcurementInvoiceById(id: number): Promise<ProcurementInvoice | undefined>;

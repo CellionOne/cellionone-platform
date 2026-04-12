@@ -19,6 +19,8 @@ import * as verificationService from "./services/verificationService";
 import { upsertVerifiedCompanyDirect, upsertVerifiedIndividualByUserId } from "./services/verifiedEntityService";
 import { registerKycServiceRoutes } from "./routes/kycServiceRoutes";
 import { registerKycApiRoutes } from "./routes/kycApiRoutes";
+import { registerKybApiRoutes } from "./routes/kybApiRoutes";
+import { registerPdfDocsRoutes } from "./routes/pdfDocsRoutes";
 import { registerProcurementRoutes } from "./routes/procurementRoutes";
 import { registerEscrowApiRoutes } from "./routes/escrowApiRoutes";
 import { registerCieAdminRoutes } from "./routes/cieAdminRoutes";
@@ -10375,6 +10377,12 @@ For questions, contact: service@cellionone.com
 
   // ============== KYC PUBLIC API ROUTES (v1) ==============
   registerKycApiRoutes(app);
+
+  // ============== KYB PUBLIC API ROUTES (v1) ==============
+  registerKybApiRoutes(app);
+
+  // ============== PDF DOCUMENTATION ROUTES (public) ==============
+  registerPdfDocsRoutes(app);
 
   // ============== PROCUREMENT ROUTES ==============
   registerProcurementRoutes(app);

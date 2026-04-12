@@ -157,6 +157,7 @@ const PROVISION_PERMISSIONS = [
       { id: "verify:identity", label: "Instant ID Lookups", description: "BVN, NIN, Licence, Voter ID, Passport, AML — synchronous, 1 credit (₦5,000) per call" },
       { id: "verify:individual", label: "Individual Verification", description: "Full individual KYC with selfie + document checks — result via webhook (₦15,000/credit)" },
       { id: "verify:supplier", label: "Supplier / Corporate Verification", description: "Entity + director KYC — result in ~1 business day (₦75,000/credit)" },
+      { id: "verify:business", label: "KYB — Company Registry Lookup", description: "CAC registry lookup by RC number — instant result (₦5,000/credit)" },
     ],
   },
   {

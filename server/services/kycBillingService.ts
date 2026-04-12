@@ -47,9 +47,20 @@ export const PRICING_TIERS = [
     resultTiming: "webhook" as const,
     color: "text-blue-600 dark:text-blue-400",
   },
+  {
+    id: "kyb" as const,
+    label: "KYB — Company Registry Lookup",
+    description: "CAC registry lookup via Smile ID. Returns company name, status, type, directors, and registration date.",
+    priceKobo: 500_000,        // ₦5,000
+    priceNaira: 5_000,
+    checks: ["CAC registry lookup", "Company status & type", "Directors list"],
+    timing: "Instant",
+    resultTiming: "instant" as const,
+    color: "text-emerald-600 dark:text-emerald-400",
+  },
 ] as const;
 
-export type VerificationType = "identity_only" | "individual" | "supplier";
+export type VerificationType = "identity_only" | "individual" | "supplier" | "kyb";
 
 function getCreditPriceKobo(verificationType: string): number {
   const tier = PRICING_TIERS.find(t => t.id === verificationType);

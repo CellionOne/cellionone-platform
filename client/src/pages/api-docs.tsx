@@ -147,6 +147,15 @@ const sidebarSections = [
       { id: "cie-endpoints", label: "Endpoints" },
     ],
   },
+  {
+    id: "kyb-api",
+    label: "KYB — Company Registry",
+    children: [
+      { id: "kyb-overview", label: "Overview & Pricing" },
+      { id: "kyb-endpoints", label: "Endpoints" },
+      { id: "kyb-errors", label: "KYB Error Codes" },
+    ],
+  },
   { id: "webhooks", label: "Webhooks" },
   { id: "errors", label: "Error Codes" },
   { id: "examples", label: "Code Examples" },
@@ -280,20 +289,30 @@ export default function ApiDocsPage() {
         <DocsSidebar activeSection={activeSection} />
 
         <div className="space-y-8 min-w-0 api-docs-print-content">
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <h1 className="text-3xl font-bold" data-testid="heading-api-docs">API Documentation</h1>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-wrap print:hidden">
               <Badge variant="secondary" className="border-0">v1.0</Badge>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.print()}
-                data-testid="button-download-docs"
-                className="print:hidden"
+              <a
+                href="/api/docs/kyc-api.pdf"
+                download="cellion-one-kyc-api-guide.pdf"
+                data-testid="button-download-kyc-pdf"
               >
-                <Download className="h-3.5 w-3.5 mr-1.5" />
-                Download
-              </Button>
+                <Button variant="outline" size="sm">
+                  <Download className="h-3.5 w-3.5 mr-1.5" />
+                  KYC API Guide (PDF)
+                </Button>
+              </a>
+              <a
+                href="/api/docs/kyb-api.pdf"
+                download="cellion-one-kyb-api-guide.pdf"
+                data-testid="button-download-kyb-pdf"
+              >
+                <Button variant="outline" size="sm">
+                  <Download className="h-3.5 w-3.5 mr-1.5" />
+                  KYB API Guide (PDF)
+                </Button>
+              </a>
             </div>
           </div>
 
@@ -2270,6 +2289,229 @@ export default function ApiDocsPage() {
                   <code className="bg-muted px-1 rounded">bearish</code> (≤ 35)
                 </p>
               </EndpointSection>
+            </div>
+          </section>
+
+          <Separator />
+
+          {/* ═══════════════════════════════════════════════════════════════
+              KYB — Company Registry API
+          ════════════════════════════════════════════════════════════════ */}
+          <section id="kyb-api" className="space-y-6 scroll-mt-24">
+            <div>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-kyb-api">
+                  <FileCheck className="h-5 w-5" />
+                  KYB — Company Registry API
+                </h2>
+                <a
+                  href="/api/docs/kyb-api.pdf"
+                  download="cellion-one-kyb-api-guide.pdf"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-border bg-muted hover:bg-muted/70 transition-colors shrink-0 print:hidden"
+                  data-testid="button-download-kyb-docs"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download KYB API Guide (PDF)
+                </a>
+              </div>
+              <p className="text-muted-foreground leading-relaxed mt-2">
+                The <strong>Cellion One KYB API</strong> provides programmatic access to the Nigerian{" "}
+                <strong>Corporate Affairs Commission (CAC) registry</strong>. Look up any registered
+                Nigerian company by its RC number and receive a structured response: company name, status,
+                registration date, company type, directors list, share capital, and TIN.
+              </p>
+              <div className="mt-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-sm text-emerald-800 dark:text-emerald-200">
+                <strong>Authentication:</strong> All KYB endpoints require the{" "}
+                <code className="bg-muted px-1 rounded text-foreground">verify:business</code> scope.
+                KYB credits are separate from KYC credits — purchase them in your organisation billing
+                settings at <strong>₦5,000 per lookup</strong>.
+              </div>
+            </div>
+
+            {/* ── Overview & Pricing ─────────────────────────────────────── */}
+            <div id="kyb-overview" className="scroll-mt-24 space-y-4">
+              <h3 className="text-lg font-semibold">Overview &amp; Pricing</h3>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Card className="bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800">
+                  <CardContent className="pt-5 space-y-2">
+                    <p className="text-sm font-semibold">KYB Lookup</p>
+                    <p className="text-2xl font-bold">₦5,000</p>
+                    <p className="text-xs text-muted-foreground">per lookup credit</p>
+                    <ul className="space-y-1.5 mt-2">
+                      {["CAC registry lookup", "Company status & type", "Directors list", "Registration date & TIN"].map(c => (
+                        <li key={c} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                          <span className="text-primary mt-0.5">✓</span>{c}
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400">⏱ Instant result</div>
+                  </CardContent>
+                </Card>
+                <Card className="sm:col-span-2">
+                  <CardContent className="pt-5 space-y-3">
+                    <h4 className="font-semibold text-sm">businessType Codes</h4>
+                    <div className="rounded-md border overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/50">
+                          <tr>
+                            <th className="text-left p-2 font-medium">Code</th>
+                            <th className="text-left p-2 font-medium">Company Category</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="border-t"><td className="p-2 font-mono text-xs">co</td><td className="p-2 text-muted-foreground">Private limited company (Ltd) — <em>default</em></td></tr>
+                          <tr className="border-t"><td className="p-2 font-mono text-xs">bn</td><td className="p-2 text-muted-foreground">Business Name (sole proprietorship)</td></tr>
+                          <tr className="border-t"><td className="p-2 font-mono text-xs">it</td><td className="p-2 text-muted-foreground">Incorporated Trustee (NGO / association)</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Base URL for all KYB endpoints:{" "}
+                      <code className="bg-muted px-1 rounded">https://cellionone.com/api/v1/kyb</code>
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            {/* ── Endpoints ─────────────────────────────────────────────── */}
+            <div id="kyb-endpoints" className="scroll-mt-24 space-y-4">
+              <h3 className="text-lg font-semibold">Endpoints</h3>
+
+              <EndpointSection
+                method="POST"
+                path="/api/v1/kyb/lookup"
+                badge="verify:business"
+                description="Perform a CAC registry lookup by RC number"
+              >
+                <p className="text-sm text-muted-foreground">
+                  Checks your KYB credit balance, calls the CAC registry via Smile ID, stores the result,
+                  and deducts one credit. Returns the full company record synchronously — no webhook needed.
+                </p>
+                <ParamTable
+                  title="Request Body"
+                  params={[
+                    { field: "rcNumber", type: "string", required: "Yes", description: "RC number — digits only or with RC prefix (e.g. '9228748' or 'RC9228748'). Max 20 chars." },
+                    { field: "businessType", type: "string", required: "No", description: "Company category: co (default), bn, or it." },
+                  ]}
+                />
+                <h4 className="text-sm font-semibold">Example Request</h4>
+                <CodeBlock language="bash" code={`curl -X POST https://cellionone.com/api/v1/kyb/lookup \\
+  -H "X-API-Key: co_live_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"rcNumber": "9228748", "businessType": "co"}'`} />
+                <h4 className="text-sm font-semibold">Response — 200 (found)</h4>
+                <CodeBlock language="json" code={`{
+  "reference": "kyb_1_1744000000_a1b2c3d4",
+  "status": "found",
+  "rcNumber": "9228748",
+  "businessType": "co",
+  "companyName": "CELLION PLATFORMS NIGERIA LIMITED",
+  "registrationDate": "2022-08-15",
+  "companyStatus": "ACTIVE",
+  "companyType": "LTD",
+  "address": "51 Raymond Njoku Street, Lagos, Nigeria",
+  "shareCapital": "1000000",
+  "tinNumber": "12345678-0001",
+  "directors": [
+    { "name": "EMEKA OKORO", "role": "DIRECTOR" },
+    { "name": "NGOZI ADEYEMI", "role": "DIRECTOR" }
+  ],
+  "creditDeducted": true,
+  "createdAt": "2026-04-12T10:30:00.000Z"
+}`} />
+                <h4 className="text-sm font-semibold">Response — 404 (not found)</h4>
+                <CodeBlock language="json" code={`{
+  "reference": "kyb_1_1744000001_b2c3d4e5",
+  "status": "not_found",
+  "rcNumber": "0000001",
+  "businessType": "co",
+  "companyName": null,
+  "directors": null,
+  "creditDeducted": true,
+  "createdAt": "2026-04-12T10:31:00.000Z"
+}`} />
+              </EndpointSection>
+
+              <EndpointSection
+                method="GET"
+                path="/api/v1/kyb/lookups"
+                badge="verify:business"
+                description="List all KYB lookups for your organisation"
+              >
+                <p className="text-sm text-muted-foreground">
+                  Returns lookups sorted by <code className="bg-muted px-1 rounded">createdAt</code> descending.
+                  Paginate using <code className="bg-muted px-1 rounded">limit</code> (default 50, max 200) and{" "}
+                  <code className="bg-muted px-1 rounded">offset</code> query parameters.
+                </p>
+                <ParamTable
+                  title="Query Parameters"
+                  params={[
+                    { field: "limit", type: "integer", required: "No", description: "Max records returned (default 50, max 200)" },
+                    { field: "offset", type: "integer", required: "No", description: "Number of records to skip for pagination (default 0)" },
+                  ]}
+                />
+                <h4 className="text-sm font-semibold">Response</h4>
+                <CodeBlock language="json" code={`{
+  "data": [ /* array of lookup records */ ],
+  "limit": 50,
+  "offset": 0,
+  "count": 12
+}`} />
+              </EndpointSection>
+
+              <EndpointSection
+                method="GET"
+                path="/api/v1/kyb/lookups/:reference"
+                badge="verify:business"
+                description="Retrieve a single KYB lookup by its reference"
+              >
+                <p className="text-sm text-muted-foreground">
+                  Fetch a previously performed lookup by its <code className="bg-muted px-1 rounded">reference</code> string.
+                  Only lookups belonging to your organisation are accessible.
+                </p>
+                <h4 className="text-sm font-semibold">Example</h4>
+                <CodeBlock language="bash" code={`curl https://cellionone.com/api/v1/kyb/lookups/kyb_1_1744000000_a1b2c3d4 \\
+  -H "X-API-Key: co_live_..."`} />
+              </EndpointSection>
+            </div>
+
+            {/* ── KYB Error Codes ────────────────────────────────────────── */}
+            <div id="kyb-errors" className="scroll-mt-24 space-y-3">
+              <h3 className="text-lg font-semibold">KYB Error Codes</h3>
+              <div className="rounded-md border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-2 font-medium">Code</th>
+                      <th className="text-left p-2 font-medium">HTTP</th>
+                      <th className="text-left p-2 font-medium">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { code: "INSUFFICIENT_CREDITS", http: "402", desc: "No KYB credits — purchase more in your billing settings." },
+                      { code: "INVALID_API_KEY", http: "401", desc: "API key missing, invalid, or lacks verify:business scope." },
+                      { code: "RC_NOT_FOUND", http: "404", desc: "RC number not found in the CAC registry. A credit is still deducted." },
+                      { code: "INVALID_RC_FORMAT", http: "400", desc: "rcNumber must be numeric digits or RC-prefixed digits (max 20 chars)." },
+                      { code: "LOOKUP_NOT_FOUND", http: "404", desc: "GET /:reference — this reference doesn't exist for your organisation." },
+                      { code: "REGISTRY_SERVICE_ERROR", http: "502", desc: "Upstream CAC registry is temporarily unavailable. No credit deducted." },
+                      { code: "RATE_LIMIT_EXCEEDED", http: "429", desc: "60 req/min per API key. Retry with exponential back-off." },
+                    ].map(row => (
+                      <tr key={row.code} className="border-t">
+                        <td className="p-2 font-mono text-xs">{row.code}</td>
+                        <td className="p-2 text-xs">{row.http}</td>
+                        <td className="p-2 text-muted-foreground text-xs">{row.desc}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Note: KYB lookups are <strong>synchronous</strong> — no webhook events are fired. The full
+                result is returned in the POST /lookup response body. Save the{" "}
+                <code className="bg-muted px-1 rounded">reference</code> field to retrieve the record later.
+              </p>
             </div>
           </section>
 

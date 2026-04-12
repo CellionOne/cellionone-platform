@@ -847,6 +847,7 @@ function ApiKeysTab({ orgId, integrationProfile }: { orgId: string; integrationP
         { value: "verify:identity", label: "Instant ID Lookups", description: "BVN, NIN, Passport, Licence, Voter ID, AML screening" },
         { value: "verify:individual", label: "Individual Verification", description: "Full KYC with selfie + document checks" },
         { value: "verify:supplier", label: "Supplier / Corporate Verification", description: "Entity + director due-diligence" },
+        { value: "verify:business", label: "KYB — Company Registry Lookup", description: "CAC registry lookup by RC number — instant result (₦5,000/credit)" },
       ],
     },
     {
@@ -970,7 +971,8 @@ function ApiKeysTab({ orgId, integrationProfile }: { orgId: string; integrationP
                               "verify:identity": { label: "ID Lookup", color: "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" },
                               "verify:individual": { label: "Individual KYC", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
                               "verify:supplier": { label: "Supplier KYC", color: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400" },
-                              "escrow:read": { label: "Escrow Read", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+                              "verify:business": { label: "KYB Lookup", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" },
+                              "escrow:read": { label: "Escrow Read", color: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400" },
                               "escrow:write": { label: "Escrow Write", color: "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400" },
                             };
                             const meta = permLabels[p] || { label: p, color: "" };

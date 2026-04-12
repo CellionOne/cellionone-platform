@@ -2499,3 +2499,34 @@ export const insertCiePartnerSchema = createInsertSchema(ciePartners).omit({ id:
 export type CiePartner = typeof ciePartners.$inferSelect;
 export type InsertCiePartner = z.infer<typeof insertCiePartnerSchema>;
 
+// ============== KYB LOOKUPS (Public KYB API — CAC Registry) ==============
+export const kybLookups = pgTable("kyb_lookups", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull(),
+  reference: varchar("reference", { length: 128 }).notNull().unique(),
+  rcNumber: varchar("rc_number", { length: 50 }).notNull(),
+  businessType: varchar("business_type", { length: 50 }).default("co"),
+  status: varchar("status", { length: 20 }).notNull().default("pending"), // pending | found | not_found | error
+  companyName: varchar("company_name", { length: 255 }),
+  registrationDate: varchar("registration_date", { length: 20 }),
+  companyStatus: varchar("company_status", { length: 100 }),
+  companyType: varchar("company_type", { length: 100 }),
+  address: text("address"),
+  shareCapital: varchar("share_capital", { length: 100 }),
+  tinNumber: varchar("tin_number", { length: 50 }),
+  directors: json("directors").$type<{ name: string; role?: string }[]>(),
+  rawResult: json("raw_result").$type<Record<string, unknown>>(),
+  creditDeducted: boolean("credit_deducted").default(false),
+  errorMessage: varchar("error_message", { length: 500 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_kyb_lookups_org").on(table.orgId),
+  index("idx_kyb_lookups_reference").on(table.reference),
+  index("idx_kyb_lookups_status").on(table.status),
+]);
+
+export const insertKybLookupSchema = createInsertSchema(kybLookups).omit({ id: true, createdAt: true, updatedAt: true });
+export type KybLookup = typeof kybLookups.$inferSelect;
+export type InsertKybLookup = z.infer<typeof insertKybLookupSchema>;
+

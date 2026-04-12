@@ -18,3 +18,15 @@ id = "v9rcYYYcs0GV-ldGEUzq3"
 uri = "file://Cellion_One_VaaS_Proposal.docx"
 type = "word_document"
 title = "Cellion One – Verification as a Service Proposal"
+
+[[outputs]]
+id = "lBhhu1YHeq5CzKStZKYnM"
+uri = "file://cellion-one-kyc-api-guide.pdf"
+type = "pdf"
+title = "Cellion One — KYC Verification API Guide"
+
+[[outputs]]
+id = "63ELImyR812WOort9K11s"
+uri = "file://cellion-one-kyb-api-guide.pdf"
+type = "pdf"
+title = "Cellion One — KYB Company Registry API Guide"

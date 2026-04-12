@@ -304,9 +304,9 @@ export default function AdminEscrowDashboard() {
                                 Seller A/C: {tx.beneficiaryAccountNumber} ({tx.beneficiaryBankCode}) — {tx.beneficiaryAccountName ?? "unverified"}
                               </span>
                             )}
-                            {tx.paystackTransferCode && (
-                              <span className="col-span-2 font-mono text-xs" data-testid={`text-transfer-code-${tx.id}`}>
-                                Transfer: {tx.paystackTransferCode}
+                            {tx.paystackTransferReference && (
+                              <span className="col-span-2 font-mono text-xs" data-testid={`text-transfer-ref-${tx.id}`}>
+                                Transfer: {tx.paystackTransferReference}
                               </span>
                             )}
                             {tx.disputeReason && (

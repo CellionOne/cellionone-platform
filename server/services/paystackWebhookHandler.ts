@@ -182,6 +182,20 @@ async function handleTransferFailed(data: any): Promise<void> {
 }
 
 async function handleTitanInboundApproval(data: any): Promise<{ processed: boolean; event: string; approvalResponse?: any }> {
+  // Discriminator: charge.attempt for DVA inbound has a receiver account number.
+  // If the payload lacks dedicated_nuban or receiver_bank_account_number,
+  // this is likely a non-DVA charge.attempt (e.g. card pre-auth) — don't interfere.
+  const isDvaAttempt = !!(
+    data?.authorization?.receiver_bank_account_number
+    || data?.dedicated_nuban?.account_number
+    || data?.account_number
+  );
+
+  if (!isDvaAttempt) {
+    console.log('[Paystack Webhook] charge.attempt — no DVA account number, not a DVA inbound; skipping approval response');
+    return { processed: true, event: 'charge.attempt' };
+  }
+
   const dvaAccountNumber = data?.authorization?.receiver_bank_account_number
     || data?.dedicated_nuban?.account_number
     || data?.account_number;

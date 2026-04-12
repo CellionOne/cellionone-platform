@@ -300,7 +300,7 @@ export default function ApiDocsPage() {
               >
                 <Button variant="outline" size="sm">
                   <Download className="h-3.5 w-3.5 mr-1.5" />
-                  KYC API Guide (PDF)
+                  Download KYC API Guide (PDF)
                 </Button>
               </a>
               <a
@@ -310,7 +310,7 @@ export default function ApiDocsPage() {
               >
                 <Button variant="outline" size="sm">
                   <Download className="h-3.5 w-3.5 mr-1.5" />
-                  KYB API Guide (PDF)
+                  Download KYB API Guide (PDF)
                 </Button>
               </a>
             </div>

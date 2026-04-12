@@ -4,7 +4,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
 import crypto from "crypto";
 import {
-  kybLookups, kycOrganisations,
+  kybLookups,
   type KybLookup,
 } from "@shared/schema";
 import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth";
@@ -183,7 +183,7 @@ export function registerKybApiRoutes(app: Express) {
         data: rows.map(buildLookupResponse),
         limit: limitParam,
         offset: offsetParam,
-        count: rows.length,
+        pageCount: rows.length,
       });
     } catch (err: any) {
       console.error("[KYB API] List lookups error:", err);

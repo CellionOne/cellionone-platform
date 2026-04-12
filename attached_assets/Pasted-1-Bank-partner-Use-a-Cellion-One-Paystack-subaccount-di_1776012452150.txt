@@ -1,0 +1,12 @@
+1. Bank partner: Use a Cellion One Paystack subaccount directly for now. No specific bank partner integration yet. The subaccount is linked to Cellion One's own bank account. Bank partner integration is a future phase — the architecture should make it easy to swap the subaccount details later without code changes.
+2. DVA bank: Default to Titan-Paystack (9101 prefix) as the primary DVA provider because it supports Inbound Transfer Approval. Support Wema Bank (0121 prefix) as fallback. At DVA creation time, try Titan first, fall back to Wema if unavailable.
+3. Beneficiary details timing: Collect seller/beneficiary bank details at escrow initialisation time, not at release. At initialisation, validate the account name via Paystack's account resolution API (GET /bank/resolve?account_number=&bank_code=) and store the validated name, account number, and bank code against the escrow record. Reject initialisation if account resolution fails — this prevents wrong transfers. At release time, use the stored validated details to create a Paystack transfer recipient and initiate the transfer immediately.
+Additional requirements:
+
+Add a GET /bank/list proxy endpoint in Aprisys so the frontend can show a bank selector dropdown when entering beneficiary details
+The escrow initialisation form in Aprisys frontend needs: seller bank name (dropdown), seller account number (input), and an account name preview that auto-populates after resolution
+Escrow release should be blocked at the API level until a validated beneficiary account is on record
+For the Inbound Transfer Approval feature on Titan DVAs: auto-approve transfers that match the deal total value within a 1% tolerance (to account for any bank charges deducted in transit). Reject and refund everything else.
+Store on the escrow record: dva_id, dva_account_number, dva_bank_name, dva_bank_code, beneficiary_account_number, beneficiary_bank_code, beneficiary_account_name, paystack_transfer_recipient_code, paystack_transfer_reference
+
+Plan this as a task. This is the escrow engine rework needed before Cellion Escrow API can go to the bank as a serious proposal.

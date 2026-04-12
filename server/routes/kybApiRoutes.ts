@@ -161,7 +161,7 @@ export function registerKybApiRoutes(app: Express) {
       return res.status(200).json(responseBody);
     } catch (err: any) {
       if (err instanceof z.ZodError) {
-        return res.status(400).json({ error: "Validation error", details: err.errors });
+        return res.status(400).json({ error: "Validation error", code: "INVALID_RC_FORMAT", details: err.errors });
       }
       console.error("[KYB API] Lookup error:", err);
       return res.status(500).json({ error: "KYB lookup failed" });

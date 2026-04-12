@@ -435,6 +435,278 @@ function generateKybPdf(res: Response) {
   doc.end();
 }
 
+// ─── Escrow PDF ───────────────────────────────────────────────────────────────
+
+function generateEscrowPdf(res: Response) {
+  const doc = new PDFDocument({ margin: 40, size: "A4", bufferPages: true });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", "attachment; filename=\"cellion-one-escrow-api-guide.pdf\"");
+  doc.pipe(res);
+
+  writeHeader(
+    doc,
+    "Escrow-as-a-Service API Guide",
+    "Cellion One — Secure Fund Holding via REST API v1.0"
+  );
+
+  writeToc(doc, [
+    { title: "Overview" },
+    { title: "Base URL" },
+    { title: "Authentication & Scopes" },
+    { title: "Fee Structure" },
+    { title: "Transaction Status Lifecycle" },
+    { title: "Endpoints" },
+    { title: "POST /api/v1/escrow/transactions", indent: true },
+    { title: "GET /api/v1/escrow/transactions", indent: true },
+    { title: "GET /api/v1/escrow/transactions/:reference", indent: true },
+    { title: "POST .../release", indent: true },
+    { title: "POST .../dispute", indent: true },
+    { title: "Webhook Events" },
+    { title: "Error Codes" },
+    { title: "Support" },
+  ]);
+
+  sectionTitle(doc, "Overview");
+  bodyText(doc, "The Cellion One Escrow-as-a-Service API lets your platform hold buyer funds securely in a Cellion-managed escrow account until both parties confirm fulfilment. Funds are collected via Paystack and released to the beneficiary only when your platform calls the release endpoint. No separate bank integrations required.");
+  bodyText(doc, "Common use cases:\n  - B2B marketplaces: hold supplier payment until goods are delivered\n  - Freelancer platforms: release payment after work is accepted\n  - Trade finance: secure payment before shipping\n  - Real-estate: hold deposit until title documents are exchanged");
+
+  sectionTitle(doc, "Base URL");
+  codeBlock(doc, "https://cellionone.com/api/v1/escrow");
+
+  sectionTitle(doc, "Authentication & Scopes");
+  bodyText(doc, "All escrow endpoints require an API key passed in the X-API-Key header. Two permission scopes are available:");
+  const scopeRows: [string, string][] = [
+    ["escrow:write", "Create transactions, release funds, raise disputes"],
+    ["escrow:read", "List and view transactions (read-only)"],
+  ];
+  for (const [scope, scopeDesc] of scopeRows) {
+    doc.fill(BRAND_GREEN).font("Courier").fontSize(9).text(scope, 52, doc.y, { width: 120, lineBreak: false });
+    doc.fill(TEXT_DARK).font("Helvetica").fontSize(9).text(scopeDesc, 180, doc.y, { width: doc.page.width - 230 });
+    doc.moveDown(0.4);
+  }
+  doc.moveDown(0.4);
+  codeBlock(doc, `curl -X POST https://cellionone.com/api/v1/escrow/transactions \\
+  -H "X-API-Key: co_live_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" \\
+  -H "Content-Type: application/json" \\
+  -d '{ ... }'`);
+
+  sectionTitle(doc, "Fee Structure");
+  bodyText(doc, "Cellion charges a service fee on the escrow principal. This fee is added to the buyer's total at payment time — the beneficiary receives the full principal amount upon release.");
+  const feeRows: [string, string][] = [
+    ["Rate", "1.5% of escrow principal"],
+    ["Minimum fee", "N1,500"],
+    ["Maximum fee", "N50,000"],
+    ["Who pays", "Buyer (added to Paystack payment amount)"],
+    ["Beneficiary receives", "Full principal (100%)"],
+  ];
+  for (const [key, val] of feeRows) {
+    doc.fill(BRAND_GREEN).font("Helvetica-Bold").fontSize(9).text(key, 52, doc.y, { width: 140, lineBreak: false });
+    doc.fill(TEXT_DARK).font("Helvetica").fontSize(9).text(val, 200, doc.y, { width: doc.page.width - 250 });
+    doc.moveDown(0.4);
+  }
+  doc.moveDown(0.4);
+
+  sectionTitle(doc, "Transaction Status Lifecycle");
+  const statusRows: [string, string][] = [
+    ["pending_payment", "Transaction created; awaiting buyer payment via Paystack"],
+    ["funded", "Paystack confirmed payment; funds held in escrow"],
+    ["released", "Platform called /release; funds disbursed to beneficiary"],
+    ["disputed", "Platform called /dispute; transaction under review"],
+    ["refunded", "Admin marked as refunded; buyer refund processed"],
+    ["expired", "Payment link expired (expiresIn days passed); transaction closed"],
+  ];
+  for (const [status, statusDesc] of statusRows) {
+    doc.fill(BRAND_GREEN).font("Courier").fontSize(8).text(status, 52, doc.y, { width: 140, lineBreak: false });
+    doc.fill(TEXT_DARK).font("Helvetica").fontSize(9).text(statusDesc, 200, doc.y, { width: doc.page.width - 250 });
+    doc.moveDown(0.4);
+  }
+  doc.moveDown(0.4);
+
+  sectionTitle(doc, "Endpoints");
+
+  endpointHeading(doc, "POST", "/api/v1/escrow/transactions", "Create a new escrow transaction");
+  bodyText(doc, "Creates an escrow transaction and returns a Paystack payment URL to send to the buyer. Status is pending_payment until the buyer completes payment.\n\nRequires escrow:write scope.");
+  bodyText(doc, "Request Body:");
+  paramRow(doc, "amount", "integer", true, "Principal in kobo (N1 = 100 kobo). Minimum 100000 (N1,000).");
+  paramRow(doc, "description", "string", true, "Description of what the escrow covers (max 500 chars).");
+  paramRow(doc, "buyerName", "string", true, "Full name of the buyer.");
+  paramRow(doc, "buyerEmail", "string", true, "Buyer's email — Paystack sends the payment link here.");
+  paramRow(doc, "beneficiaryName", "string", true, "Full name of the beneficiary.");
+  paramRow(doc, "beneficiaryEmail", "string", true, "Beneficiary's email address.");
+  paramRow(doc, "releaseConditions", "string", false, "Conditions that must be met before release.");
+  paramRow(doc, "expiresIn", "integer", false, "Days before the payment link expires (1-365).");
+  paramRow(doc, "metadata", "object", false, "Arbitrary key-value pairs for your reference.");
+  doc.moveDown(0.3);
+  bodyText(doc, "Example Request:");
+  codeBlock(doc, `{
+  "amount": 500000,
+  "description": "Website redesign project Phase 1",
+  "buyerName": "Emeka Obi",
+  "buyerEmail": "emeka@example.com",
+  "beneficiaryName": "TechBuild Ltd",
+  "beneficiaryEmail": "pay@techbuild.ng",
+  "releaseConditions": "Release on buyer approval of deliverables",
+  "expiresIn": 7
+}`);
+  bodyText(doc, "Success Response (201):");
+  codeBlock(doc, `{
+  "reference": "CO-ESC-2026-A3F7D2B1",
+  "status": "pending_payment",
+  "amount": 500000,
+  "serviceFee": 7500,
+  "totalCharged": 507500,
+  "currency": "NGN",
+  "buyerName": "Emeka Obi",
+  "paystackPaymentUrl": "https://checkout.paystack.com/xyz123",
+  "expiresAt": "2026-04-19T10:00:00.000Z",
+  "createdAt": "2026-04-12T10:00:00.000Z"
+}`);
+
+  endpointHeading(doc, "GET", "/api/v1/escrow/transactions", "List all escrow transactions");
+  bodyText(doc, "Returns transactions sorted by createdAt descending. Supports optional ?status= filter.\n\nRequires escrow:read or escrow:write scope.");
+  codeBlock(doc, "GET /api/v1/escrow/transactions?status=funded");
+
+  endpointHeading(doc, "GET", "/api/v1/escrow/transactions/:reference", "Get a single transaction");
+  bodyText(doc, "Retrieve a transaction by its reference. Only your organisation's transactions are accessible.\n\nRequires escrow:read or escrow:write scope.");
+  codeBlock(doc, "GET /api/v1/escrow/transactions/CO-ESC-2026-A3F7D2B1");
+
+  endpointHeading(doc, "POST", "/api/v1/escrow/transactions/:reference/release", "Release funds to beneficiary");
+  bodyText(doc, "Releases held funds to the beneficiary. Transaction must be in funded status. This action is irreversible.\n\nRequires escrow:write scope.");
+  codeBlock(doc, `POST /api/v1/escrow/transactions/CO-ESC-2026-A3F7D2B1/release
+X-API-Key: co_live_...
+
+// Response
+{
+  "success": true,
+  "transaction": { "status": "released", "releasedAt": "..." }
+}`);
+
+  endpointHeading(doc, "POST", "/api/v1/escrow/transactions/:reference/dispute", "Raise a dispute");
+  bodyText(doc, "Marks the transaction as disputed. Transaction must be in funded status.\n\nRequires escrow:write scope.");
+  paramRow(doc, "reason", "string", true, "Description of the dispute (max 1000 chars).");
+  doc.moveDown(0.3);
+  codeBlock(doc, `POST /api/v1/escrow/transactions/CO-ESC-2026-A3F7D2B1/dispute
+{
+  "reason": "Goods were not delivered as specified"
+}`);
+
+  sectionTitle(doc, "Webhook Events");
+  bodyText(doc, "Cellion delivers signed webhook events to your configured webhook URL when a transaction status changes. All events include an X-Cellion-Signature header (HMAC-SHA256) for verification. Configure your webhook URL in the KYC organisation settings page.");
+
+  const events: { name: string; desc: string; payload: string }[] = [
+    {
+      name: "escrow.funded",
+      desc: "Fired when Paystack confirms the buyer's payment.",
+      payload: `{
+  "event": "escrow.funded",
+  "timestamp": "2026-04-12T09:15:00.000Z",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "status": "funded",
+    "amount": 500000,
+    "currency": "NGN",
+    "buyerName": "Emeka Obi",
+    "fundedAt": "2026-04-12T09:15:00.000Z"
+  }
+}`,
+    },
+    {
+      name: "escrow.released",
+      desc: "Fired when funds are released to the beneficiary.",
+      payload: `{
+  "event": "escrow.released",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "status": "released",
+    "releasedAt": "2026-04-15T14:00:00.000Z"
+  }
+}`,
+    },
+    {
+      name: "escrow.disputed",
+      desc: "Fired when a dispute is raised by the platform.",
+      payload: `{
+  "event": "escrow.disputed",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "status": "disputed",
+    "disputeReason": "Goods not delivered as described",
+    "disputedAt": "2026-04-14T11:00:00.000Z"
+  }
+}`,
+    },
+    {
+      name: "escrow.refunded",
+      desc: "Fired when an admin processes a refund for the transaction.",
+      payload: `{
+  "event": "escrow.refunded",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "amount": 500000,
+    "currency": "NGN",
+    "buyerName": "Emeka Obi",
+    "beneficiaryName": "TechBuild Ltd",
+    "refundedAt": "2026-04-16T10:00:00.000Z"
+  }
+}`,
+    },
+    {
+      name: "escrow.expired",
+      desc: "Fired when a pending_payment transaction passes its expiresAt timestamp.",
+      payload: `{
+  "event": "escrow.expired",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "amount": 500000,
+    "currency": "NGN",
+    "buyerName": "Emeka Obi",
+    "beneficiaryName": "TechBuild Ltd",
+    "expiredAt": "2026-04-19T10:00:00.000Z"
+  }
+}`,
+    },
+  ];
+
+  for (const ev of events) {
+    doc.fill(BRAND_GREEN).font("Helvetica-Bold").fontSize(10).text(ev.name, 40, doc.y);
+    doc.fill(TEXT_MUTED).font("Helvetica").fontSize(9).text(ev.desc, 40, doc.y);
+    doc.moveDown(0.4);
+    codeBlock(doc, ev.payload);
+    doc.moveDown(0.5);
+  }
+
+  bodyText(doc, "Signature Verification (Node.js):");
+  codeBlock(doc, `const crypto = require('crypto');
+const secret = process.env.CELLION_WEBHOOK_SECRET;
+const sig = req.headers['x-cellion-signature'];
+const expected = crypto
+  .createHmac('sha256', secret)
+  .update(rawBody)
+  .digest('hex');
+if (sig !== expected) return res.status(401).send('Invalid signature');`);
+
+  sectionTitle(doc, "Error Codes");
+  const errorRows: [string, string, string][] = [
+    ["ESCROW_UNAVAILABLE", "503", "Escrow service is currently disabled (feature flag)"],
+    ["INVALID_API_KEY", "401", "API key missing, invalid, or lacks required escrow scope"],
+    ["TRANSACTION_NOT_FOUND", "404", "Reference does not exist or belongs to another org"],
+    ["INVALID_STATUS", "400", "Transaction is not in the required status for this action"],
+    ["ALREADY_REFUNDED", "400", "Transaction has already been marked as refunded"],
+    ["RATE_LIMIT_EXCEEDED", "429", "60 req/min per API key — retry with exponential backoff"],
+    ["VALIDATION_ERROR", "400", "Request body failed validation — see error message field"],
+  ];
+  doc.moveDown(0.3);
+  for (const [code, status, errDesc] of errorRows) {
+    errorRow(doc, code, status, errDesc);
+  }
+
+  sectionTitle(doc, "Support");
+  bodyText(doc, "For API support and integration guidance, contact:\n\nservice@cellionone.com\nhttps://cellionone.com/api-docs");
+
+  writePageNumbers(doc);
+  doc.end();
+}
+
 // ─── Route registration ──────────────────────────────────────────────────────
 
 export function registerPdfDocsRoutes(app: Express) {
@@ -452,6 +724,15 @@ export function registerPdfDocsRoutes(app: Express) {
       generateKybPdf(res);
     } catch (err) {
       console.error("[PDF Docs] KYB PDF generation error:", err);
+      if (!res.headersSent) res.status(500).send("PDF generation failed");
+    }
+  });
+
+  app.get("/api/docs/escrow-api.pdf", (_req: Request, res: Response) => {
+    try {
+      generateEscrowPdf(res);
+    } catch (err) {
+      console.error("[PDF Docs] Escrow PDF generation error:", err);
       if (!res.headersSent) res.status(500).send("PDF generation failed");
     }
   });

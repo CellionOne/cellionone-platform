@@ -7,6 +7,7 @@ import { startSubscriptionScheduler } from "./services/subscriptionScheduler";
 import { runComplianceDeadlineCheck } from "./services/complianceScheduler";
 import { runKycExpiryCheck, runSanctionsMonitoring, runIndividualExpiryCheck, runDocumentFilesExpiryCheck } from "./services/kycSchedulerService";
 import { startCieScheduler } from "./services/cieScheduler";
+import { runEscrowExpiry } from "./routes/escrowApiRoutes";
 import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUploadMiddleware } from "./middleware/security";
 
 // Log as early as possible so deployment systems can confirm startup
@@ -279,6 +280,11 @@ httpServer.listen(
       runSanctionsMonitoring().catch(console.error);
     }, SEVEN_DAYS_MS);
     runSanctionsMonitoring().catch(console.error);
+
+    // Auto-expire stale escrow API transactions every 30 minutes
+    const THIRTY_MIN_MS = 30 * 60 * 1000;
+    runEscrowExpiry().catch(console.error);
+    setInterval(() => runEscrowExpiry().catch(console.error), THIRTY_MIN_MS);
 
     // Clean up expired login attempts every hour
     setInterval(() => {

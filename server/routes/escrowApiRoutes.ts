@@ -3,7 +3,7 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { db } from "../db";
 import { eq, desc } from "drizzle-orm";
-import { kycWebhookConfigs, escrowTransactions, userRoles } from "@shared/schema";
+import { kycWebhookConfigs, escrowTransactions, userRoles, escrowApiTransactions } from "@shared/schema";
 import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth";
 import { isAuthenticated } from "../replit_integrations/auth";
 import crypto from "crypto";
@@ -551,9 +551,10 @@ export function registerEscrowApiRoutes(app: Express): void {
       if (!tx) return res.status(404).json({ error: "Transaction not found" });
       if (tx.status === "refunded") return res.status(400).json({ error: "Already refunded" });
 
+      const refundedAt = new Date();
       const updated = await storage.updateEscrowApiTransaction(id, {
         status: "refunded",
-        refundedAt: new Date(),
+        refundedAt,
       });
 
       await storage.createAuditLog({
@@ -562,6 +563,17 @@ export function registerEscrowApiRoutes(app: Express): void {
         entityType: "escrow_api_transaction",
         entityId: String(id),
         details: { reference: tx.reference },
+      });
+
+      await deliverEscrowWebhook(tx.orgId, "escrow.refunded", {
+        reference: tx.reference,
+        amount: tx.amount,
+        currency: tx.currency,
+        buyerName: tx.buyerName,
+        buyerEmail: tx.buyerEmail,
+        beneficiaryName: tx.beneficiaryName,
+        beneficiaryEmail: tx.beneficiaryEmail,
+        refundedAt: refundedAt.toISOString(),
       });
 
       res.json({ success: true, transaction: updated });
@@ -780,4 +792,37 @@ export function registerEscrowApiRoutes(app: Express): void {
   });
 
   console.log("[EscrowAPI] Routes registered");
+}
+
+// ─── Auto-Expiry Scheduler ────────────────────────────────────────────────────
+
+/**
+ * Marks pending_payment escrow API transactions as expired when their
+ * expiresAt timestamp has passed. Fires escrow.expired webhook for each.
+ * Called every 30 minutes from server/index.ts.
+ */
+export async function runEscrowExpiry(): Promise<void> {
+  try {
+    const expired = await storage.getExpiredPendingEscrowTransactions();
+    if (expired.length === 0) return;
+
+    const ids = expired.map((tx) => tx.id);
+    await storage.bulkExpireEscrowTransactions(ids);
+
+    for (const tx of expired) {
+      await deliverEscrowWebhook(tx.orgId, "escrow.expired", {
+        reference: tx.reference,
+        amount: tx.amount,
+        currency: tx.currency,
+        buyerName: tx.buyerName,
+        buyerEmail: tx.buyerEmail,
+        beneficiaryName: tx.beneficiaryName,
+        expiredAt: new Date().toISOString(),
+      });
+    }
+
+    console.log(`[EscrowExpiry] Expired ${expired.length} stale transactions.`);
+  } catch (err: any) {
+    console.error("[EscrowExpiry] Auto-expiry run failed:", err.message);
+  }
 }

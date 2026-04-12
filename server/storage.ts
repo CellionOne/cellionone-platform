@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, and, desc, sql, count, inArray, or, ilike, gte, lte } from "drizzle-orm";
+import { eq, and, desc, sql, count, inArray, or, ilike, gte, lte, lt, isNotNull } from "drizzle-orm";
 import {
   users, type User,
   founderProfiles, type FounderProfile, type InsertFounderProfile,
@@ -1836,6 +1836,22 @@ export class DatabaseStorage implements IStorage {
       .where(eq(escrowApiTransactions.id, id))
       .returning();
     return tx;
+  }
+
+  async getExpiredPendingEscrowTransactions(): Promise<EscrowApiTransaction[]> {
+    return db.select().from(escrowApiTransactions)
+      .where(and(
+        eq(escrowApiTransactions.status, "pending_payment"),
+        isNotNull(escrowApiTransactions.expiresAt),
+        lt(escrowApiTransactions.expiresAt, new Date()),
+      ));
+  }
+
+  async bulkExpireEscrowTransactions(ids: number[]): Promise<void> {
+    if (ids.length === 0) return;
+    await db.update(escrowApiTransactions)
+      .set({ status: "expired", updatedAt: new Date() })
+      .where(inArray(escrowApiTransactions.id, ids));
   }
 
   // Procurement Invoices

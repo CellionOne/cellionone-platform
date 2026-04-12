@@ -1745,10 +1745,21 @@ export default function ApiDocsPage() {
           {/* ── Escrow-as-a-Service ── */}
           <section id="escrow-api" className="space-y-6 scroll-mt-24">
             <div>
-              <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-escrow-api">
-                <Shield className="h-5 w-5" />
-                Escrow-as-a-Service
-              </h2>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <h2 className="text-2xl font-bold flex items-center gap-2" data-testid="heading-escrow-api">
+                  <Shield className="h-5 w-5" />
+                  Escrow-as-a-Service
+                </h2>
+                <a
+                  href="/api/docs/escrow-api.pdf"
+                  download="cellion-one-escrow-api-guide.pdf"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-border bg-muted hover:bg-muted/70 transition-colors shrink-0"
+                  data-testid="button-download-escrow-pdf"
+                >
+                  <Download className="h-3.5 w-3.5 mr-1" />
+                  Download Escrow API Guide (PDF)
+                </a>
+              </div>
               <p className="text-muted-foreground mt-2">
                 The Escrow API lets your platform hold buyer funds securely in a Cellion-managed escrow until
                 both parties confirm fulfilment — no bank integrations required. Funds are collected via
@@ -1961,6 +1972,33 @@ export default function ApiDocsPage() {
     "status": "disputed",
     "disputeReason": "Goods not delivered as described",
     "disputedAt": "2026-04-04T11:00:00.000Z"
+  }
+}
+
+// escrow.refunded — admin processed a refund
+{
+  "event": "escrow.refunded",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "amount": 500000,
+    "currency": "NGN",
+    "buyerName": "Emeka Obi",
+    "buyerEmail": "emeka@example.com",
+    "beneficiaryName": "TechBuild Ltd",
+    "refundedAt": "2026-04-06T10:00:00.000Z"
+  }
+}
+
+// escrow.expired — payment link expired before buyer paid
+{
+  "event": "escrow.expired",
+  "data": {
+    "reference": "CO-ESC-2026-A3F7D2B1",
+    "amount": 500000,
+    "currency": "NGN",
+    "buyerName": "Emeka Obi",
+    "beneficiaryName": "TechBuild Ltd",
+    "expiredAt": "2026-04-09T10:00:00.000Z"
   }
 }`}
               />

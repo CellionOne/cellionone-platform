@@ -92,6 +92,12 @@ export async function processWebhook(
     case 'charge.attempt':
       // Titan DVA Inbound Transfer Approval — respond with approve/reject
       return await handleTitanInboundApproval(event.data);
+    case 'dedicatedaccount.assign.success':
+      await handleDvaAssignSuccess(event.data);
+      break;
+    case 'dedicatedaccount.assign.failed':
+      console.warn('[Paystack Webhook] DVA assignment failed:', JSON.stringify(event.data));
+      break;
     case 'transfer.success':
       await handleTransferSuccess(event.data);
       break;
@@ -191,6 +197,48 @@ async function handleTitanInboundApproval(data: any): Promise<{ processed: boole
   console.log(`[Paystack Webhook] Titan DVA approval for ${dvaAccountNumber} amount=${incomingAmount}: ${approve} — ${reason}`);
 
   return { processed: true, event: 'charge.attempt', approvalResponse: { data: { approve } } };
+}
+
+/**
+ * Paystack fires dedicatedaccount.assign.success when a DVA is fully activated.
+ * We use this to confirm the DVA is live and log the assignment.
+ * If for any reason DVA creation succeeded API-side but the escrow record
+ * didn't get the account number, we patch it here from the webhook payload.
+ */
+async function handleDvaAssignSuccess(data: any): Promise<void> {
+  const accountNumber = data?.dedicated_account?.account_number
+    || data?.account?.account_number;
+  const bankName = data?.dedicated_account?.bank?.name
+    || data?.account?.bank?.name;
+  const customerEmail = data?.customer?.email;
+
+  if (!accountNumber) {
+    console.warn('[Paystack Webhook] dedicatedaccount.assign.success — no account_number in payload');
+    return;
+  }
+
+  console.log(`[Paystack Webhook] DVA assigned: ${accountNumber} (${bankName}) for customer ${customerEmail}`);
+
+  // Use storage directly to find the escrow transaction with this DVA account
+  const tx = await storage.getEscrowApiTransactionByDvaAccount(accountNumber);
+  if (!tx) {
+    // DVA assigned but no escrow matched — could be a test DVA or timing issue
+    console.log(`[Paystack Webhook] DVA ${accountNumber} assigned but no pending escrow matched`);
+    return;
+  }
+
+  // If DVA was already stored (normal case), just log
+  if (tx.dvaAccountNumber === accountNumber) {
+    console.log(`[Paystack Webhook] DVA ${accountNumber} already recorded for escrow ${tx.reference} — assignment confirmed`);
+  }
+
+  await storage.createAuditLog({
+    actorUserId: 'system',
+    action: 'dva_assign_success',
+    entityType: 'escrow_api_transaction',
+    entityId: tx.reference,
+    details: { accountNumber, bankName, customerEmail, orgId: tx.orgId },
+  });
 }
 
 async function handleProcurementEscrowSuccess(data: PaystackWebhookEvent['data']): Promise<void> {

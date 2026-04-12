@@ -153,8 +153,10 @@ export async function handleDvaEscrowFunded(
     console.error(`[EscrowAPI] No escrow found for DVA account ${dvaAccountNumber}`);
     return;
   }
-  if (tx.status === "funded") {
-    console.log(`[EscrowAPI] DVA escrow ${tx.reference} already funded`);
+  // Only allow pending_payment → funded. Ignore duplicate/late DVA credits
+  // for transactions already in a terminal or advanced state.
+  if (tx.status !== "pending_payment") {
+    console.log(`[EscrowAPI] DVA escrow ${tx.reference} received charge.success but status is "${tx.status}" — ignoring`);
     return;
   }
 

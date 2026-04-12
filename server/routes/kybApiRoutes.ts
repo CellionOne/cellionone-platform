@@ -138,35 +138,21 @@ export function registerKybApiRoutes(app: Express) {
         .where(eq(kybLookups.id, lookup.id))
         .returning();
 
-      // Deduct credit for genuine lookup outcomes (found or not_found).
-      try {
-        await billingService.deductCredit(orgId, "kyb", lookup.id);
-        await db.update(kybLookups)
-          .set({ creditDeducted: true, updatedAt: new Date() })
-          .where(eq(kybLookups.id, lookup.id));
-        updated.creditDeducted = true;
-      } catch (billingErr: any) {
-        console.error("[KYB API] Credit deduction error:", billingErr);
-      }
+      // Deduct credit — mandatory for found/not_found. If deduction fails, return error.
+      await billingService.deductCredit(orgId, "kyb", lookup.id);
+      await db.update(kybLookups)
+        .set({ creditDeducted: true, updatedAt: new Date() })
+        .where(eq(kybLookups.id, lookup.id));
+      updated.creditDeducted = true;
 
-      // Audit log
-      try {
-        await storage.createAuditLog({
-          actorUserId: null,
-          action: "kyb_api_lookup",
-          entityType: "kyb_lookup",
-          entityId: String(lookup.id),
-          details: {
-            orgId,
-            rcNumber: cleanRc,
-            status,
-            found: result.found,
-            reference,
-          },
-        });
-      } catch (auditErr) {
-        console.error("[KYB API] Audit log error (non-blocking):", auditErr);
-      }
+      // Audit log (non-blocking — failure does not affect response).
+      storage.createAuditLog({
+        actorUserId: null,
+        action: "kyb_api_lookup",
+        entityType: "kyb_lookup",
+        entityId: String(lookup.id),
+        details: { orgId, rcNumber: cleanRc, status, found: result.found, reference },
+      }).catch((auditErr: any) => console.error("[KYB API] Audit log error:", auditErr));
 
       return res.status(status === "not_found" ? 404 : 200).json(buildLookupResponse(updated));
     } catch (err: any) {

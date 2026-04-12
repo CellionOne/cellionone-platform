@@ -386,7 +386,7 @@ function generateKybPdf(res: Response) {
   "data": [ /* array of lookup records */ ],
   "limit": 20,
   "offset": 0,
-  "count": 20
+  "pageCount": 20
 }`);
 
   endpointHeading(doc, "GET", "/api/v1/kyb/lookups/:reference", "Retrieve a single lookup by reference");

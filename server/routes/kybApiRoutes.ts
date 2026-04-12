@@ -154,7 +154,11 @@ export function registerKybApiRoutes(app: Express) {
         details: { orgId, rcNumber: cleanRc, status, found: result.found, reference },
       }).catch((auditErr: any) => console.error("[KYB API] Audit log error:", auditErr));
 
-      return res.status(status === "not_found" ? 404 : 200).json(buildLookupResponse(updated));
+      const responseBody = buildLookupResponse(updated);
+      if (status === "not_found") {
+        return res.status(404).json({ ...responseBody, code: "RC_NOT_FOUND" });
+      }
+      return res.status(200).json(responseBody);
     } catch (err: any) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ error: "Validation error", details: err.errors });

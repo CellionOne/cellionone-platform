@@ -1114,16 +1114,20 @@ export async function registerRoutes(
   app.post("/api/auth/forgot-password", async (req: any, res) => {
     try {
       const { email } = req.body;
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       const result = await authService.requestPasswordReset(email, baseUrl);
       
       // Security audit log - password reset requested
       await storage.createAuditLog({
         action: "password_reset_requested",
         entityType: "user",
-        details: { email: email?.toLowerCase(), success: true },
+        details: { email: email?.toLowerCase(), success: result.success },
         ipAddress: req.ip,
       });
+
+      if (!result.success) {
+        return res.status(500).json({ message: result.message });
+      }
       
       res.json({ message: result.message });
     } catch (error) {

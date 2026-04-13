@@ -95,29 +95,25 @@ async function sendBankInviteEmail(email: string, bankName: string, token: strin
 }
 
 async function sendBankPasswordResetEmail(email: string, token: string, baseUrl: string) {
-  try {
-    const { client, fromEmail } = await getResendClient();
-    const link = `${baseUrl}/bank/reset-password?token=${token}`;
-    await client.emails.send({
-      from: fromEmail,
-      to: email,
-      subject: "Reset your Cellion One Bank Portal password",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #1a1a1a;">Password Reset Request</h2>
-          <p>We received a request to reset your Cellion One Bank Portal password.</p>
-          <div style="text-align: center; margin: 24px 0;">
-            <a href="${link}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
-              Reset Password
-            </a>
-          </div>
-          <p style="color: #666; font-size: 14px;">This link expires in 2 hours. If you did not request this, please ignore this email.</p>
+  const { client, fromEmail } = await getResendClient();
+  const link = `${baseUrl}/bank/reset-password?token=${token}`;
+  await client.emails.send({
+    from: fromEmail,
+    to: email,
+    subject: "Reset your Cellion One Bank Portal password",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1a1a1a;">Password Reset Request</h2>
+        <p>We received a request to reset your Cellion One Bank Portal password.</p>
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="${link}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+            Reset Password
+          </a>
         </div>
-      `,
-    });
-  } catch (err) {
-    console.error("[BankPortal] Failed to send password reset email:", err);
-  }
+        <p style="color: #666; font-size: 14px;">This link expires in 2 hours. If you did not request this, please ignore this email.</p>
+      </div>
+    `,
+  });
 }
 
 type DispatchCompanyProfile = {
@@ -468,8 +464,13 @@ export function registerBankPortalRoutes(app: Express): void {
         const token = generateToken();
         const expiry = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS);
         await storage.updateBankPortalUser(user.id, { resetToken: token, resetTokenExpiry: expiry });
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
-        await sendBankPasswordResetEmail(email, token, baseUrl);
+        const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
+        try {
+          await sendBankPasswordResetEmail(email, token, baseUrl);
+        } catch (emailErr: any) {
+          console.error("[BankPortal] Failed to send password reset email:", emailErr);
+          return res.status(500).json({ error: "Failed to send reset email. Please try again shortly." });
+        }
       }
 
       res.json({ ok: true, message: "If that email is registered, a reset link has been sent." });

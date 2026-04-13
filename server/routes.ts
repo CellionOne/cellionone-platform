@@ -3262,18 +3262,13 @@ export async function registerRoutes(
       }));
 
       // Count unverified founders accurately — KYB-pipeline founders are still unverified until biometric completes
-      const founderIsUnverified = !founderVerified;
-      const founderNeedsFee = founderIsUnverified && !isKybPipelineVerified; // KYB path = free
       const unverifiedPeople = people.filter(p => !p.isVerified).length;
-      const unverifiedCount = (founderIsUnverified ? 1 : 0) + unverifiedPeople;
-      const feeableUnverifiedCount = (founderNeedsFee ? 1 : 0) + unverifiedPeople;
+      const unverifiedCount = (!founderVerified ? 1 : 0) + unverifiedPeople;
 
       res.json({
         founderVerified,
         people,
         unverifiedCount,
-        verificationFeePerPerson: 1000000,
-        totalVerificationFee: feeableUnverifiedCount * 1000000,
         founderVerificationStatus: verificationStatus.status,
         founderExpiresAt: verificationStatus.expiresAt,
         founderDaysUntilExpiry: verificationStatus.daysUntilExpiry,
@@ -3361,20 +3356,8 @@ export async function registerRoutes(
         }
       }
 
-      const hasVerify = finalItems.some((i) => i.sku === "VERIFY");
-      if (!hasVerify) {
-        let verifyCount = 0;
-        if (!user.isIdentityVerified) {
-          verifyCount = 1;
-        }
-        // Include ALL declared people (draft/pending/accepted) who are not yet verified
-        const unverifiedPeople = scopedPeople.filter(p => !p.isVerified);
-        verifyCount += unverifiedPeople.length;
-
-        if (verifyCount > 0) {
-          finalItems.push({ sku: "VERIFY", quantity: verifyCount });
-        }
-      }
+      // Identity verification is absorbed by Cellion — VERIFY SKU is never auto-added to founder orders.
+      // Verification runs silently post-payment at no charge to the founder.
 
       const { order, items: orderItemRecords } = await orderService.createOrder({
         founderId: userId,

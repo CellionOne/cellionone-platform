@@ -3331,6 +3331,13 @@ export async function registerRoutes(
 
       let finalItems: { sku: string; quantity?: number }[] = items.map((i: { sku: string }) => ({ sku: i.sku }));
 
+      // Guard: remove any VERIFY SKUs from client-submitted items — verification is absorbed by Cellion
+      // and must never appear in a founder split order regardless of client payload.
+      finalItems = finalItems.filter(i => i.sku !== "VERIFY");
+      if (finalItems.length === 0) {
+        return res.status(400).json({ message: "No valid items in order." });
+      }
+
       // Service gating: block post-inc SKU purchases only when all the founder's existing-company profiles
       // are unverified AND the order has no applicationId (incorporation context).
       // Founders with a verified existing company OR a completed incorporation may always purchase.

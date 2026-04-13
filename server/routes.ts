@@ -1114,7 +1114,7 @@ export async function registerRoutes(
   app.post("/api/auth/forgot-password", async (req: any, res) => {
     try {
       const { email } = req.body;
-      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
+      const baseUrl = emailService.getSiteBaseUrl(req);
       const result = await authService.requestPasswordReset(email, baseUrl);
       
       // Security audit log - password reset requested

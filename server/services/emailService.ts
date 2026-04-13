@@ -1,6 +1,17 @@
 import { Resend } from 'resend';
+import { Request } from 'express';
 
 export const ADMIN_NOTIFICATION_EMAIL = 'service@cellionone.com';
+
+/**
+ * Returns the authoritative base URL for constructing email links.
+ * Uses SITE_URL env var when set (recommended in production) so links always
+ * point at the correct deployed domain regardless of reverse-proxy behaviour.
+ * Falls back to deriving the URL from the Express request (works in dev).
+ */
+export function getSiteBaseUrl(req: Request): string {
+  return process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
+}
 
 let connectionSettings: any;
 

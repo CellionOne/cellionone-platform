@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
-import { getResendClient, ADMIN_NOTIFICATION_EMAIL } from "../services/emailService";
+import { getResendClient, ADMIN_NOTIFICATION_EMAIL, getSiteBaseUrl } from "../services/emailService";
 import { db } from "../db";
 import { eq, desc } from "drizzle-orm";
 import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications } from "@shared/schema";
@@ -464,7 +464,7 @@ export function registerBankPortalRoutes(app: Express): void {
         const token = generateToken();
         const expiry = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS);
         await storage.updateBankPortalUser(user.id, { resetToken: token, resetTokenExpiry: expiry });
-        const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
+        const baseUrl = getSiteBaseUrl(req);
         try {
           await sendBankPasswordResetEmail(email, token, baseUrl);
         } catch (emailErr: any) {

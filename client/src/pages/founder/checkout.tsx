@@ -6,14 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import {
   ShoppingCart, Building2, FileText, Shield, Loader2, Plus, X,
-  ExternalLink, CheckCircle2, Sparkles, ArrowRight, Users, Clock,
-  MapPin, Hash, ClipboardList, ShieldCheck, Info, AlertTriangle
+  ExternalLink, CheckCircle2, Sparkles, Users, Clock,
+  MapPin, Hash, ClipboardList, Info, AlertTriangle
 } from "lucide-react";
 
 interface Product {
@@ -84,7 +82,6 @@ function getSkuPriceLabel(sku: string, priceNgn: number): string {
 
 export default function CheckoutPage() {
   const { toast } = useToast();
-  const { user } = useAuth();
   const [, setLocation] = useLocation();
 
   const { applicationId, initSkus } = (() => {
@@ -100,26 +97,8 @@ export default function CheckoutPage() {
   const [mode, setMode] = useState<CheckoutMode>("new_company");
   const [selectedSkus, setSelectedSkus] = useState<string[]>(initSkus);
 
-  const isVerified = !!(user as any)?.isIdentityVerified;
-
   const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
-  });
-
-  interface VerificationInfo {
-    founderVerified: boolean;
-    people: { id: number; email: string | null; role: string; title: string | null; isVerified: boolean; inviteStatus: string }[];
-    unverifiedCount: number;
-    verificationFeePerPerson: number;
-    totalVerificationFee: number;
-  }
-
-  const verificationInfoUrl = applicationId
-    ? `/api/checkout/verification-info?applicationId=${applicationId}`
-    : "/api/checkout/verification-info";
-
-  const { data: verificationInfo } = useQuery<VerificationInfo>({
-    queryKey: [verificationInfoUrl],
   });
 
   interface ReadinessSummary {
@@ -146,11 +125,6 @@ export default function CheckoutPage() {
   const profilesReady = readiness?.summary?.allReady ?? true;
   const incompletePeople = readiness?.people?.filter(p => !p.isProfileComplete) ?? [];
 
-  const verifyProduct = useMemo(
-    () => products?.find(p => p.sku === "VERIFY") || null,
-    [products]
-  );
-
   const cacProducts = useMemo(
     () => products?.filter(p => p.sku.startsWith("CAC_") && !p.requiresManualPricing) || [],
     [products]
@@ -166,28 +140,14 @@ export default function CheckoutPage() {
     [products]
   );
 
-  const unverifiedCount = verificationInfo?.unverifiedCount || 0;
-  const needsVerification = unverifiedCount > 0 && selectedSkus.length > 0;
-
   const selectedProducts = useMemo(
     () => products?.filter(p => selectedSkus.includes(p.sku)) || [],
     [products, selectedSkus]
   );
 
-  const allCheckoutSkus = useMemo(() => {
-    if (needsVerification && !selectedSkus.includes("VERIFY")) {
-      return [...selectedSkus, "VERIFY"];
-    }
-    return selectedSkus;
-  }, [selectedSkus, needsVerification]);
-
   const totalKobo = useMemo(() => {
-    let total = selectedProducts.reduce((sum, p) => sum + p.priceNgn, 0);
-    if (needsVerification && verifyProduct && !selectedSkus.includes("VERIFY")) {
-      total += verifyProduct.priceNgn * unverifiedCount;
-    }
-    return total;
-  }, [selectedProducts, needsVerification, verifyProduct, selectedSkus, unverifiedCount]);
+    return selectedProducts.reduce((sum, p) => sum + p.priceNgn, 0);
+  }, [selectedProducts]);
 
   const hasIncorporation = selectedSkus.some(s => s.startsWith("CAC_") || s === "NGO");
 
@@ -227,7 +187,7 @@ export default function CheckoutPage() {
   const checkoutMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/checkout/split", {
-        items: allCheckoutSkus.map(sku => ({ sku })),
+        items: selectedSkus.map(sku => ({ sku })),
         ...(applicationId ? { applicationId } : {}),
       });
       return res.json();
@@ -613,50 +573,6 @@ export default function CheckoutPage() {
                       <span className="text-sm font-medium flex-shrink-0">{getSkuPriceLabel(p.sku, p.priceNgn)}</span>
                     </div>
                   ))}
-
-                  {needsVerification && verifyProduct && (
-                    <>
-                      <Separator />
-                      <div className="flex items-center justify-between gap-2" data-testid="summary-item-VERIFY">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <ShieldCheck className="h-4 w-4 text-primary flex-shrink-0" />
-                          <span className="text-sm truncate">
-                            Identity Verification — {unverifiedCount} {unverifiedCount === 1 ? "person" : "people"} × {formatNgn(verifyProduct.priceNgn)}
-                          </span>
-                        </div>
-                        <span className="text-sm font-medium flex-shrink-0">{formatNgn(verifyProduct.priceNgn * unverifiedCount)}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground pl-6 space-y-1">
-                        <p>Covers BVN/NIN validation, document verification, biometric selfie matching, and AML screening.</p>
-                        {verificationInfo && (
-                          <div className="space-y-0.5 mt-1">
-                            {!verificationInfo.founderVerified && (
-                              <p className="flex items-center gap-1" data-testid="verify-line-founder">
-                                <span className="text-yellow-600 dark:text-yellow-400">•</span>
-                                <span>You (Founder) — {formatNgn(verifyProduct.priceNgn)}</span>
-                              </p>
-                            )}
-                            {verificationInfo.people.filter(p => !p.isVerified).map(p => (
-                              <p key={p.id} className="flex items-center gap-1" data-testid={`verify-line-${p.id}`}>
-                                <span className="text-yellow-600 dark:text-yellow-400">•</span>
-                                <span>
-                                  {p.title || p.email}{p.title && p.email ? ` (${p.email})` : ""}
-                                  {" "}— {p.role.replace(/_/g, " ")} — {formatNgn(verifyProduct.priceNgn)}
-                                </span>
-                              </p>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-                  {unverifiedCount === 0 && selectedSkus.length > 0 && (
-                    <div className="flex items-center gap-2 text-xs text-primary" data-testid="text-already-verified">
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      <span>All identities verified — no additional verification fee</span>
-                    </div>
-                  )}
 
                   <Separator />
                   <div className="flex items-center justify-between gap-2">

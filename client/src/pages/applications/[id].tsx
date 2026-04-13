@@ -73,14 +73,6 @@ interface ApplicationDetails {
   clarifications: ClarificationRequest[];
 }
 
-interface VerificationInfo {
-  founderVerified: boolean;
-  people: { id: number; email: string | null; role: string; title: string | null; isVerified: boolean }[];
-  unverifiedCount: number;
-  verificationFeePerPerson: number;
-  totalVerificationFee: number;
-}
-
 interface Product {
   id: number;
   sku: string;
@@ -155,11 +147,6 @@ export default function ApplicationDetailsPage() {
     queryKey: ["/api/company-people/readiness"],
   });
   const teamPeople = teamReadiness?.people ?? [];
-
-  const { data: verificationInfo } = useQuery<VerificationInfo>({
-    queryKey: [`/api/checkout/verification-info?applicationId=${applicationId}`],
-    enabled: !!applicationId,
-  });
 
   const { data: products } = useQuery<Product[]>({
     queryKey: ["/api/products"],
@@ -250,10 +237,7 @@ export default function ApplicationDetailsPage() {
   };
 
   const INCORPORATION_FEE_KOBO = 10000000;
-  const verifyCount = verificationInfo?.unverifiedCount ?? 0;
-  const verifyFeePerPerson = verificationInfo?.verificationFeePerPerson ?? 1000000;
-  const totalVerifyFee = verifyCount * verifyFeePerPerson;
-  const estimatedTotal = INCORPORATION_FEE_KOBO + totalVerifyFee + addOnsTotalKobo;
+  const estimatedTotal = INCORPORATION_FEE_KOBO + addOnsTotalKobo;
 
   if (isLoading) return <LoadingPage />;
 
@@ -587,25 +571,6 @@ export default function ApplicationDetailsPage() {
                         <span className="text-muted-foreground">Company Incorporation</span>
                         <span className="font-medium">₦100,000</span>
                       </div>
-                      {verifyCount > 0 && (
-                        <div className="flex items-start justify-between gap-2" data-testid="fee-line-verification">
-                          <div>
-                            <span className="text-muted-foreground">Identity Verification</span>
-                            <p className="text-xs text-muted-foreground">
-                              {verifyCount} {verifyCount === 1 ? "person" : "people"} × ₦{(verifyFeePerPerson / 100).toLocaleString()}
-                            </p>
-                          </div>
-                          <span className="font-medium shrink-0">
-                            ₦{(totalVerifyFee / 100).toLocaleString()}
-                          </span>
-                        </div>
-                      )}
-                      {verifyCount === 0 && verificationInfo && (
-                        <div className="flex items-center gap-1.5 text-xs text-primary" data-testid="fee-line-verified">
-                          <ShieldCheck className="h-3.5 w-3.5" />
-                          <span>All identities verified — no verification fee</span>
-                        </div>
-                      )}
                       {selectedAddOnProducts.map(p => (
                         <div key={p.sku} className="flex items-center justify-between" data-testid={`fee-line-addon-${p.sku}`}>
                           <span className="text-muted-foreground">{ADD_ON_META[p.sku]?.label || p.name}</span>

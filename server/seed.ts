@@ -80,19 +80,20 @@ export async function seedDatabase() {
     }
     console.log("Synced service addresses");
 
-    // Seed product catalog with fixed-cut SKUs (prices in kobo: ₦1 = 100 kobo)
+    // Seed product catalog — cellionCutNgn = 10% of priceNgn for all service SKUs
+    // Pass-through SKUs (OFFICE_*, EXISTING_CO_*, BANK_ACCOUNT) retain full or zero cut as noted
     const catalogItems = [
-      { sku: "CAC_1M", name: "Company Incorporation (₦1M Share Capital)", category: "incorporation", priceNgn: 10000000, cellionCutNgn: 2500000, metadata: { shareCapital: 1000000 } },
-      { sku: "CAC_5M", name: "Company Incorporation (₦5M Share Capital)", category: "incorporation", priceNgn: 15000000, cellionCutNgn: 2500000, metadata: { shareCapital: 5000000 } },
+      { sku: "CAC_1M", name: "Company Incorporation (₦1M Share Capital)", category: "incorporation", priceNgn: 10000000, cellionCutNgn: 1000000, metadata: { shareCapital: 1000000 } },
+      { sku: "CAC_5M", name: "Company Incorporation (₦5M Share Capital)", category: "incorporation", priceNgn: 15000000, cellionCutNgn: 1500000, metadata: { shareCapital: 5000000 } },
       { sku: "CAC_10M", name: "Company Incorporation (₦10M Share Capital)", category: "incorporation", priceNgn: 35000000, cellionCutNgn: 3500000, metadata: { shareCapital: 10000000 } },
-      { sku: "CAC_20M", name: "Company Incorporation (₦20M Share Capital)", category: "incorporation", priceNgn: 55000000, cellionCutNgn: 4000000, metadata: { shareCapital: 20000000 } },
-      { sku: "CAC_100M", name: "Company Incorporation (₦100M Share Capital, incl. Foreign Participation per CAMA)", category: "incorporation", priceNgn: 300000000, cellionCutNgn: 10000000, metadata: { shareCapital: 100000000, foreignParticipation: true } },
-      { sku: "SCUML", name: "SCUML Certificate (EFCC)", category: "post_incorporation", priceNgn: 15000000, cellionCutNgn: 2500000, metadata: { deliveryDays: 5 } },
-      { sku: "TM", name: "Trademark Registration (2 Stages)", category: "post_incorporation", priceNgn: 25000000, cellionCutNgn: 3500000 },
-      { sku: "TIN", name: "TIN Registration (FIRS)", category: "post_incorporation", priceNgn: 2000000, cellionCutNgn: 1000000, metadata: { note: "Price may vary by company location" } },
-      { sku: "NGO", name: "Registration of Incorporated Trustees (NGO)", category: "incorporation", priceNgn: 25000000, cellionCutNgn: 4000000, metadata: { note: "Includes filing fees, newspaper publications, constitution and legal charges" } },
-      { sku: "VERIFY", name: "Identity & Company Verification", category: "verification", priceNgn: 1000000, cellionCutNgn: 1000000, metadata: { note: "One-time verification fee per person. Covers BVN/NIN validation, government ID document verification, biometric selfie matching, and AML/sanctions screening through Smile ID." } },
-      { sku: "ADD_DIR", name: "Add Director to Company", category: "post_incorporation", priceNgn: 7500000, cellionCutNgn: 2000000, metadata: { note: "Post-incorporation service to formally appoint a new director at the Corporate Affairs Commission (CAC). Includes Form CAC 7 filing and board resolution preparation." } },
+      { sku: "CAC_20M", name: "Company Incorporation (₦20M Share Capital)", category: "incorporation", priceNgn: 55000000, cellionCutNgn: 5500000, metadata: { shareCapital: 20000000 } },
+      { sku: "CAC_100M", name: "Company Incorporation (₦100M Share Capital, incl. Foreign Participation per CAMA)", category: "incorporation", priceNgn: 300000000, cellionCutNgn: 30000000, metadata: { shareCapital: 100000000, foreignParticipation: true } },
+      { sku: "SCUML", name: "SCUML Certificate (EFCC)", category: "post_incorporation", priceNgn: 15000000, cellionCutNgn: 1500000, metadata: { deliveryDays: 5 } },
+      { sku: "TM", name: "Trademark Registration (2 Stages)", category: "post_incorporation", priceNgn: 25000000, cellionCutNgn: 2500000 },
+      { sku: "TIN", name: "TIN Registration (FIRS)", category: "post_incorporation", priceNgn: 2000000, cellionCutNgn: 200000, metadata: { note: "Price may vary by company location" } },
+      { sku: "NGO", name: "Registration of Incorporated Trustees (NGO)", category: "incorporation", priceNgn: 25000000, cellionCutNgn: 2500000, metadata: { note: "Includes filing fees, newspaper publications, constitution and legal charges" } },
+      { sku: "VERIFY", name: "Identity & Company Verification", category: "verification", priceNgn: 1000000, cellionCutNgn: 1000000, metadata: { note: "Identity verification cost absorbed by Cellion. Covers BVN/NIN validation, government ID document verification, biometric selfie matching, and AML/sanctions screening through Smile ID." } },
+      { sku: "ADD_DIR", name: "Add Director to Company", category: "post_incorporation", priceNgn: 7500000, cellionCutNgn: 750000, metadata: { note: "Post-incorporation service to formally appoint a new director at the Corporate Affairs Commission (CAC). Includes Form CAC 7 filing and board resolution preparation." } },
       { sku: "OFFICE_ONLY", name: "Registered Office Address (Office Only)", category: "registered_office", priceNgn: 7500000, cellionCutNgn: 7500000, metadata: { tier: "office_only", annual: true, note: "Annual registered office address at our Lagos premises. Includes official CAC-registered address and annual renewal." } },
       { sku: "OFFICE_PLUS_MAIL", name: "Registered Office Address (Office + Mail Handling)", category: "registered_office", priceNgn: 15000000, cellionCutNgn: 15000000, metadata: { tier: "office_plus_mail", annual: true, note: "Annual registered office address plus mail receiving, scanning, and forwarding services." } },
       { sku: "EXISTING_CO_VERIFY", name: "Existing Company Verification", category: "verification", priceNgn: 1500000, cellionCutNgn: 1500000, metadata: { note: "One-time verification fee for existing Nigerian companies. Covers automated CAC registry check (KYB), TIN verification, director BVN/NIN checks, and AML/sanctions screening. Includes up to 2 directors; additional directors billed at ₦2,500 each." } },

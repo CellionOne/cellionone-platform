@@ -334,14 +334,17 @@ async function sendDispatchEmail(
       </html>
     `;
 
-    for (const address of addresses) {
-      await client.emails.send({
-        from: fromEmail,
-        to: address,
-        subject: `Company Dossier: ${company.companyName || "Unknown Company"}`,
-        html,
-      });
-    }
+    // Send one email to all bank addresses, with super admin CC'd for confirmation.
+    // Using a single send avoids the super admin receiving duplicate copies when
+    // a bank has multiple registered addresses.
+    await client.emails.send({
+      from: fromEmail,
+      to: addresses,
+      cc: [ADMIN_NOTIFICATION_EMAIL],
+      subject: `Company Dossier: ${company.companyName || "Unknown Company"} — ${bankName}`,
+      html,
+    });
+    console.log(`[BankPortal] Dossier dispatched to ${addresses.length} bank address(es), CC: ${ADMIN_NOTIFICATION_EMAIL}`);
   } catch (err) {
     console.error("[BankPortal] Failed to send dispatch email:", err);
     throw err;

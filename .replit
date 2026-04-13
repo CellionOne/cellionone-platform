@@ -62,7 +62,7 @@ PAYSTACK_CIE_PRO_PLAN_CODE = "PLN_izsapf1t62ez14t"
 
 [userenv.production]
 ADMIN_BOOTSTRAP_PASSWORD = "CellionAdmin2026!"
-SITE_URL = "https://workspace-lamikolade.replit.app"
+SITE_URL = "https://cellionone.com"
 
 [postMerge]
 path = "scripts/post-merge.sh"

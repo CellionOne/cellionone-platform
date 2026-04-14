@@ -363,7 +363,7 @@ function InviteDialog() {
           <div className="space-y-4">
             <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
               <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <span>Corporate entities are verified via the CAC registry. The authorised representative receives a biometric identity verification invite. A ₦15,000 KYB fee applies at checkout.</span>
+              <span>Corporate entities are verified via the CAC registry. The authorised representative receives a biometric identity verification invite.</span>
             </div>
             <div className="space-y-3">
               <div>

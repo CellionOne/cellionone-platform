@@ -84,6 +84,7 @@ interface KybResult {
 interface DirectorEntry {
   name: string;
   role: string;
+  classification: "director" | "shareholder" | "director_shareholder";
   email: string;
   bvn: string;
   nin: string;
@@ -183,7 +184,7 @@ export default function ExistingCompanyPage() {
 
   // Step 3 directors
   const [directors, setDirectors] = useState<DirectorEntry[]>([]);
-  const [newDir, setNewDir] = useState<DirectorEntry>({ name: "", role: "Director", email: "", bvn: "", nin: "" });
+  const [newDir, setNewDir] = useState<DirectorEntry>({ name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "" });
 
   // Step 4 documents
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDoc[]>([]);
@@ -290,6 +291,9 @@ export default function ExistingCompanyPage() {
         registeredAddress: sameAddress ? operatingAddress : registeredAddress,
         operatingAddress,
         directors,
+        shareholders: directors
+          .filter(d => d.classification === "shareholder" || d.classification === "director_shareholder")
+          .map(d => ({ name: d.name })),
         businessActivities: [],
       };
       const res = await apiRequest("POST", "/api/founder/company-profiles/existing", payload);
@@ -803,9 +807,11 @@ export default function ExistingCompanyPage() {
                           <User className="h-4 w-4 text-primary" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <p className="font-medium text-sm">{d.name}</p>
                             <Badge variant="outline" className="text-xs">{d.role}</Badge>
+                            {d.classification === "director_shareholder" && <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-0">Director & Shareholder</Badge>}
+                            {d.classification === "shareholder" && <Badge className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 border-0">Shareholder only</Badge>}
                             {!hasId && <Badge variant="secondary" className="text-xs text-amber-700 bg-amber-100 dark:bg-amber-900 dark:text-amber-300">BVN or NIN required</Badge>}
                           </div>
                           <div className="grid grid-cols-2 gap-2 mt-2">
@@ -860,7 +866,7 @@ export default function ExistingCompanyPage() {
                   <Input value={newDir.name} onChange={e => setNewDir(prev => ({ ...prev, name: e.target.value }))} placeholder="Full legal name" data-testid="input-new-director-name" />
                 </div>
                 <div>
-                  <Label>Role</Label>
+                  <Label>Role / Title</Label>
                   <Select value={newDir.role} onValueChange={v => setNewDir(prev => ({ ...prev, role: v }))}>
                     <SelectTrigger data-testid="select-new-director-role">
                       <SelectValue />
@@ -870,6 +876,19 @@ export default function ExistingCompanyPage() {
                       <SelectItem value="CEO">CEO / MD</SelectItem>
                       <SelectItem value="Secretary">Company Secretary</SelectItem>
                       <SelectItem value="Shareholder">Shareholder</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="sm:col-span-2">
+                  <Label>Classification <span className="text-muted-foreground font-normal text-xs">(used for dossier & bank reporting)</span></Label>
+                  <Select value={newDir.classification} onValueChange={v => setNewDir(prev => ({ ...prev, classification: v as DirectorEntry["classification"] }))}>
+                    <SelectTrigger data-testid="select-new-director-classification">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="director">Director only</SelectItem>
+                      <SelectItem value="shareholder">Shareholder only</SelectItem>
+                      <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -903,7 +922,7 @@ export default function ExistingCompanyPage() {
                   if (!newDir.name.trim()) return;
                   if (!newDir.bvn.trim() && !newDir.nin.trim()) return;
                   setDirectors(prev => [...prev, { ...newDir }]);
-                  setNewDir({ name: "", role: "Director", email: "", bvn: "", nin: "" });
+                  setNewDir({ name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "" });
                 }}
                 data-testid="button-add-director"
               >

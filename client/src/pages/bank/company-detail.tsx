@@ -77,6 +77,8 @@ type Company = {
   cellionCertRef?: string;
   dispatchedAt?: string;
   bankDocuments?: BankDocument[];
+  platformPeople?: PlatformPerson[];
+  founderProfile?: FounderProfileData | null;
 };
 
 type BankDocument = {
@@ -87,6 +89,45 @@ type BankDocument = {
   mimeType?: string;
   sizeBytes?: number;
   shareWithBank: boolean;
+};
+
+type PlatformPersonProfile = {
+  fullName: string | null;
+  phone: string | null;
+  dateOfBirth: string | null;
+  nationality: string | null;
+  occupation: string | null;
+  addressLine1: string | null;
+  city: string | null;
+  state: string | null;
+  idType: string | null;
+  hasSignature: boolean;
+};
+
+type PlatformPerson = {
+  id: number;
+  inviteEmail: string | null;
+  role: string | null;
+  sharesAllocated: number | null;
+  shareClass: string | null;
+  sharePercentage: number | null;
+  personUserId: string | null;
+  profile: PlatformPersonProfile | null;
+  isIdentityVerified: boolean | null;
+};
+
+type FounderProfileData = {
+  fullName: string | null;
+  phone: string | null;
+  dateOfBirth: string | null;
+  nationality: string | null;
+  occupation: string | null;
+  addressLine1: string | null;
+  city: string | null;
+  state: string | null;
+  idType: string | null;
+  hasSignature: boolean;
+  isIdentityVerified: boolean;
 };
 
 function VerificationIcon({ value, trueLabel = "Verified", falseLabel = "Not Verified", pendingLabel = "Pending" }: {
@@ -114,6 +155,9 @@ export default function BankCompanyDetailPage() {
   const [docRequestOpen, setDocRequestOpen] = useState(false);
   const [documentsRequested, setDocumentsRequested] = useState("");
   const [reason, setReason] = useState("");
+  const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
+  const [signatureOpen, setSignatureOpen] = useState(false);
+  const [signatureLoading, setSignatureLoading] = useState(false);
 
   const { data: session, isLoading: sessionLoading } = useQuery<BankSession>({
     queryKey: ["/api/bank-portal/me"],
@@ -188,6 +232,31 @@ export default function BankCompanyDetailPage() {
   const shareholders = Array.isArray(company.shareholders) ? company.shareholders : [];
   const checklistItems = Array.isArray(company.checklistItems) ? company.checklistItems : [];
   const bankDocuments = Array.isArray(company.bankDocuments) ? company.bankDocuments : [];
+  const platformPeople = Array.isArray(company.platformPeople) ? company.platformPeople : [];
+  const platformDirectors = platformPeople.filter(p => p.role === "director" || p.role === "director_shareholder");
+  const platformShareholders = platformPeople.filter(p => p.role === "shareholder" || p.role === "director_shareholder");
+
+  const loadSignature = async (personId?: string) => {
+    const endpoint = personId
+      ? `/api/bank-portal/companies/${id}/people/${personId}/signature`
+      : `/api/bank-portal/companies/${id}/founder/signature`;
+    try {
+      setSignatureLoading(true);
+      const res = await fetch(endpoint, { credentials: "include" });
+      if (!res.ok) {
+        const err = await res.json();
+        toast({ title: "Signature unavailable", description: err.error || "Could not load signature.", variant: "destructive" });
+        return;
+      }
+      const { signatureUrl: url } = await res.json();
+      setSignatureUrl(url);
+      setSignatureOpen(true);
+    } catch {
+      toast({ title: "Error", description: "Could not load signature.", variant: "destructive" });
+    } finally {
+      setSignatureLoading(false);
+    }
+  };
 
   const downloadDocument = async (docId: number, filename: string) => {
     try {
@@ -377,6 +446,69 @@ export default function BankCompanyDetailPage() {
           </CardContent>
         </Card>
 
+        {/* Signature Modal */}
+        <Dialog open={signatureOpen} onOpenChange={setSignatureOpen}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Signature Specimen</DialogTitle>
+              <DialogDescription>This signature is provided for identity verification purposes only. Access is logged.</DialogDescription>
+            </DialogHeader>
+            {signatureUrl && (
+              <div className="flex justify-center py-4">
+                <img src={signatureUrl} alt="Signature specimen" className="max-h-48 border rounded" />
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Founder Profile */}
+        {company.founderProfile && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <UserCircle className="h-4 w-4" />
+                Founder Profile
+                {company.founderProfile.isIdentityVerified && (
+                  <Badge className="ml-auto bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200 border-0 text-xs">Identity Verified</Badge>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                {[
+                  { label: "Full Name", value: company.founderProfile.fullName },
+                  { label: "Phone", value: company.founderProfile.phone },
+                  { label: "Date of Birth", value: company.founderProfile.dateOfBirth },
+                  { label: "Nationality", value: company.founderProfile.nationality },
+                  { label: "Occupation", value: company.founderProfile.occupation },
+                  { label: "Address", value: [company.founderProfile.addressLine1, company.founderProfile.city, company.founderProfile.state].filter(Boolean).join(", ") || undefined },
+                  { label: "ID Type", value: company.founderProfile.idType },
+                ].filter(r => r.value).map(({ label, value }) => (
+                  <div key={label}>
+                    <dt className="text-muted-foreground text-xs uppercase tracking-wide">{label}</dt>
+                    <dd className="font-medium mt-0.5">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              {company.founderProfile.hasSignature && (
+                <div className="mt-4 pt-4 border-t">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadSignature()}
+                    disabled={signatureLoading}
+                    data-testid="button-view-founder-signature"
+                  >
+                    {signatureLoading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <FileText className="h-3.5 w-3.5 mr-1.5" />}
+                    View Signature
+                  </Button>
+                  <p className="text-xs text-muted-foreground mt-1.5">Access to this signature specimen is audited.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* KYB Result */}
         {company.smileKybResult && Object.keys(company.smileKybResult).length > 0 && (
           <Card>
@@ -469,30 +601,71 @@ export default function BankCompanyDetailPage() {
               Shareholders
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            {shareholders.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No shareholder information available.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-2 text-xs text-muted-foreground font-medium">Name</th>
-                      <th className="text-right py-2 text-xs text-muted-foreground font-medium">Shares</th>
-                      <th className="text-right py-2 text-xs text-muted-foreground font-medium">Ownership</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shareholders.map((s, i) => (
-                      <tr key={i} className="border-b last:border-0" data-testid={`row-shareholder-${i}`}>
-                        <td className="py-2 font-medium">{s.name}</td>
-                        <td className="py-2 text-right text-muted-foreground">{s.shares != null ? s.shares.toLocaleString() : "—"}</td>
-                        <td className="py-2 text-right">{s.percentage != null ? `${s.percentage.toFixed(2)}%` : "—"}</td>
+          <CardContent className="space-y-4">
+            {/* Platform shareholders */}
+            {platformShareholders.length > 0 && (
+              <div>
+                {(shareholders.length > 0) && <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Platform-Registered</p>}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 text-xs text-muted-foreground font-medium">Name</th>
+                        <th className="text-left py-2 text-xs text-muted-foreground font-medium">Role</th>
+                        <th className="text-right py-2 text-xs text-muted-foreground font-medium">Shares</th>
+                        <th className="text-right py-2 text-xs text-muted-foreground font-medium">%</th>
+                        <th className="text-right py-2 text-xs text-muted-foreground font-medium">Verified</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {platformShareholders.map((p, i) => (
+                        <tr key={p.id} className="border-b last:border-0" data-testid={`row-platform-shareholder-${i}`}>
+                          <td className="py-2 font-medium">{p.profile?.fullName || p.inviteEmail || "—"}</td>
+                          <td className="py-2 text-muted-foreground text-xs">{p.role === "director_shareholder" ? "Dir & SH" : "SH"}</td>
+                          <td className="py-2 text-right text-muted-foreground">{p.sharesAllocated != null ? p.sharesAllocated.toLocaleString() : "—"}</td>
+                          <td className="py-2 text-right">{p.sharePercentage != null ? `${p.sharePercentage}%` : "—"}</td>
+                          <td className="py-2 text-right">
+                            {p.isIdentityVerified
+                              ? <span className="text-green-600 text-xs">✓</span>
+                              : <span className="text-muted-foreground text-xs">—</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
+            )}
+
+            {/* CAC-sourced shareholders */}
+            {shareholders.length > 0 && (
+              <div>
+                {platformShareholders.length > 0 && <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">CAC-Sourced</p>}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-2 text-xs text-muted-foreground font-medium">Name</th>
+                        <th className="text-right py-2 text-xs text-muted-foreground font-medium">Shares</th>
+                        <th className="text-right py-2 text-xs text-muted-foreground font-medium">Ownership</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shareholders.map((s, i) => (
+                        <tr key={i} className="border-b last:border-0" data-testid={`row-shareholder-${i}`}>
+                          <td className="py-2 font-medium">{s.name}</td>
+                          <td className="py-2 text-right text-muted-foreground">{s.shares != null ? s.shares.toLocaleString() : "—"}</td>
+                          <td className="py-2 text-right">{s.percentage != null ? `${s.percentage.toFixed(2)}%` : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {shareholders.length === 0 && platformShareholders.length === 0 && (
+              <p className="text-muted-foreground text-sm">No shareholder information available.</p>
             )}
           </CardContent>
         </Card>
@@ -505,11 +678,46 @@ export default function BankCompanyDetailPage() {
               Directors & Officers
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            {directors.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No director information available.</p>
-            ) : (
-              <div className="space-y-4">
+          <CardContent className="space-y-4">
+            {/* Platform-registered directors (with full profile data) */}
+            {platformDirectors.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Platform-Registered</p>
+                {platformDirectors.map((p, i) => (
+                  <div key={p.id} className="border rounded-lg p-4 space-y-3" data-testid={`card-platform-director-${i}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium text-sm">{p.profile?.fullName || p.inviteEmail || "—"}</p>
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          <p className="text-xs text-muted-foreground">{p.role === "director_shareholder" ? "Director & Shareholder" : p.role}</p>
+                          {p.isIdentityVerified && <Badge className="text-xs bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200 border-0">Identity Verified</Badge>}
+                        </div>
+                      </div>
+                    </div>
+                    {p.profile && (
+                      <dl className="grid grid-cols-2 gap-2 text-xs">
+                        {p.profile.phone && <div><dt className="text-muted-foreground">Phone</dt><dd className="font-medium">{p.profile.phone}</dd></div>}
+                        {p.profile.dateOfBirth && <div><dt className="text-muted-foreground">Date of Birth</dt><dd className="font-medium">{p.profile.dateOfBirth}</dd></div>}
+                        {p.profile.nationality && <div><dt className="text-muted-foreground">Nationality</dt><dd className="font-medium">{p.profile.nationality}</dd></div>}
+                        {p.profile.occupation && <div><dt className="text-muted-foreground">Occupation</dt><dd className="font-medium">{p.profile.occupation}</dd></div>}
+                        {p.profile.idType && <div><dt className="text-muted-foreground">ID Type</dt><dd className="font-medium">{p.profile.idType}</dd></div>}
+                        {(p.sharesAllocated || p.sharePercentage) && <div><dt className="text-muted-foreground">Shareholding</dt><dd className="font-medium">{p.sharePercentage != null ? `${p.sharePercentage}%` : `${(p.sharesAllocated || 0).toLocaleString()} shares`}</dd></div>}
+                      </dl>
+                    )}
+                    {p.profile?.hasSignature && (
+                      <div className="pt-2 border-t">
+                        <p className="text-xs text-muted-foreground">BVN/NIN: on file • <span className="text-primary">Verified via Cellion One KYC pipeline</span></p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* CAC-sourced directors */}
+            {directors.length > 0 && (
+              <div className="space-y-3">
+                {platformDirectors.length > 0 && <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CAC-Sourced</p>}
                 {directors.map((d, i) => (
                   <div key={i} className="border rounded-lg p-4 space-y-2" data-testid={`card-director-${i}`}>
                     <div className="flex items-center justify-between">
@@ -547,6 +755,10 @@ export default function BankCompanyDetailPage() {
                   </div>
                 ))}
               </div>
+            )}
+
+            {directors.length === 0 && platformDirectors.length === 0 && (
+              <p className="text-muted-foreground text-sm">No director information available.</p>
             )}
           </CardContent>
         </Card>

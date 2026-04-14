@@ -6,8 +6,8 @@ import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { getResendClient, ADMIN_NOTIFICATION_EMAIL, getSiteBaseUrl } from "../services/emailService";
 import { db } from "../db";
-import { eq, desc } from "drizzle-orm";
-import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications, documentFiles } from "@shared/schema";
+import { eq, desc, and, inArray } from "drizzle-orm";
+import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications, documentFiles, founderProfiles, companyPeople, users } from "@shared/schema";
 import { ObjectStorageService } from "../replit_integrations/object_storage";
 
 const SALT_ROUNDS = 10;
@@ -635,7 +635,94 @@ export function registerBankPortalRoutes(app: Express): void {
           .then(rows => rows.filter(r => r.shareWithBank === true))
         : [];
 
-      res.json({ ...profile, checklistItems: checklistRows, dispatchedAt: dispatches[0]?.sentAt, bankDocuments });
+      // Enrich with platform-registered people linked to this company
+      const peopleRows = await db.select({
+        id: companyPeople.id,
+        inviteEmail: companyPeople.inviteEmail,
+        role: companyPeople.role,
+        sharesAllocated: companyPeople.sharesAllocated,
+        shareClass: companyPeople.shareClass,
+        sharePercentage: companyPeople.sharePercentage,
+        personUserId: companyPeople.personUserId,
+        // Founder profile fields (non-sensitive)
+        fpFullName: founderProfiles.fullName,
+        fpPhone: founderProfiles.phone,
+        fpDateOfBirth: founderProfiles.dateOfBirth,
+        fpNationality: founderProfiles.nationality,
+        fpOccupation: founderProfiles.occupation,
+        fpAddressLine1: founderProfiles.addressLine1,
+        fpCity: founderProfiles.city,
+        fpState: founderProfiles.state,
+        fpIdType: founderProfiles.idType,
+        fpHasSignature: founderProfiles.signaturePath,
+        // User identity verification
+        isIdentityVerified: users.isIdentityVerified,
+      })
+        .from(companyPeople)
+        .leftJoin(founderProfiles, eq(founderProfiles.userId, companyPeople.personUserId as any))
+        .leftJoin(users, eq(users.id, companyPeople.personUserId as any))
+        .where(eq(companyPeople.companyProfileId, companyProfileId));
+
+      const platformPeople = peopleRows.map(p => ({
+        id: p.id,
+        inviteEmail: p.inviteEmail,
+        role: p.role,
+        sharesAllocated: p.sharesAllocated,
+        shareClass: p.shareClass,
+        sharePercentage: p.sharePercentage ? parseFloat(p.sharePercentage) : null,
+        personUserId: p.personUserId,
+        profile: p.fpFullName ? {
+          fullName: p.fpFullName,
+          phone: p.fpPhone,
+          dateOfBirth: p.fpDateOfBirth,
+          nationality: p.fpNationality,
+          occupation: p.fpOccupation,
+          addressLine1: p.fpAddressLine1,
+          city: p.fpCity,
+          state: p.fpState,
+          idType: p.fpIdType,
+          hasSignature: !!p.fpHasSignature,
+        } : null,
+        isIdentityVerified: p.isIdentityVerified,
+      }));
+
+      // Fetch founder profile (non-sensitive fields only)
+      let founderProfile = null;
+      if (profile.founderId) {
+        const [fp] = await db.select({
+          fullName: founderProfiles.fullName,
+          phone: founderProfiles.phone,
+          dateOfBirth: founderProfiles.dateOfBirth,
+          nationality: founderProfiles.nationality,
+          occupation: founderProfiles.occupation,
+          addressLine1: founderProfiles.addressLine1,
+          city: founderProfiles.city,
+          state: founderProfiles.state,
+          idType: founderProfiles.idType,
+          signaturePath: founderProfiles.signaturePath,
+        }).from(founderProfiles).where(eq(founderProfiles.userId, profile.founderId));
+
+        const [founderUser] = await db.select({ isIdentityVerified: users.isIdentityVerified })
+          .from(users).where(eq(users.id, profile.founderId));
+
+        if (fp) {
+          founderProfile = {
+            fullName: fp.fullName,
+            phone: fp.phone,
+            dateOfBirth: fp.dateOfBirth,
+            nationality: fp.nationality,
+            occupation: fp.occupation,
+            addressLine1: fp.addressLine1,
+            city: fp.city,
+            state: fp.state,
+            idType: fp.idType,
+            hasSignature: !!fp.signaturePath,
+            isIdentityVerified: founderUser?.isIdentityVerified ?? false,
+          };
+        }
+      }
+
+      res.json({ ...profile, checklistItems: checklistRows, dispatchedAt: dispatches[0]?.sentAt, bankDocuments, platformPeople, founderProfile });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -695,6 +782,47 @@ export function registerBankPortalRoutes(app: Express): void {
       res.json({ downloadUrl, filename: doc.filename, mimeType: doc.mimeType });
     } catch (e: any) {
       console.error("[BankPortal] Document download error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/bank-portal/companies/:id/founder/signature — 15-min pre-signed URL for founder signature
+  app.get("/api/bank-portal/companies/:id/founder/signature", async (req: Request, res: Response) => {
+    try {
+      const session = await getBankPortalSession(req);
+      if (!session) return res.status(401).json({ error: "Not authenticated" });
+
+      const companyProfileId = parseInt(req.params.id);
+      const dispatches = await storage.listBankCompanyDispatches({ companyProfileId, bankPartnerId: session.bankPartnerId });
+      if (dispatches.length === 0) return res.status(404).json({ error: "Company not dispatched to your bank" });
+
+      const [profile] = await db.select({ founderId: companyProfiles.founderId }).from(companyProfiles).where(eq(companyProfiles.id, companyProfileId));
+      if (!profile?.founderId) return res.status(404).json({ error: "Company profile not found" });
+
+      const [fp] = await db.select({ signaturePath: founderProfiles.signaturePath }).from(founderProfiles).where(eq(founderProfiles.userId, profile.founderId));
+      if (!fp?.signaturePath) return res.status(404).json({ error: "No signature on file" });
+
+      let signatureUrl: string | null = null;
+      if (fp.signaturePath.startsWith("/objects/")) {
+        const objectStorage = new ObjectStorageService();
+        signatureUrl = await objectStorage.getObjectEntityDownloadURL(fp.signaturePath, 900);
+      } else if (fp.signaturePath.startsWith("http")) {
+        signatureUrl = fp.signaturePath;
+      }
+
+      if (!signatureUrl) return res.status(404).json({ error: "Signature file not available" });
+
+      await storage.createAuditLog({
+        actorUserId: `bank:${session.email}`,
+        action: "bank_portal_signature_view",
+        entityType: "founder_profile",
+        entityId: profile.founderId,
+        details: { bankPartnerId: session.bankPartnerId, companyProfileId },
+      });
+
+      res.json({ signatureUrl });
+    } catch (e: any) {
+      console.error("[BankPortal] Signature fetch error:", e);
       res.status(500).json({ error: e.message });
     }
   });

@@ -195,6 +195,22 @@ function ProfileDetailView({
   toast: ReturnType<typeof useToast>["toast"];
 }) {
   const [editOpen, setEditOpen] = useState(false);
+  const [editDirIndex, setEditDirIndex] = useState<number | null>(null);
+  const [editDirForm, setEditDirForm] = useState<{ name: string; role: string; classification: string; email: string; bvn: string; nin: string }>({ name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "" });
+
+  const editDirMutation = useMutation({
+    mutationFn: async ({ index, data }: { index: number; data: typeof editDirForm }) => {
+      const res = await apiRequest("PATCH", `/api/founder/company-profiles/${profile?.id}/directors/${index}`, data);
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message || "Failed to update"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Director updated" });
+      setEditDirIndex(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", profile?.id] });
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
 
   if (isLoading) {
     return (
@@ -215,7 +231,7 @@ function ProfileDetailView({
   }
 
   const address = (profile.registeredAddress || {}) as RegisteredAddress;
-  const directors = (profile.directors || []) as { name: string; role?: string; email?: string }[];
+  const directors = (profile.directors || []) as { name: string; role?: string; classification?: string; email?: string }[];
   const shareholders = (profile.shareholders || []) as { name: string; shares?: number; percentage?: number }[];
   const activities = (profile.businessActivities || []) as string[];
   const completedTasks = profile.tasks?.filter(t => t.status === "completed").length || 0;
@@ -312,16 +328,25 @@ function ProfileDetailView({
             {directors.length > 0 ? (
               <div className="space-y-3">
                 {directors.map((d, i) => (
-                  <div key={i} className="flex items-center justify-between gap-2" data-testid={`row-director-${i}`}>
-                    <div>
-                      <p className="text-sm font-medium" data-testid={`text-director-name-${i}`}>{d.name}</p>
-                      {d.email && <p className="text-xs text-muted-foreground">{d.email}</p>}
+                  <div key={i} className="flex items-start justify-between gap-2" data-testid={`row-director-${i}`}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium" data-testid={`text-director-name-${i}`}>{d.name}</p>
+                        {d.role && <Badge variant="outline" className="text-xs shrink-0" data-testid={`badge-director-role-${i}`}>{d.role}</Badge>}
+                        {d.classification === "director_shareholder" && <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-0 shrink-0">Director & Shareholder</Badge>}
+                        {d.classification === "shareholder" && <Badge className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 border-0 shrink-0">Shareholder only</Badge>}
+                      </div>
+                      {d.email && <p className="text-xs text-muted-foreground mt-0.5">{d.email}</p>}
                     </div>
-                    {d.role && (
-                      <Badge variant="outline" className="shrink-0" data-testid={`badge-director-role-${i}`}>
-                        {d.role}
-                      </Badge>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => { setEditDirIndex(i); setEditDirForm({ name: d.name, role: d.role || "Director", classification: d.classification || "director", email: d.email || "", bvn: "", nin: "" }); }}
+                      data-testid={`button-edit-director-${i}`}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -330,6 +355,69 @@ function ProfileDetailView({
             )}
           </CardContent>
         </Card>
+
+        {/* Edit Director Dialog */}
+        <Dialog open={editDirIndex !== null} onOpenChange={open => { if (!open) setEditDirIndex(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Director / Officer</DialogTitle>
+              <DialogDescription>Update this person's role and classification. BVN/NIN fields are masked for security — only enter values to update them.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <Label>Full Name</Label>
+                  <Input value={editDirForm.name} onChange={e => setEditDirForm(p => ({ ...p, name: e.target.value }))} data-testid="input-edit-dir-name" />
+                </div>
+                <div>
+                  <Label>Role / Title</Label>
+                  <Select value={editDirForm.role} onValueChange={v => setEditDirForm(p => ({ ...p, role: v }))}>
+                    <SelectTrigger data-testid="select-edit-dir-role"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Director">Director</SelectItem>
+                      <SelectItem value="CEO">CEO / MD</SelectItem>
+                      <SelectItem value="Secretary">Company Secretary</SelectItem>
+                      <SelectItem value="Shareholder">Shareholder</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Classification</Label>
+                  <Select value={editDirForm.classification} onValueChange={v => setEditDirForm(p => ({ ...p, classification: v }))}>
+                    <SelectTrigger data-testid="select-edit-dir-classification"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="director">Director only</SelectItem>
+                      <SelectItem value="shareholder">Shareholder only</SelectItem>
+                      <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="sm:col-span-2">
+                  <Label>Email</Label>
+                  <Input type="email" value={editDirForm.email} onChange={e => setEditDirForm(p => ({ ...p, email: e.target.value }))} placeholder="director@company.com" data-testid="input-edit-dir-email" />
+                </div>
+                <div>
+                  <Label>BVN <span className="text-muted-foreground font-normal text-xs">(leave blank to keep)</span></Label>
+                  <Input value={editDirForm.bvn} onChange={e => setEditDirForm(p => ({ ...p, bvn: e.target.value }))} placeholder="11-digit BVN" data-testid="input-edit-dir-bvn" />
+                </div>
+                <div>
+                  <Label>NIN <span className="text-muted-foreground font-normal text-xs">(leave blank to keep)</span></Label>
+                  <Input value={editDirForm.nin} onChange={e => setEditDirForm(p => ({ ...p, nin: e.target.value }))} placeholder="11-digit NIN" data-testid="input-edit-dir-nin" />
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditDirIndex(null)} data-testid="button-edit-dir-cancel">Cancel</Button>
+              <Button
+                disabled={!editDirForm.name.trim() || editDirMutation.isPending}
+                onClick={() => editDirIndex !== null && editDirMutation.mutate({ index: editDirIndex, data: editDirForm })}
+                data-testid="button-edit-dir-save"
+              >
+                {editDirMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Card data-testid="card-shareholders">
           <CardHeader>

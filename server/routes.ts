@@ -7926,6 +7926,53 @@ Important guidelines:
     }
   });
 
+  // PATCH /api/founder/company-profiles/:id/directors/:index — edit a director entry
+  app.patch("/api/founder/company-profiles/:id/directors/:index", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const dirIndex = parseInt(req.params.index, 10);
+      if (isNaN(profileId) || isNaN(dirIndex)) return res.status(400).json({ message: "Invalid parameters" });
+
+      const body = z.object({
+        name: z.string().min(1).optional(),
+        role: z.string().optional(),
+        classification: z.enum(["director", "shareholder", "director_shareholder"]).optional(),
+        email: z.string().email().or(z.literal("")).optional(),
+        bvn: z.string().optional(),
+        nin: z.string().optional(),
+      }).parse(req.body);
+
+      const [profile] = await db
+        .select()
+        .from(companyProfiles)
+        .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+
+      if (!profile) return res.status(404).json({ message: "Company profile not found" });
+
+      const directors: any[] = Array.isArray(profile.directors) ? [...profile.directors] : [];
+      if (dirIndex < 0 || dirIndex >= directors.length) return res.status(400).json({ message: "Director index out of range" });
+
+      directors[dirIndex] = { ...directors[dirIndex], ...body };
+
+      // Re-derive shareholders from classification
+      const shareholders: any[] = directors
+        .filter((d: any) => d.classification === "shareholder" || d.classification === "director_shareholder")
+        .map((d: any) => ({ name: d.name }));
+
+      const [updated] = await db
+        .update(companyProfiles)
+        .set({ directors, shareholders, updatedAt: new Date() })
+        .where(eq(companyProfiles.id, profileId))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating director:", error);
+      res.status(500).json({ message: error.message || "Failed to update director" });
+    }
+  });
+
   app.post("/api/founder/company-profiles/from-application/:applicationId", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);

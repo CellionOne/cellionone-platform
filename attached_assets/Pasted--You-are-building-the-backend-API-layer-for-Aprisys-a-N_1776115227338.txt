@@ -1,0 +1,247 @@
+
+You are building the backend API layer for **Aprisys**, a Nigerian capital markets platform. This backend is called **Cellion One API**. It will be consumed by two React frontends: CIE Digest (retail intelligence portal) and CDI (professional deal execution portal).
+
+---
+
+## STACK
+- Runtime: Node.js with Express
+- Language: JavaScript (CommonJS)
+- Database: Replit's built-in PostgreSQL (use the DATABASE_URL environment variable)
+- ORM: Drizzle ORM
+- Auth: JWT (jsonwebtoken + bcryptjs)
+- CORS: enabled for frontend origins
+
+---
+
+## PROJECT STRUCTURE TO CREATE
+/cellion-one-api
+/src
+/db
+schema.js          ← Drizzle schema definitions
+index.js           ← DB connection (Drizzle + postgres)
+/middleware
+auth.js            ← JWT verification middleware
+errorHandler.js    ← Global error handler
+/routes
+marketData.js      ← /api/market-data
+companies.js       ← /api/companies
+news.js            ← /api/news
+user.js            ← /api/user (auth + profile + watchlists)
+portfolio.js       ← /api/portfolio
+deals.js           ← /api/deals (CDI only)
+/controllers
+(one controller per route file, co-located logic)
+app.js               ← Express app setup
+server.js            ← Entry point, listens on PORT
+.env                   ← DATABASE_URL, JWT_SECRET, PORT
+package.json
+drizzle.config.js
+
+---
+
+## DATABASE SCHEMA (define in /src/db/schema.js using Drizzle)
+
+Create the following tables:
+
+### users
+- id (uuid, primary key, default gen_random_uuid())
+- email (text, unique, not null)
+- password_hash (text, not null)
+- full_name (text)
+- role (text, default 'retail') — values: 'retail', 'professional', 'admin'
+- created_at (timestamp, default now())
+
+### securities
+- id (uuid, primary key)
+- ticker (text, unique, not null)
+- name (text, not null)
+- sector (text)
+- exchange (text, default 'NGX')
+- market_cap (numeric)
+- updated_at (timestamp)
+
+### prices
+- id (uuid, primary key)
+- security_id (uuid, foreign key → securities.id)
+- close_price (numeric, not null)
+- open_price (numeric)
+- high (numeric)
+- low (numeric)
+- volume (bigint)
+- trade_date (date, not null)
+
+### companies
+- id (uuid, primary key)
+- security_id (uuid, foreign key → securities.id)
+- description (text)
+- ceo (text)
+- founded_year (integer)
+- website (text)
+- employees (integer)
+
+### news_articles
+- id (uuid, primary key)
+- title (text, not null)
+- summary (text)
+- source (text)
+- url (text)
+- category (text) — e.g. 'equities', 'bonds', 'macro', 'deals'
+- published_at (timestamp)
+- created_at (timestamp, default now())
+
+### watchlists
+- id (uuid, primary key)
+- user_id (uuid, foreign key → users.id)
+- security_id (uuid, foreign key → securities.id)
+- added_at (timestamp, default now())
+
+### portfolio_holdings
+- id (uuid, primary key)
+- user_id (uuid, foreign key → users.id)
+- security_id (uuid, foreign key → securities.id)
+- quantity (numeric, not null)
+- avg_buy_price (numeric)
+- created_at (timestamp, default now())
+
+### deals (CDI)
+- id (uuid, primary key)
+- title (text, not null)
+- deal_type (text) — e.g. 'IPO', 'rights_issue', 'bond', 'private_placement'
+- issuer (text)
+- status (text, default 'open') — 'open', 'closed', 'pending'
+- value_ngn (numeric)
+- open_date (date)
+- close_date (date)
+- description (text)
+- created_at (timestamp, default now())
+
+---
+
+## API ROUTES TO IMPLEMENT
+
+### POST /api/user/register
+- Accepts: { email, password, full_name, role }
+- Hashes password with bcryptjs
+- Saves user to DB
+- Returns: { message: 'User registered', userId }
+
+### POST /api/user/login
+- Accepts: { email, password }
+- Validates credentials
+- Returns: { token, user: { id, email, full_name, role } }
+
+### GET /api/user/me  ← protected
+- Returns current user profile from JWT
+
+### GET /api/user/watchlist  ← protected
+- Returns user's watchlisted securities with latest price
+
+### POST /api/user/watchlist  ← protected
+- Body: { security_id }
+- Adds security to user's watchlist
+
+### DELETE /api/user/watchlist/:security_id  ← protected
+- Removes from watchlist
+
+### GET /api/market-data/securities
+- Query params: ?sector=&exchange=&search=
+- Returns paginated list of securities with latest price
+
+### GET /api/market-data/securities/:ticker
+- Returns single security with latest price and 30-day price history
+
+### GET /api/market-data/indices
+- Returns hardcoded or seeded NGX All-Share Index, NGX 30, NGX Pension mock data for now
+
+### GET /api/companies
+- Query params: ?sector=&search=
+- Returns list of companies joined with securities
+
+### GET /api/companies/:ticker
+- Returns full company profile with security data
+
+### GET /api/news
+- Query params: ?category=&limit=20&offset=0
+- Returns news articles ordered by published_at DESC
+
+### GET /api/news/:id
+- Returns single article
+
+### GET /api/portfolio  ← protected
+- Returns user's holdings with current value and P&L calculation
+
+### POST /api/portfolio  ← protected
+- Body: { security_id, quantity, avg_buy_price }
+- Adds or updates holding
+
+### GET /api/deals  ← protected (role: professional or admin)
+- Returns all deals ordered by open_date DESC
+
+### GET /api/deals/:id  ← protected (role: professional or admin)
+- Returns single deal
+
+### POST /api/deals  ← protected (role: admin only)
+- Creates a new deal
+
+---
+
+## AUTH MIDDLEWARE
+
+Create /src/middleware/auth.js:
+- Reads Bearer token from Authorization header
+- Verifies JWT using JWT_SECRET
+- Attaches decoded user to req.user
+- Returns 401 if missing or invalid
+
+Create a role check helper:
+- requireRole(...roles) — returns middleware that checks req.user.role
+
+---
+
+## SEED DATA
+
+Create a /src/db/seed.js script that inserts:
+- 10 Nigerian securities (use real NGX tickers: DANGCEM, GTCO, MTNN, ZENITHBANK, ACCESSCORP, NESTLE, SEPLAT, OKOMUOIL, FLOURMILL, WAPCO)
+- Sample price entries for each for the past 7 days
+- 3 sample news articles
+- 2 sample deals
+- 1 admin user (email: admin@cellion.io, password: Admin1234!)
+
+Run seed with: node src/db/seed.js
+
+---
+
+## APP SETUP (app.js)
+
+- Mount all routes under /api
+- Enable CORS for all origins (configurable via env later)
+- Use express.json()
+- Register global error handler last
+- Add a health check: GET /health → { status: 'ok', service: 'Cellion One API' }
+
+---
+
+## ENVIRONMENT VARIABLES (.env)
+
+DATABASE_URL=       ← Replit PostgreSQL connection string
+JWT_SECRET=cellion_one_secret_key
+PORT=3001
+
+---
+
+## PACKAGE.JSON SCRIPTS
+
+- "start": "node src/server.js"
+- "dev": "nodemon src/server.js"
+- "db:push": "drizzle-kit push"
+- "db:seed": "node src/db/seed.js"
+
+---
+
+## FINAL NOTES
+
+- All responses should follow the format: { success: true, data: {...} } or { success: false, error: '...' }
+- Use async/await throughout, wrap in try/catch
+- Do not use TypeScript — plain JavaScript only
+- Do not use Prisma — use Drizzle ORM only
+- Comment each route file with the consuming portal (CIE Digest, CDI, or both)

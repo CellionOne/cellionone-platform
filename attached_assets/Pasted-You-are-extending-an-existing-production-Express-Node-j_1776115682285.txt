@@ -1,0 +1,191 @@
+You are extending an existing production Express/Node.js API called Cellion One.
+The existing codebase already has:
+- API key authentication on /api/v1/cie/* routes
+- Securities, prices, pulse, signals, sector rotation endpoints
+- An existing PostgreSQL database with users, securities, prices tables
+
+Do NOT touch or rewrite any existing routes or tables.
+Only add the following new modules.
+
+---
+
+## 1. JWT AUTH ENDPOINT
+
+### POST /api/auth/token
+- Accepts: { email, password }
+- Validates against existing users table
+- Returns: { token, user: { id, email, full_name, role } }
+- JWT signed with JWT_SECRET, expires in 7 days
+- This is for browser-based frontends (Aprisys CIE Digest and CDI) that cannot use session cookies
+
+Create /src/middleware/jwtAuth.js:
+- Reads Bearer token from Authorization header
+- Verifies and attaches req.user
+- Returns 401 if missing or invalid
+- Keep separate from existing API key middleware — do not replace it
+
+---
+
+## 2. COMPANY PROFILES MODULE
+
+### New table: company_profiles
+- id (uuid, primary key, default gen_random_uuid())
+- security_id (uuid, foreign key → securities.id, unique)
+- description (text)
+- ceo (text)
+- founded_year (integer)
+- website (text)
+- employees (integer)
+- headquarters (text)
+- created_at (timestamp, default now())
+
+### Routes (mount at /api/v1/cie/companies — API key auth)
+GET /api/v1/cie/companies
+- Query params: ?sector=&search=&limit=20&offset=0
+- Joins company_profiles with securities
+- Returns paginated list
+
+GET /api/v1/cie/companies/:ticker
+- Returns full company profile joined with security data and latest price
+
+### Routes (mount at /api/cie-portal/companies — JWT auth, Subscriber+)
+GET /api/cie-portal/companies/:ticker
+- Same as above but with extended data (financials if available)
+
+PATCH /api/cie-portal/companies/:ticker (admin only)
+- Updates company profile fields
+
+---
+
+## 3. NEWS MODULE
+
+### New table: news_articles
+- id (uuid, primary key, default gen_random_uuid())
+- title (text, not null)
+- summary (text)
+- source (text)
+- url (text)
+- category (text) — values: 'equities', 'bonds', 'macro', 'deals', 'dividends'
+- is_featured (boolean, default false)
+- published_at (timestamp, not null)
+- created_at (timestamp, default now())
+
+### Routes (mount at /api/v1/cie/news — API key auth, Subscriber+)
+GET /api/v1/cie/news
+- Query params: ?category=&limit=20&offset=0&featured=true
+- Returns articles ordered by published_at DESC
+
+GET /api/v1/cie/news/:id
+- Returns single article
+
+### Routes (mount at /api/cie-portal/news — JWT auth, admin only)
+POST /api/cie-portal/news
+- Creates a news article
+
+DELETE /api/cie-portal/news/:id
+- Soft delete (add deleted_at column, filter in GET queries)
+
+---
+
+## 4. WATCHLISTS MODULE
+
+### New table: watchlists
+- id (uuid, primary key, default gen_random_uuid())
+- user_id (uuid, foreign key → users.id)
+- security_id (uuid, foreign key → securities.id)
+- added_at (timestamp, default now())
+- UNIQUE constraint on (user_id, security_id)
+
+### Routes (mount at /api/cie-portal/watchlist — JWT auth, Subscriber+)
+GET /api/cie-portal/watchlist
+- Returns user's watchlisted securities joined with latest price
+
+POST /api/cie-portal/watchlist
+- Body: { security_id }
+- Adds to watchlist, ignores duplicate (use ON CONFLICT DO NOTHING)
+
+DELETE /api/cie-portal/watchlist/:security_id
+- Removes security from user's watchlist
+
+---
+
+## 5. PORTFOLIO MODULE
+
+### New table: portfolio_holdings
+- id (uuid, primary key, default gen_random_uuid())
+- user_id (uuid, foreign key → users.id)
+- security_id (uuid, foreign key → securities.id)
+- quantity (numeric, not null)
+- avg_buy_price (numeric, not null)
+- created_at (timestamp, default now())
+- updated_at (timestamp)
+- UNIQUE constraint on (user_id, security_id)
+
+### Routes (mount at /api/cie-portal/portfolio — JWT auth, Subscriber+)
+GET /api/cie-portal/portfolio
+- Returns user's holdings joined with latest price
+- Calculates and returns: current_value, total_cost, unrealised_pnl, pnl_percent per holding
+- Also returns portfolio summary totals
+
+POST /api/cie-portal/portfolio
+- Body: { security_id, quantity, avg_buy_price }
+- Upserts holding (ON CONFLICT on user_id + security_id → update quantity and avg_buy_price)
+
+---
+
+## 6. DEALS MODULE
+
+### New table: deals
+- id (uuid, primary key, default gen_random_uuid())
+- title (text, not null)
+- deal_type (text) — values: 'IPO', 'rights_issue', 'bond', 'private_placement', 'commercial_paper'
+- issuer (text, not null)
+- status (text, default 'open') — values: 'open', 'closed', 'pending', 'cancelled'
+- value_ngn (numeric)
+- open_date (date)
+- close_date (date)
+- description (text)
+- prospectus_url (text)
+- created_at (timestamp, default now())
+
+### Routes (mount at /api/v1/cie/deals — API key auth, Pro+)
+GET /api/v1/cie/deals
+- Query params: ?status=&deal_type=&limit=20&offset=0
+- Returns deals ordered by open_date DESC
+
+GET /api/v1/cie/deals/:id
+- Returns single deal
+
+### Routes (mount at /api/cie-portal/deals — JWT auth)
+GET /api/cie-portal/deals (Subscriber+)
+- Same as public but includes prospectus_url
+
+POST /api/cie-portal/deals (admin only)
+- Creates a deal
+
+PATCH /api/cie-portal/deals/:id (admin only)
+- Updates deal status or fields
+
+---
+
+## SEED ADDITIONS
+
+Extend the existing seed script (do not replace it) to also insert:
+- 5 company profiles (for DANGCEM, GTCO, MTNN, ZENITHBANK, ACCESSCORP)
+- 4 news articles across different categories
+- 2 open deals (1 IPO, 1 bond)
+
+---
+
+## RESPONSE FORMAT
+
+All new routes must follow the existing API response format used in the codebase.
+If no consistent format exists, use: { success: true, data: {...} } or { success: false, error: '...' }
+
+---
+
+## NOTES
+- Use Drizzle ORM (same as existing codebase) for all new tables
+- Run drizzle-kit push after adding schema changes
+- Do not modify existing schema, routes, or middleware
+- All new routes must be registered in app.js alongside existing ones

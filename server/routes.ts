@@ -897,29 +897,33 @@ export async function registerRoutes(
         });
       }
       
-      // Check if this email belongs to a bank portal user — authenticate there first
+      // Only consider bank portal auth if this email does NOT exist in the main users table.
+      // This guarantees existing platform users (founders, admins, lawyers) are completely unaffected.
       if (email) {
-        const bankUser = await storage.getBankPortalUserByEmail(email);
-        if (bankUser && bankUser.isActive && bankUser.passwordHash && req.body?.password) {
-          const bcryptLib = await import("bcryptjs");
-          const validBankPassword = await bcryptLib.compare(req.body.password, bankUser.passwordHash);
-          if (validBankPassword) {
-            await recordSuccessfulLogin(lockoutIdentifier);
-            const partner = await storage.getBankPartner(bankUser.bankPartnerId);
-            (req as any).session.bankPortalEmail = bankUser.email;
-            (req as any).session.bankPortalPartnerId = bankUser.bankPartnerId;
-            await storage.updateBankPortalUser(bankUser.id, { lastLoginAt: new Date() });
-            const freshCsrfToken = generateCsrfToken(req);
-            console.log(`[Login] Bank portal user authenticated: ${bankUser.email}`);
-            return res.json({
-              userType: "bank",
-              message: "Login successful",
-              bankPartnerId: bankUser.bankPartnerId,
-              bankName: partner?.name,
-              csrfToken: freshCsrfToken,
-            });
+        const regularUser = await storage.getUserByEmail(email);
+        if (!regularUser) {
+          const bankUser = await storage.getBankPortalUserByEmail(email);
+          if (bankUser && bankUser.isActive && bankUser.passwordHash && req.body?.password) {
+            const bcryptLib = await import("bcryptjs");
+            const validBankPassword = await bcryptLib.compare(req.body.password, bankUser.passwordHash);
+            if (validBankPassword) {
+              await recordSuccessfulLogin(lockoutIdentifier);
+              const partner = await storage.getBankPartner(bankUser.bankPartnerId);
+              (req as any).session.bankPortalEmail = bankUser.email;
+              (req as any).session.bankPortalPartnerId = bankUser.bankPartnerId;
+              await storage.updateBankPortalUser(bankUser.id, { lastLoginAt: new Date() });
+              const freshCsrfToken = generateCsrfToken(req);
+              console.log(`[Login] Bank portal user authenticated: ${bankUser.email}`);
+              return res.json({
+                userType: "bank",
+                message: "Login successful",
+                bankPartnerId: bankUser.bankPartnerId,
+                bankName: partner?.name,
+                csrfToken: freshCsrfToken,
+              });
+            }
+            // Wrong password for bank portal user — fall through so lockout is recorded
           }
-          // Wrong password for a bank portal user — fall through so lockout is recorded
         }
       }
 
@@ -1142,21 +1146,26 @@ export async function registerRoutes(
       const { email } = req.body;
       const baseUrl = emailService.getSiteBaseUrl(req);
 
-      // If this email belongs to a bank portal user, send a bank portal reset email instead
+      // Only send a bank portal reset email if this email does NOT exist in the main users table.
+      // This ensures existing platform users always receive the standard reset flow.
       if (email && typeof email === "string") {
-        const bankUser = await storage.getBankPortalUserByEmail(email.toLowerCase().trim());
-        if (bankUser && bankUser.isActive) {
-          const { generateToken, sendBankPasswordResetEmail } = await import("./routes/bankPortalRoutes");
-          const token = generateToken();
-          const expiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
-          await storage.updateBankPortalUser(bankUser.id, { resetToken: token, resetTokenExpiry: expiry });
-          try {
-            await sendBankPasswordResetEmail(bankUser.email, token, baseUrl);
-            console.log(`[Auth] Bank portal reset email sent to: ${bankUser.email}`);
-          } catch (emailErr: any) {
-            console.error("[Auth] Failed to send bank portal reset email:", emailErr);
+        const normalizedEmail = email.toLowerCase().trim();
+        const regularUser = await storage.getUserByEmail(normalizedEmail);
+        if (!regularUser) {
+          const bankUser = await storage.getBankPortalUserByEmail(normalizedEmail);
+          if (bankUser && bankUser.isActive) {
+            const { generateToken, sendBankPasswordResetEmail } = await import("./routes/bankPortalRoutes");
+            const token = generateToken();
+            const expiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
+            await storage.updateBankPortalUser(bankUser.id, { resetToken: token, resetTokenExpiry: expiry });
+            try {
+              await sendBankPasswordResetEmail(bankUser.email, token, baseUrl);
+              console.log(`[Auth] Bank portal reset email sent to: ${bankUser.email}`);
+            } catch (emailErr: any) {
+              console.error("[Auth] Failed to send bank portal reset email:", emailErr);
+            }
+            return res.json({ message: "If an account exists with that email, a password reset link has been sent." });
           }
-          return res.json({ message: "If an account exists with that email, a password reset link has been sent." });
         }
       }
 

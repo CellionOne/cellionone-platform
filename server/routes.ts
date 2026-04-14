@@ -1164,6 +1164,12 @@ export async function registerRoutes(
             } catch (emailErr: any) {
               console.error("[Auth] Failed to send bank portal reset email:", emailErr);
             }
+            await storage.createAuditLog({
+              action: "password_reset_requested",
+              entityType: "bank_portal_user",
+              details: { email: normalizedEmail, userType: "bank_portal" },
+              ipAddress: req.ip,
+            });
             return res.json({ message: "If an account exists with that email, a password reset link has been sent." });
           }
         }

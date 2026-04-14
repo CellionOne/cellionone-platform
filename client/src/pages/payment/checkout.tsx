@@ -51,6 +51,9 @@ interface PaystackInitResponse {
   authorizationUrl: string;
   accessCode: string;
   reference: string;
+  subtotalKobo?: number;
+  adminFeeKobo?: number;
+  grandTotalKobo?: number;
 }
 
 export default function CheckoutPage() {
@@ -182,6 +185,9 @@ export default function CheckoutPage() {
   const totals = calculateTotal();
   const hasOneOff = totals.oneOff > 0;
   const hasRecurring = totals.recurring > 0;
+  const subtotal = totals.oneOff + totals.recurring;
+  const adminFee = Math.round(subtotal * 0.10);
+  const grandTotal = subtotal + adminFee;
 
   return (
     <div className="min-h-screen bg-background py-12 px-4">
@@ -246,12 +252,21 @@ export default function CheckoutPage() {
                   </div>
                 )}
 
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="font-medium" data-testid="text-subtotal">{formatAmount(subtotal)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Administration Fee (10%)</span>
+                  <span className="font-medium" data-testid="text-admin-fee">{formatAmount(adminFee)}</span>
+                </div>
+
                 <Separator />
 
                 <div className="flex justify-between">
                   <span className="text-lg font-semibold">Total Due Today</span>
                   <span className="text-lg font-bold text-primary" data-testid="text-total-amount">
-                    {formatAmount(totals.oneOff + totals.recurring)}
+                    {formatAmount(grandTotal)}
                   </span>
                 </div>
               </CardContent>
@@ -269,7 +284,7 @@ export default function CheckoutPage() {
               <CardContent className="space-y-4">
                 <div className="text-center">
                   <p className="text-3xl font-bold text-foreground">
-                    {formatAmount(totals.oneOff + totals.recurring)}
+                    {formatAmount(grandTotal)}
                   </p>
                   <p className="text-sm text-muted-foreground">Total due (NGN)</p>
                 </div>

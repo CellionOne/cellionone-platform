@@ -22,6 +22,9 @@ export interface InitializeTransactionResult {
   authorizationUrl: string;
   accessCode: string;
   reference: string;
+  subtotalKobo?: number;
+  adminFeeKobo?: number;
+  grandTotalKobo?: number;
 }
 
 function getPaystackSecretKey(): string {
@@ -81,6 +84,10 @@ export async function initializeTransaction(
     'paystack'
   );
 
+  // Apply 10% administration fee on top of subtotal
+  const adminFeeKobo = Math.round(total * 0.10);
+  const grandTotal = total + adminFeeKobo;
+
   const user = await storage.getUser(userId);
   if (!user?.email) {
     throw new Error('User email is required for Paystack payments');
@@ -104,13 +111,15 @@ export async function initializeTransaction(
     reference: string;
   }>('/transaction/initialize', 'POST', {
     email: user.email,
-    amount: total,
+    amount: grandTotal,
     reference,
     callback_url: `${baseUrl}/payment/success?provider=paystack&reference=${reference}`,
     metadata: {
       userId,
       applicationId: context.applicationId,
       subscriptionId: context.subscriptionId,
+      subtotalKobo: total,
+      adminFeeKobo,
       lineItems,
       custom_fields: [
         { display_name: 'User ID', variable_name: 'user_id', value: userId },
@@ -125,7 +134,7 @@ export async function initializeTransaction(
     accessCode: result.access_code,
     status: 'pending',
     currency: 'NGN',
-    amountTotal: total,
+    amountTotal: grandTotal,
     lineItems,
     contextJson: {
       applicationId: context.applicationId,
@@ -137,6 +146,9 @@ export async function initializeTransaction(
     authorizationUrl: result.authorization_url,
     accessCode: result.access_code,
     reference,
+    subtotalKobo: total,
+    adminFeeKobo,
+    grandTotalKobo: grandTotal,
   };
 }
 

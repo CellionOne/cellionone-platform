@@ -24,6 +24,12 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 
+function formatBankDocSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 type BankSession = {
   email: string;
   bankPartnerId: number;
@@ -598,9 +604,9 @@ export default function BankCompanyDetailPage() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{doc.filename}</p>
-                        {doc.docType && (
-                          <p className="text-xs text-muted-foreground">{doc.docType}</p>
-                        )}
+                        <p className="text-xs text-muted-foreground">
+                          {[doc.docType, doc.sizeBytes ? formatBankDocSize(doc.sizeBytes) : null].filter(Boolean).join(" \u2022 ")}
+                        </p>
                       </div>
                     </div>
                     <Button

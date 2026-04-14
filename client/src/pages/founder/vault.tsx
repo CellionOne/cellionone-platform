@@ -466,7 +466,7 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function DocumentRow({ doc, formatFileSize: _fmt }: { doc: DocumentFile; formatFileSize: (b: number | null | undefined) => string }) {
+function DocumentRow({ doc }: { doc: DocumentFile }) {
   const { toast } = useToast();
   const [shared, setShared] = useState<boolean>(doc.shareWithBank ?? false);
 
@@ -513,11 +513,16 @@ function DocumentRow({ doc, formatFileSize: _fmt }: { doc: DocumentFile; formatF
             disabled={toggleMutation.isPending}
             data-testid={`switch-bank-share-${doc.id}`}
           />
-          <label
-            htmlFor={`bank-share-${doc.id}`}
-            className={`text-xs cursor-pointer select-none ${shared ? "text-primary font-medium" : "text-muted-foreground"}`}
-          >
-            {shared ? "Shared with bank" : "Share with bank"}
+          <label htmlFor={`bank-share-${doc.id}`} className="cursor-pointer select-none">
+            {shared ? (
+              <Badge variant="default" className="bg-primary/10 text-primary border-primary/20 text-xs font-medium hover:bg-primary/10">
+                Shared with bank
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
+                Private
+              </Badge>
+            )}
           </label>
         </div>
         <Button
@@ -599,7 +604,7 @@ export default function VaultPage() {
                   <CardContent>
                     <div className="divide-y">
                       {docs.map((doc) => (
-                        <DocumentRow key={doc.id} doc={doc} formatFileSize={formatFileSize} />
+                        <DocumentRow key={doc.id} doc={doc} />
                       ))}
                     </div>
                   </CardContent>

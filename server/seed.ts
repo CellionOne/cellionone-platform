@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
-import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts, cieSecurities, cieModelVersions, cieMarketPulse, ciePartners, kycApiKeys } from "@shared/schema";
+import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts, cieSecurities, cieModelVersions, cieMarketPulse, ciePartners, kycApiKeys, bankPartners, bankPortalUsers } from "@shared/schema";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { storage } from "./storage";
@@ -496,6 +496,47 @@ export async function seedDatabase() {
       await storage.runBankPartnerEmailMigration();
     } catch (migErr) {
       console.warn("[Seed] Bank partner email migration skipped:", migErr);
+    }
+
+    // Seed Optimus Bank and demo bank portal user
+    try {
+      const OPTIMUS_EMAIL = "portal@optimusbank.com";
+      const OPTIMUS_DEMO_PASSWORD = "Optimus@2024";
+
+      // Upsert Optimus Bank as a bank partner
+      const [existingOptimus] = await db.select().from(bankPartners).where(eq(bankPartners.name, "Optimus Bank"));
+      let optimusBankId: number;
+      if (existingOptimus) {
+        optimusBankId = existingOptimus.id;
+      } else {
+        const [inserted] = await db.insert(bankPartners).values({
+          name: "Optimus Bank",
+          emails: [{ email: "partnerships@optimusbank.com", isPrimary: true, inviteStatus: "active" }],
+          isActive: true,
+        }).returning();
+        optimusBankId = inserted.id;
+      }
+
+      // Upsert bank portal user with a set password (idempotent)
+      const [existingUser] = await db.select().from(bankPortalUsers).where(eq(bankPortalUsers.email, OPTIMUS_EMAIL));
+      if (!existingUser) {
+        const passwordHash = await bcrypt.hash(OPTIMUS_DEMO_PASSWORD, 10);
+        await db.insert(bankPortalUsers).values({
+          email: OPTIMUS_EMAIL,
+          bankPartnerId: optimusBankId,
+          passwordHash,
+          isActive: true,
+        });
+        console.log(`[Seed] Bank portal user created — ${OPTIMUS_EMAIL} / ${OPTIMUS_DEMO_PASSWORD}`);
+      } else if (!existingUser.passwordHash) {
+        const passwordHash = await bcrypt.hash(OPTIMUS_DEMO_PASSWORD, 10);
+        await db.update(bankPortalUsers).set({ passwordHash }).where(eq(bankPortalUsers.email, OPTIMUS_EMAIL));
+        console.log(`[Seed] Bank portal user password set — ${OPTIMUS_EMAIL} / ${OPTIMUS_DEMO_PASSWORD}`);
+      } else {
+        console.log(`[Seed] Bank portal user already exists — ${OPTIMUS_EMAIL}`);
+      }
+    } catch (bankSeedErr: any) {
+      console.warn("[Seed] Bank portal user seeding skipped:", bankSeedErr.message);
     }
 
     console.log("Database seeding complete");

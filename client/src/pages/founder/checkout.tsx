@@ -575,9 +575,18 @@ export default function CheckoutPage() {
                   ))}
 
                   <Separator />
+                  <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
+                    <span>Subtotal</span>
+                    <span data-testid="text-subtotal-amount">{formatNgn(totalKobo)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
+                    <span>Administration Fee (10%)</span>
+                    <span data-testid="text-admin-fee-amount">{formatNgn(Math.round(totalKobo * 0.10))}</span>
+                  </div>
+                  <Separator />
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold">Total</span>
-                    <span className="font-bold text-lg" data-testid="text-total-amount">{formatNgn(totalKobo)}</span>
+                    <span className="font-bold text-lg" data-testid="text-total-amount">{formatNgn(totalKobo + Math.round(totalKobo * 0.10))}</span>
                   </div>
                 </>
               )}
@@ -627,7 +636,7 @@ export default function CheckoutPage() {
                   </>
                 ) : (
                   <>
-                    Pay {selectedProducts.length > 0 ? formatNgn(totalKobo) : ""}
+                    Pay {selectedProducts.length > 0 ? formatNgn(totalKobo + Math.round(totalKobo * 0.10)) : ""}
                     <ExternalLink className="h-4 w-4 ml-2" />
                   </>
                 )}

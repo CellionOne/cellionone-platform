@@ -237,7 +237,9 @@ export default function ApplicationDetailsPage() {
   };
 
   const INCORPORATION_FEE_KOBO = 10000000;
-  const estimatedTotal = INCORPORATION_FEE_KOBO + addOnsTotalKobo;
+  const estimatedSubtotal = INCORPORATION_FEE_KOBO + addOnsTotalKobo;
+  const estimatedAdminFee = Math.round(estimatedSubtotal * 0.10);
+  const estimatedTotal = estimatedSubtotal + estimatedAdminFee;
 
   if (isLoading) return <LoadingPage />;
 
@@ -577,6 +579,15 @@ export default function ApplicationDetailsPage() {
                           <span className="font-medium">₦{(p.priceNgn / 100).toLocaleString()}</span>
                         </div>
                       ))}
+                      <Separator />
+                      <div className="flex items-center justify-between text-sm text-muted-foreground" data-testid="fee-line-subtotal">
+                        <span>Subtotal</span>
+                        <span>₦{(estimatedSubtotal / 100).toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-muted-foreground" data-testid="fee-line-admin-fee">
+                        <span>Administration Fee (10%)</span>
+                        <span>₦{(estimatedAdminFee / 100).toLocaleString()}</span>
+                      </div>
                       <Separator />
                       <div className="flex items-center justify-between font-semibold" data-testid="fee-line-total">
                         <span>Estimated Total</span>

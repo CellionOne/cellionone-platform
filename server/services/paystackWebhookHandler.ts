@@ -1952,6 +1952,311 @@ async function handleCieSubscriptionDisable(data: any): Promise<void> {
   console.log(`[Paystack Webhook] CIE subscription ${subscriptionCode} cancelled`);
 }
 
+/**
+ * Run the existing company verification pipeline directly, without a Paystack payment.
+ * Called when verification is submitted for free (no payment required).
+ */
+export async function runExistingCompanyVerificationPipeline(profileId: number): Promise<void> {
+  const [profile] = await db.select().from(companyProfiles).where(eq(companyProfiles.id, profileId));
+  if (!profile) {
+    console.error(`[ExistingCoVerify] Profile ${profileId} not found`);
+    return;
+  }
+  const founderUser = await storage.getUser(profile.founderId);
+  const founderEmail = founderUser?.email ?? profile.founderId;
+
+  // Reuse the same pipeline — pass a synthetic "order" with just the fields the pipeline uses.
+  const syntheticOrder = { id: 0, founderId: profile.founderId, totalAmount: 0 };
+
+  try {
+    const { verifyBusiness, verifyTin, verifyBvn, verifyNin, performAmlCheck } = await import('./smileIdService');
+    const { decryptField } = await import('./encryptionService');
+
+    const normalizeCoName = (s: string) =>
+      s.toUpperCase()
+        .replace(/\b(LIMITED|LTD|PUBLIC LIMITED COMPANY|PLC|LLC|LLP|CO|COMPANY|INC|INCORPORATED)\b/g, '')
+        .replace(/[^A-Z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    const nameMatch = (a: string, b: string) => {
+      const na = normalizeCoName(a); const nb = normalizeCoName(b);
+      return na === nb || na.includes(nb) || nb.includes(na);
+    };
+
+    // ── Step 1: KYB ─────────────────────────────────────────────────────────
+    let kybPassed = false;
+    let kybResultText = 'No KYB data';
+    let kybFailReason: string | undefined;
+    let kybDirectorMismatches: string[] = [];
+    let freshKybResult: Record<string, unknown> | undefined;
+    let kybMatchedData: { registryName?: string; status?: string; type?: string; rcNumber?: string; registrationDate?: string } | undefined;
+    const KYB_ACTIVE_STATUSES = ['active', 'approved and active', 'registered'];
+
+    try {
+      const companyTypeToBusinessType: Record<string, string> = {
+        LTD: 'co', PLC: 'co', LLP: 'co', LBG: 'co', UC: 'co',
+        Sole_Proprietorship: 'bn', Business_Name: 'bn', BN: 'bn',
+        Incorporated_Trustee: 'it', IT: 'it',
+      };
+      const businessType = companyTypeToBusinessType[profile.companyType || ''] || 'co';
+      const kybJob = await verifyBusiness(profile.rcNumber || '', profile.founderId, `kyb-free-${profile.id}-${Date.now()}`, businessType);
+      kybMatchedData = {
+        registryName: kybJob.companyName ?? undefined,
+        status: kybJob.status ?? undefined,
+        type: kybJob.companyType ?? undefined,
+        rcNumber: kybJob.rcNumber ?? undefined,
+        registrationDate: kybJob.registrationDate ?? undefined,
+      };
+      const { rawResult: _kybRaw, ...safeKyb } = kybJob;
+      freshKybResult = safeKyb as Record<string, unknown>;
+
+      if (!kybJob.found) {
+        kybResultText = 'Not found in CAC registry';
+        kybFailReason = 'not_found';
+      } else {
+        const statusOk = KYB_ACTIVE_STATUSES.includes((kybJob.status || '').toLowerCase());
+        const nameOk = nameMatch(kybJob.companyName || '', profile.companyName || '');
+        const rcOk = (kybJob.rcNumber || '').replace(/\D/g, '') === (profile.rcNumber || '').replace(/\D/g, '');
+
+        // Directors cross-check
+        const cacheDirectors = (profile.kybResult as any)?.directors ?? [];
+        const freshDirectors = kybJob.directors ?? [];
+        const allDirs = freshDirectors.length > 0 ? freshDirectors : cacheDirectors;
+        const profileDirs = (profile.directors as { name: string }[]) || [];
+        const dirMatches = profileDirs.map(pd => ({
+          name: pd.name,
+          matched: allDirs.some((cd: { name?: string; full_name?: string }) =>
+            nameMatch(pd.name, cd.name || cd.full_name || '')),
+        }));
+        kybDirectorMismatches = dirMatches.filter(d => !d.matched).map(d => d.name);
+
+        if (!statusOk) {
+          kybResultText = `Company status is '${kybJob.status}' — not active`;
+          kybFailReason = 'inactive_status';
+        } else if (!rcOk) {
+          kybResultText = `RC number mismatch — provided ${profile.rcNumber}, registry has ${kybJob.rcNumber}`;
+          kybFailReason = 'rc_mismatch';
+        } else if (!nameOk) {
+          kybResultText = `Company name mismatch — provided '${profile.companyName}', registry has '${kybJob.companyName}'`;
+          kybFailReason = 'name_mismatch';
+        } else {
+          kybPassed = true;
+          kybResultText = kybDirectorMismatches.length > 0
+            ? `KYB passed with director name warnings: ${kybDirectorMismatches.join(', ')}`
+            : 'KYB passed — company found, active, name and RC match';
+        }
+      }
+    } catch (kybErr: unknown) {
+      kybResultText = `KYB error: ${kybErr instanceof Error ? kybErr.message : String(kybErr)}`;
+    }
+
+    // ── Step 2: TIN ─────────────────────────────────────────────────────────
+    let tinPassed = false;
+    let tinResultText = 'No TIN provided';
+    let tinFailReason: string | undefined;
+    let tinMatchedData: { tinNumber?: string; registryName?: string } | undefined;
+    const tinProvided = !!(profile.tinNumber && profile.tinNumber.trim());
+
+    if (!tinProvided) {
+      tinPassed = true; // TIN is optional; absence is not a failure
+      tinResultText = 'TIN not provided — skipped';
+    } else {
+      try {
+        const tinResult = await verifyTin(profile.tinNumber!, profile.founderId, `tin-free-${profile.id}-${Date.now()}`);
+        tinMatchedData = { tinNumber: profile.tinNumber!, registryName: tinResult.taxPayerName ?? undefined };
+        if (tinResult.found) {
+          const nameOk = nameMatch(tinResult.taxPayerName || '', profile.companyName || '');
+          tinPassed = nameOk;
+          tinResultText = nameOk ? 'TIN verified — name matches' : `TIN found but name mismatch: '${tinResult.taxPayerName}' vs '${profile.companyName}'`;
+          if (!nameOk) tinFailReason = 'name_mismatch';
+        } else {
+          tinResultText = 'TIN not found in FIRS registry';
+          tinFailReason = 'not_found';
+        }
+      } catch (tinErr: unknown) {
+        tinResultText = `TIN error: ${tinErr instanceof Error ? tinErr.message : String(tinErr)}`;
+        tinPassed = true; // TIN API error is non-blocking
+      }
+    }
+
+    // ── Step 3: Director checks ─────────────────────────────────────────────
+    interface PipelineDirector {
+      name: string; email?: string; role?: string; phone?: string;
+      bvn?: string; nin?: string;
+      bvnVerified?: boolean; ninVerified?: boolean;
+      amlIsHit?: boolean; amlHitTypes?: string[];
+      amlChecked?: boolean;
+      amlCheckError?: string;
+      biometricStatus?: string;
+      entityType?: string;
+      rcNumber?: string;
+      authorisedRepName?: string;
+      authorisedRepEmail?: string;
+      corporateKybPassed?: boolean;
+      corporateKybResultText?: string;
+    }
+
+    const rawDirs = (profile.directors as PipelineDirector[]) || [];
+    const updatedDirectors: PipelineDirector[] = JSON.parse(JSON.stringify(rawDirs));
+
+    for (const director of updatedDirectors) {
+      if (director.entityType === 'corporate') {
+        // Corporate entity: verify via KYB + AML on authorised rep
+        try {
+          const corpRc = director.rcNumber || '';
+          const corpKyb = await verifyBusiness(corpRc, profile.founderId, `corp-kyb-free-${profile.id}-${Date.now()}`, 'co');
+          director.corporateKybPassed = corpKyb.found && KYB_ACTIVE_STATUSES.includes((corpKyb.status || '').toLowerCase());
+          director.corporateKybResultText = corpKyb.found
+            ? `Found: ${corpKyb.companyName} (${corpKyb.status})`
+            : `Not found in CAC registry (RC: ${corpRc})`;
+        } catch (corpErr: unknown) {
+          director.corporateKybPassed = false;
+          director.corporateKybResultText = `Corporate KYB error: ${corpErr instanceof Error ? corpErr.message : String(corpErr)}`;
+        }
+        if (director.authorisedRepName) {
+          try {
+            const amlResult = await performAmlCheck(director.authorisedRepName, profile.founderId, `corp-aml-free-${profile.id}-${Date.now()}`);
+            director.amlIsHit = amlResult.isHit;
+            director.amlHitTypes = amlResult.hitTypes;
+            director.amlChecked = true;
+          } catch {
+            director.amlChecked = false;
+          }
+        }
+        continue;
+      }
+
+      // Individual director
+      const rawBvn = director.bvn ? (() => { try { return decryptField(director.bvn!); } catch { return null; } })() : null;
+      const rawNin = director.nin ? (() => { try { return decryptField(director.nin!); } catch { return null; } })() : null;
+
+      if (rawBvn) {
+        try {
+          const bvnResult = await verifyBvn(rawBvn, profile.founderId, `bvn-free-${director.name}-${Date.now()}`);
+          director.bvnVerified = bvnResult.verified;
+        } catch { director.bvnVerified = false; }
+      }
+      if (!director.bvnVerified && rawNin) {
+        try {
+          const ninResult = await verifyNin(rawNin, profile.founderId, `nin-free-${director.name}-${Date.now()}`);
+          director.ninVerified = ninResult.verified;
+        } catch { director.ninVerified = false; }
+      }
+      try {
+        const amlResult = await performAmlCheck(director.name, profile.founderId, `aml-free-${director.name}-${Date.now()}`);
+        director.amlIsHit = amlResult.isHit;
+        director.amlHitTypes = amlResult.hitTypes;
+        director.amlChecked = true;
+      } catch {
+        director.amlChecked = false;
+      }
+    }
+
+    const individualPipelineDirs = updatedDirectors.filter(d => d.entityType !== 'corporate');
+    const directorsPass = updatedDirectors.every(d => {
+      if (d.entityType === 'corporate') {
+        const amlOk = !d.amlChecked || !d.amlIsHit;
+        return d.corporateKybPassed === true && amlOk;
+      }
+      const idOk = d.bvnVerified || d.ninVerified;
+      const amlOk = !d.amlChecked || !d.amlIsHit;
+      return idOk && amlOk;
+    });
+
+    const directorsReport = updatedDirectors.map(d => {
+      if (d.entityType === 'corporate') {
+        return {
+          name: d.name,
+          entityType: 'corporate',
+          rcNumber: d.rcNumber,
+          authorisedRepName: d.authorisedRepName,
+          corporateKybPassed: d.corporateKybPassed,
+          corporateKybResultText: d.corporateKybResultText,
+          amlChecked: d.amlChecked,
+          amlIsHit: d.amlIsHit,
+          amlHitTypes: d.amlHitTypes,
+        };
+      }
+      return {
+        name: d.name,
+        entityType: 'individual',
+        bvnVerified: d.bvnVerified,
+        ninVerified: d.ninVerified,
+        amlChecked: d.amlChecked,
+        amlIsHit: d.amlIsHit,
+        amlHitTypes: d.amlHitTypes,
+      };
+    });
+
+    const allPass = kybPassed && tinPassed && directorsPass;
+    const verificationReport = {
+      kybPassed,
+      kybResultText,
+      kybFailReason,
+      kybDirectorMismatches,
+      kybResult: freshKybResult,
+      kybMatched: kybMatchedData,
+      tinPassed,
+      tinResultText,
+      tinFailReason,
+      tinSubmitted: tinProvided ? { tinNumber: profile.tinNumber } : undefined,
+      tinMatched: tinMatchedData,
+      directorsReport,
+      autoApproved: allPass,
+      completedAt: new Date().toISOString(),
+    };
+
+    const newStatus = allPass ? 'verified' : 'under_review';
+    await db.update(companyProfiles)
+      .set({ existingCompanyStatus: newStatus, verificationReport: verificationReport as typeof companyProfiles.$inferSelect['verificationReport'], updatedAt: new Date() })
+      .where(eq(companyProfiles.id, profile.id));
+
+    await storage.createAuditLog({
+      actorUserId: profile.founderId,
+      action: allPass ? 'existing_company_auto_approved' : 'existing_company_flagged_for_review',
+      entityType: 'company_profile',
+      entityId: String(profile.id),
+      details: { kybPassed, tinPassed, directorsPass, autoApproved: allPass },
+    });
+
+    if (allPass) {
+      await storage.createNotification({
+        userId: profile.founderId,
+        title: 'Company Verified',
+        message: `${profile.companyName} has passed all automated checks and is now verified on Cellion One.`,
+        type: 'success',
+        linkUrl: '/founder/existing-company',
+      });
+    } else {
+      const failReasons: string[] = [];
+      if (!kybPassed) failReasons.push('CAC registry check');
+      if (!tinPassed) failReasons.push('TIN verification');
+      if (!directorsPass) failReasons.push('director identity/AML check');
+      await storage.createNotification({
+        userId: profile.founderId,
+        title: 'Verification Under Review',
+        message: `${profile.companyName} requires manual review: ${failReasons.join(', ')}. Our compliance team will contact you shortly.`,
+        type: 'warning',
+        linkUrl: '/founder/existing-company',
+      });
+      sendNewOrderNotificationEmail(ADMIN_NOTIFICATION_EMAIL, {
+        orderId: syntheticOrder.id,
+        founderName: profile.companyName || '',
+        founderEmail,
+        totalAmount: 0,
+        items: [{ sku: 'EXISTING_CO_VERIFY', name: `Manual review required — ${failReasons.join(', ')}`, unitPrice: 0 }],
+      }).catch((e: Error) => console.error(`[ExistingCoVerify] Admin email error: ${e.message}`));
+    }
+
+    console.log(`[ExistingCoVerify] Profile ${profile.id} pipeline complete — status: ${newStatus}`);
+  } catch (pipelineErr: unknown) {
+    const msg = pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr);
+    console.error('[ExistingCoVerify] Pipeline error:', msg);
+    const errorReport = { kybPassed: false, tinPassed: false, directorsPass: false, pipelineError: msg, autoApproved: false, completedAt: new Date().toISOString() };
+    await db.update(companyProfiles)
+      .set({ existingCompanyStatus: 'under_review', verificationReport: errorReport as typeof companyProfiles.$inferSelect['verificationReport'], updatedAt: new Date() })
+      .where(eq(companyProfiles.id, profile.id));
+  }
+}
+
 export default {
   processWebhook,
 };

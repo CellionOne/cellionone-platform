@@ -3464,18 +3464,27 @@ export async function registerRoutes(
       // Identity verification is absorbed by Cellion — VERIFY SKU is never auto-added to founder orders.
       // Verification runs silently post-payment at no charge to the founder.
 
-      const { order, items: orderItemRecords } = await orderService.createOrder({
+      // Compute 10% Administration Fee on top of the service subtotal — goes entirely to Cellion.
+      const subtotalOrder = await orderService.createOrder({
         founderId: userId,
         applicationId: applicationId || undefined,
         items: finalItems,
       });
+      const adminFeeAmount = Math.round(subtotalOrder.order.totalAmount * 0.10);
+
+      // Update order with the admin fee
+      await db.update(ordersTable).set({ adminFeeAmount, updatedAt: new Date() }).where(eq(ordersTable.id, subtotalOrder.order.id));
+
+      const order = { ...subtotalOrder.order, adminFeeAmount };
+      const orderItemRecords = subtotalOrder.items;
+      const paystackAmount = order.totalAmount + adminFeeAmount;
 
       const baseUrl = `${req.protocol}://${req.get("host")}`;
 
       const result = await paystackPaymentService.initializeSplitTransaction({
         orderId: order.id,
         email: user.email,
-        totalAmount: order.totalAmount,
+        totalAmount: paystackAmount,
         totalCellionCut: order.totalCellionCut || 0,
         founderId: userId,
         applicationId: order.applicationId,
@@ -3490,7 +3499,9 @@ export async function registerRoutes(
         entityId: String(order.id),
         details: {
           reference: result.reference,
-          totalAmount: order.totalAmount,
+          subtotal: order.totalAmount,
+          adminFeeAmount,
+          totalCharged: paystackAmount,
           cellionCut: order.totalCellionCut,
           lawyerNet: order.totalLawyerNet,
           items: items.map((i: { sku: string }) => i.sku),
@@ -3502,7 +3513,9 @@ export async function registerRoutes(
         orderId: order.id,
         authorizationUrl: result.authorizationUrl,
         reference: result.reference,
-        totalAmount: order.totalAmount,
+        subtotal: order.totalAmount,
+        adminFeeAmount,
+        totalAmount: paystackAmount,
         totalCellionCut: order.totalCellionCut,
         totalLawyerNet: order.totalLawyerNet,
       });
@@ -8502,7 +8515,8 @@ Important guidelines:
     }
   });
 
-  // Checkout: create order + Paystack payment for existing company verification
+  // Submit existing company for verification — free, no payment required.
+  // All KYC/KYB verification is absorbed by Cellion as a cost of doing business.
   app.post("/api/founder/company-profiles/:id/checkout", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
@@ -8513,74 +8527,54 @@ Important guidelines:
       if (!profile) return res.status(404).json({ message: "Profile not found" });
       if (!profile.isExistingCompany) return res.status(400).json({ message: "Not an existing company profile" });
       if (!["draft", "pending_payment"].includes(profile.existingCompanyStatus || "")) {
-        return res.status(400).json({ message: "Profile cannot be checked out in its current state" });
+        return res.status(400).json({ message: "Profile is already submitted or verified" });
       }
 
-      // Server-side director enforcement at checkout — defence in depth (profile creation already validates)
+      // Validate directors exist and have required identity fields
       const allDirectors = (profile.directors as { name: string; bvn?: string; nin?: string; entityType?: string; rcNumber?: string }[]) || [];
       const individualDirs = allDirectors.filter(d => d.entityType !== "corporate");
-      const corporateEntities = allDirectors.filter(d => d.entityType === "corporate");
 
       if (allDirectors.length === 0) {
-        return res.status(400).json({ message: "At least one director is required before checkout", code: "DIRECTOR_REQUIRED" });
+        return res.status(400).json({ message: "At least one director is required before submitting", code: "DIRECTOR_REQUIRED" });
       }
-      const checkoutDirMissingId = individualDirs.find(d => !d.bvn && !d.nin);
-      if (checkoutDirMissingId) {
+      const dirMissingId = individualDirs.find(d => !d.bvn && !d.nin);
+      if (dirMissingId) {
         return res.status(400).json({
-          message: `Director "${checkoutDirMissingId.name}" must have BVN or NIN for automated verification`,
+          message: `Director "${dirMissingId.name}" must have BVN or NIN for automated verification`,
           code: "DIRECTOR_ID_REQUIRED",
         });
       }
 
-      // Documents are optional — they go into the secure vault for bank/legal use.
-
-      // Pricing: ₦15,000 base (covers up to 2 individual directors) + ₦2,500 per additional individual beyond 2
-      //          + ₦15,000 per corporate entity (KYB fee)
-      const extraIndividualDirs = Math.max(0, individualDirs.length - 2);
-      const items: { sku: string; quantity?: number }[] = [{ sku: "EXISTING_CO_VERIFY", quantity: 1 }];
-      if (extraIndividualDirs > 0) {
-        items.push({ sku: "EXISTING_CO_EXTRA_DIR", quantity: extraIndividualDirs });
-      }
-      if (corporateEntities.length > 0) {
-        items.push({ sku: "CORPORATE_KYB", quantity: corporateEntities.length });
-      }
-
-      const orderService = await import('./services/orderService');
-      const { order, items: orderItemRecords } = await orderService.createOrder({ founderId: userId, items });
-
-      const paystackPaymentService = await import('./services/paystackPaymentService');
-      const [founderRow] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
-      const founderEmail = founderRow?.email || "";
-
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
-      const checkoutResult = await paystackPaymentService.initializeSplitTransaction({
-        orderId: order.id,
-        email: founderEmail,
-        totalAmount: order.totalAmount,
-        totalCellionCut: order.totalCellionCut || 0,
-        founderId: userId,
-        itemSkus: items.map(i => i.sku),
-        baseUrl,
-      });
-
-      // Save orderId on profile and mark pending_payment
+      // Advance status to pending_review — verification pipeline is triggered by the webhook handler
+      // which already handles the case where existingCompanyStatus = 'pending_review'.
+      // We trigger it directly here since there is no payment event.
       await db.update(companyProfiles)
-        .set({ existingCoVerifyOrderId: order.id, existingCompanyStatus: "pending_payment", updatedAt: new Date() })
+        .set({ existingCompanyStatus: "pending_review", updatedAt: new Date() })
         .where(eq(companyProfiles.id, profileId));
 
       await storage.createAuditLog({
         actorUserId: userId,
-        action: "existing_company_checkout_initiated",
+        action: "existing_company_submitted_free",
         entityType: "company_profile",
         entityId: profileId.toString(),
-        details: { orderId: order.id, totalAmount: order.totalAmount },
+        details: { message: "Verification is free — submitted directly to pending_review" },
       });
 
-      res.json({ authorizationUrl: checkoutResult.authorizationUrl, reference: checkoutResult.reference, orderId: order.id });
+      // Kick off the verification pipeline asynchronously
+      try {
+        const webhookHandler = await import('./services/paystackWebhookHandler');
+        webhookHandler.runExistingCompanyVerificationPipeline(profileId).catch((err: Error) => {
+          console.error(`[ExistingCoVerify] Pipeline error for profile ${profileId}:`, err.message);
+        });
+      } catch (pipelineErr: any) {
+        console.error("[ExistingCoVerify] Failed to import pipeline:", pipelineErr.message);
+      }
+
+      res.json({ success: true, message: "Application submitted. Verification is running in the background." });
     } catch (error: any) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: "Validation error", errors: error.errors });
-      console.error("Error initiating existing company checkout:", error);
-      res.status(500).json({ message: "Failed to initiate checkout" });
+      console.error("Error submitting existing company:", error);
+      res.status(500).json({ message: "Failed to submit application" });
     }
   });
 

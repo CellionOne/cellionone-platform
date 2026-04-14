@@ -7,6 +7,7 @@ export interface CreateOrderInput {
   founderId: string;
   applicationId?: number;
   items: { sku: string; quantity?: number }[];
+  adminFeeAmount?: number; // 10% administration fee in kobo, charged on top of subtotal
 }
 
 export async function createOrder(input: CreateOrderInput) {
@@ -43,6 +44,7 @@ export async function createOrder(input: CreateOrderInput) {
     status: "pending_payment",
     currency: "NGN",
     totalAmount,
+    adminFeeAmount: input.adminFeeAmount || 0,
     totalCellionCut,
     totalLawyerNet,
   }).returning();

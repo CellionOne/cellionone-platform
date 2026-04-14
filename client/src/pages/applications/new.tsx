@@ -856,7 +856,7 @@ export default function NewApplicationPage() {
                     <div className="space-y-3">
                       <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
                         <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                        <span>A Corporate entity (company or trust) can be a director or shareholder. The entity's RC number will be verified via the CAC registry as part of the verification process. A ₦15,000 KYB fee applies per corporate entity.</span>
+                        <span>A Corporate entity (company or trust) can be a director or shareholder. The entity's RC number will be verified via the CAC registry as part of the verification process.</span>
                       </div>
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-2">

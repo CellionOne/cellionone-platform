@@ -940,7 +940,8 @@ export const orders = pgTable("orders", {
   applicationId: integer("application_id"), // link to incorporation application if relevant
   status: varchar("status", { length: 50 }).default("draft"), // draft | pending_payment | paid | failed | cancelled
   currency: varchar("currency", { length: 10 }).default("NGN"),
-  totalAmount: integer("total_amount").notNull(), // in kobo
+  totalAmount: integer("total_amount").notNull(), // subtotal of products in kobo (before admin fee)
+  adminFeeAmount: integer("admin_fee_amount").notNull().default(0), // 10% administration fee in kobo
   totalCellionCut: integer("total_cellion_cut").notNull().default(0), // sum of all item cuts in kobo
   totalLawyerNet: integer("total_lawyer_net").notNull().default(0), // total - cellion cut in kobo
   fulfilmentStatus: varchar("fulfilment_status", { length: 50 }).default("pending"), // pending | assigned | in_progress | completed

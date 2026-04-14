@@ -16,6 +16,7 @@ import {
   Building2,
   ArrowRight,
   ArrowLeft,
+  CheckCircle,
   CheckCircle2,
   Search,
   Loader2,
@@ -27,7 +28,6 @@ import {
   User,
   CreditCard,
   AlertCircle,
-  ExternalLink,
 } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ const STEPS = [
   { id: 2, title: "Confirm Details", description: "Review and complete your company information" },
   { id: 3, title: "Directors", description: "Confirm director information" },
   { id: 4, title: "Documents", description: "Upload required company documents" },
-  { id: 5, title: "Payment", description: "Complete payment to submit for verification" },
+  { id: 5, title: "Submit", description: "Submit your application for free verification" },
 ];
 
 const VAULT_DOCS: { key: string; label: string }[] = [
@@ -382,24 +382,26 @@ export default function ExistingCompanyPage() {
     }
   };
 
-  // ── Checkout (Step 5) — Paystack redirect ─────────────────────────────────
-
+  // ── Submit (Step 5) — free verification, no payment required ─────────────────
   const checkoutMutation = useMutation({
     mutationFn: async () => {
       if (!createdProfileId) throw new Error("No company profile found");
       const res = await apiRequest("POST", `/api/founder/company-profiles/${createdProfileId}/checkout`);
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ message: "Checkout failed" }));
+        const err = await res.json().catch(() => ({ message: "Submission failed" }));
         throw new Error(err.message);
       }
-      return res.json() as Promise<{ authorizationUrl: string; reference: string; orderId: number }>;
+      return res.json() as Promise<{ success: boolean; message: string }>;
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles"] });
-      window.location.href = data.authorizationUrl;
+      toast({
+        title: "Application Submitted",
+        description: "Your company has been submitted for verification. We'll notify you when complete.",
+      });
     },
     onError: (err: Error) => {
-      toast({ title: "Checkout failed", description: err.message || "Please try again.", variant: "destructive" });
+      toast({ title: "Submission failed", description: err.message || "Please try again.", variant: "destructive" });
     },
   });
 
@@ -415,9 +417,7 @@ export default function ExistingCompanyPage() {
   const directorsWithoutId = individualDirs.filter(d => !d.bvn.trim() && !d.nin.trim());
   const corporateWithoutRc = corporateDirs.filter(d => !d.rcNumber?.trim());
   const canProceedStep3 = directors.length > 0 && directorsWithoutId.length === 0 && corporateWithoutRc.length === 0;
-  const CORPORATE_KYB_FEE = 15000;
   const extraIndividualDirs = Math.max(0, individualDirs.length - INCLUDED_DIRECTORS);
-  const totalFee = BASE_FEE_NGN + extraIndividualDirs * EXTRA_DIR_FEE_NGN + corporateDirs.length * CORPORATE_KYB_FEE;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -453,13 +453,13 @@ export default function ExistingCompanyPage() {
                 <span className="font-medium">{resumableProfile.companyName || "Unnamed Company"}</span>
                 {resumableProfile.rcNumber && <span className="text-muted-foreground"> · RC {resumableProfile.rcNumber}</span>}
                 {" — "}
-                {resumableProfile.existingCompanyStatus === "pending_payment" ? "Awaiting payment" : "Draft saved"}
+                {"Draft saved"}
               </p>
               <div className="flex gap-2 mt-2.5">
-                {resumableProfile.existingCompanyStatus === "pending_payment" ? (
+                {(resumableProfile.existingCompanyStatus === "pending_payment" || resumableProfile.existingCompanyStatus === "draft") ? (
                   <Button size="sm" onClick={() => setStep(5)} data-testid="button-resume-to-payment">
-                    <CreditCard className="h-3.5 w-3.5 mr-1.5" />
-                    Go to Payment
+                    <CheckCircle className="h-3.5 w-3.5 mr-1.5" />
+                    Go to Submit
                   </Button>
                 ) : (
                   <Button size="sm" onClick={() => setStep(4)} data-testid="button-resume-to-documents">
@@ -709,7 +709,7 @@ export default function ExistingCompanyPage() {
                   <Input value={tinNumber} onChange={e => setTinNumber(e.target.value)} placeholder="e.g. 12345678-0001" data-testid="input-tin" />
                   <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                     <Info className="h-3 w-3" />
-                    We will automatically verify your TIN with FIRS after payment
+                    We will automatically verify your TIN with FIRS after you submit
                   </p>
                 </div>
                 <div>
@@ -801,7 +801,7 @@ export default function ExistingCompanyPage() {
               <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription>
-                  <span className="font-medium">Identity verification is required for all entries.</span> Individual directors need a BVN or NIN; corporate entities need an RC Number. After payment, we automatically verify identities and run AML/sanctions checks.
+                  <span className="font-medium">Identity verification is required for all entries.</span> Individual directors need a BVN or NIN; corporate entities need an RC Number. After submission, we automatically verify identities and run AML/sanctions checks.
                 </AlertDescription>
               </Alert>
 
@@ -919,7 +919,7 @@ export default function ExistingCompanyPage() {
               {newDirType === "corporate" && (
                 <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
                   <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>Corporate entities (companies or trusts) are verified against the CAC registry. A ₦15,000 KYB fee applies per corporate entity. BVN/NIN is not required — use the entity's RC Number instead.</span>
+                  <span>Corporate entities (companies or trusts) are verified against the CAC registry as part of the free verification process. BVN/NIN is not required — use the entity's RC Number instead.</span>
                 </div>
               )}
 
@@ -1137,59 +1137,59 @@ export default function ExistingCompanyPage() {
           </Card>
         )}
 
-        {/* ── STEP 5: Payment & Submit ── */}
+        {/* ── STEP 5: Submit & Verify ── */}
         {step === 5 && (
           <Card>
             <CardHeader>
-              <CardTitle>Step 5: Payment</CardTitle>
-              <CardDescription>Review the fee summary then complete payment via Paystack to start the automated verification.</CardDescription>
+              <CardTitle>Step 5: Submit Application</CardTitle>
+              <CardDescription>Review and submit your application. Verification is completely free.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
-              <div className="rounded-lg border divide-y">
-                <div className="flex items-center justify-between px-4 py-3">
-                  <div>
-                    <p className="font-medium text-sm">Existing Company Verification</p>
-                    <p className="text-xs text-muted-foreground">KYB (CAC registry), TIN verification, up to {INCLUDED_DIRECTORS} individual director checks (BVN/NIN + AML)</p>
-                  </div>
-                  <p className="font-semibold">₦{BASE_FEE_NGN.toLocaleString()}</p>
-                </div>
-                {extraIndividualDirs > 0 && (
-                  <div className="flex items-center justify-between px-4 py-3">
-                    <div>
-                      <p className="font-medium text-sm">Additional Individual Directors</p>
-                      <p className="text-xs text-muted-foreground">{extraIndividualDirs} extra director{extraIndividualDirs > 1 ? "s" : ""} × ₦{EXTRA_DIR_FEE_NGN.toLocaleString()} each</p>
-                    </div>
-                    <p className="font-semibold">₦{(extraIndividualDirs * EXTRA_DIR_FEE_NGN).toLocaleString()}</p>
-                  </div>
-                )}
-                {corporateDirs.length > 0 && (
-                  <div className="flex items-center justify-between px-4 py-3">
-                    <div>
-                      <p className="font-medium text-sm">Corporate Entity KYB</p>
-                      <p className="text-xs text-muted-foreground">{corporateDirs.length} corporate entit{corporateDirs.length > 1 ? "ies" : "y"} × ₦15,000 each (CAC registry verification)</p>
-                    </div>
-                    <p className="font-semibold">₦{(corporateDirs.length * CORPORATE_KYB_FEE).toLocaleString()}</p>
-                  </div>
-                )}
-                <div className="flex items-center justify-between px-4 py-3 bg-muted/30">
-                  <p className="font-semibold">Total</p>
-                  <p className="font-bold text-lg">₦{totalFee.toLocaleString()}</p>
+              {/* Free verification banner */}
+              <div className="rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 p-4 flex items-start gap-3">
+                <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-green-800 dark:text-green-300">No payment required</p>
+                  <p className="text-sm text-green-700 dark:text-green-400 mt-0.5">
+                    Verification for existing Nigerian companies is fully covered by Cellion One. Submit your application and our automated pipeline will verify your company at no cost.
+                  </p>
                 </div>
               </div>
 
-              <Alert>
-                <CreditCard className="h-4 w-4" />
-                <AlertDescription>
-                  You will be redirected to Paystack to complete payment securely. Once confirmed, our automated pipeline verifies your company instantly — no waiting for a human review.
-                </AlertDescription>
-              </Alert>
+              {/* What gets verified */}
+              <div className="rounded-lg border divide-y">
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <CheckCircle className="h-4 w-4 text-primary shrink-0" />
+                  <div>
+                    <p className="font-medium text-sm">CAC Registry (KYB)</p>
+                    <p className="text-xs text-muted-foreground">Company found, active, name and RC number match</p>
+                  </div>
+                  <span className="ml-auto text-xs font-medium text-green-600 dark:text-green-400">Free</span>
+                </div>
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <CheckCircle className="h-4 w-4 text-primary shrink-0" />
+                  <div>
+                    <p className="font-medium text-sm">TIN Verification (FIRS)</p>
+                    <p className="text-xs text-muted-foreground">Tax Identification Number cross-checked if provided</p>
+                  </div>
+                  <span className="ml-auto text-xs font-medium text-green-600 dark:text-green-400">Free</span>
+                </div>
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <CheckCircle className="h-4 w-4 text-primary shrink-0" />
+                  <div>
+                    <p className="font-medium text-sm">Director Identity & AML Checks</p>
+                    <p className="text-xs text-muted-foreground">BVN/NIN verification + sanctions/PEP screening for all directors</p>
+                  </div>
+                  <span className="ml-auto text-xs font-medium text-green-600 dark:text-green-400">Free</span>
+                </div>
+              </div>
 
+              {/* What happens next */}
               <div className="rounded-lg border p-4 space-y-2">
-                <p className="text-sm font-medium">What happens after payment</p>
+                <p className="text-sm font-medium">What happens after you submit</p>
                 <ol className="text-sm text-muted-foreground space-y-1.5 list-decimal list-inside">
-                  <li>Payment confirmed on Paystack's secure page</li>
                   <li>Automated KYB cross-check with the live CAC registry</li>
-                  <li>Automated TIN verification with FIRS</li>
+                  <li>Automated TIN verification with FIRS (if TIN provided)</li>
                   <li>Director BVN/NIN identity checks + AML/sanctions screening</li>
                   <li>If all checks pass — company is instantly marked Verified</li>
                   <li>If any check requires review — our compliance team contacts you within 1 business day</li>
@@ -1203,11 +1203,15 @@ export default function ExistingCompanyPage() {
                 </Button>
                 <Button
                   onClick={() => checkoutMutation.mutate()}
-                  disabled={checkoutMutation.isPending}
-                  data-testid="button-pay-now"
+                  disabled={checkoutMutation.isPending || checkoutMutation.isSuccess}
+                  data-testid="button-submit-application"
                 >
-                  {checkoutMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <ExternalLink className="h-4 w-4 mr-1.5" />}
-                  Pay ₦{totalFee.toLocaleString()} via Paystack
+                  {checkoutMutation.isPending
+                    ? <><Loader2 className="h-4 w-4 animate-spin mr-1.5" />Submitting…</>
+                    : checkoutMutation.isSuccess
+                    ? <><CheckCircle className="h-4 w-4 mr-1.5" />Submitted</>
+                    : <><CheckCircle className="h-4 w-4 mr-1.5" />Submit Application — Free</>
+                  }
                 </Button>
               </div>
             </CardContent>

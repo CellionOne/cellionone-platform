@@ -43,12 +43,17 @@ const steps = [
 interface DirectorEntry {
   localId: string;
   personId?: number;
+  personType: "individual" | "corporate";
   fullName: string;
   inviteEmail: string;
   role: string;
   sharesAllocated: string;
   shareClass: string;
   sharePercentage: string;
+  corporateName?: string;
+  corporateRcNumber?: string;
+  corporateCountry?: string;
+  authorisedRepName?: string;
 }
 
 const companyTypes = [
@@ -100,12 +105,17 @@ export default function NewApplicationPage() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [directors, setDirectors] = useState<DirectorEntry[]>([]);
   const [newDirector, setNewDirector] = useState<Omit<DirectorEntry, "localId">>({
+    personType: "individual",
     fullName: "",
     inviteEmail: "",
     role: "director",
     sharesAllocated: "",
     shareClass: "ordinary",
     sharePercentage: "",
+    corporateName: "",
+    corporateRcNumber: "",
+    corporateCountry: "Nigeria",
+    authorisedRepName: "",
   });
   const [formData, setFormData] = useState({
     applicationType: "incorporation",
@@ -244,15 +254,23 @@ export default function NewApplicationPage() {
 
   const persistDirectorMutation = useMutation({
     mutationFn: async (dir: Omit<DirectorEntry, "localId" | "personId">) => {
-      const res = await apiRequest("POST", "/api/company-people", {
-        inviteEmail: dir.inviteEmail,
+      const payload: Record<string, unknown> = {
+        inviteEmail: dir.personType === "corporate" ? dir.inviteEmail : dir.inviteEmail,
         role: dir.role,
-        title: dir.fullName || null,
+        title: dir.personType === "corporate" ? (dir.corporateName || null) : (dir.fullName || null),
         deferInvite: true,
         sharesAllocated: dir.sharesAllocated ? parseInt(dir.sharesAllocated, 10) : null,
         shareClass: dir.shareClass || null,
         sharePercentage: dir.sharePercentage || null,
-      });
+        entityType: dir.personType,
+      };
+      if (dir.personType === "corporate") {
+        payload.corporateName = dir.corporateName || null;
+        payload.corporateRcNumber = dir.corporateRcNumber || null;
+        payload.corporateCountry = dir.corporateCountry || null;
+        payload.corporateAuthorisedRepName = dir.authorisedRepName || null;
+      }
+      const res = await apiRequest("POST", "/api/company-people", payload);
       return res.json() as Promise<{ id: number }>;
     },
   });
@@ -284,16 +302,24 @@ export default function NewApplicationPage() {
             applicationId: app.id,
           });
         } else if (dir.inviteEmail) {
-          await apiRequest("POST", "/api/company-people", {
+          const dirPayload: Record<string, unknown> = {
             inviteEmail: dir.inviteEmail,
             role: dir.role,
-            title: dir.fullName || null,
+            title: dir.personType === "corporate" ? (dir.corporateName || null) : (dir.fullName || null),
             applicationId: app.id,
             deferInvite: true,
             sharesAllocated: dir.sharesAllocated ? parseInt(dir.sharesAllocated, 10) : null,
             shareClass: dir.shareClass || null,
             sharePercentage: dir.sharePercentage || null,
-          });
+            entityType: dir.personType,
+          };
+          if (dir.personType === "corporate") {
+            dirPayload.corporateName = dir.corporateName || null;
+            dirPayload.corporateRcNumber = dir.corporateRcNumber || null;
+            dirPayload.corporateCountry = dir.corporateCountry || null;
+            dirPayload.corporateAuthorisedRepName = dir.authorisedRepName || null;
+          }
+          await apiRequest("POST", "/api/company-people", dirPayload);
         }
       }
       
@@ -324,7 +350,11 @@ export default function NewApplicationPage() {
   });
 
   const addDirector = async () => {
-    if (!newDirector.fullName || !newDirector.inviteEmail || !newDirector.role) return;
+    if (newDirector.personType === "corporate") {
+      if (!newDirector.corporateName || !newDirector.corporateRcNumber || !newDirector.inviteEmail) return;
+    } else {
+      if (!newDirector.fullName || !newDirector.inviteEmail || !newDirector.role) return;
+    }
     const localId = crypto.randomUUID();
     try {
       const person = await persistDirectorMutation.mutateAsync({ ...newDirector });
@@ -332,7 +362,19 @@ export default function NewApplicationPage() {
     } catch {
       setDirectors(prev => [...prev, { ...newDirector, localId }]);
     }
-    setNewDirector({ fullName: "", inviteEmail: "", role: "director", sharesAllocated: "", shareClass: "ordinary", sharePercentage: "" });
+    setNewDirector({
+      personType: "individual",
+      fullName: "",
+      inviteEmail: "",
+      role: "director",
+      sharesAllocated: "",
+      shareClass: "ordinary",
+      sharePercentage: "",
+      corporateName: "",
+      corporateRcNumber: "",
+      corporateCountry: "Nigeria",
+      authorisedRepName: "",
+    });
   };
 
   const totalSharePercentage = directors.reduce((sum, d) => sum + (parseFloat(d.sharePercentage) || 0), 0);
@@ -633,11 +675,24 @@ export default function NewApplicationPage() {
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                            <Users className="h-4 w-4 text-primary" />
+                            {dir.personType === "corporate"
+                              ? <Building2 className="h-4 w-4 text-primary" />
+                              : <Users className="h-4 w-4 text-primary" />
+                            }
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{dir.fullName || dir.inviteEmail}</p>
-                            {dir.fullName && <p className="text-xs text-muted-foreground truncate">{dir.inviteEmail}</p>}
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-medium truncate">
+                                {dir.personType === "corporate" ? dir.corporateName : (dir.fullName || dir.inviteEmail)}
+                              </p>
+                              {dir.personType === "corporate" && (
+                                <Badge variant="secondary" className="text-xs shrink-0" data-testid={`badge-corporate-${dir.localId}`}>Corporate</Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground truncate">{dir.inviteEmail}</p>
+                            {dir.personType === "corporate" && dir.authorisedRepName && (
+                              <p className="text-xs text-muted-foreground truncate">Rep: {dir.authorisedRepName}</p>
+                            )}
                             <p className="text-xs text-muted-foreground capitalize">
                               {dir.role.replace(/_/g, " ")}
                               {dir.sharePercentage ? ` · ${dir.sharePercentage}% ${dir.shareClass || ""}` : ""}
@@ -693,108 +748,226 @@ export default function NewApplicationPage() {
                 )}
 
                 <div className="space-y-4 rounded-lg border p-4" data-testid="add-director-form">
-                  <p className="text-sm font-medium flex items-center gap-2">
-                    <UserPlus className="h-4 w-4" />
-                    Add a Team Member
-                  </p>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="dir-name">Full Name *</Label>
-                      <Input
-                        id="dir-name"
-                        type="text"
-                        placeholder="e.g. Chukwuemeka Obi"
-                        value={newDirector.fullName}
-                        onChange={(e) => setNewDirector(p => ({ ...p, fullName: e.target.value }))}
-                        data-testid="input-director-name"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="dir-email">Email Address *</Label>
-                      <Input
-                        id="dir-email"
-                        type="email"
-                        placeholder="director@example.com"
-                        value={newDirector.inviteEmail}
-                        onChange={(e) => setNewDirector(p => ({ ...p, inviteEmail: e.target.value }))}
-                        data-testid="input-director-email"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="dir-role">Role *</Label>
-                      <Select
-                        value={newDirector.role}
-                        onValueChange={(v) => setNewDirector(p => ({ ...p, role: v }))}
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <UserPlus className="h-4 w-4" />
+                      Add a Team Member
+                    </p>
+                    <div className="flex items-center gap-1 rounded-md border p-0.5 bg-muted/40" data-testid="toggle-person-type">
+                      <button
+                        type="button"
+                        onClick={() => setNewDirector(p => ({ ...p, personType: "individual" }))}
+                        className={`px-3 py-1 text-xs rounded font-medium transition-colors ${newDirector.personType === "individual" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                        data-testid="toggle-individual"
                       >
-                        <SelectTrigger id="dir-role" data-testid="select-director-role">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="director">Director</SelectItem>
-                          <SelectItem value="shareholder">Shareholder</SelectItem>
-                          <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
-                          <SelectItem value="secretary">Company Secretary</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="dir-share-class">Share Class</Label>
-                      <Select
-                        value={newDirector.shareClass}
-                        onValueChange={(v) => setNewDirector(p => ({ ...p, shareClass: v }))}
+                        <Users className="h-3 w-3 inline mr-1" />Individual
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewDirector(p => ({ ...p, personType: "corporate" }))}
+                        className={`px-3 py-1 text-xs rounded font-medium transition-colors ${newDirector.personType === "corporate" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                        data-testid="toggle-corporate"
                       >
-                        <SelectTrigger id="dir-share-class" data-testid="select-director-share-class">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(shareClassInfo).map(([value, info]) => (
-                            <SelectItem key={value} value={value}>{info.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {newDirector.shareClass && shareClassInfo[newDirector.shareClass] && (
-                        <p className="text-xs text-muted-foreground flex items-start gap-1.5 pt-0.5">
-                          <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary/70" />
-                          {shareClassInfo[newDirector.shareClass].description}
-                        </p>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="dir-shares">Shares Allocated</Label>
-                      <Input
-                        id="dir-shares"
-                        type="number"
-                        min="0"
-                        placeholder="e.g. 5000"
-                        value={newDirector.sharesAllocated}
-                        onChange={(e) => setNewDirector(p => ({ ...p, sharesAllocated: e.target.value }))}
-                        data-testid="input-director-shares"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="dir-pct">Share Percentage (%)</Label>
-                      <Input
-                        id="dir-pct"
-                        type="number"
-                        min="0"
-                        max="100"
-                        placeholder="e.g. 25"
-                        value={newDirector.sharePercentage}
-                        onChange={(e) => setNewDirector(p => ({ ...p, sharePercentage: e.target.value }))}
-                        data-testid="input-director-percentage"
-                      />
+                        <Building2 className="h-3 w-3 inline mr-1" />Corporate
+                      </button>
                     </div>
                   </div>
+
+                  {newDirector.personType === "individual" ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="dir-name">Full Name *</Label>
+                        <Input
+                          id="dir-name"
+                          type="text"
+                          placeholder="e.g. Chukwuemeka Obi"
+                          value={newDirector.fullName}
+                          onChange={(e) => setNewDirector(p => ({ ...p, fullName: e.target.value }))}
+                          data-testid="input-director-name"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="dir-email">Email Address *</Label>
+                        <Input
+                          id="dir-email"
+                          type="email"
+                          placeholder="director@example.com"
+                          value={newDirector.inviteEmail}
+                          onChange={(e) => setNewDirector(p => ({ ...p, inviteEmail: e.target.value }))}
+                          data-testid="input-director-email"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="dir-role">Role *</Label>
+                        <Select value={newDirector.role} onValueChange={(v) => setNewDirector(p => ({ ...p, role: v }))}>
+                          <SelectTrigger id="dir-role" data-testid="select-director-role"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="director">Director</SelectItem>
+                            <SelectItem value="shareholder">Shareholder</SelectItem>
+                            <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
+                            <SelectItem value="secretary">Company Secretary</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="dir-share-class">Share Class</Label>
+                        <Select value={newDirector.shareClass} onValueChange={(v) => setNewDirector(p => ({ ...p, shareClass: v }))}>
+                          <SelectTrigger id="dir-share-class" data-testid="select-director-share-class"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(shareClassInfo).map(([value, info]) => (
+                              <SelectItem key={value} value={value}>{info.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {newDirector.shareClass && shareClassInfo[newDirector.shareClass] && (
+                          <p className="text-xs text-muted-foreground flex items-start gap-1.5 pt-0.5">
+                            <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-primary/70" />
+                            {shareClassInfo[newDirector.shareClass].description}
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="dir-shares">Shares Allocated</Label>
+                        <Input
+                          id="dir-shares"
+                          type="number"
+                          min="0"
+                          placeholder="e.g. 5000"
+                          value={newDirector.sharesAllocated}
+                          onChange={(e) => setNewDirector(p => ({ ...p, sharesAllocated: e.target.value }))}
+                          data-testid="input-director-shares"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="dir-pct">Share Percentage (%)</Label>
+                        <Input
+                          id="dir-pct"
+                          type="number"
+                          min="0"
+                          max="100"
+                          placeholder="e.g. 25"
+                          value={newDirector.sharePercentage}
+                          onChange={(e) => setNewDirector(p => ({ ...p, sharePercentage: e.target.value }))}
+                          data-testid="input-director-percentage"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
+                        <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                        <span>A Corporate entity (company or trust) can be a director or shareholder. The entity's RC number will be verified via the CAC registry as part of the verification process. A ₦15,000 KYB fee applies per corporate entity.</span>
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="corp-name">Registered Company Name *</Label>
+                          <Input
+                            id="corp-name"
+                            type="text"
+                            placeholder="e.g. Acme Holdings Ltd"
+                            value={newDirector.corporateName || ""}
+                            onChange={(e) => setNewDirector(p => ({ ...p, corporateName: e.target.value }))}
+                            data-testid="input-corporate-name"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="corp-rc">RC Number *</Label>
+                          <Input
+                            id="corp-rc"
+                            type="text"
+                            placeholder="e.g. RC123456"
+                            value={newDirector.corporateRcNumber || ""}
+                            onChange={(e) => setNewDirector(p => ({ ...p, corporateRcNumber: e.target.value }))}
+                            data-testid="input-corporate-rc"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="corp-country">Country of Incorporation</Label>
+                          <Select
+                            value={newDirector.corporateCountry || "Nigeria"}
+                            onValueChange={(v) => setNewDirector(p => ({ ...p, corporateCountry: v }))}
+                          >
+                            <SelectTrigger id="corp-country" data-testid="select-corporate-country"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {countries.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="corp-role">Role *</Label>
+                          <Select value={newDirector.role} onValueChange={(v) => setNewDirector(p => ({ ...p, role: v }))}>
+                            <SelectTrigger id="corp-role" data-testid="select-corporate-role"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="director">Director</SelectItem>
+                              <SelectItem value="shareholder">Shareholder</SelectItem>
+                              <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="corp-rep-name">Authorised Representative Name</Label>
+                          <Input
+                            id="corp-rep-name"
+                            type="text"
+                            placeholder="e.g. Ada Nwosu"
+                            value={newDirector.authorisedRepName || ""}
+                            onChange={(e) => setNewDirector(p => ({ ...p, authorisedRepName: e.target.value }))}
+                            data-testid="input-corporate-rep-name"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="corp-rep-email">Authorised Representative Email *</Label>
+                          <Input
+                            id="corp-rep-email"
+                            type="email"
+                            placeholder="rep@acme.com"
+                            value={newDirector.inviteEmail}
+                            onChange={(e) => setNewDirector(p => ({ ...p, inviteEmail: e.target.value }))}
+                            data-testid="input-corporate-rep-email"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="corp-share-pct">Share Percentage (%)</Label>
+                          <Input
+                            id="corp-share-pct"
+                            type="number"
+                            min="0"
+                            max="100"
+                            placeholder="e.g. 30"
+                            value={newDirector.sharePercentage}
+                            onChange={(e) => setNewDirector(p => ({ ...p, sharePercentage: e.target.value }))}
+                            data-testid="input-corporate-share-pct"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="corp-share-class">Share Class</Label>
+                          <Select value={newDirector.shareClass} onValueChange={(v) => setNewDirector(p => ({ ...p, shareClass: v }))}>
+                            <SelectTrigger id="corp-share-class" data-testid="select-corporate-share-class"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(shareClassInfo).map(([value, info]) => (
+                                <SelectItem key={value} value={value}>{info.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <Button
                     type="button"
                     variant="outline"
                     onClick={addDirector}
-                    disabled={!newDirector.fullName || !newDirector.inviteEmail}
+                    disabled={
+                      newDirector.personType === "corporate"
+                        ? !newDirector.corporateName || !newDirector.corporateRcNumber || !newDirector.inviteEmail
+                        : !newDirector.fullName || !newDirector.inviteEmail
+                    }
                     className="gap-2"
                     data-testid="button-add-director"
                   >
                     <UserPlus className="h-4 w-4" />
-                    Add Person
+                    {newDirector.personType === "corporate" ? "Add Corporate Entity" : "Add Person"}
                   </Button>
                 </div>
 

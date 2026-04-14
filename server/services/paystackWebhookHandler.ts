@@ -630,6 +630,12 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             amlChecked?: boolean; // true only when AML service returned a definitive result
             amlCheckError?: string;
             biometricStatus?: string;
+            entityType?: string; // "individual" | "corporate"
+            rcNumber?: string; // for corporate entities
+            authorisedRepName?: string; // for corporate entities
+            authorisedRepEmail?: string; // for corporate entities
+            corporateKybPassed?: boolean; // KYB result for the corporate entity itself
+            corporateKybResultText?: string;
           }
 
           // Fetch founder email once for notifications
@@ -821,57 +827,116 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             for (let idx = 0; idx < directors.length; idx++) {
               const director = directors[idx];
               const dirJobBase = `dir-${profile.id}-${idx}-${Date.now()}`;
-              let bvnVerified: boolean | undefined;
-              let ninVerified: boolean | undefined;
+              const isCorporateEntry = director.entityType === "corporate";
 
-              if (director.bvn) {
+              if (isCorporateEntry) {
+                // Corporate entity: run KYB on the entity RC + AML on authorised rep
+                let corporateKybPassed = false;
+                let corporateKybResultText = 'Not checked';
+                let amlIsHit: boolean | undefined;
+                let amlHitTypes: string[] | undefined;
+                let amlChecked = false;
+                let amlCheckError: string | undefined;
+
+                if (director.rcNumber) {
+                  try {
+                    const corpKybJob = await verifyBusiness(director.rcNumber, order.founderId, `corp-kyb-${dirJobBase}`);
+                    if (!corpKybJob.found) {
+                      corporateKybResultText = 'Corporate entity not found in CAC registry';
+                    } else {
+                      const activeStatuses = ['active', 'approved and active', 'registered'];
+                      const statusOk = activeStatuses.includes((corpKybJob.status || '').toLowerCase());
+                      if (statusOk) {
+                        corporateKybPassed = true;
+                        corporateKybResultText = corpKybJob.status || 'Active';
+                      } else {
+                        corporateKybResultText = `Corporate entity status: ${corpKybJob.status || 'unknown'}`;
+                      }
+                    }
+                  } catch (e: unknown) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    corporateKybResultText = `KYB error: ${msg}`;
+                    console.error(`[Webhook] Corporate KYB failed for entity ${director.name} (idx ${idx}): ${msg}`);
+                  }
+                } else {
+                  corporateKybResultText = 'No RC Number provided';
+                }
+
+                // AML check on the authorised representative
+                const amlTarget = director.authorisedRepName || director.name;
                 try {
-                  const plainBvn = decryptField(director.bvn);
-                  const bvnRes = await verifyBvn(plainBvn, order.founderId, `bvn-${dirJobBase}`);
-                  bvnVerified = bvnRes.success;
+                  const amlRes = await performAmlCheck(amlTarget, order.founderId);
+                  amlIsHit = amlRes.isHit;
+                  amlHitTypes = amlRes.hitTypes;
+                  amlChecked = true;
                 } catch (e: unknown) {
                   const msg = e instanceof Error ? e.message : String(e);
-                  console.error(`[Webhook] Director BVN verification failed (idx ${idx}): ${msg}`);
+                  amlCheckError = msg;
+                  console.error(`[Webhook] Corporate authorised rep AML check failed (idx ${idx}): ${msg}`);
                 }
-              }
 
-              if (director.nin) {
+                updatedDirectors[idx] = {
+                  ...director,
+                  corporateKybPassed,
+                  corporateKybResultText,
+                  amlIsHit: amlIsHit !== undefined ? amlIsHit : director.amlIsHit,
+                  amlHitTypes: amlHitTypes !== undefined ? amlHitTypes : director.amlHitTypes,
+                  amlChecked,
+                  amlCheckError,
+                };
+              } else {
+                // Individual director: BVN/NIN + AML
+                let bvnVerified: boolean | undefined;
+                let ninVerified: boolean | undefined;
+
+                if (director.bvn) {
+                  try {
+                    const plainBvn = decryptField(director.bvn);
+                    const bvnRes = await verifyBvn(plainBvn, order.founderId, `bvn-${dirJobBase}`);
+                    bvnVerified = bvnRes.success;
+                  } catch (e: unknown) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    console.error(`[Webhook] Director BVN verification failed (idx ${idx}): ${msg}`);
+                  }
+                }
+
+                if (director.nin) {
+                  try {
+                    const plainNin = decryptField(director.nin);
+                    const ninRes = await verifyNin(plainNin, order.founderId, `nin-${dirJobBase}`);
+                    ninVerified = ninRes.success;
+                  } catch (e: unknown) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    console.error(`[Webhook] Director NIN verification failed (idx ${idx}): ${msg}`);
+                  }
+                }
+
+                let amlIsHit: boolean | undefined;
+                let amlHitTypes: string[] | undefined;
+                let amlChecked = false;
+                let amlCheckError: string | undefined;
                 try {
-                  const plainNin = decryptField(director.nin);
-                  const ninRes = await verifyNin(plainNin, order.founderId, `nin-${dirJobBase}`);
-                  ninVerified = ninRes.success;
+                  const amlRes = await performAmlCheck(director.name, order.founderId);
+                  amlIsHit = amlRes.isHit;
+                  amlHitTypes = amlRes.hitTypes;
+                  amlChecked = true;
                 } catch (e: unknown) {
                   const msg = e instanceof Error ? e.message : String(e);
-                  console.error(`[Webhook] Director NIN verification failed (idx ${idx}): ${msg}`);
+                  amlCheckError = msg;
+                  console.error(`[Webhook] Director AML check failed (idx ${idx}): ${msg}`);
                 }
-              }
 
-              let amlIsHit: boolean | undefined;
-              let amlHitTypes: string[] | undefined;
-              let amlChecked = false;
-              let amlCheckError: string | undefined;
-              try {
-                const amlRes = await performAmlCheck(director.name, order.founderId);
-                amlIsHit = amlRes.isHit;
-                amlHitTypes = amlRes.hitTypes;
-                amlChecked = true; // service returned a definitive result
-              } catch (e: unknown) {
-                const msg = e instanceof Error ? e.message : String(e);
-                amlCheckError = msg;
-                console.error(`[Webhook] Director AML check failed (idx ${idx}): ${msg}`);
-                // amlChecked stays false — pipeline will route to under_review
+                updatedDirectors[idx] = {
+                  ...director,
+                  bvnVerified: bvnVerified !== undefined ? bvnVerified : director.bvnVerified,
+                  ninVerified: ninVerified !== undefined ? ninVerified : director.ninVerified,
+                  amlIsHit: amlIsHit !== undefined ? amlIsHit : director.amlIsHit,
+                  amlHitTypes: amlHitTypes !== undefined ? amlHitTypes : director.amlHitTypes,
+                  amlChecked,
+                  amlCheckError,
+                  biometricStatus: 'pending_selfie',
+                };
               }
-
-              updatedDirectors[idx] = {
-                ...director,
-                bvnVerified: bvnVerified !== undefined ? bvnVerified : director.bvnVerified,
-                ninVerified: ninVerified !== undefined ? ninVerified : director.ninVerified,
-                amlIsHit: amlIsHit !== undefined ? amlIsHit : director.amlIsHit,
-                amlHitTypes: amlHitTypes !== undefined ? amlHitTypes : director.amlHitTypes,
-                amlChecked,
-                amlCheckError,
-                biometricStatus: 'pending_selfie',
-              };
             }
 
             // Persist updated director verification statuses
@@ -890,36 +955,62 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               const founderEmailForBio = founderUserForBio?.email?.toLowerCase();
               for (let dirIdx = 0; dirIdx < updatedDirectors.length; dirIdx++) {
                 const director = updatedDirectors[dirIdx];
+                const isCorporateDir = director.entityType === "corporate";
                 try {
+                  // For corporate entries, skip biometric invite — the KYB check on the entity serves as identity verification
+                  // The authorised rep still gets an invite to verify their own identity
                   const inviteToken = crypto.randomBytes(48).toString('hex');
                   const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
-                  // If this director is the founder, link the invite to their user account
-                  const isFounderDirector = founderEmailForBio && director.email?.toLowerCase() === founderEmailForBio;
-                  await db.insert(directorBiometricInvites).values({
-                    token: inviteToken,
-                    companyProfileId: profile.id,
-                    directorIndex: dirIdx,
-                    directorName: director.name,
-                    directorEmail: director.email || null,
-                    // founder_selfie = this is the platform founder; they complete via Personal Profile
-                    // pending = external director; they receive an email link
-                    status: isFounderDirector ? 'founder_selfie' : 'pending',
-                    expiresAt,
-                    // Link to founder's user account so they can complete via Personal Profile
-                    ...(isFounderDirector && founderUserForBio ? { founderUserId: founderUserForBio.id } : {}),
-                  });
-                  if (director.email && !isFounderDirector) {
-                    // External director — send the invite email
-                    const appUrl = process.env.REPLIT_DEV_DOMAIN || process.env.APP_URL || 'https://cellionone.com';
-                    const biometricUrl = `${appUrl}/director-biometric?token=${inviteToken}`;
-                    resendBio.emails.send({
-                      from: fromBio,
-                      to: director.email,
-                      subject: `Action required: Complete identity verification — ${profile.companyName}`,
-                      html: `<p>Hi ${director.name},</p><p>You have been listed as a director/officer of <strong>${profile.companyName}</strong> on Cellion One.</p><p>To complete your identity verification, please submit a biometric selfie using the secure link below. This link is valid for 48 hours and can only be used once.</p><p><a href="${biometricUrl}" style="font-weight:bold">Complete Biometric Verification</a></p><p>This step is required before the company can be fully verified on Cellion One.</p><p>The Cellion One Compliance Team</p>`,
-                    }).catch((e: Error) => console.error(`[Webhook] Biometric invite email failed for director ${director.name}: ${e.message}`));
-                  } else if (isFounderDirector) {
-                    console.log(`[Webhook] Director ${director.name} is the founder — skipping email, they will complete biometric via Personal Profile`);
+
+                  if (isCorporateDir) {
+                    // Corporate entity: invite the authorised representative (not the corporate entity itself)
+                    const repEmail = director.authorisedRepEmail || null;
+                    const repName = director.authorisedRepName || `Authorised Rep of ${director.name}`;
+                    if (repEmail) {
+                      await db.insert(directorBiometricInvites).values({
+                        token: inviteToken,
+                        companyProfileId: profile.id,
+                        directorIndex: dirIdx,
+                        directorName: repName,
+                        directorEmail: repEmail,
+                        status: 'pending',
+                        expiresAt,
+                      });
+                      const appUrl = process.env.REPLIT_DEV_DOMAIN || process.env.APP_URL || 'https://cellionone.com';
+                      const biometricUrl = `${appUrl}/director-biometric?token=${inviteToken}`;
+                      resendBio.emails.send({
+                        from: fromBio,
+                        to: repEmail,
+                        subject: `Action required: Identity verification as Authorised Representative — ${profile.companyName}`,
+                        html: `<p>Hi ${repName},</p><p>You are listed as the authorised representative of <strong>${director.name}</strong> (a corporate shareholder/director) of <strong>${profile.companyName}</strong> on Cellion One.</p><p>To complete your identity verification on behalf of ${director.name}, please submit a biometric selfie using the secure link below. This link is valid for 48 hours.</p><p><a href="${biometricUrl}" style="font-weight:bold">Complete Biometric Verification</a></p><p>The Cellion One Compliance Team</p>`,
+                      }).catch((e: Error) => console.error(`[Webhook] Biometric invite email failed for corporate rep ${repName}: ${e.message}`));
+                    }
+                    console.log(`[Webhook] Corporate entity ${director.name} (idx ${dirIdx}): KYB check run, biometric invite issued to authorised rep ${repEmail || 'unknown'}`);
+                  } else {
+                    // Individual director — existing flow
+                    const isFounderDirector = founderEmailForBio && director.email?.toLowerCase() === founderEmailForBio;
+                    await db.insert(directorBiometricInvites).values({
+                      token: inviteToken,
+                      companyProfileId: profile.id,
+                      directorIndex: dirIdx,
+                      directorName: director.name,
+                      directorEmail: director.email || null,
+                      status: isFounderDirector ? 'founder_selfie' : 'pending',
+                      expiresAt,
+                      ...(isFounderDirector && founderUserForBio ? { founderUserId: founderUserForBio.id } : {}),
+                    });
+                    if (director.email && !isFounderDirector) {
+                      const appUrl = process.env.REPLIT_DEV_DOMAIN || process.env.APP_URL || 'https://cellionone.com';
+                      const biometricUrl = `${appUrl}/director-biometric?token=${inviteToken}`;
+                      resendBio.emails.send({
+                        from: fromBio,
+                        to: director.email,
+                        subject: `Action required: Complete identity verification — ${profile.companyName}`,
+                        html: `<p>Hi ${director.name},</p><p>You have been listed as a director/officer of <strong>${profile.companyName}</strong> on Cellion One.</p><p>To complete your identity verification, please submit a biometric selfie using the secure link below. This link is valid for 48 hours and can only be used once.</p><p><a href="${biometricUrl}" style="font-weight:bold">Complete Biometric Verification</a></p><p>This step is required before the company can be fully verified on Cellion One.</p><p>The Cellion One Compliance Team</p>`,
+                      }).catch((e: Error) => console.error(`[Webhook] Biometric invite email failed for director ${director.name}: ${e.message}`));
+                    } else if (isFounderDirector) {
+                      console.log(`[Webhook] Director ${director.name} is the founder — skipping email, they will complete biometric via Personal Profile`);
+                    }
                   }
                 } catch (e: unknown) {
                   const msg = e instanceof Error ? e.message : String(e);
@@ -944,18 +1035,21 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                 .from(users).where(eq(users.id, order.founderId));
               const founderEmail = founderUser?.email?.toLowerCase();
               {
+                // Only individual directors can pre-fill the founder profile
+                const individualPipelineDirs = updatedDirectors.filter(d => d.entityType !== "corporate");
+
                 // (A) Pre-fill condition: email match — BVN or NIN verified, AML not required
                 let prefillDir = founderEmail
-                  ? updatedDirectors.find(d =>
+                  ? individualPipelineDirs.find(d =>
                       d.email?.toLowerCase() === founderEmail &&
                       (d.bvnVerified === true || d.ninVerified === true)
                     )
                   : undefined;
 
-                // (B) Fallback: exactly one verified director with no AML hit
+                // (B) Fallback: exactly one verified individual director with no AML hit
                 // Excludes AML-hit directors; allows clean (amlIsHit=false) or not-yet-run (amlIsHit=null/undefined)
                 if (!prefillDir) {
-                  const verifiedDirs = updatedDirectors.filter(d =>
+                  const verifiedDirs = individualPipelineDirs.filter(d =>
                     (d.bvnVerified === true || d.ninVerified === true) && d.amlIsHit !== true
                   );
                   if (verifiedDirs.length === 1) prefillDir = verifiedDirs[0];
@@ -1008,11 +1102,11 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
                   const now = new Date();
 
-                  // Auto-verify condition: any director with email matching founder email,
+                  // Auto-verify condition: any INDIVIDUAL director with email matching founder email,
                   // BVN/NIN verified AND AML explicitly clean.
                   // Requires email match to safely confirm identity (founderEmail guard prevents false positives).
                   const verifyDir = founderEmail
-                    ? updatedDirectors.find(d =>
+                    ? individualPipelineDirs.find(d =>
                         d.email?.toLowerCase() === founderEmail &&
                         (d.bvnVerified === true || d.ninVerified === true) &&
                         d.amlChecked === true && d.amlIsHit === false
@@ -1087,32 +1181,51 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
 
             // Step 4: Build verification report and auto-approve / flag for review
             const directorsReport = updatedDirectors.map(dir => {
-              const hasBvn = !!dir.bvn;
-              const hasNin = !!dir.nin;
+              const isCorp = dir.entityType === "corporate";
+              const hasBvn = !isCorp && !!dir.bvn;
+              const hasNin = !isCorp && !!dir.nin;
               // amlStatus: 'clear' | 'hit' | 'error' | 'pending'
               const amlStatus = !dir.amlChecked
                 ? (dir.amlCheckError ? 'error' : 'pending')
                 : (dir.amlIsHit === false ? 'clear' : 'hit');
+              if (isCorp) {
+                return {
+                  name: dir.name,
+                  entityType: 'corporate',
+                  rcNumber: dir.rcNumber,
+                  authorisedRepName: dir.authorisedRepName,
+                  corporateKybPassed: dir.corporateKybPassed,
+                  corporateKybResultText: dir.corporateKybResultText,
+                  amlClear: dir.amlChecked ? dir.amlIsHit === false : undefined,
+                  amlStatus,
+                  amlCheckError: dir.amlCheckError,
+                  amlHitTypes: dir.amlHitTypes,
+                };
+              }
               return {
                 name: dir.name,
+                entityType: 'individual',
                 bvnPassed: hasBvn ? dir.bvnVerified === true : undefined,
                 ninPassed: hasNin ? dir.ninVerified === true : undefined,
-                amlClear: dir.amlChecked ? dir.amlIsHit === false : undefined, // undefined = not completed
+                amlClear: dir.amlChecked ? dir.amlIsHit === false : undefined,
                 amlStatus,
                 amlCheckError: dir.amlCheckError,
                 amlHitTypes: dir.amlHitTypes,
               };
             });
 
-            // Directors pass: must have ≥1 director AND each must have ≥1 verified ID (BVN or NIN)
-            // AND AML check completed (fail-closed) AND no AML hit.
+            // Directors pass: must have ≥1 entry AND each must pass its own verification type.
+            // Individual: ≥1 verified ID (BVN or NIN) AND AML check completed + clear (fail-closed).
+            // Corporate: KYB passed AND AML on authorised rep completed + clear.
             // Empty array is an explicit fail — guards against API bypass reaching the webhook.
             const directorsPass = updatedDirectors.length > 0 && updatedDirectors.every(dir => {
+              const amlOk = dir.amlChecked === true && dir.amlIsHit === false;
+              if (dir.entityType === "corporate") {
+                return dir.corporateKybPassed === true && amlOk;
+              }
               const bvnPassedCheck = !!dir.bvn && dir.bvnVerified === true;
               const ninPassedCheck = !!dir.nin && dir.ninVerified === true;
               // Fail-closed: require explicit amlIsHit === false (completed + clear).
-              // undefined means AML did not complete (service error) — routes to under_review.
-              const amlOk = dir.amlChecked === true && dir.amlIsHit === false;
               return (bvnPassedCheck || ninPassedCheck) && amlOk;
             });
 

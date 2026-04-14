@@ -82,12 +82,16 @@ interface KybResult {
 }
 
 interface DirectorEntry {
+  entityType: "individual" | "corporate";
   name: string;
   role: string;
   classification: "director" | "shareholder" | "director_shareholder";
   email: string;
   bvn: string;
   nin: string;
+  rcNumber?: string;
+  authorisedRepName?: string;
+  countryOfIncorporation?: string;
 }
 
 interface AddressFields {
@@ -184,7 +188,8 @@ export default function ExistingCompanyPage() {
 
   // Step 3 directors
   const [directors, setDirectors] = useState<DirectorEntry[]>([]);
-  const [newDir, setNewDir] = useState<DirectorEntry>({ name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "" });
+  const [newDirType, setNewDirType] = useState<"individual" | "corporate">("individual");
+  const [newDir, setNewDir] = useState<DirectorEntry>({ entityType: "individual", name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "", rcNumber: "", authorisedRepName: "", countryOfIncorporation: "Nigeria" });
 
   // Step 4 documents
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDoc[]>([]);
@@ -405,11 +410,14 @@ export default function ExistingCompanyPage() {
     : !!(operatingAddress.line1.trim() && operatingAddress.city.trim() && operatingAddress.state.trim());
   const canProceedStep2 = companyName.trim().length >= 2 && (rcInput.trim() || kybResult?.rcNumber || "").length >= 2 && operatingAddressValid;
   const uploadedKeys = new Set(uploadedDocs.map(d => d.key));
-  const directorsWithId = directors.filter(d => d.bvn.trim() || d.nin.trim());
-  const directorsWithoutId = directors.filter(d => !d.bvn.trim() && !d.nin.trim());
-  const canProceedStep3 = directors.length > 0 && directorsWithoutId.length === 0;
-  const extraDirectors = Math.max(0, directors.length - INCLUDED_DIRECTORS);
-  const totalFee = BASE_FEE_NGN + extraDirectors * EXTRA_DIR_FEE_NGN;
+  const individualDirs = directors.filter(d => d.entityType !== "corporate");
+  const corporateDirs = directors.filter(d => d.entityType === "corporate");
+  const directorsWithoutId = individualDirs.filter(d => !d.bvn.trim() && !d.nin.trim());
+  const corporateWithoutRc = corporateDirs.filter(d => !d.rcNumber?.trim());
+  const canProceedStep3 = directors.length > 0 && directorsWithoutId.length === 0 && corporateWithoutRc.length === 0;
+  const CORPORATE_KYB_FEE = 15000;
+  const extraIndividualDirs = Math.max(0, individualDirs.length - INCLUDED_DIRECTORS);
+  const totalFee = BASE_FEE_NGN + extraIndividualDirs * EXTRA_DIR_FEE_NGN + corporateDirs.length * CORPORATE_KYB_FEE;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -786,67 +794,95 @@ export default function ExistingCompanyPage() {
             <CardHeader>
               <CardTitle>Step 3: Directors & Officers</CardTitle>
               <CardDescription>
-                Each director must have a BVN or NIN for automated identity verification. This is required for compliance and cannot be skipped.
+                Individual directors require a BVN or NIN for automated identity verification. Corporate entities (companies, trusts) require an RC Number instead.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription>
-                  <span className="font-medium">BVN or NIN is required for every director.</span> After payment, we automatically verify each director's identity and run AML/sanctions checks against international databases.
+                  <span className="font-medium">Identity verification is required for all entries.</span> Individual directors need a BVN or NIN; corporate entities need an RC Number. After payment, we automatically verify identities and run AML/sanctions checks.
                 </AlertDescription>
               </Alert>
 
               {directors.length > 0 && (
                 <div className="space-y-3">
                   {directors.map((d, i) => {
-                    const hasId = d.bvn.trim() || d.nin.trim();
+                    const isCorp = d.entityType === "corporate";
+                    const hasId = isCorp ? !!d.rcNumber?.trim() : (d.bvn.trim() || d.nin.trim());
                     return (
                       <div key={i} className={`flex items-start gap-3 rounded-lg border p-3 ${!hasId ? "border-amber-500/40 bg-amber-500/5" : ""}`}>
                         <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                          <User className="h-4 w-4 text-primary" />
+                          {isCorp ? <Building2 className="h-4 w-4 text-primary" /> : <User className="h-4 w-4 text-primary" />}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="font-medium text-sm">{d.name}</p>
+                            {isCorp && <Badge variant="secondary" className="text-xs">Corporate</Badge>}
                             <Badge variant="outline" className="text-xs">{d.role}</Badge>
                             {d.classification === "director_shareholder" && <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-0">Director & Shareholder</Badge>}
                             {d.classification === "shareholder" && <Badge className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 border-0">Shareholder only</Badge>}
-                            {!hasId && <Badge variant="secondary" className="text-xs text-amber-700 bg-amber-100 dark:bg-amber-900 dark:text-amber-300">BVN or NIN required</Badge>}
+                            {!hasId && <Badge variant="secondary" className="text-xs text-amber-700 bg-amber-100 dark:bg-amber-900 dark:text-amber-300">{isCorp ? "RC Number required" : "BVN or NIN required"}</Badge>}
                           </div>
-                          <div className="grid grid-cols-2 gap-2 mt-2">
-                            <div className="col-span-2 sm:col-span-1">
-                              <Label className="text-xs">Email (for biometric invite)</Label>
-                              <Input
-                                className="h-7 text-xs"
-                                value={d.email}
-                                onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, email: e.target.value } : dir))}
-                                placeholder="director@company.com"
-                                data-testid={`input-director-email-${i}`}
-                              />
+                          {isCorp ? (
+                            <div className="grid grid-cols-2 gap-2 mt-2">
+                              <div className="col-span-2 sm:col-span-1">
+                                <Label className="text-xs">RC Number *</Label>
+                                <Input
+                                  className="h-7 text-xs"
+                                  value={d.rcNumber || ""}
+                                  onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, rcNumber: e.target.value } : dir))}
+                                  placeholder="e.g. RC123456"
+                                  data-testid={`input-director-rc-${i}`}
+                                />
+                              </div>
+                              <div className="col-span-2 sm:col-span-1">
+                                <Label className="text-xs">Authorised Rep Email</Label>
+                                <Input
+                                  className="h-7 text-xs"
+                                  value={d.email}
+                                  onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, email: e.target.value } : dir))}
+                                  placeholder="rep@company.com"
+                                  data-testid={`input-director-email-${i}`}
+                                />
+                              </div>
+                              {!hasId && <p className="text-xs text-amber-700 dark:text-amber-400 col-span-2 mt-0.5">Enter the corporate entity's RC Number to continue.</p>}
                             </div>
-                            <div>
-                              <Label className="text-xs">BVN <span className="text-muted-foreground font-normal">(or NIN — one required)</span></Label>
-                              <Input
-                                className="h-7 text-xs"
-                                value={d.bvn}
-                                onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, bvn: e.target.value } : dir))}
-                                placeholder="11-digit BVN"
-                                data-testid={`input-director-bvn-${i}`}
-                              />
+                          ) : (
+                            <div className="grid grid-cols-2 gap-2 mt-2">
+                              <div className="col-span-2 sm:col-span-1">
+                                <Label className="text-xs">Email (for biometric invite)</Label>
+                                <Input
+                                  className="h-7 text-xs"
+                                  value={d.email}
+                                  onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, email: e.target.value } : dir))}
+                                  placeholder="director@company.com"
+                                  data-testid={`input-director-email-${i}`}
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs">BVN <span className="text-muted-foreground font-normal">(or NIN — one required)</span></Label>
+                                <Input
+                                  className="h-7 text-xs"
+                                  value={d.bvn}
+                                  onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, bvn: e.target.value } : dir))}
+                                  placeholder="11-digit BVN"
+                                  data-testid={`input-director-bvn-${i}`}
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs">NIN <span className="text-muted-foreground font-normal">(or BVN — one required)</span></Label>
+                                <Input
+                                  className="h-7 text-xs"
+                                  value={d.nin}
+                                  onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, nin: e.target.value } : dir))}
+                                  placeholder="11-digit NIN"
+                                  data-testid={`input-director-nin-${i}`}
+                                />
+                              </div>
+                              {!hasId && <p className="text-xs text-amber-700 dark:text-amber-400 col-span-2 mt-0.5">Enter at least a BVN or NIN for this director to continue.</p>}
                             </div>
-                            <div>
-                              <Label className="text-xs">NIN <span className="text-muted-foreground font-normal">(or BVN — one required)</span></Label>
-                              <Input
-                                className="h-7 text-xs"
-                                value={d.nin}
-                                onChange={e => setDirectors(prev => prev.map((dir, idx) => idx === i ? { ...dir, nin: e.target.value } : dir))}
-                                placeholder="11-digit NIN"
-                                data-testid={`input-director-nin-${i}`}
-                              />
-                            </div>
-                          </div>
-                          {!hasId && <p className="text-xs text-amber-700 dark:text-amber-400 mt-1.5">Enter at least a BVN or NIN for this director to continue.</p>}
+                          )}
                         </div>
                         <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setDirectors(prev => prev.filter((_, idx) => idx !== i))} data-testid={`button-remove-director-${i}`}>
                           <X className="h-3.5 w-3.5" />
@@ -858,76 +894,142 @@ export default function ExistingCompanyPage() {
               )}
 
               <Separator />
-              <p className="text-sm font-medium">Add Director / Officer</p>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <Label>Full Name *</Label>
-                  <Input value={newDir.name} onChange={e => setNewDir(prev => ({ ...prev, name: e.target.value }))} placeholder="Full legal name" data-testid="input-new-director-name" />
-                </div>
-                <div>
-                  <Label>Role / Title</Label>
-                  <Select value={newDir.role} onValueChange={v => setNewDir(prev => ({ ...prev, role: v }))}>
-                    <SelectTrigger data-testid="select-new-director-role">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Director">Director</SelectItem>
-                      <SelectItem value="CEO">CEO / MD</SelectItem>
-                      <SelectItem value="Secretary">Company Secretary</SelectItem>
-                      <SelectItem value="Shareholder">Shareholder</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="sm:col-span-2">
-                  <Label>Classification <span className="text-muted-foreground font-normal text-xs">(used for dossier & bank reporting)</span></Label>
-                  <Select value={newDir.classification} onValueChange={v => setNewDir(prev => ({ ...prev, classification: v as DirectorEntry["classification"] }))}>
-                    <SelectTrigger data-testid="select-new-director-classification">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="director">Director only</SelectItem>
-                      <SelectItem value="shareholder">Shareholder only</SelectItem>
-                      <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Email (for biometric invite)</Label>
-                  <Input type="email" value={newDir.email} onChange={e => setNewDir(prev => ({ ...prev, email: e.target.value }))} placeholder="email@example.com" data-testid="input-new-director-email" />
-                </div>
-                <div>
-                  <Label>BVN <span className="text-muted-foreground font-normal text-xs">(or NIN — one required)</span></Label>
-                  <Input value={newDir.bvn} onChange={e => setNewDir(prev => ({ ...prev, bvn: e.target.value }))} placeholder="11-digit BVN" data-testid="input-new-director-bvn" />
-                </div>
-                <div>
-                  <Label>NIN <span className="text-muted-foreground font-normal text-xs">(or BVN — one required)</span></Label>
-                  <Input value={newDir.nin} onChange={e => setNewDir(prev => ({ ...prev, nin: e.target.value }))} placeholder="11-digit NIN" data-testid="input-new-director-nin" />
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Add Director / Officer</p>
+                <div className="flex items-center gap-1 rounded-md border p-0.5 bg-muted/40" data-testid="toggle-dir-type">
+                  <button
+                    type="button"
+                    onClick={() => { setNewDirType("individual"); setNewDir(prev => ({ ...prev, entityType: "individual" })); }}
+                    className={`px-3 py-1 text-xs rounded font-medium transition-colors ${newDirType === "individual" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    data-testid="toggle-individual-dir"
+                  >
+                    <User className="h-3 w-3 inline mr-1" />Individual
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setNewDirType("corporate"); setNewDir(prev => ({ ...prev, entityType: "corporate" })); }}
+                    className={`px-3 py-1 text-xs rounded font-medium transition-colors ${newDirType === "corporate" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    data-testid="toggle-corporate-dir"
+                  >
+                    <Building2 className="h-3 w-3 inline mr-1" />Corporate
+                  </button>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">At least one of BVN or NIN is required per director.</p>
 
-              {newDir.name.trim() && !newDir.bvn.trim() && !newDir.nin.trim() && (
-                <p className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" />
-                  Enter at least a BVN or NIN before adding this director.
-                </p>
+              {newDirType === "corporate" && (
+                <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
+                  <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span>Corporate entities (companies or trusts) are verified against the CAC registry. A ₦15,000 KYB fee applies per corporate entity. BVN/NIN is not required — use the entity's RC Number instead.</span>
+                </div>
+              )}
+
+              {newDirType === "individual" ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label>Full Name *</Label>
+                    <Input value={newDir.name} onChange={e => setNewDir(prev => ({ ...prev, name: e.target.value }))} placeholder="Full legal name" data-testid="input-new-director-name" />
+                  </div>
+                  <div>
+                    <Label>Role / Title</Label>
+                    <Select value={newDir.role} onValueChange={v => setNewDir(prev => ({ ...prev, role: v }))}>
+                      <SelectTrigger data-testid="select-new-director-role"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Director">Director</SelectItem>
+                        <SelectItem value="CEO">CEO / MD</SelectItem>
+                        <SelectItem value="Secretary">Company Secretary</SelectItem>
+                        <SelectItem value="Shareholder">Shareholder</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label>Classification <span className="text-muted-foreground font-normal text-xs">(used for dossier & bank reporting)</span></Label>
+                    <Select value={newDir.classification} onValueChange={v => setNewDir(prev => ({ ...prev, classification: v as DirectorEntry["classification"] }))}>
+                      <SelectTrigger data-testid="select-new-director-classification"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="director">Director only</SelectItem>
+                        <SelectItem value="shareholder">Shareholder only</SelectItem>
+                        <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Email (for biometric invite)</Label>
+                    <Input type="email" value={newDir.email} onChange={e => setNewDir(prev => ({ ...prev, email: e.target.value }))} placeholder="email@example.com" data-testid="input-new-director-email" />
+                  </div>
+                  <div>
+                    <Label>BVN <span className="text-muted-foreground font-normal text-xs">(or NIN — one required)</span></Label>
+                    <Input value={newDir.bvn} onChange={e => setNewDir(prev => ({ ...prev, bvn: e.target.value }))} placeholder="11-digit BVN" data-testid="input-new-director-bvn" />
+                  </div>
+                  <div>
+                    <Label>NIN <span className="text-muted-foreground font-normal text-xs">(or BVN — one required)</span></Label>
+                    <Input value={newDir.nin} onChange={e => setNewDir(prev => ({ ...prev, nin: e.target.value }))} placeholder="11-digit NIN" data-testid="input-new-director-nin" />
+                  </div>
+                  {newDir.name.trim() && !newDir.bvn.trim() && !newDir.nin.trim() && (
+                    <p className="sm:col-span-2 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      Enter at least a BVN or NIN before adding this director.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label>Registered Company Name *</Label>
+                    <Input value={newDir.name} onChange={e => setNewDir(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g. Acme Holdings Ltd" data-testid="input-new-director-name" />
+                  </div>
+                  <div>
+                    <Label>RC Number *</Label>
+                    <Input value={newDir.rcNumber || ""} onChange={e => setNewDir(prev => ({ ...prev, rcNumber: e.target.value }))} placeholder="e.g. RC123456" data-testid="input-new-director-rc" />
+                  </div>
+                  <div>
+                    <Label>Role</Label>
+                    <Select value={newDir.role} onValueChange={v => setNewDir(prev => ({ ...prev, role: v }))}>
+                      <SelectTrigger data-testid="select-new-director-role"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Director">Director</SelectItem>
+                        <SelectItem value="Shareholder">Shareholder</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Classification</Label>
+                    <Select value={newDir.classification} onValueChange={v => setNewDir(prev => ({ ...prev, classification: v as DirectorEntry["classification"] }))}>
+                      <SelectTrigger data-testid="select-new-director-classification"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="director">Director only</SelectItem>
+                        <SelectItem value="shareholder">Shareholder only</SelectItem>
+                        <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Authorised Representative Name</Label>
+                    <Input value={newDir.authorisedRepName || ""} onChange={e => setNewDir(prev => ({ ...prev, authorisedRepName: e.target.value }))} placeholder="e.g. Ada Nwosu" data-testid="input-new-director-rep-name" />
+                  </div>
+                  <div>
+                    <Label>Authorised Representative Email</Label>
+                    <Input type="email" value={newDir.email} onChange={e => setNewDir(prev => ({ ...prev, email: e.target.value }))} placeholder="rep@company.com" data-testid="input-new-director-email" />
+                  </div>
+                </div>
               )}
 
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!newDir.name.trim() || (!newDir.bvn.trim() && !newDir.nin.trim())}
+                disabled={
+                  newDirType === "corporate"
+                    ? !newDir.name.trim() || !newDir.rcNumber?.trim()
+                    : !newDir.name.trim() || (!newDir.bvn.trim() && !newDir.nin.trim())
+                }
                 onClick={() => {
-                  if (!newDir.name.trim()) return;
-                  if (!newDir.bvn.trim() && !newDir.nin.trim()) return;
-                  setDirectors(prev => [...prev, { ...newDir }]);
-                  setNewDir({ name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "" });
+                  const entry: DirectorEntry = { ...newDir, entityType: newDirType };
+                  setDirectors(prev => [...prev, entry]);
+                  setNewDir({ entityType: newDirType, name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "", rcNumber: "", authorisedRepName: "", countryOfIncorporation: "Nigeria" });
                 }}
                 data-testid="button-add-director"
               >
                 <Plus className="h-3.5 w-3.5 mr-1.5" />
-                Add Director
+                {newDirType === "corporate" ? "Add Corporate Entity" : "Add Director"}
               </Button>
 
               {directors.length === 0 && (
@@ -1047,17 +1149,26 @@ export default function ExistingCompanyPage() {
                 <div className="flex items-center justify-between px-4 py-3">
                   <div>
                     <p className="font-medium text-sm">Existing Company Verification</p>
-                    <p className="text-xs text-muted-foreground">KYB (CAC registry), TIN verification, up to {INCLUDED_DIRECTORS} director checks (BVN/NIN + AML)</p>
+                    <p className="text-xs text-muted-foreground">KYB (CAC registry), TIN verification, up to {INCLUDED_DIRECTORS} individual director checks (BVN/NIN + AML)</p>
                   </div>
                   <p className="font-semibold">₦{BASE_FEE_NGN.toLocaleString()}</p>
                 </div>
-                {extraDirectors > 0 && (
+                {extraIndividualDirs > 0 && (
                   <div className="flex items-center justify-between px-4 py-3">
                     <div>
-                      <p className="font-medium text-sm">Additional Directors</p>
-                      <p className="text-xs text-muted-foreground">{extraDirectors} extra director{extraDirectors > 1 ? "s" : ""} × ₦{EXTRA_DIR_FEE_NGN.toLocaleString()} each</p>
+                      <p className="font-medium text-sm">Additional Individual Directors</p>
+                      <p className="text-xs text-muted-foreground">{extraIndividualDirs} extra director{extraIndividualDirs > 1 ? "s" : ""} × ₦{EXTRA_DIR_FEE_NGN.toLocaleString()} each</p>
                     </div>
-                    <p className="font-semibold">₦{(extraDirectors * EXTRA_DIR_FEE_NGN).toLocaleString()}</p>
+                    <p className="font-semibold">₦{(extraIndividualDirs * EXTRA_DIR_FEE_NGN).toLocaleString()}</p>
+                  </div>
+                )}
+                {corporateDirs.length > 0 && (
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="font-medium text-sm">Corporate Entity KYB</p>
+                      <p className="text-xs text-muted-foreground">{corporateDirs.length} corporate entit{corporateDirs.length > 1 ? "ies" : "y"} × ₦15,000 each (CAC registry verification)</p>
+                    </div>
+                    <p className="font-semibold">₦{(corporateDirs.length * CORPORATE_KYB_FEE).toLocaleString()}</p>
                   </div>
                 )}
                 <div className="flex items-center justify-between px-4 py-3 bg-muted/30">

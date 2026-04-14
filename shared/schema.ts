@@ -59,6 +59,11 @@ export const companyPeople = pgTable("company_people", {
   shareClass: varchar("share_class", { length: 50 }),
   sharePercentage: varchar("share_percentage", { length: 20 }),
   isVerified: boolean("is_verified").default(false),
+  entityType: varchar("entity_type", { length: 20 }).default("individual"), // "individual" | "corporate"
+  corporateName: varchar("corporate_name", { length: 255 }),
+  corporateRcNumber: varchar("corporate_rc_number", { length: 50 }),
+  corporateCountry: varchar("corporate_country", { length: 100 }),
+  corporateAuthorisedRepName: varchar("corporate_authorised_rep_name", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -747,8 +752,8 @@ export const companyProfiles = pgTable("company_profiles", {
     postalCode?: string;
     country?: string;
   }>(),
-  directors: json("directors").$type<{ name: string; role?: string; email?: string; bvn?: string; nin?: string }[]>(),
-  shareholders: json("shareholders").$type<{ name: string; shares?: number; percentage?: number }[]>(),
+  directors: json("directors").$type<{ name: string; role?: string; email?: string; bvn?: string; nin?: string; entityType?: string; rcNumber?: string; authorisedRepName?: string; authorisedRepEmail?: string; corporateKybPassed?: boolean; corporateKybResultText?: string }[]>(),
+  shareholders: json("shareholders").$type<{ name: string; shares?: number; percentage?: number; entityType?: string; rcNumber?: string; countryOfIncorporation?: string }[]>(),
   businessActivities: json("business_activities").$type<string[]>(),
   shareCapital: varchar("share_capital", { length: 255 }),
   tinNumber: varchar("tin_number", { length: 100 }),

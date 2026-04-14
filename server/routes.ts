@@ -2870,14 +2870,24 @@ export async function registerRoutes(
   app.post("/api/company-people", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
-      const { inviteEmail, role, title, sharesAllocated, shareClass, sharePercentage, applicationId, companyProfileId, deferInvite } = req.body;
+      const {
+        inviteEmail, role, title, sharesAllocated, shareClass, sharePercentage,
+        applicationId, companyProfileId, deferInvite,
+        entityType, corporateName, corporateRcNumber, corporateCountry, corporateAuthorisedRepName,
+      } = req.body;
+
+      const isCorporate = entityType === "corporate";
 
       if (!inviteEmail || !role) {
-        return res.status(400).json({ message: "Email and role are required" });
+        return res.status(400).json({ message: isCorporate ? "Authorised representative email and role are required" : "Email and role are required" });
       }
 
       if (!['director', 'shareholder', 'director_shareholder', 'secretary'].includes(role)) {
         return res.status(400).json({ message: "Invalid role" });
+      }
+
+      if (isCorporate && !corporateName?.trim()) {
+        return res.status(400).json({ message: "Corporate entity name is required" });
       }
 
       const crypto = await import("crypto");
@@ -2897,6 +2907,11 @@ export async function registerRoutes(
         sharePercentage: sharePercentage || null,
         applicationId: applicationId || null,
         companyProfileId: companyProfileId || null,
+        entityType: isCorporate ? "corporate" : "individual",
+        corporateName: isCorporate ? (corporateName || null) : null,
+        corporateRcNumber: isCorporate ? (corporateRcNumber || null) : null,
+        corporateCountry: isCorporate ? (corporateCountry || null) : null,
+        corporateAuthorisedRepName: isCorporate ? (corporateAuthorisedRepName || null) : null,
       });
 
       if (!isDraft) {
@@ -2911,22 +2926,41 @@ export async function registerRoutes(
           const user = await storage.getUser(userId);
           const founderName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'A founder';
 
-          await resend.emails.send({
-            from: fromEmail,
-            to: inviteEmail.toLowerCase().trim(),
-            subject: `You've been invited as a ${roleLabel} on Cellion One`,
-            html: `
-              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2>Company Director/Shareholder Invitation</h2>
-                <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
-                <p>To accept this invitation, please create an account or sign in using this link:</p>
-                <p><a href="${appUrl}/invite/${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
-                <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/invite/${inviteToken}</p>
-                <hr style="margin: 24px 0;" />
-                <p style="color: #666; font-size: 12px;">This invitation was sent from Cellion One. If you didn't expect this, you can ignore this email.</p>
-              </div>
-            `,
-          });
+          if (isCorporate) {
+            await resend.emails.send({
+              from: fromEmail,
+              to: inviteEmail.toLowerCase().trim(),
+              subject: `Authorised Representative Invitation — ${corporateName} on Cellion One`,
+              html: `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                  <h2>Authorised Representative Invitation</h2>
+                  <p>${founderName} has listed <strong>${corporateName}</strong> as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
+                  <p>As the authorised representative of <strong>${corporateName}</strong>, you are invited to create an account and complete identity verification on behalf of the corporate entity.</p>
+                  <p><a href="${appUrl}/invite/${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept as Authorised Representative</a></p>
+                  <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/invite/${inviteToken}</p>
+                  <hr style="margin: 24px 0;" />
+                  <p style="color: #666; font-size: 12px;">This invitation was sent from Cellion One. If you didn't expect this, you can ignore this email.</p>
+                </div>
+              `,
+            });
+          } else {
+            await resend.emails.send({
+              from: fromEmail,
+              to: inviteEmail.toLowerCase().trim(),
+              subject: `You've been invited as a ${roleLabel} on Cellion One`,
+              html: `
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                  <h2>Company Director/Shareholder Invitation</h2>
+                  <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
+                  <p>To accept this invitation, please create an account or sign in using this link:</p>
+                  <p><a href="${appUrl}/invite/${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
+                  <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/invite/${inviteToken}</p>
+                  <hr style="margin: 24px 0;" />
+                  <p style="color: #666; font-size: 12px;">This invitation was sent from Cellion One. If you didn't expect this, you can ignore this email.</p>
+                </div>
+              `,
+            });
+          }
         } catch (emailErr: any) {
           console.warn("[CompanyPeople] Failed to send invite email:", emailErr?.message);
         }
@@ -2937,7 +2971,7 @@ export async function registerRoutes(
         action: "company_person_invited",
         entityType: "company_person",
         entityId: String(person.id),
-        details: { inviteEmail, role, title },
+        details: { inviteEmail, role, title, entityType: isCorporate ? "corporate" : "individual", corporateName: isCorporate ? corporateName : undefined },
         ipAddress: req.ip,
       });
 
@@ -8255,7 +8289,12 @@ Important guidelines:
       if (directorList.length === 0) {
         return res.status(400).json({ message: "At least one director is required", code: "DIRECTOR_REQUIRED" });
       }
-      const directorMissingId = directorList.find(d => !d.bvn?.trim() && !d.nin?.trim());
+
+      const individualDirectors = directorList.filter((d: any) => d.entityType !== "corporate");
+      const corporateDirectors = directorList.filter((d: any) => d.entityType === "corporate");
+
+      // Individual directors need BVN or NIN
+      const directorMissingId = individualDirectors.find((d: any) => !d.bvn?.trim() && !d.nin?.trim());
       if (directorMissingId) {
         return res.status(400).json({
           message: `Director "${directorMissingId.name}" must have at least a BVN or NIN for automated verification`,
@@ -8263,15 +8302,36 @@ Important guidelines:
         });
       }
 
+      // Corporate entities need an RC number
+      const corporateMissingRC = corporateDirectors.find((d: any) => !d.rcNumber?.trim());
+      if (corporateMissingRC) {
+        return res.status(400).json({
+          message: `Corporate entity "${corporateMissingRC.name}" must have an RC Number for automated KYB verification`,
+          code: "CORPORATE_RC_REQUIRED",
+        });
+      }
+
       // Encrypt BVN/NIN in director records before storing — PII must not be stored in plaintext
       const { encryptField } = await import('./services/encryptionService');
-      const encryptedDirectors = directorList.map(d => ({
-        name: d.name,
-        role: d.role,
-        email: d.email,
-        bvn: d.bvn ? encryptField(d.bvn) : undefined,
-        nin: d.nin ? encryptField(d.nin) : undefined,
-      }));
+      const encryptedDirectors = directorList.map((d: any) => {
+        if (d.entityType === "corporate") {
+          return {
+            name: d.name,
+            role: d.role,
+            entityType: "corporate",
+            rcNumber: d.rcNumber,
+            authorisedRepName: d.authorisedRepName || null,
+            authorisedRepEmail: d.email || d.authorisedRepEmail || null,
+          };
+        }
+        return {
+          name: d.name,
+          role: d.role,
+          email: d.email,
+          bvn: d.bvn ? encryptField(d.bvn) : undefined,
+          nin: d.nin ? encryptField(d.nin) : undefined,
+        };
+      });
 
       const [newProfile] = await db
         .insert(companyProfiles)
@@ -8457,11 +8517,14 @@ Important guidelines:
       }
 
       // Server-side director enforcement at checkout — defence in depth (profile creation already validates)
-      const directors = (profile.directors as { name: string; bvn?: string; nin?: string }[]) || [];
-      if (directors.length === 0) {
-        return res.status(400).json({ message: "At least one director with BVN or NIN is required before checkout", code: "DIRECTOR_REQUIRED" });
+      const allDirectors = (profile.directors as { name: string; bvn?: string; nin?: string; entityType?: string; rcNumber?: string }[]) || [];
+      const individualDirs = allDirectors.filter(d => d.entityType !== "corporate");
+      const corporateEntities = allDirectors.filter(d => d.entityType === "corporate");
+
+      if (allDirectors.length === 0) {
+        return res.status(400).json({ message: "At least one director is required before checkout", code: "DIRECTOR_REQUIRED" });
       }
-      const checkoutDirMissingId = directors.find(d => !d.bvn && !d.nin);
+      const checkoutDirMissingId = individualDirs.find(d => !d.bvn && !d.nin);
       if (checkoutDirMissingId) {
         return res.status(400).json({
           message: `Director "${checkoutDirMissingId.name}" must have BVN or NIN for automated verification`,
@@ -8471,11 +8534,15 @@ Important guidelines:
 
       // Documents are optional — they go into the secure vault for bank/legal use.
 
-      // Pricing: ₦15,000 base (covers up to 2 directors) + ₦2,500 per additional director beyond 2
-      const extraDirectors = Math.max(0, directors.length - 2);
+      // Pricing: ₦15,000 base (covers up to 2 individual directors) + ₦2,500 per additional individual beyond 2
+      //          + ₦15,000 per corporate entity (KYB fee)
+      const extraIndividualDirs = Math.max(0, individualDirs.length - 2);
       const items: { sku: string; quantity?: number }[] = [{ sku: "EXISTING_CO_VERIFY", quantity: 1 }];
-      if (extraDirectors > 0) {
-        items.push({ sku: "EXISTING_CO_EXTRA_DIR", quantity: extraDirectors });
+      if (extraIndividualDirs > 0) {
+        items.push({ sku: "EXISTING_CO_EXTRA_DIR", quantity: extraIndividualDirs });
+      }
+      if (corporateEntities.length > 0) {
+        items.push({ sku: "CORPORATE_KYB", quantity: corporateEntities.length });
       }
 
       const orderService = await import('./services/orderService');

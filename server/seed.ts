@@ -99,6 +99,7 @@ export async function seedDatabase() {
       { sku: "EXISTING_CO_VERIFY", name: "Existing Company Verification", category: "verification", priceNgn: 1500000, cellionCutNgn: 1500000, metadata: { note: "One-time verification fee for existing Nigerian companies. Covers automated CAC registry check (KYB), TIN verification, director BVN/NIN checks, and AML/sanctions screening. Includes up to 2 directors; additional directors billed at ₦2,500 each." } },
       { sku: "EXISTING_CO_EXTRA_DIR", name: "Existing Company — Extra Director Verification", category: "verification", priceNgn: 250000, cellionCutNgn: 250000, metadata: { note: "Per-director fee for each director beyond the first 2 included in the base Existing Company Verification package." } },
       { sku: "BANK_ACCOUNT", name: "Corporate Bank Account Opening", category: "post_incorporation", priceNgn: 0, cellionCutNgn: 0, requiresManualPricing: true, metadata: { note: "Corporate bank account opening service. Fee varies by partner bank. Our team will contact you with pricing after submission." } },
+      { sku: "CORPORATE_KYB", name: "Corporate Entity KYB Verification", category: "verification", priceNgn: 1500000, cellionCutNgn: 1500000, metadata: { note: "CAC registry lookup for a corporate shareholder or director entity (KYB Job Type 7). Includes AML check on the authorised representative. Bundled within Existing Company Verification at ₦15,000 per corporate entity." } },
     ];
     for (const item of catalogItems) {
       await db.insert(productCatalog).values(item).onConflictDoUpdate({

@@ -68,6 +68,7 @@ import {
   CreditCard,
   Fingerprint,
   Info,
+  Building2,
 } from "lucide-react";
 
 interface CompanyPerson {
@@ -87,6 +88,9 @@ interface CompanyPerson {
   sharePercentage: string | null;
   isVerified: boolean | null;
   createdAt: string;
+  entityType?: string | null;
+  corporateName?: string | null;
+  corporateRcNumber?: string | null;
 }
 
 const inviteSchema = z.object({
@@ -140,6 +144,8 @@ export default function CompanyPeoplePage() {
 function InviteDialog() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const [personType, setPersonType] = useState<"individual" | "corporate">("individual");
+  const [corpForm, setCorpForm] = useState({ corporateName: "", corporateRcNumber: "", corporateCountry: "Nigeria", authorisedRepName: "", repEmail: "", role: "director" });
 
   const form = useForm<InviteFormData>({
     resolver: zodResolver(inviteSchema),
@@ -154,30 +160,49 @@ function InviteDialog() {
   });
 
   const inviteMutation = useMutation({
-    mutationFn: async (data: InviteFormData) => {
-      const payload: any = {
-        inviteEmail: data.inviteEmail,
-        role: data.role,
-        title: data.title || null,
-        shareClass: data.shareClass || null,
-        sharePercentage: data.sharePercentage || null,
-      };
-      if (data.sharesAllocated) {
-        payload.sharesAllocated = parseInt(data.sharesAllocated);
-      }
+    mutationFn: async (payload: Record<string, unknown>) => {
       const res = await apiRequest("POST", "/api/company-people", payload);
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: "Invitation sent", description: "An email has been sent to the invited person." });
+      toast({ title: "Invitation sent", description: personType === "corporate" ? "Corporate entity added. The authorised rep will receive a verification invite." : "An email has been sent to the invited person." });
       queryClient.invalidateQueries({ queryKey: ["/api/company-people"] });
       form.reset();
+      setCorpForm({ corporateName: "", corporateRcNumber: "", corporateCountry: "Nigeria", authorisedRepName: "", repEmail: "", role: "director" });
       setOpen(false);
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
+
+  const handleIndividualSubmit = (data: InviteFormData) => {
+    const payload: Record<string, unknown> = {
+      inviteEmail: data.inviteEmail,
+      role: data.role,
+      title: data.title || null,
+      shareClass: data.shareClass || null,
+      sharePercentage: data.sharePercentage || null,
+      entityType: "individual",
+    };
+    if (data.sharesAllocated) payload.sharesAllocated = parseInt(data.sharesAllocated);
+    inviteMutation.mutate(payload);
+  };
+
+  const handleCorporateSubmit = () => {
+    if (!corpForm.corporateName.trim() || !corpForm.corporateRcNumber.trim() || !corpForm.repEmail.trim()) return;
+    inviteMutation.mutate({
+      entityType: "corporate",
+      corporateName: corpForm.corporateName,
+      corporateRcNumber: corpForm.corporateRcNumber,
+      corporateCountry: corpForm.corporateCountry || "Nigeria",
+      corporateAuthorisedRepName: corpForm.authorisedRepName || null,
+      inviteEmail: corpForm.repEmail,
+      role: corpForm.role,
+      title: corpForm.corporateName,
+      deferInvite: false,
+    });
+  };
 
   const selectedRole = form.watch("role");
   const showShares = selectedRole === "shareholder" || selectedRole === "director_shareholder";
@@ -192,131 +217,195 @@ function InviteDialog() {
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Invite Director / Shareholder</DialogTitle>
+          <DialogTitle>Add Director / Shareholder</DialogTitle>
           <DialogDescription>
-            Send an invitation to add a person to your company. They will need to create an account and complete their profile.
+            Add an individual person or a corporate entity to your company.
           </DialogDescription>
         </DialogHeader>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit((data) => inviteMutation.mutate(data))} className="space-y-4">
-            <FormField
-              control={form.control}
-              name="inviteEmail"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Email Address</FormLabel>
-                  <FormControl>
-                    <Input type="email" placeholder="person@example.com" data-testid="input-invite-email" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
 
-            <FormField
-              control={form.control}
-              name="role"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Role</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+        <div className="flex items-center gap-1 rounded-md border p-0.5 bg-muted/40 w-fit" data-testid="toggle-invite-type">
+          <button
+            type="button"
+            onClick={() => setPersonType("individual")}
+            className={`px-3 py-1 text-xs rounded font-medium transition-colors ${personType === "individual" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            data-testid="toggle-individual-invite"
+          >
+            <Users className="h-3 w-3 inline mr-1" />Individual
+          </button>
+          <button
+            type="button"
+            onClick={() => setPersonType("corporate")}
+            className={`px-3 py-1 text-xs rounded font-medium transition-colors ${personType === "corporate" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            data-testid="toggle-corporate-invite"
+          >
+            <Building2 className="h-3 w-3 inline mr-1" />Corporate
+          </button>
+        </div>
+
+        {personType === "individual" ? (
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleIndividualSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="inviteEmail"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email Address</FormLabel>
                     <FormControl>
-                      <SelectTrigger data-testid="select-person-role">
-                        <SelectValue placeholder="Select role" />
-                      </SelectTrigger>
+                      <Input type="email" placeholder="person@example.com" data-testid="input-invite-email" {...field} />
                     </FormControl>
-                    <SelectContent>
-                      <SelectItem value="director">Director</SelectItem>
-                      <SelectItem value="shareholder">Shareholder</SelectItem>
-                      <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
-                      <SelectItem value="secretary">Company Secretary</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="title"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Title / Designation (Optional)</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Managing Director, Chairman" data-testid="input-person-title" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {showShares && (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField
-                    control={form.control}
-                    name="sharesAllocated"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Shares</FormLabel>
-                        <FormControl>
-                          <Input type="number" placeholder="e.g. 500" data-testid="input-shares" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="sharePercentage"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Percentage (%)</FormLabel>
-                        <FormControl>
-                          <Input type="text" placeholder="e.g. 50" data-testid="input-share-percentage" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                <FormField
-                  control={form.control}
-                  name="shareClass"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Share Class</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-share-class">
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="ordinary">Ordinary Shares</SelectItem>
-                          <SelectItem value="preference">Preference Shares</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </>
-            )}
-
-            <DialogFooter>
-              <Button type="submit" disabled={inviteMutation.isPending} data-testid="button-send-invite">
-                {inviteMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Send className="h-4 w-4 mr-2" />
+                    <FormMessage />
+                  </FormItem>
                 )}
-                Send Invitation
+              />
+
+              <FormField
+                control={form.control}
+                name="role"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Role</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-person-role">
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="director">Director</SelectItem>
+                        <SelectItem value="shareholder">Shareholder</SelectItem>
+                        <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
+                        <SelectItem value="secretary">Company Secretary</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="title"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Title / Designation (Optional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Managing Director, Chairman" data-testid="input-person-title" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {showShares && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField
+                      control={form.control}
+                      name="sharesAllocated"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Shares</FormLabel>
+                          <FormControl>
+                            <Input type="number" placeholder="e.g. 500" data-testid="input-shares" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="sharePercentage"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Percentage (%)</FormLabel>
+                          <FormControl>
+                            <Input type="text" placeholder="e.g. 50" data-testid="input-share-percentage" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  <FormField
+                    control={form.control}
+                    name="shareClass"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Share Class</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-share-class">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="ordinary">Ordinary Shares</SelectItem>
+                            <SelectItem value="preference">Preference Shares</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+
+              <DialogFooter>
+                <Button type="submit" disabled={inviteMutation.isPending} data-testid="button-send-invite">
+                  {inviteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  Send Invitation
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        ) : (
+          <div className="space-y-4">
+            <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
+              <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>Corporate entities are verified via the CAC registry. The authorised representative receives a biometric identity verification invite. A ₦15,000 KYB fee applies at checkout.</span>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-medium">Registered Company Name *</label>
+                <Input className="mt-1" placeholder="e.g. Acme Holdings Ltd" value={corpForm.corporateName} onChange={e => setCorpForm(p => ({ ...p, corporateName: e.target.value }))} data-testid="input-corp-name" />
+              </div>
+              <div>
+                <label className="text-sm font-medium">RC Number *</label>
+                <Input className="mt-1" placeholder="e.g. RC123456" value={corpForm.corporateRcNumber} onChange={e => setCorpForm(p => ({ ...p, corporateRcNumber: e.target.value }))} data-testid="input-corp-rc" />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Role</label>
+                <Select value={corpForm.role} onValueChange={v => setCorpForm(p => ({ ...p, role: v }))}>
+                  <SelectTrigger className="mt-1" data-testid="select-corp-role"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="director">Director</SelectItem>
+                    <SelectItem value="shareholder">Shareholder</SelectItem>
+                    <SelectItem value="director_shareholder">Director & Shareholder</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Authorised Representative Name</label>
+                <Input className="mt-1" placeholder="e.g. Ada Nwosu" value={corpForm.authorisedRepName} onChange={e => setCorpForm(p => ({ ...p, authorisedRepName: e.target.value }))} data-testid="input-corp-rep-name" />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Authorised Representative Email *</label>
+                <Input className="mt-1" type="email" placeholder="rep@acme.com" value={corpForm.repEmail} onChange={e => setCorpForm(p => ({ ...p, repEmail: e.target.value }))} data-testid="input-corp-rep-email" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                onClick={handleCorporateSubmit}
+                disabled={inviteMutation.isPending || !corpForm.corporateName.trim() || !corpForm.corporateRcNumber.trim() || !corpForm.repEmail.trim()}
+                data-testid="button-add-corporate"
+              >
+                {inviteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Building2 className="h-4 w-4 mr-2" />}
+                Add Corporate Entity
               </Button>
             </DialogFooter>
-          </form>
-        </Form>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -540,7 +629,12 @@ function PeopleList() {
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium text-sm">{person.inviteEmail}</span>
+                  {person.entityType === "corporate"
+                    ? <Building2 className="h-4 w-4 text-primary shrink-0" />
+                    : null
+                  }
+                  <span className="font-medium text-sm">{person.entityType === "corporate" ? (person.corporateName || person.title || person.inviteEmail) : person.inviteEmail}</span>
+                  {person.entityType === "corporate" && <Badge variant="secondary" className="text-xs" data-testid={`badge-corporate-person-${person.id}`}>Corporate</Badge>}
                   {getStatusBadge(person, readinessMap.get(person.id))}
                 </div>
                 <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">

@@ -1990,10 +1990,11 @@ export const bankDocumentRequests = pgTable("bank_document_requests", {
   requestedByEmail: varchar("requested_by_email", { length: 255 }).notNull(),
   documentsRequested: text("documents_requested").notNull(),
   reason: text("reason"),
-  status: varchar("status", { length: 50 }).default("open"), // open, actioned
+  status: varchar("status", { length: 50 }).default("open"), // open, actioned, fulfilled
   createdAt: timestamp("created_at").defaultNow(),
   actionedAt: timestamp("actioned_at"),
   actionedByUserId: varchar("actioned_by_user_id"),
+  fulfilledAt: timestamp("fulfilled_at"),
 }, (table) => [
   index("idx_bank_doc_requests_company").on(table.companyProfileId),
   index("idx_bank_doc_requests_bank").on(table.bankPartnerId),

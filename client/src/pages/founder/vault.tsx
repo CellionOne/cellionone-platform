@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { ReceiptsList } from "@/components/receipts-list";
@@ -28,6 +29,7 @@ import {
   Send,
   ArrowLeft,
   BanknoteIcon,
+  AlertTriangle,
 } from "lucide-react";
 import type { DocumentFile, CompanyApplication, ProfileChecklistItem } from "@shared/schema";
 
@@ -48,6 +50,17 @@ interface VaultData {
 interface BankPartner {
   id: number;
   name: string;
+}
+
+interface BankDocRequest {
+  id: number;
+  companyProfileId: number;
+  bankPartnerId: number;
+  documentsRequested: string;
+  reason?: string | null;
+  status: string;
+  createdAt: string;
+  bankName?: string | null;
 }
 
 interface DispatchRecord {
@@ -545,6 +558,14 @@ export default function VaultPage() {
     queryKey: ["/api/founder/vault"],
   });
 
+  const { data: bankDocRequests } = useQuery<BankDocRequest[]>({
+    queryKey: ["/api/founder/bank-doc-requests"],
+  });
+
+  const [dismissedRequests, setDismissedRequests] = useState<Set<number>>(new Set());
+
+  const openRequests = (bankDocRequests ?? []).filter(r => !dismissedRequests.has(r.id));
+
   const groupedDocs = data?.documents?.reduce((acc, doc) => {
     const category = doc.category || "other";
     if (!acc[category]) acc[category] = [];
@@ -649,6 +670,34 @@ export default function VaultPage() {
           </TabsList>
 
           <TabsContent value="documents" className="mt-6">
+            {openRequests.length > 0 && (
+              <div className="space-y-3 mb-6">
+                {openRequests.map(req => (
+                  <Alert key={req.id} className="border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700" data-testid={`alert-bank-doc-request-${req.id}`}>
+                    <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    <AlertTitle className="text-amber-800 dark:text-amber-300 font-semibold">
+                      {req.bankName || "A bank"} has requested documents
+                    </AlertTitle>
+                    <AlertDescription className="text-amber-700 dark:text-amber-400">
+                      <p className="mb-1"><span className="font-medium">Requested:</span> {req.documentsRequested}</p>
+                      {req.reason && <p className="mb-1"><span className="font-medium">Reason:</span> {req.reason}</p>}
+                      <p className="text-xs mt-2">Toggle "Share with bank" on the relevant documents below to fulfil this request. The bank will be notified automatically.</p>
+                      <div className="mt-3 flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-amber-400 text-amber-800 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/40 h-7 text-xs"
+                          onClick={() => setDismissedRequests(prev => new Set([...prev, req.id]))}
+                          data-testid={`button-dismiss-request-${req.id}`}
+                        >
+                          Dismiss
+                        </Button>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                ))}
+              </div>
+            )}
             {renderDocuments()}
           </TabsContent>
 

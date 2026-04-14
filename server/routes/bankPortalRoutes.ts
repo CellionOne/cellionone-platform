@@ -348,6 +348,65 @@ async function sendDispatchEmail(
   }
 }
 
+async function sendDocRequestFounderEmail(
+  request: any,
+  companyName: string,
+  bankName: string,
+  founderEmail: string,
+  baseUrl: string
+) {
+  try {
+    const { client, fromEmail } = await getResendClient();
+    await client.emails.send({
+      from: fromEmail,
+      to: founderEmail,
+      subject: `Action Required: ${bankName} has requested documents for ${companyName}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #1a1a1a;">Bank Document Request</h2>
+          <p>Hello,</p>
+          <p><strong>${bankName}</strong> has reviewed your company dossier for <strong>${companyName}</strong> and has requested the following additional documents:</p>
+          <blockquote style="border-left: 3px solid #16a34a; padding-left: 12px; color: #444; margin: 16px 0;">${request.documentsRequested}</blockquote>
+          ${request.reason ? `<p><strong>Reason given:</strong> ${request.reason}</p>` : ""}
+          <p>To fulfil this request, please visit your <strong>Document Vault</strong> and toggle "Share with bank" on the relevant documents. The bank will be automatically notified when you share a document.</p>
+          <p style="margin: 24px 0;">
+            <a href="${baseUrl}/founder/vault" style="background-color: #16a34a; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600;">Go to Document Vault</a>
+          </p>
+          <p style="color: #666; font-size: 13px;">If you have any questions, please contact support at service@cellionone.com.</p>
+        </div>
+      `,
+    });
+  } catch (err) {
+    console.error("[BankPortal] Failed to send doc request founder email:", err);
+  }
+}
+
+async function sendDocsFulfilledBankEmail(bankEmails: string[], bankName: string, companyName: string, bankPortalUrl: string) {
+  try {
+    const { client, fromEmail } = await getResendClient();
+    for (const email of bankEmails) {
+      await client.emails.send({
+        from: fromEmail,
+        to: email,
+        subject: `Documents Now Available: ${companyName}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #1a1a1a;">Documents Available</h2>
+            <p>Hello ${bankName} team,</p>
+            <p>New documents have been shared by the founder of <strong>${companyName}</strong> in your Cellion One bank portal. You can now download them from the company dossier page.</p>
+            <p style="margin: 24px 0;">
+              <a href="${bankPortalUrl}" style="background-color: #16a34a; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600;">View in Bank Portal</a>
+            </p>
+            <p style="color: #666; font-size: 13px;">This is an automated notification from Cellion One.</p>
+          </div>
+        `,
+      });
+    }
+  } catch (err) {
+    console.error("[BankPortal] Failed to send docs fulfilled email to bank:", err);
+  }
+}
+
 async function sendDocRequestAdminEmail(request: any, companyName: string, bankName: string) {
   try {
     const { client, fromEmail } = await getResendClient();
@@ -870,6 +929,28 @@ export function registerBankPortalRoutes(app: Express): void {
         partner?.name || `Bank #${session.bankPartnerId}`
       );
 
+      // Send email to founder + create in-platform notification for founder
+      if (profile?.founderId) {
+        const [founderUser] = await db.select({ email: users.email })
+          .from(users).where(eq(users.id, profile.founderId));
+        if (founderUser?.email) {
+          await sendDocRequestFounderEmail(
+            docRequest,
+            profile.companyName || `Company #${companyProfileId}`,
+            partner?.name || `Bank #${session.bankPartnerId}`,
+            founderUser.email,
+            getSiteBaseUrl(req)
+          );
+        }
+        await storage.createNotification({
+          userId: profile.founderId,
+          title: "Bank Document Request",
+          message: `${partner?.name || "A bank"} has requested additional documents for ${profile.companyName || `Company #${companyProfileId}`}. Visit your vault to share them.`,
+          type: "warning",
+          linkUrl: "/founder/vault",
+        });
+      }
+
       // Create in-platform admin notification
       const adminUsers = await storage.getAllUsers();
       const admins = await Promise.all(adminUsers.map(async u => {
@@ -889,6 +970,38 @@ export function registerBankPortalRoutes(app: Express): void {
       res.status(201).json(docRequest);
     } catch (e: any) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/bank-portal/companies/:id/doc-requests — list all requests this bank submitted for this company
+  app.get("/api/bank-portal/companies/:id/doc-requests", async (req: Request, res: Response) => {
+    try {
+      const session = await getBankPortalSession(req);
+      if (!session) return res.status(401).json({ error: "Not authenticated" });
+
+      const companyProfileId = parseInt(req.params.id);
+
+      // Verify dispatch access
+      const dispatches = await storage.listBankCompanyDispatches({
+        companyProfileId,
+        bankPartnerId: session.bankPartnerId,
+      });
+      if (dispatches.length === 0) {
+        return res.status(404).json({ error: "Company not dispatched to your bank" });
+      }
+
+      const requests = await db.select().from(bankDocumentRequests)
+        .where(
+          and(
+            eq(bankDocumentRequests.companyProfileId, companyProfileId),
+            eq(bankDocumentRequests.bankPartnerId, session.bankPartnerId)
+          )
+        )
+        .orderBy(desc(bankDocumentRequests.createdAt));
+
+      res.json(requests);
+    } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
   });

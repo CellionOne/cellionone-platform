@@ -130,6 +130,17 @@ type FounderProfileData = {
   isIdentityVerified: boolean;
 };
 
+type DocRequest = {
+  id: number;
+  companyProfileId: number;
+  bankPartnerId: number;
+  documentsRequested: string;
+  reason?: string | null;
+  status: string;
+  createdAt: string;
+  fulfilledAt?: string | null;
+};
+
 function VerificationIcon({ value, trueLabel = "Verified", falseLabel = "Not Verified", pendingLabel = "Pending" }: {
   value?: boolean | null;
   trueLabel?: string;
@@ -174,6 +185,16 @@ export default function BankCompanyDetailPage() {
     enabled: !!session && !!id,
   });
 
+  const { data: docRequests } = useQuery<DocRequest[]>({
+    queryKey: ["/api/bank-portal/companies", id, "doc-requests"],
+    queryFn: async () => {
+      const res = await fetch(`/api/bank-portal/companies/${id}/doc-requests`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!session && !!id && !!company,
+  });
+
   const logoutMutation = useMutation({
     mutationFn: async () => { await apiRequest("POST", "/api/bank-portal/logout"); },
     onSuccess: () => { queryClient.clear(); setLocation("/bank/login"); },
@@ -193,10 +214,11 @@ export default function BankCompanyDetailPage() {
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: "Request submitted", description: "Your document request has been sent to Cellion One admins." });
+      toast({ title: "Request submitted", description: "The founder has been notified and will share the required documents in the vault." });
       setDocRequestOpen(false);
       setDocumentsRequested("");
       setReason("");
+      queryClient.invalidateQueries({ queryKey: ["/api/bank-portal/companies", id, "doc-requests"] });
     },
     onError: (e: Error) => {
       toast({ title: "Error", description: e.message, variant: "destructive" });
@@ -836,6 +858,53 @@ export default function BankCompanyDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Document Requests */}
+        {docRequests && docRequests.length > 0 && (
+          <Card data-testid="card-doc-requests">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileText className="h-4 w-4 text-primary" />
+                My Document Requests
+              </CardTitle>
+              <CardDescription>
+                Document requests submitted by your bank for this company.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="divide-y">
+                {docRequests.map(req => (
+                  <div key={req.id} className="py-3 first:pt-0 last:pb-0" data-testid={`row-doc-request-${req.id}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{req.documentsRequested}</p>
+                        {req.reason && (
+                          <p className="text-xs text-muted-foreground mt-0.5">Reason: {req.reason}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Submitted {format(new Date(req.createdAt), "dd MMM yyyy")}
+                          {req.fulfilledAt && ` · Fulfilled ${format(new Date(req.fulfilledAt), "dd MMM yyyy")}`}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={
+                          req.status === "fulfilled"
+                            ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300 shrink-0"
+                            : req.status === "actioned"
+                            ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 shrink-0"
+                            : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 shrink-0"
+                        }
+                      >
+                        {req.status === "fulfilled" ? "Fulfilled" : req.status === "actioned" ? "Actioned" : "Open"}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Attestation */}
         {company.cellionCertRef && (

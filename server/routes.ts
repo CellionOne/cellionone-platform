@@ -9,9 +9,9 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, asc, ne } from "drizzle-orm";
+import { eq, desc, and, asc, ne, inArray } from "drizzle-orm";
 import * as services from "./services";
 import { registeredOfficeService } from "./services/registeredOfficeService";
 import { mailroomService } from "./services/mailroomService";
@@ -5472,9 +5472,111 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       const updated = await storage.updateDocument(documentId, { shareWithBank });
       res.json({ id: updated?.id, shareWithBank: updated?.shareWithBank });
+
+      // Auto-fulfil: when a document is shared with bank, mark open doc requests as fulfilled
+      if (shareWithBank) {
+        (async () => {
+          try {
+            const myProfiles = await db.select({ id: companyProfiles.id, companyName: companyProfiles.companyName })
+              .from(companyProfiles).where(eq(companyProfiles.founderId, userId));
+            if (myProfiles.length === 0) return;
+
+            const profileIds = myProfiles.map(p => p.id);
+            const profileMap = Object.fromEntries(myProfiles.map(p => [p.id, p.companyName]));
+
+            const openRequests = await db.select().from(bankDocumentRequests)
+              .where(and(
+                inArray(bankDocumentRequests.companyProfileId, profileIds),
+                eq(bankDocumentRequests.status, "open")
+              ));
+            if (openRequests.length === 0) return;
+
+            // Mark them all fulfilled
+            await db.update(bankDocumentRequests)
+              .set({ status: "fulfilled", fulfilledAt: new Date() })
+              .where(and(
+                inArray(bankDocumentRequests.companyProfileId, profileIds),
+                eq(bankDocumentRequests.status, "open")
+              ));
+
+            // Send email to bank portal users for each affected bank+company pair
+            const pairs = new Map<string, { bankPartnerId: number; companyProfileId: number }>();
+            for (const r of openRequests) {
+              const key = `${r.bankPartnerId}:${r.companyProfileId}`;
+              if (!pairs.has(key)) pairs.set(key, { bankPartnerId: r.bankPartnerId, companyProfileId: r.companyProfileId });
+            }
+
+            const emailSvc = await import("./services/emailService");
+            const { client, fromEmail } = await emailSvc.getResendClient();
+            const baseUrl = emailSvc.getSiteBaseUrl(req);
+
+            for (const { bankPartnerId, companyProfileId } of pairs.values()) {
+              const [partner] = await db.select({ name: bankPartners.name }).from(bankPartners).where(eq(bankPartners.id, bankPartnerId));
+              const bankUsers = await storage.getBankPortalUsersByBankId(bankPartnerId);
+              const companyName = profileMap[companyProfileId] || `Company #${companyProfileId}`;
+              const bankPortalUrl = `${baseUrl}/bank/companies/${companyProfileId}`;
+
+              for (const bUser of bankUsers.filter((u: any) => u.isActive)) {
+                await client.emails.send({
+                  from: fromEmail,
+                  to: bUser.email,
+                  subject: `Documents Now Available: ${companyName}`,
+                  html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                      <h2 style="color: #1a1a1a;">Documents Available</h2>
+                      <p>Hello ${partner?.name || "Bank"} team,</p>
+                      <p>New documents have been shared by the founder of <strong>${companyName}</strong> in your Cellion One bank portal. You can now download them from the company dossier page.</p>
+                      <p style="margin: 24px 0;">
+                        <a href="${bankPortalUrl}" style="background-color: #16a34a; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600;">View in Bank Portal</a>
+                      </p>
+                      <p style="color: #666; font-size: 13px;">This is an automated notification from Cellion One.</p>
+                    </div>
+                  `,
+                });
+              }
+            }
+          } catch (err) {
+            console.error("[VaultShare] Auto-fulfil error:", err);
+          }
+        })();
+      }
     } catch (error: any) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: error.errors[0]?.message });
       res.status(500).json({ message: "Failed to update document" });
+    }
+  });
+
+  // GET /api/founder/bank-doc-requests — open bank doc requests for the logged-in founder's companies
+  app.get("/api/founder/bank-doc-requests", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+
+      const myProfiles = await db.select({ id: companyProfiles.id })
+        .from(companyProfiles).where(eq(companyProfiles.founderId, userId));
+      if (myProfiles.length === 0) return res.json([]);
+
+      const profileIds = myProfiles.map(p => p.id);
+
+      const requests = await db.select({
+        id: bankDocumentRequests.id,
+        companyProfileId: bankDocumentRequests.companyProfileId,
+        bankPartnerId: bankDocumentRequests.bankPartnerId,
+        documentsRequested: bankDocumentRequests.documentsRequested,
+        reason: bankDocumentRequests.reason,
+        status: bankDocumentRequests.status,
+        createdAt: bankDocumentRequests.createdAt,
+        bankName: bankPartners.name,
+      }).from(bankDocumentRequests)
+        .leftJoin(bankPartners, eq(bankDocumentRequests.bankPartnerId, bankPartners.id))
+        .where(and(
+          inArray(bankDocumentRequests.companyProfileId, profileIds),
+          eq(bankDocumentRequests.status, "open")
+        ))
+        .orderBy(desc(bankDocumentRequests.createdAt));
+
+      res.json(requests);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch bank document requests" });
     }
   });
 

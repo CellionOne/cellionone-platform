@@ -69,6 +69,11 @@ export default function LoginPage() {
         setTwoFactorState({ userId: data.userId, message: data.message });
         return;
       }
+      if (data.userType === "bank") {
+        toast({ title: "Welcome!", description: "Redirecting to your bank portal..." });
+        setLocation("/bank");
+        return;
+      }
       toast({ title: "Welcome back!", description: "You have been logged in successfully." });
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       if (inviteToken) {

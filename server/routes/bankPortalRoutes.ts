@@ -94,7 +94,7 @@ async function sendBankInviteEmail(email: string, bankName: string, token: strin
   }
 }
 
-async function sendBankPasswordResetEmail(email: string, token: string, baseUrl: string) {
+export async function sendBankPasswordResetEmail(email: string, token: string, baseUrl: string) {
   const { client, fromEmail } = await getResendClient();
   const link = `${baseUrl}/bank/reset-password?token=${token}`;
   await client.emails.send({

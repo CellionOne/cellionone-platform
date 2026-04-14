@@ -5459,6 +5459,25 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // ============== DOCUMENT BANK SHARE TOGGLE ==============
+  app.patch("/api/documents/:id/bank-share", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const documentId = parseInt(req.params.id);
+      const { shareWithBank } = z.object({ shareWithBank: z.boolean() }).parse(req.body);
+
+      const doc = await storage.getDocument(documentId);
+      if (!doc) return res.status(404).json({ message: "Document not found" });
+      if (doc.ownerUserId !== userId) return res.status(403).json({ message: "Access denied" });
+
+      const updated = await storage.updateDocument(documentId, { shareWithBank });
+      res.json({ id: updated?.id, shareWithBank: updated?.shareWithBank });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: error.errors[0]?.message });
+      res.status(500).json({ message: "Failed to update document" });
+    }
+  });
+
   // ============== DOCUMENT QUALITY ROUTES (Lawyer) ==============
   app.patch("/api/lawyer/documents/:id/quality", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
     try {

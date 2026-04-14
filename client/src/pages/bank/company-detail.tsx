@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import {
   Building2, ArrowLeft, LogOut, Loader2, CheckCircle, XCircle, Clock,
-  FileText, User, MapPin, Send, AlertCircle, Users, ShieldCheck, UserCircle
+  FileText, User, MapPin, Send, AlertCircle, Users, ShieldCheck, UserCircle, Download
 } from "lucide-react";
 import { format } from "date-fns";
 import {
@@ -70,6 +70,17 @@ type Company = {
   smileKybResult?: Record<string, unknown>;
   cellionCertRef?: string;
   dispatchedAt?: string;
+  bankDocuments?: BankDocument[];
+};
+
+type BankDocument = {
+  id: number;
+  filename: string;
+  docType?: string;
+  category?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  shareWithBank: boolean;
 };
 
 function VerificationIcon({ value, trueLabel = "Verified", falseLabel = "Not Verified", pendingLabel = "Pending" }: {
@@ -170,6 +181,27 @@ export default function BankCompanyDetailPage() {
   const directors = Array.isArray(company.directors) ? company.directors : [];
   const shareholders = Array.isArray(company.shareholders) ? company.shareholders : [];
   const checklistItems = Array.isArray(company.checklistItems) ? company.checklistItems : [];
+  const bankDocuments = Array.isArray(company.bankDocuments) ? company.bankDocuments : [];
+
+  const downloadDocument = async (docId: number, filename: string) => {
+    try {
+      const res = await fetch(`/api/bank-portal/companies/${id}/documents/${docId}/download`, { credentials: "include" });
+      if (!res.ok) {
+        const err = await res.json();
+        toast({ title: "Download failed", description: err.error || "Could not generate download link.", variant: "destructive" });
+        return;
+      }
+      const { downloadUrl } = await res.json();
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = filename;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.click();
+    } catch {
+      toast({ title: "Download failed", description: "Could not generate download link.", variant: "destructive" });
+    }
+  };
   const requiredDocs = checklistItems.filter(c => c.required);
   const completedRequired = requiredDocs.filter(c => c.status === "submitted" || c.status === "approved");
   const complianceScore = requiredDocs.length > 0 ? Math.round((completedRequired.length / requiredDocs.length) * 100) : null;
@@ -535,6 +567,51 @@ export default function BankCompanyDetailPage() {
                     <span className={`text-xs font-medium whitespace-nowrap ${docStatusColor(item.status)}`}>
                       {(item.status || "missing").replace(/_/g, " ").toUpperCase()}
                     </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Downloadable Documents Shared by Founder */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Download className="h-4 w-4" />
+              Founder-Shared Documents
+            </CardTitle>
+            <CardDescription>
+              Documents the company founder has explicitly shared with your bank for download.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {bankDocuments.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No documents have been shared by the founder yet.</p>
+            ) : (
+              <div className="divide-y">
+                {bankDocuments.map((doc) => (
+                  <div key={doc.id} className="py-3 flex items-center justify-between gap-3" data-testid={`row-bankdoc-${doc.id}`}>
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="h-8 w-8 rounded bg-muted flex items-center justify-center shrink-0">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{doc.filename}</p>
+                        {doc.docType && (
+                          <p className="text-xs text-muted-foreground">{doc.docType}</p>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => downloadDocument(doc.id, doc.filename)}
+                      data-testid={`button-download-bankdoc-${doc.id}`}
+                    >
+                      <Download className="h-3.5 w-3.5 mr-1.5" />
+                      Download
+                    </Button>
                   </div>
                 ))}
               </div>

@@ -235,6 +235,7 @@ export const documentFiles = pgTable("document_files", {
   sizeBytes: integer("size_bytes"),
   mimeType: varchar("mime_type", { length: 100 }),
   isSensitive: boolean("is_sensitive").default(true),
+  shareWithBank: boolean("share_with_bank").default(false).notNull(),
   qualityStatus: varchar("quality_status", { length: 50 }).default("not_checked"), // not_checked, pass, needs_attention
   qualityReport: json("quality_report").$type<{
     blurScore?: number;

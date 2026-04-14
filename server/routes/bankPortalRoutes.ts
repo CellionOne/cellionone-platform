@@ -7,7 +7,8 @@ import { isAuthenticated } from "../replit_integrations/auth";
 import { getResendClient, ADMIN_NOTIFICATION_EMAIL, getSiteBaseUrl } from "../services/emailService";
 import { db } from "../db";
 import { eq, desc } from "drizzle-orm";
-import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications } from "@shared/schema";
+import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications, documentFiles } from "@shared/schema";
+import { ObjectStorageService } from "../replit_integrations/object_storage";
 
 const SALT_ROUNDS = 10;
 const INVITE_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -619,8 +620,81 @@ export function registerBankPortalRoutes(app: Express): void {
       const checklistRows = await db.select().from(profileChecklistItems)
         .where(eq(profileChecklistItems.companyProfileId, companyProfileId));
 
-      res.json({ ...profile, checklistItems: checklistRows, dispatchedAt: dispatches[0]?.sentAt });
+      // Fetch documents the founder has flagged as shareable with banks
+      const bankDocuments = profile.founderId
+        ? await db.select({
+            id: documentFiles.id,
+            filename: documentFiles.filename,
+            docType: documentFiles.docType,
+            category: documentFiles.category,
+            mimeType: documentFiles.mimeType,
+            sizeBytes: documentFiles.sizeBytes,
+            shareWithBank: documentFiles.shareWithBank,
+          }).from(documentFiles)
+          .where(eq(documentFiles.ownerUserId, profile.founderId))
+          .then(rows => rows.filter(r => r.shareWithBank === true))
+        : [];
+
+      res.json({ ...profile, checklistItems: checklistRows, dispatchedAt: dispatches[0]?.sentAt, bankDocuments });
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/bank-portal/companies/:id/documents/:docId/download
+  app.get("/api/bank-portal/companies/:id/documents/:docId/download", async (req: Request, res: Response) => {
+    try {
+      const session = await getBankPortalSession(req);
+      if (!session) return res.status(401).json({ error: "Not authenticated" });
+
+      const companyProfileId = parseInt(req.params.id);
+      const docId = parseInt(req.params.docId);
+
+      // Verify this company was dispatched to this bank
+      const dispatches = await storage.listBankCompanyDispatches({
+        companyProfileId,
+        bankPartnerId: session.bankPartnerId,
+      });
+      if (dispatches.length === 0) {
+        return res.status(404).json({ error: "Company not dispatched to your bank" });
+      }
+
+      // Get the company profile to find the founderId
+      const [profile] = await db.select({ founderId: companyProfiles.founderId })
+        .from(companyProfiles)
+        .where(eq(companyProfiles.id, companyProfileId));
+      if (!profile?.founderId) return res.status(404).json({ error: "Company profile not found" });
+
+      // Get the document and verify it belongs to this company's founder and is bank-shared
+      const [doc] = await db.select().from(documentFiles)
+        .where(eq(documentFiles.id, docId));
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      if (doc.ownerUserId !== profile.founderId) return res.status(403).json({ error: "Access denied" });
+      if (!doc.shareWithBank) return res.status(403).json({ error: "Document is not shared with banks" });
+
+      // Generate a 15-minute pre-signed URL
+      let downloadUrl: string | null = null;
+      if (doc.storagePath?.startsWith("/objects/")) {
+        const objectStorage = new ObjectStorageService();
+        downloadUrl = await objectStorage.getObjectEntityDownloadURL(doc.storagePath, 900);
+      } else if (doc.storagePath?.startsWith("http")) {
+        downloadUrl = doc.storagePath;
+      }
+
+      if (!downloadUrl) return res.status(404).json({ error: "Document file not available" });
+
+      // Audit log the access
+      await storage.createAuditLog({
+        actorUserId: `bank:${session.email}`,
+        action: "bank_portal_document_download",
+        entityType: "document_file",
+        entityId: String(docId),
+        details: { bankPartnerId: session.bankPartnerId, companyProfileId, filename: doc.filename },
+      });
+
+      res.json({ downloadUrl, filename: doc.filename, mimeType: doc.mimeType });
+    } catch (e: any) {
+      console.error("[BankPortal] Document download error:", e);
       res.status(500).json({ error: e.message });
     }
   });

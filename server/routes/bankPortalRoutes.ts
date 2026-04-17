@@ -860,13 +860,19 @@ export function registerBankPortalRoutes(app: Express): void {
           try {
             if (isEncryptedField(rawBvn)) { bvn = decryptField(rawBvn); decryptedIdCount++; }
             else { bvn = rawBvn; }
-          } catch { bvn = undefined; /* corrupt / key-rotated ciphertext — omit gracefully */ }
+          } catch (err) {
+            bvn = undefined;
+            console.warn(`[BankPortal] BVN decryption failed for director in profile ${companyProfileId} — omitting field. Cause: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
         if (rawNin) {
           try {
             if (isEncryptedField(rawNin)) { nin = decryptField(rawNin); decryptedIdCount++; }
             else { nin = rawNin; }
-          } catch { nin = undefined; }
+          } catch (err) {
+            nin = undefined;
+            console.warn(`[BankPortal] NIN decryption failed for director in profile ${companyProfileId} — omitting field. Cause: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
 
         if (!match) return { ...dir, bvn, nin };

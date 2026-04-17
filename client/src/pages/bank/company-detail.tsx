@@ -74,6 +74,7 @@ type Company = {
   shareholders?: Shareholder[];
   checklistItems?: ChecklistItem[];
   smileKybResult?: Record<string, unknown>;
+  kybVerified?: boolean;
   cellionCertRef?: string;
   dispatchedAt?: string;
   bankDocuments?: BankDocument[];
@@ -89,6 +90,7 @@ type BankDocument = {
   mimeType?: string;
   sizeBytes?: number;
   shareWithBank: boolean;
+  source?: string;
 };
 
 type PlatformPersonProfile = {
@@ -154,7 +156,7 @@ function VerificationIcon({ value, trueLabel = "Verified", falseLabel = "Not Ver
 
 function docStatusColor(status?: string) {
   if (!status || status === "missing") return "text-red-500";
-  if (status === "submitted" || status === "approved") return "text-green-600";
+  if (status === "submitted" || status === "approved" || status === "provided") return "text-green-600";
   if (status === "pending_review") return "text-yellow-600";
   return "text-muted-foreground";
 }
@@ -280,9 +282,12 @@ export default function BankCompanyDetailPage() {
     }
   };
 
-  const downloadDocument = async (docId: number, filename: string) => {
+  const downloadDocument = async (docId: number, filename: string, source?: string) => {
     try {
-      const res = await fetch(`/api/bank-portal/companies/${id}/documents/${docId}/download`, { credentials: "include" });
+      const endpoint = source === "checklist"
+        ? `/api/bank-portal/companies/${id}/checklist-documents/${docId}/download`
+        : `/api/bank-portal/companies/${id}/documents/${docId}/download`;
+      const res = await fetch(endpoint, { credentials: "include" });
       if (!res.ok) {
         const err = await res.json();
         toast({ title: "Download failed", description: err.error || "Could not generate download link.", variant: "destructive" });
@@ -300,9 +305,10 @@ export default function BankCompanyDetailPage() {
     }
   };
   const requiredDocs = checklistItems.filter(c => c.required);
-  const completedRequired = requiredDocs.filter(c => c.status === "submitted" || c.status === "approved");
+  const completedRequired = requiredDocs.filter(c => c.status === "submitted" || c.status === "approved" || c.status === "provided");
   const complianceScore = requiredDocs.length > 0 ? Math.round((completedRequired.length / requiredDocs.length) * 100) : null;
-  const kybPassed = company.smileKybResult && (company.smileKybResult as Record<string, unknown>).ResultCode === "1012";
+  const kybPassed = company.kybVerified === true ||
+    (company.smileKybResult && (company.smileKybResult as Record<string, unknown>).ResultCode === "1012");
   const directorsVerified = directors.length > 0 && directors.every(d => d.ninVerified || d.bvnVerified);
   const amlClear = directors.length > 0 && directors.every(d => d.amlIsHit === false);
   const registeredAddr = company.registeredAddress
@@ -846,7 +852,7 @@ export default function BankCompanyDetailPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => downloadDocument(doc.id, doc.filename)}
+                      onClick={() => downloadDocument(doc.id, doc.filename, doc.source)}
                       data-testid={`button-download-bankdoc-${doc.id}`}
                     >
                       <Download className="h-3.5 w-3.5 mr-1.5" />

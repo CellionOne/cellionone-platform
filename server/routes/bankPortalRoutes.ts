@@ -6,7 +6,7 @@ import { storage } from "../storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { getResendClient, ADMIN_NOTIFICATION_EMAIL, getSiteBaseUrl } from "../services/emailService";
 import { db } from "../db";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { eq, desc, and, inArray, isNotNull } from "drizzle-orm";
 import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications, documentFiles, founderProfiles, companyPeople, users } from "@shared/schema";
 import { ObjectStorageService } from "../replit_integrations/object_storage";
 
@@ -679,8 +679,8 @@ export function registerBankPortalRoutes(app: Express): void {
       const checklistRows = await db.select().from(profileChecklistItems)
         .where(eq(profileChecklistItems.companyProfileId, companyProfileId));
 
-      // Fetch documents the founder has flagged as shareable with banks
-      const bankDocuments = profile.founderId
+      // Fetch documents the founder has flagged as shareable with banks (document_files table)
+      const vaultDocs = profile.founderId
         ? await db.select({
             id: documentFiles.id,
             filename: documentFiles.filename,
@@ -693,6 +693,34 @@ export function registerBankPortalRoutes(app: Express): void {
           .where(eq(documentFiles.ownerUserId, profile.founderId))
           .then(rows => rows.filter(r => r.shareWithBank === true))
         : [];
+
+      // Also include profileChecklistItems the founder has flagged as shareable with banks
+      const sharedChecklistItems = await db.select({
+        id: profileChecklistItems.id,
+        label: profileChecklistItems.label,
+        key: profileChecklistItems.key,
+        filePath: profileChecklistItems.filePath,
+        shareWithBank: profileChecklistItems.shareWithBank,
+      }).from(profileChecklistItems)
+        .where(and(
+          eq(profileChecklistItems.companyProfileId, companyProfileId),
+          eq(profileChecklistItems.shareWithBank, true),
+          isNotNull(profileChecklistItems.filePath),
+        ));
+
+      const bankDocuments = [
+        ...vaultDocs.map(d => ({ ...d, source: "vault" as const })),
+        ...sharedChecklistItems.map(ci => ({
+          id: ci.id,
+          filename: ci.label,
+          docType: ci.key,
+          category: "checklist",
+          mimeType: undefined as string | undefined,
+          sizeBytes: undefined as number | undefined,
+          shareWithBank: true,
+          source: "checklist" as const,
+        })),
+      ];
 
       // Enrich with platform-registered people linked to this company
       const peopleRows = await db.select({
@@ -781,8 +809,97 @@ export function registerBankPortalRoutes(app: Express): void {
         }
       }
 
-      res.json({ ...profile, checklistItems: checklistRows, dispatchedAt: dispatches[0]?.sentAt, bankDocuments, platformPeople, founderProfile });
+      // Compute kybVerified from verificationReport (existing company pipeline) or smileKybResult fallback
+      const vr = profile.verificationReport as Record<string, unknown> | null | undefined;
+      const kybVerified: boolean =
+        vr?.kybPassed === true ||
+        (profile.smileKybResult as Record<string, unknown> | null | undefined)?.ResultCode === "1012";
+
+      // Enrich CAC-sourced directors with verification results from verificationReport.directorsReport
+      const rawDirectors = Array.isArray(profile.directors) ? (profile.directors as Record<string, unknown>[]) : [];
+      const directorsReport = Array.isArray(vr?.directorsReport) ? (vr!.directorsReport as Record<string, unknown>[]) : [];
+      const enrichedDirectors = rawDirectors.map(dir => {
+        const match = directorsReport.find(dr => {
+          const drName = String(dr.name || "").toLowerCase();
+          const dirName = String(dir.name || "").toLowerCase();
+          return drName && dirName && drName === dirName;
+        });
+        if (!match) return dir;
+        return {
+          ...dir,
+          ninVerified: match.ninPassed === true,
+          bvnVerified: match.bvnPassed === true,
+          amlIsHit: match.amlClear === true ? false : match.amlClear === false ? true : undefined,
+          biometricStatus: dir.biometricStatus,
+        };
+      });
+
+      res.json({
+        ...profile,
+        directors: enrichedDirectors,
+        checklistItems: checklistRows,
+        dispatchedAt: dispatches[0]?.sentAt,
+        bankDocuments,
+        platformPeople,
+        founderProfile,
+        kybVerified,
+      });
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/bank-portal/companies/:id/checklist-documents/:itemId/download
+  app.get("/api/bank-portal/companies/:id/checklist-documents/:itemId/download", async (req: Request, res: Response) => {
+    try {
+      const session = await getBankPortalSession(req);
+      if (!session) return res.status(401).json({ error: "Not authenticated" });
+
+      const companyProfileId = parseInt(req.params.id);
+      const itemId = parseInt(req.params.itemId);
+
+      const dispatches = await storage.listBankCompanyDispatches({
+        companyProfileId,
+        bankPartnerId: session.bankPartnerId,
+      });
+      if (dispatches.length === 0) {
+        return res.status(404).json({ error: "Company not dispatched to your bank" });
+      }
+
+      const [item] = await db.select().from(profileChecklistItems)
+        .where(and(
+          eq(profileChecklistItems.id, itemId),
+          eq(profileChecklistItems.companyProfileId, companyProfileId),
+        ));
+      if (!item) return res.status(404).json({ error: "Document not found" });
+      if (!item.shareWithBank) return res.status(403).json({ error: "Document is not shared with banks" });
+      if (!item.filePath) return res.status(404).json({ error: "Document file not available" });
+
+      const objectStorage = new ObjectStorageService();
+      let downloadUrl: string | null = null;
+      const path = item.filePath;
+      if (path.startsWith("/objects/") || path.startsWith("http")) {
+        downloadUrl = path.startsWith("http") ? path : await objectStorage.getObjectEntityDownloadURL(path, 900);
+      } else {
+        try {
+          downloadUrl = await objectStorage.getObjectEntityDownloadURL(path, 900);
+        } catch {
+          downloadUrl = null;
+        }
+      }
+      if (!downloadUrl) return res.status(404).json({ error: "Document file not available" });
+
+      await storage.createAuditLog({
+        actorUserId: `bank:${session.email}`,
+        action: "bank_portal_checklist_document_download",
+        entityType: "profile_checklist_item",
+        entityId: String(itemId),
+        details: { bankPartnerId: session.bankPartnerId, companyProfileId, label: item.label },
+      });
+
+      res.json({ downloadUrl, filename: item.label });
+    } catch (e: any) {
+      console.error("[BankPortal] Checklist document download error:", e);
       res.status(500).json({ error: e.message });
     }
   });
@@ -862,14 +979,19 @@ export function registerBankPortalRoutes(app: Express): void {
       if (!fp?.signaturePath) return res.status(404).json({ error: "No signature on file" });
 
       let signatureUrl: string | null = null;
-      if (fp.signaturePath.startsWith("/objects/")) {
-        const objectStorage = new ObjectStorageService();
-        signatureUrl = await objectStorage.getObjectEntityDownloadURL(fp.signaturePath, 900);
-      } else if (fp.signaturePath.startsWith("http")) {
-        signatureUrl = fp.signaturePath;
+      const sigPath = fp.signaturePath;
+      if (sigPath.startsWith("http")) {
+        signatureUrl = sigPath;
+      } else {
+        try {
+          const objectStorage = new ObjectStorageService();
+          signatureUrl = await objectStorage.getObjectEntityDownloadURL(sigPath, 900);
+        } catch {
+          signatureUrl = null;
+        }
       }
 
-      if (!signatureUrl) return res.status(404).json({ error: "Signature file not available" });
+      if (!signatureUrl) return res.status(404).json({ error: "Signature file not available — please ask the founder to re-upload their signature." });
 
       await storage.createAuditLog({
         actorUserId: `bank:${session.email}`,

@@ -287,14 +287,16 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                           checked={bankShareState[item.id] ?? item.shareWithBank ?? false}
                           onCheckedChange={async (value) => {
                             const previous = bankShareState[item.id] ?? item.shareWithBank ?? false;
-                            setBankShareState(prev => ({ ...prev, [item.id]: value }));
                             try {
                               const res = await apiRequest("PATCH", `/api/documents/${item.id}/bank-share`, { shareWithBank: value });
                               if (!res.ok) throw new Error("Failed to update");
+                              const payload = await res.json().catch(() => null);
+                              const nextValue = typeof payload?.shareWithBank === "boolean" ? payload.shareWithBank : value;
+                              setBankShareState(prev => ({ ...prev, [item.id]: nextValue }));
                               queryClient.invalidateQueries({ queryKey: ["/api/founder/vault"] });
                               toast({
-                                title: value ? "Shared with bank" : "Hidden from bank",
-                                description: value ? "This document will be included when you send your dossier." : "This document will not be included when you send your dossier.",
+                                title: nextValue ? "Shared with bank" : "Hidden from bank",
+                                description: nextValue ? "This document will be included when you send your dossier." : "This document will not be included when you send your dossier.",
                               });
                             } catch {
                               setBankShareState(prev => ({ ...prev, [item.id]: previous }));

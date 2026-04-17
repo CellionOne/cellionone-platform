@@ -229,6 +229,43 @@ function findCol(headers: string[], ...candidates: string[]): number {
   return -1;
 }
 
+/**
+ * Locate the symbol/ticker column, applying a fallback heuristic for NGX reports
+ * that use "Company" or "Name" for the full company name but have an adjacent short
+ * code column ("Code", "Sym", "RIC", "ID", "Symbol Code" etc.).
+ *
+ * Priority:
+ *   1. Standard unambiguous candidates (symbol, ticker, stock, security, scrip)
+ *   2. Adjacent code-column heuristic: find "company"/"name" header, then look for a
+ *      nearby column whose header contains "code", "sym", "ric", "id" — prefer that
+ *      column because it holds the short ticker, not the full company name.
+ *   3. Raw "company" or "name" column as last resort (full names will likely end up
+ *      flagged as unknown symbols but at least data isn't silently dropped).
+ */
+function findSymbolCol(headers: string[]): number {
+  // Step 1: unambiguous ticker candidates
+  const primary = findCol(headers, "symbol", "ticker", "stock", "security", "scrip");
+  if (primary >= 0) return primary;
+
+  // Step 2: look for "company" / "name" + adjacent short-code column
+  const lc = headers.map(h => h.toLowerCase().trim());
+  const companyIdx = lc.findIndex(h => h === "company" || h === "name" || h.includes("company name") || h.includes("security name"));
+  if (companyIdx >= 0) {
+    // Scan nearby columns (up to 2 positions either side) for a code-like header
+    const codeTerms = ["code", "sym", "ric", "id", "ticker", "symbol"];
+    for (let offset = -2; offset <= 2; offset++) {
+      if (offset === 0) continue;
+      const idx = companyIdx + offset;
+      if (idx < 0 || idx >= lc.length) continue;
+      if (codeTerms.some(t => lc[idx].includes(t))) return idx;
+    }
+    // No adjacent code column found — fall back to the company/name column itself
+    return companyIdx;
+  }
+
+  return -1;
+}
+
 // ============================================================
 // Sheet detection: find the best sheet by expected column headers
 // ============================================================
@@ -277,7 +314,7 @@ function parseSheetRows(sheet: XLSX.WorkSheet, source: "csv" | "xlsx", fallbackD
   if (json.length < 2) return [];
 
   const rawHeaders = (json[0] as string[]).map(h => String(h ?? "").trim());
-  const symCol    = findCol(rawHeaders, "symbol", "ticker", "stock", "security", "scrip");
+  const symCol    = findSymbolCol(rawHeaders);
   const dateCol   = findCol(rawHeaders, "date", "trade date", "trading date", "trade_date");
   const closeCol  = findCol(rawHeaders, "close", "closing", "last price", "market price", "current price", "price", "last");
   const openCol   = findCol(rawHeaders, "open", "opening");

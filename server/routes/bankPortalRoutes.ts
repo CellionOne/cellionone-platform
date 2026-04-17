@@ -851,22 +851,22 @@ export function registerBankPortalRoutes(app: Express): void {
           return drName && dirName && drName === dirName;
         });
 
-        // Decrypt BVN/NIN if encrypted; pass plaintext through unchanged if already plain
+        // Decrypt BVN/NIN independently — one failure must not suppress the other field.
         const rawBvn = typeof dir.bvn === "string" ? dir.bvn : undefined;
         const rawNin = typeof dir.nin === "string" ? dir.nin : undefined;
         let bvn: string | undefined;
         let nin: string | undefined;
-        try {
-          if (rawBvn) {
-            bvn = isEncryptedField(rawBvn) ? (decryptedIdCount++, decryptField(rawBvn)) : rawBvn;
-          }
-          if (rawNin) {
-            nin = isEncryptedField(rawNin) ? (decryptedIdCount++, decryptField(rawNin)) : rawNin;
-          }
-        } catch {
-          // If decryption fails (key rotation, corrupt data), omit the field rather than crashing
-          bvn = undefined;
-          nin = undefined;
+        if (rawBvn) {
+          try {
+            if (isEncryptedField(rawBvn)) { bvn = decryptField(rawBvn); decryptedIdCount++; }
+            else { bvn = rawBvn; }
+          } catch { bvn = undefined; /* corrupt / key-rotated ciphertext — omit gracefully */ }
+        }
+        if (rawNin) {
+          try {
+            if (isEncryptedField(rawNin)) { nin = decryptField(rawNin); decryptedIdCount++; }
+            else { nin = rawNin; }
+          } catch { nin = undefined; }
         }
 
         if (!match) return { ...dir, bvn, nin };
@@ -887,10 +887,10 @@ export function registerBankPortalRoutes(app: Express): void {
         };
       });
 
-      // Audit-log BVN/NIN access so there is a traceable record of the bank viewing sensitive PII.
-      // directorCount = number of directors whose BVN or NIN is present in the response.
-      const directorCount = enrichedDirectors.filter(d => d.bvn || d.nin).length;
-      if (directorCount > 0) {
+      // Audit-log only when encrypted fields were actually decrypted — plaintext values do not need a log.
+      // directorCount = number of directors whose BVN or NIN is present in the final response.
+      if (decryptedIdCount > 0) {
+        const directorCount = enrichedDirectors.filter(d => d.bvn || d.nin).length;
         await storage.createAuditLog({
           actorUserId: `bank_partner_${session.bankPartnerId}`,
           action: "bank_portal_director_id_access",

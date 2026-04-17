@@ -1,11 +1,14 @@
 // Service Worker — Cellion One
-// Strategy: network-first for everything.
-// Static JS/CSS assets are cache-busted by Vite's content-hash filenames,
-// so we rely on HTTP caching headers rather than a SW cache.
-// The only thing we cache here is the offline fallback page.
-//
 // CACHE_VERSION is replaced at production build time by the vite injectSwVersion plugin.
-// In dev mode it stays as the literal placeholder string, which is fine.
+// In dev mode it stays as the literal placeholder string, which is acceptable.
+//
+// Strategy:
+//  - Navigation requests: network-first, offline.html fallback
+//  - API requests:        network-only, JSON offline fallback
+//  - Static assets:       cache-first (runtime caching).
+//                         Vite content-hashes ensure cached entries are never stale.
+//                         New deployments produce new hashed filenames → network fetched → cached.
+//                         Old entries in the old CACHE_NAME are purged on activate.
 
 const CACHE_VERSION = '__BUILD_VERSION__';
 const CACHE_NAME = 'cellion-one-' + CACHE_VERSION;
@@ -57,7 +60,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // All other requests (JS, CSS, images, fonts): network only.
-  // Vite content-hashed filenames + HTTP Cache-Control headers handle caching.
-  // Do NOT intercept — let the browser handle it directly.
+  // Static assets (JS, CSS, images, fonts): cache-first with network fallback.
+  // Vite content-hashed filenames guarantee no stale assets are ever served —
+  // a new deployment uses new hashed URLs not present in the old cache.
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      return fetch(event.request).then((response) => {
+        if (response && response.status === 200 && response.type === 'basic') {
+          const toCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, toCache));
+        }
+        return response;
+      });
+    })
+  );
 });

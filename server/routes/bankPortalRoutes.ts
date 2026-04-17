@@ -715,8 +715,8 @@ export function registerBankPortalRoutes(app: Express): void {
           filename: ci.label,
           docType: ci.key,
           category: "checklist",
-          mimeType: undefined as string | undefined,
-          sizeBytes: undefined as number | undefined,
+          mimeType: null,
+          sizeBytes: null,
           shareWithBank: true,
           source: "checklist" as const,
         })),
@@ -1034,12 +1034,10 @@ export function registerBankPortalRoutes(app: Express): void {
       if (dispatches.length === 0) return res.status(404).json({ error: "Company not dispatched to your bank" });
 
       // Verify the person is linked to this company via companyPeople
-      const [person] = await db.select({ personUserId: companyPeople.personUserId })
+      const companyPeopleRows = await db.select({ personUserId: companyPeople.personUserId })
         .from(companyPeople)
-        .where(and(
-          eq(companyPeople.companyProfileId, companyProfileId),
-          eq(companyPeople.personUserId as any, personId),
-        ));
+        .where(eq(companyPeople.companyProfileId, companyProfileId));
+      const person = companyPeopleRows.find(p => p.personUserId === personId);
       if (!person) return res.status(404).json({ error: "Person not linked to this company" });
 
       const [fp] = await db.select({ signaturePath: founderProfiles.signaturePath })

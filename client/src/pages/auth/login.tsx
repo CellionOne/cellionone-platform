@@ -75,7 +75,7 @@ export default function LoginPage() {
         return;
       }
       toast({ title: "Welcome back!", description: "You have been logged in successfully." });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      queryClient.removeQueries({ queryKey: ["/api/auth/user"] });
       if (inviteToken) {
         setLocation(`/invite/${inviteToken}`);
       } else {
@@ -100,7 +100,7 @@ export default function LoginPage() {
       if (data.csrfToken) setCsrfToken(data.csrfToken);
       if (data.success) {
         toast({ title: "Welcome back!", description: "You have been logged in successfully." });
-        queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+        queryClient.removeQueries({ queryKey: ["/api/auth/user"] });
         if (inviteToken) {
           setLocation(`/invite/${inviteToken}`);
         } else {

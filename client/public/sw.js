@@ -1,16 +1,17 @@
-const CACHE_NAME = 'celion-one-v1';
-const OFFLINE_URL = '/offline.html';
+// Service Worker — Cellion One
+// Strategy: network-first for everything.
+// Static JS/CSS assets are cache-busted by Vite's content-hash filenames,
+// so we rely on HTTP caching headers rather than a SW cache.
+// The only thing we cache here is the offline fallback page.
 
-const STATIC_ASSETS = [
-  '/',
-  '/offline.html',
-  '/manifest.json'
-];
+const CACHE_VERSION = 'v3';
+const CACHE_NAME = 'cellion-one-' + CACHE_VERSION;
+const OFFLINE_URL = '/offline.html';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
+      return cache.add(OFFLINE_URL);
     })
   );
   self.skipWaiting();
@@ -30,6 +31,7 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Navigation requests: try network, fall back to offline page
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => {
@@ -39,6 +41,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // API requests: network only, return offline JSON on failure
   if (event.request.url.includes('/api/')) {
     event.respondWith(
       fetch(event.request).catch(() => {
@@ -51,17 +54,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
-        if (response.status === 200) {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
-        }
-        return response;
-      });
-    })
-  );
+  // All other requests (JS, CSS, images, fonts): network only.
+  // Vite content-hashed filenames + HTTP Cache-Control headers handle caching.
+  // Do NOT intercept — let the browser handle it directly.
 });

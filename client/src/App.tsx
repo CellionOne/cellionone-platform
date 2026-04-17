@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -7,118 +8,121 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { useAuth } from "@/hooks/use-auth";
 import { LoadingPage } from "@/components/loading-spinner";
 
+// Eagerly loaded — needed for initial render / unauthenticated flows
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/landing";
-import FounderDashboard from "@/pages/founder/dashboard";
-import FounderApplications from "@/pages/founder/applications";
-import FounderVault from "@/pages/founder/vault";
-import FounderRegisteredOffice from "@/pages/founder/registered-office";
-import FounderMail from "@/pages/founder/mail";
-import FounderLegalAssistant from "@/pages/founder/legal-assistant";
-import FounderCompanyProfile from "@/pages/founder/company-profile";
-import FounderPostIncChecklist from "@/pages/founder/post-inc-checklist";
-import FounderComplianceCalendar from "@/pages/founder/compliance-calendar";
-import FounderCheckout from "@/pages/founder/checkout";
-import FounderServiceRequestForm from "@/pages/founder/service-request-form";
-import FounderAddDirectorForm from "@/pages/founder/add-director-form";
-import FounderOrders from "@/pages/founder/orders";
-import FounderOrderDetail from "@/pages/founder/order-detail";
-import NewApplication from "@/pages/applications/new";
-import ApplicationDetails from "@/pages/applications/[id]";
-import LawyerDashboard from "@/pages/lawyer/dashboard";
-import LawyerApplications from "@/pages/lawyer/applications";
-import LawyerApplicationDetail from "@/pages/lawyer/application-detail";
-import LawyerPayouts from "@/pages/lawyer/payouts";
-import LawyerServiceRequests from "@/pages/lawyer/service-requests";
-import LawyerServiceRequestDetail from "@/pages/lawyer/service-request-detail";
-import AdminDashboard from "@/pages/admin/dashboard";
-import AdminUsers from "@/pages/admin/users";
-import AdminApplications from "@/pages/admin/applications";
-import AdminFeatureFlags from "@/pages/admin/feature-flags";
-import AdminAuditLogs from "@/pages/admin/audit-logs";
-import AdminAIEvents from "@/pages/admin/ai-events";
-import AdminReceipts from "@/pages/admin/receipts";
-import AdminLawyerApplications from "@/pages/admin/lawyer-applications";
-import AdminMailroom from "@/pages/admin/mailroom";
-import AdminOrders from "@/pages/admin/orders";
-import AdminKycOverview from "@/pages/admin/kyc-overview";
-import AdminFieldVerifications from "@/pages/admin/field-verifications";
-import AdminProposals from "@/pages/admin/proposals";
-import AdminRegisteredOffices from "@/pages/admin/registered-offices";
-import AdminSecurity from "@/pages/admin/security";
-import AdminEscrowDashboard from "@/pages/admin/escrow-dashboard";
-import AdminBankingPartners from "@/pages/admin/banking-partners";
-import AdminCieCockpit from "@/pages/admin/cie";
-import AdminExistingCompanies from "@/pages/admin/existing-companies";
-import CiePortal from "@/pages/cie/index";
-import CieSecurities from "@/pages/cie/securities";
-import CieSecurityDetail from "@/pages/cie/security-detail";
-import CieSignals from "@/pages/cie/signals";
-import CieApiKeys from "@/pages/cie/api-keys";
-import CieSubscribePage from "@/pages/cie/subscribe";
-import CieSubscribeSuccess from "@/pages/cie/subscribe-success";
-import CieIntelligencePage from "@/pages/cie-intelligence";
-import PlatformOverview from "@/pages/platform-overview";
-import WhyCellionOne from "@/pages/why-cellion-one";
-import ApiDocsPage from "@/pages/api-docs";
-import ApplyLawyerPage from "@/pages/apply-lawyer";
-import TermsPage from "@/pages/terms";
-import PrivacyPage from "@/pages/privacy";
-import PartnerWithUsPage from "@/pages/partner-with-us";
-import ContactPage from "@/pages/contact";
-import BankPortalLogin from "@/pages/bank/login";
-import BankSetPasswordPage from "@/pages/bank/set-password";
-import BankForgotPasswordPage from "@/pages/bank/forgot-password";
-import BankResetPasswordPage from "@/pages/bank/reset-password";
-import BankCompaniesPage from "@/pages/bank/companies";
-import BankCompanyDetailPage from "@/pages/bank/company-detail";
-import BankAccountPage from "@/pages/bank/account";
 import LoginPage from "@/pages/auth/login";
 import RegisterPage from "@/pages/auth/register";
 import ForgotPasswordPage from "@/pages/auth/forgot-password";
 import ResetPasswordPage from "@/pages/auth/reset-password";
 import VerifyEmailPage from "@/pages/auth/verify-email";
-import SettingsPage from "@/pages/settings";
-import PersonalProfilePage from "@/pages/personal-profile";
-import CompanyPeoplePage from "@/pages/founder/company-people";
-import FounderDataSharing from "@/pages/founder/data-sharing";
-import VerifyPage from "@/pages/verify";
-import InviteAcceptPage from "@/pages/invite-accept";
-import DirectorBiometricPage from "@/pages/director-biometric";
-import NotificationsPage from "@/pages/notifications";
-import PaymentCheckoutPage from "@/pages/payment/checkout";
-import PaymentSuccessPage from "@/pages/payment/success";
-import PaymentCancelPage from "@/pages/payment/cancel";
-import KycTermsPage from "@/pages/kyc-service/terms";
-import KycOrgsPage from "@/pages/kyc-service/orgs";
-import KycOrgPortal from "@/pages/kyc-service/org-portal";
-import KycVerificationDetail from "@/pages/kyc-service/verification-detail";
-import KycVerifyRequestPage from "@/pages/kyc-service/verify-request";
-import KycEmployeePortalPage from "@/pages/kyc-service/employee-portal";
-import KycSupplierPortalPage from "@/pages/kyc-service/supplier-portal";
-import KycOrgInviteAcceptPage from "@/pages/kyc-service/org-invite-accept";
-import KycMyVerifications from "@/pages/kyc-service/my-verifications";
-import KycSessionPage from "@/pages/kyc-service/kyc-session";
-import ProcurementMarketplace from "@/pages/procurement/marketplace";
-import ProcurementCreateRfq from "@/pages/procurement/create-rfq";
-import ProcurementRfqDetail from "@/pages/procurement/rfq-detail";
-import ProcurementMyRfqs from "@/pages/procurement/my-rfqs";
-import ProcurementSubmitBid from "@/pages/procurement/submit-bid";
-import ProcurementMyBids from "@/pages/procurement/my-bids";
-import ProcurementBidTemplates from "@/pages/procurement/bid-templates";
-import ProcurementMyContracts from "@/pages/procurement/my-contracts";
-import ProcurementContractDetail from "@/pages/procurement/contract-detail";
-import ProcurementMyInvoices from "@/pages/procurement/my-invoices";
-import ProcurementCreateInvoice from "@/pages/procurement/create-invoice";
-import ProcurementInvoiceDetail from "@/pages/procurement/invoice-detail";
-import BuildingManagerDashboard from "@/pages/building-manager/dashboard";
-import BuildingManagerUtilityBill from "@/pages/building-manager/utility-bill";
-import BuildingManagerSubscribers from "@/pages/building-manager/subscribers";
-import BuildingManagerMailIntake from "@/pages/building-manager/mail-intake";
-import WelcomePage from "@/pages/welcome";
-import ExistingCompanyPage from "@/pages/founder/existing-company";
-import RegistrationsPage from "@/pages/founder/registrations";
-import FounderRegistrationServicesPage from "@/pages/founder/registration-services";
+
+// Lazy-loaded — only downloaded when the user actually visits that route
+const FounderDashboard = lazy(() => import("@/pages/founder/dashboard"));
+const FounderApplications = lazy(() => import("@/pages/founder/applications"));
+const FounderVault = lazy(() => import("@/pages/founder/vault"));
+const FounderRegisteredOffice = lazy(() => import("@/pages/founder/registered-office"));
+const FounderMail = lazy(() => import("@/pages/founder/mail"));
+const FounderLegalAssistant = lazy(() => import("@/pages/founder/legal-assistant"));
+const FounderCompanyProfile = lazy(() => import("@/pages/founder/company-profile"));
+const FounderPostIncChecklist = lazy(() => import("@/pages/founder/post-inc-checklist"));
+const FounderComplianceCalendar = lazy(() => import("@/pages/founder/compliance-calendar"));
+const FounderCheckout = lazy(() => import("@/pages/founder/checkout"));
+const FounderServiceRequestForm = lazy(() => import("@/pages/founder/service-request-form"));
+const FounderAddDirectorForm = lazy(() => import("@/pages/founder/add-director-form"));
+const FounderOrders = lazy(() => import("@/pages/founder/orders"));
+const FounderOrderDetail = lazy(() => import("@/pages/founder/order-detail"));
+const NewApplication = lazy(() => import("@/pages/applications/new"));
+const ApplicationDetails = lazy(() => import("@/pages/applications/[id]"));
+const LawyerDashboard = lazy(() => import("@/pages/lawyer/dashboard"));
+const LawyerApplications = lazy(() => import("@/pages/lawyer/applications"));
+const LawyerApplicationDetail = lazy(() => import("@/pages/lawyer/application-detail"));
+const LawyerPayouts = lazy(() => import("@/pages/lawyer/payouts"));
+const LawyerServiceRequests = lazy(() => import("@/pages/lawyer/service-requests"));
+const LawyerServiceRequestDetail = lazy(() => import("@/pages/lawyer/service-request-detail"));
+const AdminDashboard = lazy(() => import("@/pages/admin/dashboard"));
+const AdminUsers = lazy(() => import("@/pages/admin/users"));
+const AdminApplications = lazy(() => import("@/pages/admin/applications"));
+const AdminFeatureFlags = lazy(() => import("@/pages/admin/feature-flags"));
+const AdminAuditLogs = lazy(() => import("@/pages/admin/audit-logs"));
+const AdminAIEvents = lazy(() => import("@/pages/admin/ai-events"));
+const AdminReceipts = lazy(() => import("@/pages/admin/receipts"));
+const AdminLawyerApplications = lazy(() => import("@/pages/admin/lawyer-applications"));
+const AdminMailroom = lazy(() => import("@/pages/admin/mailroom"));
+const AdminOrders = lazy(() => import("@/pages/admin/orders"));
+const AdminKycOverview = lazy(() => import("@/pages/admin/kyc-overview"));
+const AdminFieldVerifications = lazy(() => import("@/pages/admin/field-verifications"));
+const AdminProposals = lazy(() => import("@/pages/admin/proposals"));
+const AdminRegisteredOffices = lazy(() => import("@/pages/admin/registered-offices"));
+const AdminSecurity = lazy(() => import("@/pages/admin/security"));
+const AdminEscrowDashboard = lazy(() => import("@/pages/admin/escrow-dashboard"));
+const AdminBankingPartners = lazy(() => import("@/pages/admin/banking-partners"));
+const AdminCieCockpit = lazy(() => import("@/pages/admin/cie"));
+const AdminExistingCompanies = lazy(() => import("@/pages/admin/existing-companies"));
+const CiePortal = lazy(() => import("@/pages/cie/index"));
+const CieSecurities = lazy(() => import("@/pages/cie/securities"));
+const CieSecurityDetail = lazy(() => import("@/pages/cie/security-detail"));
+const CieSignals = lazy(() => import("@/pages/cie/signals"));
+const CieApiKeys = lazy(() => import("@/pages/cie/api-keys"));
+const CieSubscribePage = lazy(() => import("@/pages/cie/subscribe"));
+const CieSubscribeSuccess = lazy(() => import("@/pages/cie/subscribe-success"));
+const CieIntelligencePage = lazy(() => import("@/pages/cie-intelligence"));
+const PlatformOverview = lazy(() => import("@/pages/platform-overview"));
+const WhyCellionOne = lazy(() => import("@/pages/why-cellion-one"));
+const ApiDocsPage = lazy(() => import("@/pages/api-docs"));
+const ApplyLawyerPage = lazy(() => import("@/pages/apply-lawyer"));
+const TermsPage = lazy(() => import("@/pages/terms"));
+const PrivacyPage = lazy(() => import("@/pages/privacy"));
+const PartnerWithUsPage = lazy(() => import("@/pages/partner-with-us"));
+const ContactPage = lazy(() => import("@/pages/contact"));
+const BankPortalLogin = lazy(() => import("@/pages/bank/login"));
+const BankSetPasswordPage = lazy(() => import("@/pages/bank/set-password"));
+const BankForgotPasswordPage = lazy(() => import("@/pages/bank/forgot-password"));
+const BankResetPasswordPage = lazy(() => import("@/pages/bank/reset-password"));
+const BankCompaniesPage = lazy(() => import("@/pages/bank/companies"));
+const BankCompanyDetailPage = lazy(() => import("@/pages/bank/company-detail"));
+const BankAccountPage = lazy(() => import("@/pages/bank/account"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
+const PersonalProfilePage = lazy(() => import("@/pages/personal-profile"));
+const CompanyPeoplePage = lazy(() => import("@/pages/founder/company-people"));
+const FounderDataSharing = lazy(() => import("@/pages/founder/data-sharing"));
+const VerifyPage = lazy(() => import("@/pages/verify"));
+const InviteAcceptPage = lazy(() => import("@/pages/invite-accept"));
+const DirectorBiometricPage = lazy(() => import("@/pages/director-biometric"));
+const NotificationsPage = lazy(() => import("@/pages/notifications"));
+const PaymentCheckoutPage = lazy(() => import("@/pages/payment/checkout"));
+const PaymentSuccessPage = lazy(() => import("@/pages/payment/success"));
+const PaymentCancelPage = lazy(() => import("@/pages/payment/cancel"));
+const KycTermsPage = lazy(() => import("@/pages/kyc-service/terms"));
+const KycOrgsPage = lazy(() => import("@/pages/kyc-service/orgs"));
+const KycOrgPortal = lazy(() => import("@/pages/kyc-service/org-portal"));
+const KycVerificationDetail = lazy(() => import("@/pages/kyc-service/verification-detail"));
+const KycVerifyRequestPage = lazy(() => import("@/pages/kyc-service/verify-request"));
+const KycEmployeePortalPage = lazy(() => import("@/pages/kyc-service/employee-portal"));
+const KycSupplierPortalPage = lazy(() => import("@/pages/kyc-service/supplier-portal"));
+const KycOrgInviteAcceptPage = lazy(() => import("@/pages/kyc-service/org-invite-accept"));
+const KycMyVerifications = lazy(() => import("@/pages/kyc-service/my-verifications"));
+const KycSessionPage = lazy(() => import("@/pages/kyc-service/kyc-session"));
+const ProcurementMarketplace = lazy(() => import("@/pages/procurement/marketplace"));
+const ProcurementCreateRfq = lazy(() => import("@/pages/procurement/create-rfq"));
+const ProcurementRfqDetail = lazy(() => import("@/pages/procurement/rfq-detail"));
+const ProcurementMyRfqs = lazy(() => import("@/pages/procurement/my-rfqs"));
+const ProcurementSubmitBid = lazy(() => import("@/pages/procurement/submit-bid"));
+const ProcurementMyBids = lazy(() => import("@/pages/procurement/my-bids"));
+const ProcurementBidTemplates = lazy(() => import("@/pages/procurement/bid-templates"));
+const ProcurementMyContracts = lazy(() => import("@/pages/procurement/my-contracts"));
+const ProcurementContractDetail = lazy(() => import("@/pages/procurement/contract-detail"));
+const ProcurementMyInvoices = lazy(() => import("@/pages/procurement/my-invoices"));
+const ProcurementCreateInvoice = lazy(() => import("@/pages/procurement/create-invoice"));
+const ProcurementInvoiceDetail = lazy(() => import("@/pages/procurement/invoice-detail"));
+const BuildingManagerDashboard = lazy(() => import("@/pages/building-manager/dashboard"));
+const BuildingManagerUtilityBill = lazy(() => import("@/pages/building-manager/utility-bill"));
+const BuildingManagerSubscribers = lazy(() => import("@/pages/building-manager/subscribers"));
+const BuildingManagerMailIntake = lazy(() => import("@/pages/building-manager/mail-intake"));
+const WelcomePage = lazy(() => import("@/pages/welcome"));
+const ExistingCompanyPage = lazy(() => import("@/pages/founder/existing-company"));
+const RegistrationsPage = lazy(() => import("@/pages/founder/registrations"));
+const FounderRegistrationServicesPage = lazy(() => import("@/pages/founder/registration-services"));
 
 const INTENT_EXEMPT_PATHS = ["/welcome", "/settings", "/profile", "/notifications", "/login", "/register"];
 const INTENT_EXEMPT_ROLES = ["admin", "lawyer", "building_manager"];
@@ -260,332 +264,334 @@ function Router() {
   const { isAuthenticated, isLoading } = useAuth();
   
   return (
-    <Switch>
-      <Route path="/">
-        {isLoading ? (
-          <LoadingPage />
-        ) : isAuthenticated ? (
-          <RoleBasedRedirect />
-        ) : (
-          <LandingPage />
-        )}
-      </Route>
-      
-      <Route path="/welcome">
-        <ProtectedRoute component={WelcomePage} />
-      </Route>
-      <Route path="/founder/existing-company">
-        <ProtectedRoute component={ExistingCompanyPage} />
-      </Route>
-      <Route path="/founder/registrations">
-        <ProtectedRoute component={RegistrationsPage} />
-      </Route>
-      <Route path="/founder/registration-services">
-        <ProtectedRoute component={FounderRegistrationServicesPage} />
-      </Route>
-      <Route path="/founder/dashboard">
-        <ProtectedRoute component={FounderDashboard} />
-      </Route>
-      <Route path="/founder/applications">
-        <ProtectedRoute component={FounderApplications} />
-      </Route>
-      <Route path="/founder/vault">
-        <ProtectedRoute component={FounderVault} />
-      </Route>
-      <Route path="/founder/registered-office">
-        <ProtectedRoute component={FounderRegisteredOffice} />
-      </Route>
-      <Route path="/founder/mail">
-        <ProtectedRoute component={FounderMail} />
-      </Route>
-      <Route path="/founder/legal-assistant">
-        <ProtectedRoute component={FounderLegalAssistant} />
-      </Route>
-      <Route path="/founder/company-profile">
-        <ProtectedRoute component={FounderCompanyProfile} />
-      </Route>
-      <Route path="/founder/post-inc-checklist">
-        <ProtectedRoute component={FounderPostIncChecklist} />
-      </Route>
-      <Route path="/founder/compliance">
-        <ProtectedRoute component={FounderComplianceCalendar} />
-      </Route>
-      <Route path="/founder/company-people">
-        <ProtectedRoute component={CompanyPeoplePage} roles={["founder"]} />
-      </Route>
-      <Route path="/founder/data-sharing">
-        <ProtectedRoute component={FounderDataSharing} roles={["founder"]} />
-      </Route>
-      <Route path="/founder/checkout">
-        <ProtectedRoute component={FounderCheckout} />
-      </Route>
-      <Route path="/founder/service-request">
-        <ProtectedRoute component={FounderServiceRequestForm} />
-      </Route>
-      <Route path="/founder/add-director">
-        <ProtectedRoute component={FounderAddDirectorForm} />
-      </Route>
-      <Route path="/founder/orders">
-        <ProtectedRoute component={FounderOrders} />
-      </Route>
-      <Route path="/founder/orders/:id">
-        <ProtectedRoute component={FounderOrderDetail} />
-      </Route>
-      
-      <Route path="/applications/new">
-        <ProtectedRoute component={NewApplication} />
-      </Route>
-      <Route path="/applications/:id">
-        <ProtectedRoute component={ApplicationDetails} />
-      </Route>
-      
-      <Route path="/lawyer/dashboard">
-        <ProtectedRoute component={LawyerDashboard} roles={["lawyer"]} />
-      </Route>
-      <Route path="/lawyer/applications">
-        <ProtectedRoute component={LawyerApplications} roles={["lawyer"]} />
-      </Route>
-      <Route path="/lawyer/applications/:id">
-        <ProtectedRoute component={LawyerApplicationDetail} roles={["lawyer"]} />
-      </Route>
-      <Route path="/lawyer/payouts">
-        <ProtectedRoute component={LawyerPayouts} roles={["lawyer"]} />
-      </Route>
-      <Route path="/lawyer/service-requests">
-        <ProtectedRoute component={LawyerServiceRequests} roles={["lawyer"]} />
-      </Route>
-      <Route path="/lawyer/service-requests/:id">
-        <ProtectedRoute component={LawyerServiceRequestDetail} roles={["lawyer"]} />
-      </Route>
-      
-      <Route path="/admin/dashboard">
-        <ProtectedRoute component={AdminDashboard} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/users">
-        <ProtectedRoute component={AdminUsers} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/applications">
-        <ProtectedRoute component={AdminApplications} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/feature-flags">
-        <ProtectedRoute component={AdminFeatureFlags} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/audit-logs">
-        <ProtectedRoute component={AdminAuditLogs} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/ai-events">
-        <ProtectedRoute component={AdminAIEvents} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/receipts">
-        <ProtectedRoute component={AdminReceipts} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/mailroom">
-        <ProtectedRoute component={AdminMailroom} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/lawyer-applications">
-        <ProtectedRoute component={AdminLawyerApplications} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/orders">
-        <ProtectedRoute component={AdminOrders} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/kyc">
-        <ProtectedRoute component={AdminKycOverview} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/field-verifications">
-        <ProtectedRoute component={AdminFieldVerifications} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/proposals">
-        <ProtectedRoute component={AdminProposals} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/registered-offices">
-        <ProtectedRoute component={AdminRegisteredOffices} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/security">
-        <ProtectedRoute component={AdminSecurity} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/escrow-dashboard">
-        <ProtectedRoute component={AdminEscrowDashboard} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/banking-partners">
-        <ProtectedRoute component={AdminBankingPartners} roles={["admin"]} />
-      </Route>
-      <Route path="/admin/cie">
-        <ProtectedRoute component={AdminCieCockpit} roles={["admin", "cie_analyst"]} />
-      </Route>
-      <Route path="/admin/existing-companies">
-        <ProtectedRoute component={AdminExistingCompanies} roles={["admin"]} />
-      </Route>
+    <Suspense fallback={<LoadingPage />}>
+      <Switch>
+        <Route path="/">
+          {isLoading ? (
+            <LoadingPage />
+          ) : isAuthenticated ? (
+            <RoleBasedRedirect />
+          ) : (
+            <LandingPage />
+          )}
+        </Route>
+        
+        <Route path="/welcome">
+          <ProtectedRoute component={WelcomePage} />
+        </Route>
+        <Route path="/founder/existing-company">
+          <ProtectedRoute component={ExistingCompanyPage} />
+        </Route>
+        <Route path="/founder/registrations">
+          <ProtectedRoute component={RegistrationsPage} />
+        </Route>
+        <Route path="/founder/registration-services">
+          <ProtectedRoute component={FounderRegistrationServicesPage} />
+        </Route>
+        <Route path="/founder/dashboard">
+          <ProtectedRoute component={FounderDashboard} />
+        </Route>
+        <Route path="/founder/applications">
+          <ProtectedRoute component={FounderApplications} />
+        </Route>
+        <Route path="/founder/vault">
+          <ProtectedRoute component={FounderVault} />
+        </Route>
+        <Route path="/founder/registered-office">
+          <ProtectedRoute component={FounderRegisteredOffice} />
+        </Route>
+        <Route path="/founder/mail">
+          <ProtectedRoute component={FounderMail} />
+        </Route>
+        <Route path="/founder/legal-assistant">
+          <ProtectedRoute component={FounderLegalAssistant} />
+        </Route>
+        <Route path="/founder/company-profile">
+          <ProtectedRoute component={FounderCompanyProfile} />
+        </Route>
+        <Route path="/founder/post-inc-checklist">
+          <ProtectedRoute component={FounderPostIncChecklist} />
+        </Route>
+        <Route path="/founder/compliance">
+          <ProtectedRoute component={FounderComplianceCalendar} />
+        </Route>
+        <Route path="/founder/company-people">
+          <ProtectedRoute component={CompanyPeoplePage} roles={["founder"]} />
+        </Route>
+        <Route path="/founder/data-sharing">
+          <ProtectedRoute component={FounderDataSharing} roles={["founder"]} />
+        </Route>
+        <Route path="/founder/checkout">
+          <ProtectedRoute component={FounderCheckout} />
+        </Route>
+        <Route path="/founder/service-request">
+          <ProtectedRoute component={FounderServiceRequestForm} />
+        </Route>
+        <Route path="/founder/add-director">
+          <ProtectedRoute component={FounderAddDirectorForm} />
+        </Route>
+        <Route path="/founder/orders">
+          <ProtectedRoute component={FounderOrders} />
+        </Route>
+        <Route path="/founder/orders/:id">
+          <ProtectedRoute component={FounderOrderDetail} />
+        </Route>
+        
+        <Route path="/applications/new">
+          <ProtectedRoute component={NewApplication} />
+        </Route>
+        <Route path="/applications/:id">
+          <ProtectedRoute component={ApplicationDetails} />
+        </Route>
+        
+        <Route path="/lawyer/dashboard">
+          <ProtectedRoute component={LawyerDashboard} roles={["lawyer"]} />
+        </Route>
+        <Route path="/lawyer/applications">
+          <ProtectedRoute component={LawyerApplications} roles={["lawyer"]} />
+        </Route>
+        <Route path="/lawyer/applications/:id">
+          <ProtectedRoute component={LawyerApplicationDetail} roles={["lawyer"]} />
+        </Route>
+        <Route path="/lawyer/payouts">
+          <ProtectedRoute component={LawyerPayouts} roles={["lawyer"]} />
+        </Route>
+        <Route path="/lawyer/service-requests">
+          <ProtectedRoute component={LawyerServiceRequests} roles={["lawyer"]} />
+        </Route>
+        <Route path="/lawyer/service-requests/:id">
+          <ProtectedRoute component={LawyerServiceRequestDetail} roles={["lawyer"]} />
+        </Route>
+        
+        <Route path="/admin/dashboard">
+          <ProtectedRoute component={AdminDashboard} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/users">
+          <ProtectedRoute component={AdminUsers} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/applications">
+          <ProtectedRoute component={AdminApplications} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/feature-flags">
+          <ProtectedRoute component={AdminFeatureFlags} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/audit-logs">
+          <ProtectedRoute component={AdminAuditLogs} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/ai-events">
+          <ProtectedRoute component={AdminAIEvents} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/receipts">
+          <ProtectedRoute component={AdminReceipts} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/mailroom">
+          <ProtectedRoute component={AdminMailroom} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/lawyer-applications">
+          <ProtectedRoute component={AdminLawyerApplications} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/orders">
+          <ProtectedRoute component={AdminOrders} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/kyc">
+          <ProtectedRoute component={AdminKycOverview} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/field-verifications">
+          <ProtectedRoute component={AdminFieldVerifications} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/proposals">
+          <ProtectedRoute component={AdminProposals} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/registered-offices">
+          <ProtectedRoute component={AdminRegisteredOffices} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/security">
+          <ProtectedRoute component={AdminSecurity} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/escrow-dashboard">
+          <ProtectedRoute component={AdminEscrowDashboard} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/banking-partners">
+          <ProtectedRoute component={AdminBankingPartners} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/cie">
+          <ProtectedRoute component={AdminCieCockpit} roles={["admin", "cie_analyst"]} />
+        </Route>
+        <Route path="/admin/existing-companies">
+          <ProtectedRoute component={AdminExistingCompanies} roles={["admin"]} />
+        </Route>
 
-      <Route path="/cie/subscribe/success">
-        <ProtectedRoute component={CieSubscribeSuccess} />
-      </Route>
-      <Route path="/cie/subscribe" component={CieSubscribePage} />
-      <Route path="/cie/api-keys">
-        <CieTierRoute component={CieApiKeys} minTier="subscriber" />
-      </Route>
-      <Route path="/cie/signals">
-        <CieTierRoute component={CieSignals} minTier="pro" />
-      </Route>
-      <Route path="/cie/securities/:ticker">
-        <CieTierRoute component={CieSecurityDetail} minTier="subscriber" />
-      </Route>
-      <Route path="/cie/securities">
-        <CieTierRoute component={CieSecurities} minTier="subscriber" />
-      </Route>
-      <Route path="/cie">
-        <CiePortal />
-      </Route>
-      <Route path="/cie-intelligence">
-        <CieIntelligencePage />
-      </Route>
+        <Route path="/cie/subscribe/success">
+          <ProtectedRoute component={CieSubscribeSuccess} />
+        </Route>
+        <Route path="/cie/subscribe" component={CieSubscribePage} />
+        <Route path="/cie/api-keys">
+          <CieTierRoute component={CieApiKeys} minTier="subscriber" />
+        </Route>
+        <Route path="/cie/signals">
+          <CieTierRoute component={CieSignals} minTier="pro" />
+        </Route>
+        <Route path="/cie/securities/:ticker">
+          <CieTierRoute component={CieSecurityDetail} minTier="subscriber" />
+        </Route>
+        <Route path="/cie/securities">
+          <CieTierRoute component={CieSecurities} minTier="subscriber" />
+        </Route>
+        <Route path="/cie">
+          <CiePortal />
+        </Route>
+        <Route path="/cie-intelligence">
+          <CieIntelligencePage />
+        </Route>
 
-      <Route path="/building-manager/dashboard">
-        <ProtectedRoute component={BuildingManagerDashboard} roles={["building_manager"]} />
-      </Route>
-      <Route path="/building-manager/utility-bill">
-        <ProtectedRoute component={BuildingManagerUtilityBill} roles={["building_manager"]} />
-      </Route>
-      <Route path="/building-manager/subscribers">
-        <ProtectedRoute component={BuildingManagerSubscribers} roles={["building_manager"]} />
-      </Route>
-      <Route path="/building-manager/mail-intake">
-        <ProtectedRoute component={BuildingManagerMailIntake} roles={["building_manager"]} />
-      </Route>
-      
-      <Route path="/profile">
-        <ProtectedRoute component={PersonalProfilePage} />
-      </Route>
-      <Route path="/settings">
-        <ProtectedRoute component={SettingsPage} />
-      </Route>
-      <Route path="/notifications">
-        <ProtectedRoute component={NotificationsPage} />
-      </Route>
-      
-      <Route path="/apply-lawyer" component={ApplyLawyerPage} />
-      
-      <Route path="/platform-overview" component={PlatformOverview} />
-      <Route path="/why-cellion-one" component={WhyCellionOne} />
-      <Route path="/api-docs" component={ApiDocsPage} />
-      <Route path="/terms" component={TermsPage} />
-      <Route path="/privacy" component={PrivacyPage} />
-      <Route path="/partner-with-us" component={PartnerWithUsPage} />
-      <Route path="/contact" component={ContactPage} />
-      
-      {/* Bank Portal Routes */}
-      <Route path="/bank/login" component={BankPortalLogin} />
-      <Route path="/bank/set-password" component={BankSetPasswordPage} />
-      <Route path="/bank/forgot-password" component={BankForgotPasswordPage} />
-      <Route path="/bank/reset-password" component={BankResetPasswordPage} />
-      <Route path="/bank/account" component={BankAccountPage} />
-      <Route path="/bank/companies/:id" component={BankCompanyDetailPage} />
-      <Route path="/bank/companies" component={BankCompaniesPage} />
-      <Route path="/bank" component={BankPortalLogin} />
+        <Route path="/building-manager/dashboard">
+          <ProtectedRoute component={BuildingManagerDashboard} roles={["building_manager"]} />
+        </Route>
+        <Route path="/building-manager/utility-bill">
+          <ProtectedRoute component={BuildingManagerUtilityBill} roles={["building_manager"]} />
+        </Route>
+        <Route path="/building-manager/subscribers">
+          <ProtectedRoute component={BuildingManagerSubscribers} roles={["building_manager"]} />
+        </Route>
+        <Route path="/building-manager/mail-intake">
+          <ProtectedRoute component={BuildingManagerMailIntake} roles={["building_manager"]} />
+        </Route>
+        
+        <Route path="/profile">
+          <ProtectedRoute component={PersonalProfilePage} />
+        </Route>
+        <Route path="/settings">
+          <ProtectedRoute component={SettingsPage} />
+        </Route>
+        <Route path="/notifications">
+          <ProtectedRoute component={NotificationsPage} />
+        </Route>
+        
+        <Route path="/apply-lawyer" component={ApplyLawyerPage} />
+        
+        <Route path="/platform-overview" component={PlatformOverview} />
+        <Route path="/why-cellion-one" component={WhyCellionOne} />
+        <Route path="/api-docs" component={ApiDocsPage} />
+        <Route path="/terms" component={TermsPage} />
+        <Route path="/privacy" component={PrivacyPage} />
+        <Route path="/partner-with-us" component={PartnerWithUsPage} />
+        <Route path="/contact" component={ContactPage} />
+        
+        {/* Bank Portal Routes */}
+        <Route path="/bank/login" component={BankPortalLogin} />
+        <Route path="/bank/set-password" component={BankSetPasswordPage} />
+        <Route path="/bank/forgot-password" component={BankForgotPasswordPage} />
+        <Route path="/bank/reset-password" component={BankResetPasswordPage} />
+        <Route path="/bank/account" component={BankAccountPage} />
+        <Route path="/bank/companies/:id" component={BankCompanyDetailPage} />
+        <Route path="/bank/companies" component={BankCompaniesPage} />
+        <Route path="/bank" component={BankPortalLogin} />
 
-      <Route path="/login" component={LoginPage} />
-      <Route path="/register" component={RegisterPage} />
-      <Route path="/invite/:token" component={InviteAcceptPage} />
-      <Route path="/director-biometric" component={DirectorBiometricPage} />
-      <Route path="/forgot-password" component={ForgotPasswordPage} />
-      <Route path="/reset-password" component={ResetPasswordPage} />
-      <Route path="/verify-email" component={VerifyEmailPage} />
-      <Route path="/consent/:token" component={VerifyPage} />
-      <Route path="/verify/:token" component={KycSessionPage} />
-      <Route path="/kyc/terms" component={KycTermsPage} />
-      <Route path="/kyc/orgs">
-        <ProtectedRoute component={KycOrgsPage} />
-      </Route>
-      <Route path="/kyc/org/:id/requests/:reqId">
-        <ProtectedRoute component={KycVerificationDetail} />
-      </Route>
-      <Route path="/kyc/org/:id/verifications">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/org/:id/sessions">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/org/:id/users">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/org/:id/monitoring">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/org/:id/analytics">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/org/:id/developers">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/org/:id/billing">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/org/:id/team">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/org/:id/settings">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/org/:id">
-        <ProtectedRoute component={KycOrgPortal} />
-      </Route>
-      <Route path="/kyc/my-verifications">
-        <ProtectedRoute component={KycMyVerifications} />
-      </Route>
-      <Route path="/kyc/org-invite/:token" component={KycOrgInviteAcceptPage} />
-      <Route path="/kyc/verify/:token" component={KycVerifyRequestPage} />
-      <Route path="/kyc/session/:token" component={KycSessionPage} />
-      <Route path="/kyc/:slug/employees" component={KycEmployeePortalPage} />
-      <Route path="/kyc/:slug/suppliers" component={KycSupplierPortalPage} />
+        <Route path="/login" component={LoginPage} />
+        <Route path="/register" component={RegisterPage} />
+        <Route path="/invite/:token" component={InviteAcceptPage} />
+        <Route path="/director-biometric" component={DirectorBiometricPage} />
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
+        <Route path="/reset-password" component={ResetPasswordPage} />
+        <Route path="/verify-email" component={VerifyEmailPage} />
+        <Route path="/consent/:token" component={VerifyPage} />
+        <Route path="/verify/:token" component={KycSessionPage} />
+        <Route path="/kyc/terms" component={KycTermsPage} />
+        <Route path="/kyc/orgs">
+          <ProtectedRoute component={KycOrgsPage} />
+        </Route>
+        <Route path="/kyc/org/:id/requests/:reqId">
+          <ProtectedRoute component={KycVerificationDetail} />
+        </Route>
+        <Route path="/kyc/org/:id/verifications">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/org/:id/sessions">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/org/:id/users">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/org/:id/monitoring">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/org/:id/analytics">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/org/:id/developers">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/org/:id/billing">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/org/:id/team">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/org/:id/settings">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/org/:id">
+          <ProtectedRoute component={KycOrgPortal} />
+        </Route>
+        <Route path="/kyc/my-verifications">
+          <ProtectedRoute component={KycMyVerifications} />
+        </Route>
+        <Route path="/kyc/org-invite/:token" component={KycOrgInviteAcceptPage} />
+        <Route path="/kyc/verify/:token" component={KycVerifyRequestPage} />
+        <Route path="/kyc/session/:token" component={KycSessionPage} />
+        <Route path="/kyc/:slug/employees" component={KycEmployeePortalPage} />
+        <Route path="/kyc/:slug/suppliers" component={KycSupplierPortalPage} />
 
-      <Route path="/procurement/marketplace">
-        <ProtectedRoute component={ProcurementMarketplace} />
-      </Route>
-      <Route path="/procurement/rfqs/new">
-        <ProtectedRoute component={ProcurementCreateRfq} />
-      </Route>
-      <Route path="/procurement/rfqs/:id">
-        <ProtectedRoute component={ProcurementRfqDetail} />
-      </Route>
-      <Route path="/procurement/my-rfqs">
-        <ProtectedRoute component={ProcurementMyRfqs} />
-      </Route>
-      <Route path="/procurement/rfqs/:rfqId/bid">
-        <ProtectedRoute component={ProcurementSubmitBid} />
-      </Route>
-      <Route path="/procurement/my-bids">
-        <ProtectedRoute component={ProcurementMyBids} />
-      </Route>
-      <Route path="/procurement/bid-templates">
-        <ProtectedRoute component={ProcurementBidTemplates} />
-      </Route>
-      <Route path="/procurement/contracts">
-        <ProtectedRoute component={ProcurementMyContracts} />
-      </Route>
-      <Route path="/procurement/contracts/:id">
-        <ProtectedRoute component={ProcurementContractDetail} />
-      </Route>
-      <Route path="/procurement/invoices">
-        <ProtectedRoute component={ProcurementMyInvoices} />
-      </Route>
-      <Route path="/procurement/contracts/:contractId/invoice/new">
-        <ProtectedRoute component={ProcurementCreateInvoice} />
-      </Route>
-      <Route path="/procurement/invoices/:id">
-        <ProtectedRoute component={ProcurementInvoiceDetail} />
-      </Route>
-      
-      <Route path="/payment/checkout">
-        <ProtectedRoute component={PaymentCheckoutPage} />
-      </Route>
-      <Route path="/payment/success">
-        <ProtectedRoute component={PaymentSuccessPage} />
-      </Route>
-      <Route path="/payment/cancel">
-        <ProtectedRoute component={PaymentCancelPage} />
-      </Route>
-      
-      <Route component={NotFound} />
-    </Switch>
+        <Route path="/procurement/marketplace">
+          <ProtectedRoute component={ProcurementMarketplace} />
+        </Route>
+        <Route path="/procurement/rfqs/new">
+          <ProtectedRoute component={ProcurementCreateRfq} />
+        </Route>
+        <Route path="/procurement/rfqs/:id">
+          <ProtectedRoute component={ProcurementRfqDetail} />
+        </Route>
+        <Route path="/procurement/my-rfqs">
+          <ProtectedRoute component={ProcurementMyRfqs} />
+        </Route>
+        <Route path="/procurement/rfqs/:rfqId/bid">
+          <ProtectedRoute component={ProcurementSubmitBid} />
+        </Route>
+        <Route path="/procurement/my-bids">
+          <ProtectedRoute component={ProcurementMyBids} />
+        </Route>
+        <Route path="/procurement/bid-templates">
+          <ProtectedRoute component={ProcurementBidTemplates} />
+        </Route>
+        <Route path="/procurement/contracts">
+          <ProtectedRoute component={ProcurementMyContracts} />
+        </Route>
+        <Route path="/procurement/contracts/:id">
+          <ProtectedRoute component={ProcurementContractDetail} />
+        </Route>
+        <Route path="/procurement/invoices">
+          <ProtectedRoute component={ProcurementMyInvoices} />
+        </Route>
+        <Route path="/procurement/contracts/:contractId/invoice/new">
+          <ProtectedRoute component={ProcurementCreateInvoice} />
+        </Route>
+        <Route path="/procurement/invoices/:id">
+          <ProtectedRoute component={ProcurementInvoiceDetail} />
+        </Route>
+        
+        <Route path="/payment/checkout">
+          <ProtectedRoute component={PaymentCheckoutPage} />
+        </Route>
+        <Route path="/payment/success">
+          <ProtectedRoute component={PaymentSuccessPage} />
+        </Route>
+        <Route path="/payment/cancel">
+          <ProtectedRoute component={PaymentCancelPage} />
+        </Route>
+        
+        <Route component={NotFound} />
+      </Switch>
+    </Suspense>
   );
 }
 

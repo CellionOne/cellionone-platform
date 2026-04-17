@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -94,6 +94,7 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [step, setStep] = useState<"select" | "confirm">("select");
   const [selectedBank, setSelectedBank] = useState<BankPartner | null>(null);
+  const [bankShareState, setBankShareState] = useState<Record<number, boolean>>({});
 
   const isVerified = group.status === "verified";
 
@@ -163,9 +164,13 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
   };
 
   const itemsByKey = Object.fromEntries(group.items.map(i => [i.key, i]));
-  const companyDocuments = STANDARD_VAULT_DOCS.filter(
-    d => itemsByKey[d.key]?.status === "provided" && itemsByKey[d.key]?.filePath
-  );
+  useEffect(() => {
+    const nextState: Record<number, boolean> = {};
+    for (const item of group.items) {
+      if (item.id) nextState[item.id] = item.shareWithBank ?? false;
+    }
+    setBankShareState(nextState);
+  }, [group.items]);
 
   const dispatchedByBankId: Record<number, DispatchRecord> = {};
   for (const d of dispatchesQuery.data || []) {
@@ -279,8 +284,10 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                       <div className="flex items-center gap-2">
                         <Switch
                           id={`company-bank-share-${group.profileId}-${item.id}`}
-                          checked={item.shareWithBank ?? false}
+                          checked={bankShareState[item.id] ?? item.shareWithBank ?? false}
                           onCheckedChange={async (value) => {
+                            const previous = bankShareState[item.id] ?? item.shareWithBank ?? false;
+                            setBankShareState(prev => ({ ...prev, [item.id]: value }));
                             try {
                               const res = await apiRequest("PATCH", `/api/documents/${item.id}/bank-share`, { shareWithBank: value });
                               if (!res.ok) throw new Error("Failed to update");
@@ -290,13 +297,14 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                                 description: value ? "This document will be included when you send your dossier." : "This document will not be included when you send your dossier.",
                               });
                             } catch {
+                              setBankShareState(prev => ({ ...prev, [item.id]: previous }));
                               toast({ title: "Error", description: "Could not update bank sharing setting.", variant: "destructive" });
                             }
                           }}
                           data-testid={`switch-company-bank-share-${group.profileId}-${item.id}`}
                         />
                         <label htmlFor={`company-bank-share-${group.profileId}-${item.id}`} className="cursor-pointer select-none text-sm text-muted-foreground">
-                          {item.shareWithBank ? "Shared" : "Private"}
+                          {(bankShareState[item.id] ?? item.shareWithBank ?? false) ? "Shared" : "Private"}
                         </label>
                       </div>
                     )}

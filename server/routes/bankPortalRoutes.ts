@@ -809,28 +809,41 @@ export function registerBankPortalRoutes(app: Express): void {
         }
       }
 
-      // Compute kybVerified from verificationReport (existing company pipeline) or smileKybResult fallback
+      // Compute kybVerified from verificationReport (existing company pipeline) or smileKybResult fallback.
+      // Support both top-level kybPassed (actual pipeline) and kybCheck.passed (legacy/alternate shape).
       const vr = profile.verificationReport as Record<string, unknown> | null | undefined;
+      const vrKybCheck = vr?.kybCheck as Record<string, unknown> | undefined;
       const kybVerified: boolean =
         vr?.kybPassed === true ||
+        vrKybCheck?.passed === true ||
         (profile.smileKybResult as Record<string, unknown> | null | undefined)?.ResultCode === "1012";
 
-      // Enrich CAC-sourced directors with verification results from verificationReport.directorsReport
+      // Enrich CAC-sourced directors with verification results from verificationReport.
+      // Support both directorsReport (actual pipeline key) and directors (alternate key).
       const rawDirectors = Array.isArray(profile.directors) ? (profile.directors as Record<string, unknown>[]) : [];
-      const directorsReport = Array.isArray(vr?.directorsReport) ? (vr!.directorsReport as Record<string, unknown>[]) : [];
+      const vrDirectors = (
+        Array.isArray(vr?.directorsReport) ? vr!.directorsReport :
+        Array.isArray(vr?.directors) ? vr!.directors : []
+      ) as Record<string, unknown>[];
       const enrichedDirectors = rawDirectors.map(dir => {
-        const match = directorsReport.find(dr => {
+        const match = vrDirectors.find(dr => {
           const drName = String(dr.name || "").toLowerCase();
           const dirName = String(dir.name || "").toLowerCase();
           return drName && dirName && drName === dirName;
         });
         if (!match) return dir;
+        // Support both ninPassed/bvnPassed (actual) and ninKyc/bvnKyc (alternate) naming
+        const ninVerified = match.ninPassed === true || match.ninKyc === true;
+        const bvnVerified = match.bvnPassed === true || match.bvnKyc === true;
+        const amlIsHit = match.amlClear === true ? false : match.amlClear === false ? true : undefined;
+        // biometricStatus: prefer report value, fall back to raw director value
+        const biometricStatus = match.biometricStatus !== undefined ? match.biometricStatus : dir.biometricStatus;
         return {
           ...dir,
-          ninVerified: match.ninPassed === true,
-          bvnVerified: match.bvnPassed === true,
-          amlIsHit: match.amlClear === true ? false : match.amlClear === false ? true : undefined,
-          biometricStatus: dir.biometricStatus,
+          ninVerified,
+          bvnVerified,
+          amlIsHit,
+          biometricStatus,
         };
       });
 
@@ -991,7 +1004,7 @@ export function registerBankPortalRoutes(app: Express): void {
         }
       }
 
-      if (!signatureUrl) return res.status(404).json({ error: "Signature file not available — please ask the founder to re-upload their signature." });
+      if (!signatureUrl) return res.status(404).json({ error: "Signature path format not supported — please re-upload signature." });
 
       await storage.createAuditLog({
         actorUserId: `bank:${session.email}`,

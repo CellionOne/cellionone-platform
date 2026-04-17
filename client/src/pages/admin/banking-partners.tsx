@@ -523,15 +523,27 @@ export default function AdminBankingPartnersPage() {
             ) : (
               <div className="space-y-2">
                 {docRequests.map(r => (
-                  <Card key={r.id} data-testid={`card-doc-request-${r.id}`} className={r.status === "open" ? "border-orange-400/40" : ""}>
+                  <Card key={r.id} data-testid={`card-doc-request-${r.id}`} className={r.status === "open" ? "border-orange-400/40" : r.status === "actioned" ? "border-blue-400/40" : ""}>
                     <CardContent className="py-3 px-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-0.5 flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-sm font-medium">{r.companyName}</p>
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.status === "open" ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"}`}>
-                              {r.status.toUpperCase()}
-                            </span>
+                            {r.status === "open" && (
+                              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" data-testid={`badge-status-${r.id}`}>
+                                PENDING
+                              </span>
+                            )}
+                            {r.status === "actioned" && (
+                              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" data-testid={`badge-status-${r.id}`}>
+                                ACKNOWLEDGED
+                              </span>
+                            )}
+                            {r.status !== "open" && r.status !== "actioned" && (
+                              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" data-testid={`badge-status-${r.id}`}>
+                                {r.status.toUpperCase()}
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-muted-foreground">
                             From <span className="font-medium">{r.bankName}</span> ({r.requestedByEmail})
@@ -539,6 +551,11 @@ export default function AdminBankingPartnersPage() {
                           </p>
                           <p className="text-sm mt-1">{r.documentsRequested}</p>
                           {r.reason && <p className="text-xs text-muted-foreground italic">Reason: {r.reason}</p>}
+                          {r.status === "actioned" && r.actionedAt && (
+                            <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5" data-testid={`text-acknowledged-at-${r.id}`}>
+                              Acknowledged by founder on {format(new Date(r.actionedAt), "d MMM yyyy, HH:mm")}
+                            </p>
+                          )}
                         </div>
                         {r.status === "open" && (
                           <Button

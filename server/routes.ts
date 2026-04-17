@@ -5516,6 +5516,9 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const doc = await storage.getDocument(documentId);
       if (!doc) return res.status(404).json({ message: "Document not found" });
       if (doc.ownerUserId !== userId) return res.status(403).json({ message: "Access denied" });
+      if (!doc.applicationId && doc.category !== "company" && doc.category !== "filing") {
+        return res.status(400).json({ message: "Only company KYC documents can be shared with banks" });
+      }
 
       const updated = await storage.updateDocument(documentId, { shareWithBank });
       res.json({ id: updated?.id, shareWithBank: updated?.shareWithBank });

@@ -170,7 +170,6 @@ export default function BankCompanyDetailPage() {
   const [reason, setReason] = useState("");
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   const [signatureOpen, setSignatureOpen] = useState(false);
-  const [signatureLoading, setSignatureLoading] = useState(false);
 
   const { data: session, isLoading: sessionLoading } = useQuery<BankSession>({
     queryKey: ["/api/bank-portal/me"],
@@ -260,26 +259,18 @@ export default function BankCompanyDetailPage() {
   const platformDirectors = platformPeople.filter(p => p.role === "director" || p.role === "director_shareholder");
   const platformShareholders = platformPeople.filter(p => p.role === "shareholder" || p.role === "director_shareholder");
 
-  const loadSignature = async (personId?: string) => {
-    const endpoint = personId
-      ? `/api/bank-portal/companies/${id}/people/${personId}/signature`
-      : `/api/bank-portal/companies/${id}/founder/signature`;
-    try {
-      setSignatureLoading(true);
-      const res = await fetch(endpoint, { credentials: "include" });
-      if (!res.ok) {
-        const err = await res.json();
-        toast({ title: "Signature unavailable", description: err.error || "Could not load signature.", variant: "destructive" });
-        return;
-      }
-      const { signatureUrl: url } = await res.json();
-      setSignatureUrl(url);
-      setSignatureOpen(true);
-    } catch {
-      toast({ title: "Error", description: "Could not load signature.", variant: "destructive" });
-    } finally {
-      setSignatureLoading(false);
-    }
+  const loadSignature = (personId?: string) => {
+    const proxyUrl = personId
+      ? `/api/bank-portal/companies/${id}/people/${personId}/signature/image`
+      : `/api/bank-portal/companies/${id}/founder/signature/image`;
+    setSignatureUrl(proxyUrl);
+    setSignatureOpen(true);
+  };
+
+  const handleSignatureError = () => {
+    setSignatureOpen(false);
+    setSignatureUrl(null);
+    toast({ title: "Signature unavailable", description: "Could not load signature specimen. The founder may need to re-upload their signature.", variant: "destructive" });
   };
 
   const downloadDocument = async (docId: number, filename: string, source?: string) => {
@@ -483,7 +474,7 @@ export default function BankCompanyDetailPage() {
             </DialogHeader>
             {signatureUrl && (
               <div className="flex justify-center py-4">
-                <img src={signatureUrl} alt="Signature specimen" className="max-h-48 border rounded" />
+                <img src={signatureUrl} alt="Signature specimen" className="max-h-48 border rounded" onError={handleSignatureError} />
               </div>
             )}
           </DialogContent>
@@ -524,10 +515,9 @@ export default function BankCompanyDetailPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => loadSignature()}
-                    disabled={signatureLoading}
                     data-testid="button-view-founder-signature"
                   >
-                    {signatureLoading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <FileText className="h-3.5 w-3.5 mr-1.5" />}
+                    <FileText className="h-3.5 w-3.5 mr-1.5" />
                     View Signature
                   </Button>
                   <p className="text-xs text-muted-foreground mt-1.5">Access to this signature specimen is audited.</p>
@@ -732,9 +722,18 @@ export default function BankCompanyDetailPage() {
                         {(p.sharesAllocated || p.sharePercentage) && <div><dt className="text-muted-foreground">Shareholding</dt><dd className="font-medium">{p.sharePercentage != null ? `${p.sharePercentage}%` : `${(p.sharesAllocated || 0).toLocaleString()} shares`}</dd></div>}
                       </dl>
                     )}
-                    {p.profile?.hasSignature && (
-                      <div className="pt-2 border-t">
-                        <p className="text-xs text-muted-foreground">BVN/NIN: on file • <span className="text-primary">Verified via Cellion One KYC pipeline</span></p>
+                    {p.profile?.hasSignature && p.personUserId && (
+                      <div className="pt-2 border-t flex items-center gap-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => loadSignature(p.personUserId!)}
+                          data-testid={`button-view-person-signature-${p.id}`}
+                        >
+                          <FileText className="h-3.5 w-3.5 mr-1.5" />
+                          View Signature
+                        </Button>
+                        <p className="text-xs text-muted-foreground">Access is audited.</p>
                       </div>
                     )}
                   </div>

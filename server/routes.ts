@@ -8635,7 +8635,13 @@ Important guidelines:
       const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
       if (!profile) return res.status(404).json({ message: "Profile not found" });
       const checklist = await db.select().from(profileChecklistItems).where(eq(profileChecklistItems.companyProfileId, profileId));
-      res.json({ ...profile, checklistItems: checklist });
+      // Resolve TIN: prefer column; fall back to verificationReport.tinSubmitted.tinNumber
+      const vr = profile.verificationReport as Record<string, unknown> | null | undefined;
+      const vrTinSubmitted = vr?.tinSubmitted as Record<string, unknown> | undefined;
+      const resolvedTinNumber: string | null =
+        profile.tinNumber ||
+        (typeof vrTinSubmitted?.tinNumber === "string" && vrTinSubmitted.tinNumber ? vrTinSubmitted.tinNumber : null);
+      res.json({ ...profile, tinNumber: resolvedTinNumber, checklistItems: checklist });
     } catch (error: any) {
       console.error("Error fetching existing company:", error);
       res.status(500).json({ message: "Failed to fetch existing company" });

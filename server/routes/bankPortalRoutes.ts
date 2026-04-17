@@ -818,6 +818,13 @@ export function registerBankPortalRoutes(app: Express): void {
         vrKybCheck?.passed === true ||
         (profile.smileKybResult as Record<string, unknown> | null | undefined)?.ResultCode === "1012";
 
+      // Resolve TIN: prefer profile column; fall back to verificationReport.tinSubmitted.tinNumber
+      // (the pipeline stores TIN there even when the column was not written).
+      const vrTinSubmitted = vr?.tinSubmitted as Record<string, unknown> | undefined;
+      const resolvedTinNumber: string | null =
+        (profile.tinNumber as string | null) ||
+        (typeof vrTinSubmitted?.tinNumber === "string" && vrTinSubmitted.tinNumber ? vrTinSubmitted.tinNumber : null);
+
       // Enrich CAC-sourced directors with verification results from verificationReport.
       // Support both directorsReport (actual pipeline key) and directors (alternate key).
       const rawDirectors = Array.isArray(profile.directors) ? (profile.directors as Record<string, unknown>[]) : [];
@@ -849,6 +856,7 @@ export function registerBankPortalRoutes(app: Express): void {
 
       res.json({
         ...profile,
+        tinNumber: resolvedTinNumber,
         directors: enrichedDirectors,
         checklistItems: checklistRows,
         dispatchedAt: dispatches[0]?.sentAt,
@@ -1072,6 +1080,93 @@ export function registerBankPortalRoutes(app: Express): void {
     } catch (e: any) {
       console.error("[BankPortal] Person signature fetch error:", e);
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/bank-portal/companies/:id/founder/signature/image — stream signature bytes (avoids CORS on GCS signed URLs)
+  app.get("/api/bank-portal/companies/:id/founder/signature/image", async (req: Request, res: Response) => {
+    try {
+      const session = await getBankPortalSession(req);
+      if (!session) return res.status(401).json({ error: "Not authenticated" });
+
+      const companyProfileId = parseInt(req.params.id);
+      const dispatches = await storage.listBankCompanyDispatches({ companyProfileId, bankPartnerId: session.bankPartnerId });
+      if (dispatches.length === 0) return res.status(404).json({ error: "Company not dispatched to your bank" });
+
+      const [profile] = await db.select({ founderId: companyProfiles.founderId }).from(companyProfiles).where(eq(companyProfiles.id, companyProfileId));
+      if (!profile?.founderId) return res.status(404).json({ error: "Company profile not found" });
+
+      const [fp] = await db.select({ signaturePath: founderProfiles.signaturePath }).from(founderProfiles).where(eq(founderProfiles.userId, profile.founderId));
+      if (!fp?.signaturePath) return res.status(404).json({ error: "No signature on file" });
+
+      const objectStorage = new ObjectStorageService();
+      const normalizedPath = objectStorage.normalizeObjectEntityPath(fp.signaturePath);
+      let file;
+      try {
+        file = await objectStorage.getObjectEntityFile(normalizedPath);
+      } catch {
+        return res.status(404).json({ error: "Signature file not found in storage" });
+      }
+
+      await storage.createAuditLog({
+        actorUserId: `bank:${session.email}`,
+        action: "bank_portal_signature_view",
+        entityType: "founder_profile",
+        entityId: profile.founderId,
+        details: { bankPartnerId: session.bankPartnerId, companyProfileId },
+      });
+
+      await objectStorage.downloadObject(file, res, 0);
+    } catch (e: any) {
+      console.error("[BankPortal] Signature image proxy error:", e);
+      if (!res.headersSent) res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/bank-portal/companies/:id/people/:personId/signature/image — stream person signature bytes
+  app.get("/api/bank-portal/companies/:id/people/:personId/signature/image", async (req: Request, res: Response) => {
+    try {
+      const session = await getBankPortalSession(req);
+      if (!session) return res.status(401).json({ error: "Not authenticated" });
+
+      const companyProfileId = parseInt(req.params.id);
+      const personId = req.params.personId;
+
+      const dispatches = await storage.listBankCompanyDispatches({ companyProfileId, bankPartnerId: session.bankPartnerId });
+      if (dispatches.length === 0) return res.status(404).json({ error: "Company not dispatched to your bank" });
+
+      const companyPeopleRows = await db.select({ personUserId: companyPeople.personUserId })
+        .from(companyPeople)
+        .where(eq(companyPeople.companyProfileId, companyProfileId));
+      const person = companyPeopleRows.find(p => p.personUserId === personId);
+      if (!person) return res.status(404).json({ error: "Person not linked to this company" });
+
+      const [fp] = await db.select({ signaturePath: founderProfiles.signaturePath })
+        .from(founderProfiles)
+        .where(eq(founderProfiles.userId, personId));
+      if (!fp?.signaturePath) return res.status(404).json({ error: "No signature on file" });
+
+      const objectStorage = new ObjectStorageService();
+      const normalizedPath = objectStorage.normalizeObjectEntityPath(fp.signaturePath);
+      let file;
+      try {
+        file = await objectStorage.getObjectEntityFile(normalizedPath);
+      } catch {
+        return res.status(404).json({ error: "Signature file not found in storage" });
+      }
+
+      await storage.createAuditLog({
+        actorUserId: `bank:${session.email}`,
+        action: "bank_portal_person_signature_view",
+        entityType: "founder_profile",
+        entityId: personId,
+        details: { bankPartnerId: session.bankPartnerId, companyProfileId },
+      });
+
+      await objectStorage.downloadObject(file, res, 0);
+    } catch (e: any) {
+      console.error("[BankPortal] Person signature image proxy error:", e);
+      if (!res.headersSent) res.status(500).json({ error: e.message });
     }
   });
 

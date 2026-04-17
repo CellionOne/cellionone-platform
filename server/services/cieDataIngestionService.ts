@@ -25,7 +25,10 @@ let openaiClient: OpenAIClient | null = null;
 async function getOpenAI(): Promise<OpenAIClient> {
   if (!openaiClient) {
     const { OpenAI } = await import("openai");
-    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    openaiClient = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY,
+      ...(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ? { baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL } : {}),
+    });
   }
   return openaiClient;
 }
@@ -160,6 +163,64 @@ function parseNumber(val: unknown): number | undefined {
   return isNaN(n) ? undefined : n;
 }
 
+/**
+ * Extract a trade date from a filename — for NGX daily price list files that
+ * embed the date in the name rather than in a per-row column.
+ *
+ * Recognised patterns (case-insensitive):
+ *   10042026         → DDMMYYYY → "2026-04-10"
+ *   2026-04-10       → ISO       → "2026-04-10"
+ *   2026 04 10       → ISO-ish   → "2026-04-10"
+ *   24March2026      → DMmmYYYY → "2026-03-24"
+ *   March 24 2026    → Mdd YYYY  → "2026-03-24"
+ */
+const MONTH_NAMES: Record<string, string> = {
+  january: "01", february: "02", march: "03", april: "04",
+  may: "05", june: "06", july: "07", august: "08",
+  september: "09", october: "10", november: "11", december: "12",
+  jan: "01", feb: "02", mar: "03", apr: "04",
+  jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+};
+
+export function parseDateFromFilename(filename: string): string | null {
+  if (!filename) return null;
+  const base = filename.replace(/\.[^.]+$/, ""); // strip extension
+
+  // ISO with separators: 2026-04-10 or 2026/04/10 or 2026 04 10
+  const isoMatch = base.match(/(\d{4})[\s\-\/](\d{2})[\s\-\/](\d{2})/);
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch;
+    return `${y}-${m}-${d}`;
+  }
+
+  // Month-name pattern: 24March2026 or March24 2026 or 24 March 2026
+  const monthNameMatch = base.match(/(\d{1,2})\s*([A-Za-z]+)\s*(\d{4})/);
+  if (monthNameMatch) {
+    const [, d, mon, y] = monthNameMatch;
+    const m = MONTH_NAMES[mon.toLowerCase()];
+    if (m) return `${y}-${m}-${d.padStart(2, "0")}`;
+  }
+  const monthNameMatchReverse = base.match(/([A-Za-z]+)\s*(\d{1,2})[,\s]+(\d{4})/);
+  if (monthNameMatchReverse) {
+    const [, mon, d, y] = monthNameMatchReverse;
+    const m = MONTH_NAMES[mon.toLowerCase()];
+    if (m) return `${y}-${m}-${d.padStart(2, "0")}`;
+  }
+
+  // 8-digit run DDMMYYYY (e.g. 10042026)
+  const ddmmyyyy = base.match(/(\d{2})(\d{2})(\d{4})(?!\d)/);
+  if (ddmmyyyy) {
+    const [, d, mo, y] = ddmmyyyy;
+    const di = parseInt(d, 10);
+    const mi = parseInt(mo, 10);
+    if (di >= 1 && di <= 31 && mi >= 1 && mi <= 12) {
+      return `${y}-${mo}-${d}`;
+    }
+  }
+
+  return null;
+}
+
 function findCol(headers: string[], ...candidates: string[]): number {
   for (const c of candidates) {
     const idx = headers.findIndex(h => h.toLowerCase().includes(c.toLowerCase()));
@@ -211,18 +272,36 @@ function detectPriceSheet(wb: XLSX.WorkBook): XLSX.WorkSheet {
 // CSV / Excel parsing
 // ============================================================
 
-function parseSheetRows(sheet: XLSX.WorkSheet, source: "csv" | "xlsx"): PriceRow[] {
+function parseSheetRows(sheet: XLSX.WorkSheet, source: "csv" | "xlsx", fallbackDate?: string | null): PriceRow[] {
   const json = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
   if (json.length < 2) return [];
 
   const rawHeaders = (json[0] as string[]).map(h => String(h ?? "").trim());
-  const symCol    = findCol(rawHeaders, "symbol", "ticker", "stock");
-  const dateCol   = findCol(rawHeaders, "date", "trade date", "trading date");
-  const closeCol  = findCol(rawHeaders, "close", "closing", "last price");
+  const symCol    = findCol(rawHeaders, "symbol", "ticker", "stock", "security", "scrip");
+  const dateCol   = findCol(rawHeaders, "date", "trade date", "trading date", "trade_date");
+  const closeCol  = findCol(rawHeaders, "close", "closing", "last price", "market price", "current price", "price", "last");
   const openCol   = findCol(rawHeaders, "open", "opening");
   const highCol   = findCol(rawHeaders, "high");
   const lowCol    = findCol(rawHeaders, "low");
-  const volCol    = findCol(rawHeaders, "volume", "vol");
+  const volCol    = findCol(rawHeaders, "volume", "vol", "qty", "quantity");
+
+  // When there is no date column, scan the first few header rows for a date value
+  // (common in NGX reports that put the trade date in the sheet header area)
+  let sheetHeaderDate: string | null = null;
+  if (dateCol === -1) {
+    for (let r = 0; r < Math.min(5, json.length); r++) {
+      const cells = json[r] as unknown[];
+      for (const cell of cells) {
+        if (!cell) continue;
+        const candidate = normaliseDate(cell);
+        if (candidate) { sheetHeaderDate = candidate; break; }
+      }
+      if (sheetHeaderDate) break;
+    }
+  }
+
+  // Effective fallback: sheet-header date takes priority over filename-derived date
+  const effectiveFallbackDate = sheetHeaderDate ?? fallbackDate ?? null;
 
   const rows: PriceRow[] = [];
 
@@ -238,14 +317,19 @@ function parseSheetRows(sheet: XLSX.WorkSheet, source: "csv" | "xlsx"): PriceRow
       rows.push({ rowIndex: -1, symbol: "", date: "", close: 0, confidence: 0, lowConfidence: true, source, error: `Row ${i + 1}: missing symbol` });
       continue;
     }
-    if (!rawDate) {
-      rows.push({ rowIndex: -1, symbol, date: "", close: 0, confidence: 0, lowConfidence: true, source, error: `Row ${i + 1}: missing date` });
-      continue;
-    }
 
-    const date = normaliseDate(rawDate);
-    if (!date) {
-      rows.push({ rowIndex: -1, symbol, date: "", close: 0, confidence: 0, lowConfidence: true, source, error: `Row ${i + 1}: invalid date '${rawDate}'` });
+    // Resolve date: column value → sheet header scan → filename fallback
+    let date: string | null = null;
+    if (rawDate) {
+      date = normaliseDate(rawDate);
+      if (!date) {
+        rows.push({ rowIndex: -1, symbol, date: "", close: 0, confidence: 0, lowConfidence: true, source, error: `Row ${i + 1}: invalid date '${rawDate}'` });
+        continue;
+      }
+    } else if (effectiveFallbackDate) {
+      date = effectiveFallbackDate;
+    } else {
+      rows.push({ rowIndex: -1, symbol, date: "", close: 0, confidence: 0, lowConfidence: true, source, error: `Row ${i + 1}: missing date` });
       continue;
     }
 
@@ -273,16 +357,18 @@ function parseSheetRows(sheet: XLSX.WorkSheet, source: "csv" | "xlsx"): PriceRow
   return rows;
 }
 
-export function parseCsvBuffer(buffer: Buffer): PriceRow[] {
+export function parseCsvBuffer(buffer: Buffer, filename?: string): PriceRow[] {
   const wb = XLSX.read(buffer, { type: "buffer", raw: false, cellDates: false });
   const sheet = wb.Sheets[wb.SheetNames[0]];
-  return parseSheetRows(sheet, "csv");
+  const fallbackDate = filename ? parseDateFromFilename(filename) : null;
+  return parseSheetRows(sheet, "csv", fallbackDate);
 }
 
-export function parseXlsxBuffer(buffer: Buffer): PriceRow[] {
+export function parseXlsxBuffer(buffer: Buffer, filename?: string): PriceRow[] {
   const wb = XLSX.read(buffer, { type: "buffer", raw: false, cellDates: false });
   const sheet = detectPriceSheet(wb); // smart sheet detection by header scoring
-  return parseSheetRows(sheet, "xlsx");
+  const fallbackDate = filename ? parseDateFromFilename(filename) : null;
+  return parseSheetRows(sheet, "xlsx", fallbackDate);
 }
 
 // ============================================================

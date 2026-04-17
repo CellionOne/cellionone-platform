@@ -362,7 +362,7 @@ function PriceUploadTab() {
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">Upload End-of-Day Prices</CardTitle>
-            <CardDescription className="text-xs">Accepts CSV or XLSX with headers: ticker, trade_date, open, high, low, close, volume</CardDescription>
+            <CardDescription className="text-xs">Accepts CSV, XLSX, or PDF with headers: ticker, trade_date, open, high, low, close, volume</CardDescription>
           </CardHeader>
           <CardContent>
             <label
@@ -379,7 +379,7 @@ function PriceUploadTab() {
                 id="price-file-input"
                 ref={fileRef}
                 type="file"
-                accept=".csv,.xlsx"
+                accept=".csv,.xlsx,.pdf"
                 className="hidden"
                 onChange={handleFileChange}
                 data-testid="input-file-upload"
@@ -391,7 +391,7 @@ function PriceUploadTab() {
                 <p className="text-sm text-primary font-medium">Drop to upload</p>
               ) : (
                 <>
-                  <p className="text-sm text-muted-foreground">Drag & drop CSV / XLSX here</p>
+                  <p className="text-sm text-muted-foreground">Drag & drop CSV / XLSX / PDF here</p>
                   <p className="text-xs text-muted-foreground mt-1">or click to browse</p>
                 </>
               )}
@@ -446,8 +446,19 @@ function PriceUploadTab() {
                 <div className="text-muted-foreground">…and {preview.previewRows.length - 10} more</div>
               )}
             </div>
+            {preview.rowsAccepted === 0 && (
+              <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400" data-testid="warning-no-rows">
+                <span className="mt-0.5 shrink-0">⚠</span>
+                <span>No rows could be extracted from this file. Check the file format — it may use unsupported column names, be image-based (scanned PDF), or contain no price data. Contact support if the issue persists.</span>
+              </div>
+            )}
             <div className="flex gap-3">
-              <Button onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending} className="gap-2" data-testid="button-confirm-upload">
+              <Button
+                onClick={() => confirmMutation.mutate()}
+                disabled={confirmMutation.isPending || preview.rowsAccepted === 0}
+                className="gap-2"
+                data-testid="button-confirm-upload"
+              >
                 <CheckCircle2 className="h-4 w-4" /> Confirm & Ingest
               </Button>
               <Button variant="outline" onClick={() => setPreview(null)} data-testid="button-cancel-upload">Cancel</Button>

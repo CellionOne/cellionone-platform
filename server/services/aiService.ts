@@ -14,13 +14,16 @@ const PROMPT_VERSIONS = {
 };
 
 export function isOpenAIAvailable(): boolean {
-  return !!process.env.OPENAI_API_KEY;
+  return !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY);
 }
 
 async function getOpenAI() {
   if (!openaiClient) {
     const { OpenAI } = await import("openai");
-    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    openaiClient = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY,
+      ...(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ? { baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL } : {}),
+    });
   }
   return openaiClient;
 }

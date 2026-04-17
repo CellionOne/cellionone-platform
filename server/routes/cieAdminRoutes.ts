@@ -246,10 +246,10 @@ export function registerCieAdminRoutes(app: Express): void {
 
       if (filename.endsWith(".csv") || mime.includes("csv")) {
         format = "csv";
-        rows = parseCsvBuffer(file.buffer);
+        rows = parseCsvBuffer(file.buffer, file.originalname);
       } else if (filename.endsWith(".xlsx") || filename.endsWith(".xls") || mime.includes("spreadsheet") || mime.includes("excel")) {
         format = "xlsx";
-        rows = parseXlsxBuffer(file.buffer);
+        rows = parseXlsxBuffer(file.buffer, file.originalname);
       } else if (filename.endsWith(".pdf") || mime.includes("pdf")) {
         format = "pdf";
         rows = await parsePdfBuffer(file.buffer, file.originalname);

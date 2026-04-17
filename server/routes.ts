@@ -163,8 +163,12 @@ const betaActivationSchema = z.object({
 // Lazy initialization of OpenAI to avoid startup errors
 let openai: OpenAI | null = null;
 function getOpenAI(): OpenAI | null {
-  if (!openai && process.env.OPENAI_API_KEY) {
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY;
+  if (!openai && apiKey) {
+    openai = new OpenAI({
+      apiKey,
+      ...(process.env.AI_INTEGRATIONS_OPENAI_BASE_URL ? { baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL } : {}),
+    });
   }
   return openai;
 }

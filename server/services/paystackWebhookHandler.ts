@@ -2150,6 +2150,13 @@ export async function runExistingCompanyVerificationPipeline(profileId: number):
       }
     }
 
+    // Persist updated verification flags (amlChecked, amlIsHit, bvnVerified, ninVerified, etc.)
+    // back to company_profiles.directors. Original encrypted BVN/NIN values are preserved
+    // since updatedDirectors is a deep copy of rawDirs (JSON.parse/stringify at line 2098).
+    await db.update(companyProfiles)
+      .set({ directors: JSON.parse(JSON.stringify(updatedDirectors)) as typeof companyProfiles.$inferSelect['directors'], updatedAt: new Date() })
+      .where(eq(companyProfiles.id, profile.id));
+
     const individualPipelineDirs = updatedDirectors.filter(d => d.entityType !== 'corporate');
     const directorsPass = updatedDirectors.every(d => {
       if (d.entityType === 'corporate') {

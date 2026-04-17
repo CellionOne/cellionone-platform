@@ -772,7 +772,7 @@ export default function BankCompanyDetailPage() {
                           trueLabel="Verified"
                           falseLabel="Not verified"
                         />
-                        <p className="text-xs font-mono mt-0.5 text-foreground">{d.nin || "—"}</p>
+                        <p className="text-xs font-mono mt-0.5 text-foreground">{d.nin || (d.ninVerified === true ? "Verified (on file)" : "—")}</p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">BVN</p>
@@ -781,7 +781,7 @@ export default function BankCompanyDetailPage() {
                           trueLabel="Verified"
                           falseLabel="Not verified"
                         />
-                        <p className="text-xs font-mono mt-0.5 text-foreground">{d.bvn || "—"}</p>
+                        <p className="text-xs font-mono mt-0.5 text-foreground">{d.bvn || (d.bvnVerified === true ? "Verified (on file)" : "—")}</p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">Biometric</p>

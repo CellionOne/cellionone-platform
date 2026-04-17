@@ -776,6 +776,9 @@ export function registerBankPortalRoutes(app: Express): void {
 
       // Fetch founder profile (non-sensitive fields only)
       let founderProfile = null;
+      let founderEmailForFallback: string | undefined;
+      let founderBvnEncrypted: string | null | undefined;
+      let founderNinEncrypted: string | null | undefined;
       if (profile.founderId) {
         const [fp] = await db.select({
           fullName: founderProfiles.fullName,
@@ -788,10 +791,16 @@ export function registerBankPortalRoutes(app: Express): void {
           state: founderProfiles.state,
           idType: founderProfiles.idType,
           signaturePath: founderProfiles.signaturePath,
+          bvnEncrypted: founderProfiles.bvnEncrypted,
+          ninEncrypted: founderProfiles.ninEncrypted,
         }).from(founderProfiles).where(eq(founderProfiles.userId, profile.founderId));
 
-        const [founderUser] = await db.select({ isIdentityVerified: users.isIdentityVerified })
+        const [founderUser] = await db.select({ isIdentityVerified: users.isIdentityVerified, email: users.email })
           .from(users).where(eq(users.id, profile.founderId));
+
+        founderEmailForFallback = founderUser?.email?.toLowerCase();
+        founderBvnEncrypted = fp?.bvnEncrypted;
+        founderNinEncrypted = fp?.ninEncrypted;
 
         if (fp) {
           founderProfile = {
@@ -893,10 +902,47 @@ export function registerBankPortalRoutes(app: Express): void {
         };
       });
 
+      // Founder profile BVN/NIN fallback: for directors whose BVN/NIN are absent from
+      // company_profiles.directors but match the company founder (by email, or sole director),
+      // populate from the founder's personal profile encrypted fields.
+      const finalDirectors = enrichedDirectors.map(dir => {
+        if (dir.bvn || dir.nin) return dir;
+        const dirEmail = typeof dir.email === "string" ? dir.email.toLowerCase() : "";
+        const isFounderDir =
+          (founderEmailForFallback && dirEmail && dirEmail === founderEmailForFallback) ||
+          (!dirEmail && rawDirectors.length === 1);
+        if (!isFounderDir) return dir;
+
+        let fallbackBvn: string | undefined;
+        let fallbackNin: string | undefined;
+
+        if (founderBvnEncrypted) {
+          try {
+            fallbackBvn = isEncryptedField(founderBvnEncrypted)
+              ? (decryptedIdCount++, decryptField(founderBvnEncrypted))
+              : founderBvnEncrypted;
+          } catch (err) {
+            console.warn(`[BankPortal] Founder BVN fallback decryption failed for profile ${companyProfileId}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        if (founderNinEncrypted) {
+          try {
+            fallbackNin = isEncryptedField(founderNinEncrypted)
+              ? (decryptedIdCount++, decryptField(founderNinEncrypted))
+              : founderNinEncrypted;
+          } catch (err) {
+            console.warn(`[BankPortal] Founder NIN fallback decryption failed for profile ${companyProfileId}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        if (!fallbackBvn && !fallbackNin) return dir;
+        return { ...dir, bvn: fallbackBvn ?? dir.bvn, nin: fallbackNin ?? dir.nin };
+      });
+
       // Audit-log only when encrypted fields were actually decrypted — plaintext values do not need a log.
       // directorCount = number of directors whose BVN or NIN is present in the final response.
       if (decryptedIdCount > 0) {
-        const directorCount = enrichedDirectors.filter(d => d.bvn || d.nin).length;
+        const directorCount = finalDirectors.filter(d => d.bvn || d.nin).length;
         await storage.createAuditLog({
           actorUserId: `bank:${session.email}`,
           action: "bank_portal_director_id_access",
@@ -913,7 +959,7 @@ export function registerBankPortalRoutes(app: Express): void {
       res.json({
         ...profile,
         tinNumber: resolvedTinNumber,
-        directors: enrichedDirectors,
+        directors: finalDirectors,
         checklistItems: checklistRows,
         dispatchedAt: dispatches[0]?.sentAt,
         bankDocuments,

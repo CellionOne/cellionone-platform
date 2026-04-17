@@ -5600,6 +5600,37 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // PATCH /api/founder/bank-doc-requests/:id/dismiss — founder marks a request as actioned
+  app.patch("/api/founder/bank-doc-requests/:id/dismiss", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const requestId = parseInt(req.params.id, 10);
+      if (isNaN(requestId)) return res.status(400).json({ message: "Invalid request ID" });
+
+      const myProfiles = await db.select({ id: companyProfiles.id })
+        .from(companyProfiles).where(eq(companyProfiles.founderId, userId));
+      if (myProfiles.length === 0) return res.status(404).json({ message: "Request not found" });
+
+      const profileIds = myProfiles.map(p => p.id);
+
+      const [request] = await db.select().from(bankDocumentRequests)
+        .where(and(
+          eq(bankDocumentRequests.id, requestId),
+          inArray(bankDocumentRequests.companyProfileId, profileIds),
+          eq(bankDocumentRequests.status, "open")
+        ));
+      if (!request) return res.status(404).json({ message: "Request not found or already actioned" });
+
+      await db.update(bankDocumentRequests)
+        .set({ status: "actioned", actionedAt: new Date(), actionedByUserId: userId })
+        .where(eq(bankDocumentRequests.id, requestId));
+
+      res.json({ message: "Request dismissed" });
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to dismiss request" });
+    }
+  });
+
   // GET /api/founder/bank-doc-requests — open bank doc requests for the logged-in founder's companies
   app.get("/api/founder/bank-doc-requests", isAuthenticated, async (req: any, res) => {
     try {

@@ -607,6 +607,16 @@ export default function VaultPage() {
 
   const [dismissedRequests, setDismissedRequests] = useState<Set<number>>(new Set());
 
+  const dismissMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("PATCH", `/api/founder/bank-doc-requests/${id}/dismiss`, {});
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/bank-doc-requests"] });
+    },
+  });
+
   const openRequests = (bankDocRequests ?? []).filter(r => !dismissedRequests.has(r.id));
 
   const groupedDocs = data?.documents?.reduce((acc, doc) => {
@@ -730,7 +740,11 @@ export default function VaultPage() {
                           variant="outline"
                           size="sm"
                           className="border-amber-400 text-amber-800 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/40 h-7 text-xs"
-                          onClick={() => setDismissedRequests(prev => new Set([...prev, req.id]))}
+                          disabled={dismissMutation.isPending}
+                          onClick={() => {
+                            setDismissedRequests(prev => new Set([...prev, req.id]));
+                            dismissMutation.mutate(req.id);
+                          }}
                           data-testid={`button-dismiss-request-${req.id}`}
                         >
                           Dismiss

@@ -39,6 +39,8 @@ type BankSession = {
 type Director = {
   name?: string;
   role?: string;
+  nin?: string;
+  bvn?: string;
   ninVerified?: boolean;
   bvnVerified?: boolean;
   biometricStatus?: string;
@@ -770,6 +772,7 @@ export default function BankCompanyDetailPage() {
                           trueLabel="Verified"
                           falseLabel="Not verified"
                         />
+                        <p className="text-xs font-mono mt-0.5 text-foreground">{d.nin || "—"}</p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">BVN</p>
@@ -778,6 +781,7 @@ export default function BankCompanyDetailPage() {
                           trueLabel="Verified"
                           falseLabel="Not verified"
                         />
+                        <p className="text-xs font-mono mt-0.5 text-foreground">{d.bvn || "—"}</p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">Biometric</p>

@@ -839,13 +839,37 @@ export function registerBankPortalRoutes(app: Express): void {
         Array.isArray(vr?.directorsReport) ? vr!.directorsReport :
         Array.isArray(vr?.directors) ? vr!.directors : []
       ) as Record<string, unknown>[];
+
+      // Decrypt BVN/NIN values stored in company_profiles.directors (AES-256-GCM encrypted at rest).
+      const { isEncryptedField, decryptField } = await import('../services/encryptionService');
+      let decryptedIdCount = 0;
+
       const enrichedDirectors = rawDirectors.map(dir => {
         const match = vrDirectors.find(dr => {
           const drName = String(dr.name || "").toLowerCase();
           const dirName = String(dir.name || "").toLowerCase();
           return drName && dirName && drName === dirName;
         });
-        if (!match) return dir;
+
+        // Decrypt BVN/NIN if encrypted; pass plaintext through unchanged if already plain
+        const rawBvn = typeof dir.bvn === "string" ? dir.bvn : undefined;
+        const rawNin = typeof dir.nin === "string" ? dir.nin : undefined;
+        let bvn: string | undefined;
+        let nin: string | undefined;
+        try {
+          if (rawBvn) {
+            bvn = isEncryptedField(rawBvn) ? (decryptedIdCount++, decryptField(rawBvn)) : rawBvn;
+          }
+          if (rawNin) {
+            nin = isEncryptedField(rawNin) ? (decryptedIdCount++, decryptField(rawNin)) : rawNin;
+          }
+        } catch {
+          // If decryption fails (key rotation, corrupt data), omit the field rather than crashing
+          bvn = undefined;
+          nin = undefined;
+        }
+
+        if (!match) return { ...dir, bvn, nin };
         // Support both ninPassed/bvnPassed (actual) and ninKyc/bvnKyc (alternate) naming
         const ninVerified = match.ninPassed === true || match.ninKyc === true;
         const bvnVerified = match.bvnPassed === true || match.bvnKyc === true;
@@ -854,12 +878,29 @@ export function registerBankPortalRoutes(app: Express): void {
         const biometricStatus = match.biometricStatus !== undefined ? match.biometricStatus : dir.biometricStatus;
         return {
           ...dir,
+          bvn,
+          nin,
           ninVerified,
           bvnVerified,
           amlIsHit,
           biometricStatus,
         };
       });
+
+      // Audit-log BVN/NIN access so there is a traceable record of the bank viewing sensitive PII
+      if (decryptedIdCount > 0) {
+        await storage.createAuditLog({
+          actorUserId: `bank_partner_${session.bankPartnerId}`,
+          action: "bank_portal_director_id_access",
+          entityType: "company_profile",
+          entityId: String(companyProfileId),
+          details: {
+            bankPartnerId: session.bankPartnerId,
+            companyProfileId,
+            decryptedIdCount,
+          },
+        });
+      }
 
       res.json({
         ...profile,

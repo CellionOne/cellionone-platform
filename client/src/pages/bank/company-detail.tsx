@@ -656,31 +656,40 @@ export default function BankCompanyDetailPage() {
             )}
 
             {/* CAC-sourced shareholders */}
-            {shareholders.length > 0 && (
-              <div>
-                {platformShareholders.length > 0 && <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">CAC-Sourced</p>}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-2 text-xs text-muted-foreground font-medium">Name</th>
-                        <th className="text-right py-2 text-xs text-muted-foreground font-medium">Shares</th>
-                        <th className="text-right py-2 text-xs text-muted-foreground font-medium">Ownership</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {shareholders.map((s, i) => (
-                        <tr key={i} className="border-b last:border-0" data-testid={`row-shareholder-${i}`}>
-                          <td className="py-2 font-medium">{s.name}</td>
-                          <td className="py-2 text-right text-muted-foreground">{s.shares != null ? s.shares.toLocaleString() : "—"}</td>
-                          <td className="py-2 text-right">{s.percentage != null ? `${s.percentage.toFixed(2)}%` : "—"}</td>
+            {shareholders.length > 0 && (() => {
+              const hasShareData = shareholders.some(s => s.shares != null || s.percentage != null);
+              return (
+                <div>
+                  {platformShareholders.length > 0 && <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">CAC-Sourced</p>}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-2 text-xs text-muted-foreground font-medium">Name</th>
+                          {hasShareData && <th className="text-right py-2 text-xs text-muted-foreground font-medium">Shares</th>}
+                          {hasShareData && <th className="text-right py-2 text-xs text-muted-foreground font-medium">Ownership</th>}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {shareholders.map((s, i) => (
+                          <tr key={i} className="border-b last:border-0" data-testid={`row-shareholder-${i}`}>
+                            <td className="py-2 font-medium">{s.name}</td>
+                            {hasShareData && <td className="py-2 text-right text-muted-foreground">{s.shares != null ? s.shares.toLocaleString() : "—"}</td>}
+                            {hasShareData && <td className="py-2 text-right">{s.percentage != null ? `${s.percentage.toFixed(2)}%` : "—"}</td>}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {!hasShareData && company.shareCapital && (
+                    <p className="text-xs text-muted-foreground mt-2">Total authorised share capital: {company.shareCapital}. Individual allocation not captured during registration.</p>
+                  )}
+                  {!hasShareData && !company.shareCapital && (
+                    <p className="text-xs text-muted-foreground mt-2">Individual share allocation was not captured during registration.</p>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {shareholders.length === 0 && platformShareholders.length === 0 && (
               <p className="text-muted-foreground text-sm">No shareholder information available.</p>
@@ -753,13 +762,21 @@ export default function BankCompanyDetailPage() {
                         <p className="text-xs text-muted-foreground">{d.role || "Director"}</p>
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-4 gap-2">
                       <div>
-                        <p className="text-xs text-muted-foreground mb-1">Identity</p>
+                        <p className="text-xs text-muted-foreground mb-1">NIN</p>
                         <VerificationIcon
-                          value={d.ninVerified === true || d.bvnVerified === true}
-                          trueLabel={d.ninVerified ? "NIN Verified" : "BVN Verified"}
-                          falseLabel="Not Verified"
+                          value={d.ninVerified === true ? true : undefined}
+                          trueLabel="Verified"
+                          falseLabel="Not verified"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">BVN</p>
+                        <VerificationIcon
+                          value={d.bvnVerified === true ? true : undefined}
+                          trueLabel="Verified"
+                          falseLabel="Not verified"
                         />
                       </div>
                       <div>

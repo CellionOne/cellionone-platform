@@ -809,14 +809,21 @@ export function registerBankPortalRoutes(app: Express): void {
         }
       }
 
-      // Compute kybVerified from verificationReport (existing company pipeline) or smileKybResult fallback.
-      // Support both top-level kybPassed (actual pipeline) and kybCheck.passed (legacy/alternate shape).
+      // Compute kybVerified from multiple sources (most → least authoritative).
+      // 1. existingCompanyStatus "verified" — authoritative: auto-approved by pipeline or manually approved by admin.
+      // 2. verificationReport.kybPassed — set by the free verification pipeline.
+      // 3. verificationReport.kybCheck.passed — legacy/alternate shape.
+      // 4. smileKybResult.found === true — the stored processed KYB result (note: ResultCode is stripped; only `found` persists).
+      // 5. smileKybResult.ResultCode === "1012" — kept for backward compat where raw result was stored.
       const vr = profile.verificationReport as Record<string, unknown> | null | undefined;
       const vrKybCheck = vr?.kybCheck as Record<string, unknown> | undefined;
+      const storedKyb = profile.smileKybResult as Record<string, unknown> | null | undefined;
       const kybVerified: boolean =
+        profile.existingCompanyStatus === "verified" ||
         vr?.kybPassed === true ||
         vrKybCheck?.passed === true ||
-        (profile.smileKybResult as Record<string, unknown> | null | undefined)?.ResultCode === "1012";
+        storedKyb?.found === true ||
+        storedKyb?.ResultCode === "1012";
 
       // Resolve TIN: prefer profile column; fall back to verificationReport.tinSubmitted.tinNumber
       // (the pipeline stores TIN there even when the column was not written).

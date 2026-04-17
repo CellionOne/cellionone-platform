@@ -887,17 +887,19 @@ export function registerBankPortalRoutes(app: Express): void {
         };
       });
 
-      // Audit-log BVN/NIN access so there is a traceable record of the bank viewing sensitive PII
-      if (decryptedIdCount > 0) {
+      // Audit-log BVN/NIN access so there is a traceable record of the bank viewing sensitive PII.
+      // directorCount = number of directors whose BVN or NIN is present in the response.
+      const directorCount = enrichedDirectors.filter(d => d.bvn || d.nin).length;
+      if (directorCount > 0) {
         await storage.createAuditLog({
           actorUserId: `bank_partner_${session.bankPartnerId}`,
           action: "bank_portal_director_id_access",
           entityType: "company_profile",
           entityId: String(companyProfileId),
           details: {
-            bankPartnerId: session.bankPartnerId,
+            actorBankPartnerId: session.bankPartnerId,
             companyProfileId,
-            decryptedIdCount,
+            directorCount,
           },
         });
       }

@@ -163,6 +163,9 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
   };
 
   const itemsByKey = Object.fromEntries(group.items.map(i => [i.key, i]));
+  const companyDocuments = STANDARD_VAULT_DOCS.filter(
+    d => itemsByKey[d.key]?.status === "provided" && itemsByKey[d.key]?.filePath
+  );
 
   const dispatchedByBankId: Record<number, DispatchRecord> = {};
   for (const d of dispatchesQuery.data || []) {
@@ -272,6 +275,31 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                       }
                       <span className="ml-1.5">{isUploaded ? "Replace" : "Upload"}</span>
                     </Button>
+                    {isUploaded && item && (
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id={`company-bank-share-${group.profileId}-${item.id}`}
+                          checked={item.shareWithBank ?? false}
+                          onCheckedChange={async (value) => {
+                            try {
+                              const res = await apiRequest("PATCH", `/api/documents/${item.id}/bank-share`, { shareWithBank: value });
+                              if (!res.ok) throw new Error("Failed to update");
+                              queryClient.invalidateQueries({ queryKey: ["/api/founder/vault"] });
+                              toast({
+                                title: value ? "Shared with bank" : "Hidden from bank",
+                                description: value ? "This document will be included when you send your dossier." : "This document will not be included when you send your dossier.",
+                              });
+                            } catch {
+                              toast({ title: "Error", description: "Could not update bank sharing setting.", variant: "destructive" });
+                            }
+                          }}
+                          data-testid={`switch-company-bank-share-${group.profileId}-${item.id}`}
+                        />
+                        <label htmlFor={`company-bank-share-${group.profileId}-${item.id}`} className="cursor-pointer select-none text-sm text-muted-foreground">
+                          {item.shareWithBank ? "Shared" : "Private"}
+                        </label>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

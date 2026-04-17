@@ -606,14 +606,21 @@ export default function VaultPage() {
   });
 
   const [dismissedRequests, setDismissedRequests] = useState<Set<number>>(new Set());
+  const [dismissingIds, setDismissingIds] = useState<Set<number>>(new Set());
 
   const dismissMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await apiRequest("PATCH", `/api/founder/bank-doc-requests/${id}/dismiss`, {});
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      setDismissingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/bank-doc-requests"] });
+    },
+    onError: (_err, id) => {
+      setDismissingIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+      setDismissedRequests(prev => { const next = new Set(prev); next.delete(id); return next; });
+      toast({ title: "Could not dismiss", description: "Please try again.", variant: "destructive" });
     },
   });
 
@@ -740,14 +747,15 @@ export default function VaultPage() {
                           variant="outline"
                           size="sm"
                           className="border-amber-400 text-amber-800 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/40 h-7 text-xs"
-                          disabled={dismissMutation.isPending}
+                          disabled={dismissingIds.has(req.id)}
                           onClick={() => {
+                            setDismissingIds(prev => new Set([...prev, req.id]));
                             setDismissedRequests(prev => new Set([...prev, req.id]));
                             dismissMutation.mutate(req.id);
                           }}
                           data-testid={`button-dismiss-request-${req.id}`}
                         >
-                          Dismiss
+                          {dismissingIds.has(req.id) ? "Dismissing…" : "Dismiss"}
                         </Button>
                       </div>
                     </AlertDescription>

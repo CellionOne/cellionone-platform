@@ -1021,6 +1021,62 @@ export function registerBankPortalRoutes(app: Express): void {
     }
   });
 
+  // GET /api/bank-portal/companies/:id/people/:personId/signature — 15-min pre-signed URL for a person's signature
+  app.get("/api/bank-portal/companies/:id/people/:personId/signature", async (req: Request, res: Response) => {
+    try {
+      const session = await getBankPortalSession(req);
+      if (!session) return res.status(401).json({ error: "Not authenticated" });
+
+      const companyProfileId = parseInt(req.params.id);
+      const personId = req.params.personId;
+
+      const dispatches = await storage.listBankCompanyDispatches({ companyProfileId, bankPartnerId: session.bankPartnerId });
+      if (dispatches.length === 0) return res.status(404).json({ error: "Company not dispatched to your bank" });
+
+      // Verify the person is linked to this company via companyPeople
+      const [person] = await db.select({ personUserId: companyPeople.personUserId })
+        .from(companyPeople)
+        .where(and(
+          eq(companyPeople.companyProfileId, companyProfileId),
+          eq(companyPeople.personUserId as any, personId),
+        ));
+      if (!person) return res.status(404).json({ error: "Person not linked to this company" });
+
+      const [fp] = await db.select({ signaturePath: founderProfiles.signaturePath })
+        .from(founderProfiles)
+        .where(eq(founderProfiles.userId, personId));
+      if (!fp?.signaturePath) return res.status(404).json({ error: "No signature on file" });
+
+      let signatureUrl: string | null = null;
+      const sigPath = fp.signaturePath;
+      if (sigPath.startsWith("http")) {
+        signatureUrl = sigPath;
+      } else {
+        try {
+          const objectStorage = new ObjectStorageService();
+          signatureUrl = await objectStorage.getObjectEntityDownloadURL(sigPath, 900);
+        } catch {
+          signatureUrl = null;
+        }
+      }
+
+      if (!signatureUrl) return res.status(404).json({ error: "Signature path format not supported — please re-upload signature." });
+
+      await storage.createAuditLog({
+        actorUserId: `bank:${session.email}`,
+        action: "bank_portal_person_signature_view",
+        entityType: "founder_profile",
+        entityId: personId,
+        details: { bankPartnerId: session.bankPartnerId, companyProfileId },
+      });
+
+      res.json({ signatureUrl });
+    } catch (e: any) {
+      console.error("[BankPortal] Person signature fetch error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // POST /api/bank-portal/companies/:id/doc-requests
   app.post("/api/bank-portal/companies/:id/doc-requests", async (req: Request, res: Response) => {
     try {

@@ -3,8 +3,11 @@
 // Static JS/CSS assets are cache-busted by Vite's content-hash filenames,
 // so we rely on HTTP caching headers rather than a SW cache.
 // The only thing we cache here is the offline fallback page.
+//
+// CACHE_VERSION is replaced at production build time by the vite injectSwVersion plugin.
+// In dev mode it stays as the literal placeholder string, which is fine.
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = '__BUILD_VERSION__';
 const CACHE_NAME = 'cellion-one-' + CACHE_VERSION;
 const OFFLINE_URL = '/offline.html';
 

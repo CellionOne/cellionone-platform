@@ -1620,7 +1620,7 @@ export async function registerRoutes(
           expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
         };
 
-        req.login(sessionUser, (err: any) => {
+        req.login(sessionUser, async (err: any) => {
           if (err) {
             console.error("Session login error after 2FA:", err);
             return res.status(500).json({ message: "Login failed after verification" });
@@ -1635,8 +1635,10 @@ export async function registerRoutes(
           });
 
           const fresh2faCsrfToken = generateCsrfToken(req);
+          const twoFaRoles = await storage.getUserRoles(user.id);
+          const { passwordHash: _ph, verificationToken: _vt, verificationTokenExpiry: _vte, resetToken: _rt, resetTokenExpiry: _rte, twoFactorSecret: _tfs, twoFactorBackupCodes: _tbc, ...safe2faUser } = user;
           req.session.save(() => {
-            res.json({ success: true, message: "Verification successful", user, csrfToken: fresh2faCsrfToken });
+            res.json({ success: true, message: "Verification successful", user: { ...safe2faUser, roles: twoFaRoles }, csrfToken: fresh2faCsrfToken });
           });
         });
       }

@@ -119,6 +119,7 @@ export async function loginUser(input: LoginInput): Promise<AuthResult> {
       firstName: user.firstName,
       lastName: user.lastName,
       profileImageUrl: user.profileImageUrl,
+      primaryIntent: user.primaryIntent,
       roles,
     },
   };

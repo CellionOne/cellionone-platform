@@ -9,6 +9,7 @@ import { db } from "../db";
 import { eq, desc, and, inArray, isNotNull } from "drizzle-orm";
 import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications, documentFiles, founderProfiles, companyPeople, users } from "@shared/schema";
 import { ObjectStorageService } from "../replit_integrations/object_storage";
+import { isEncryptedField, decryptField } from "../services/encryptionService";
 
 const SALT_ROUNDS = 10;
 const INVITE_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -841,7 +842,6 @@ export function registerBankPortalRoutes(app: Express): void {
       ) as Record<string, unknown>[];
 
       // Decrypt BVN/NIN values stored in company_profiles.directors (AES-256-GCM encrypted at rest).
-      const { isEncryptedField, decryptField } = await import('../services/encryptionService');
       let decryptedIdCount = 0;
 
       const enrichedDirectors = rawDirectors.map(dir => {
@@ -898,7 +898,7 @@ export function registerBankPortalRoutes(app: Express): void {
       if (decryptedIdCount > 0) {
         const directorCount = enrichedDirectors.filter(d => d.bvn || d.nin).length;
         await storage.createAuditLog({
-          actorUserId: `bank_partner_${session.bankPartnerId}`,
+          actorUserId: `bank:${session.email}`,
           action: "bank_portal_director_id_access",
           entityType: "company_profile",
           entityId: String(companyProfileId),

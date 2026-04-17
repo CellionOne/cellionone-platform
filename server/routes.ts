@@ -8109,7 +8109,13 @@ Important guidelines:
       const directors: any[] = Array.isArray(profile.directors) ? [...profile.directors] : [];
       if (dirIndex < 0 || dirIndex >= directors.length) return res.status(400).json({ message: "Director index out of range" });
 
-      directors[dirIndex] = { ...directors[dirIndex], ...body };
+      // Encrypt sensitive identity numbers before storing
+      const { encryptField: encryptDirField } = await import('./services/encryptionService');
+      const patch: any = { ...body };
+      if (patch.bvn) patch.bvn = encryptDirField(patch.bvn);
+      if (patch.nin) patch.nin = encryptDirField(patch.nin);
+
+      directors[dirIndex] = { ...directors[dirIndex], ...patch };
 
       // Re-derive shareholders from classification
       const shareholders: any[] = directors
@@ -9016,6 +9022,52 @@ Important guidelines:
     } catch (err: any) {
       console.error("[AdminBiometricInvites] Error resending invite:", err.message);
       res.status(500).json({ message: "Failed to resend invite" });
+    }
+  });
+
+  // PATCH /api/admin/existing-companies/:id/directors/:index/identity — admin sets encrypted BVN/NIN for a director
+  app.patch("/api/admin/existing-companies/:id/directors/:index/identity", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const profileId = parseInt(req.params.id, 10);
+      const dirIndex = parseInt(req.params.index, 10);
+      if (isNaN(profileId) || isNaN(dirIndex)) return res.status(400).json({ message: "Invalid IDs" });
+
+      const body = z.object({
+        bvn: z.string().length(11).optional(),
+        nin: z.string().length(11).optional(),
+      }).parse(req.body);
+
+      if (!body.bvn && !body.nin) return res.status(400).json({ message: "At least one of BVN or NIN is required" });
+
+      const { encryptField } = await import('./services/encryptionService');
+      const [profile] = await db.select().from(companyProfiles)
+        .where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.isExistingCompany, true)));
+      if (!profile) return res.status(404).json({ message: "Company profile not found" });
+
+      const directors: any[] = Array.isArray(profile.directors) ? [...profile.directors] : [];
+      if (dirIndex < 0 || dirIndex >= directors.length) return res.status(400).json({ message: "Director index out of range" });
+
+      const patch: Record<string, string> = {};
+      if (body.bvn) patch.bvn = encryptField(body.bvn);
+      if (body.nin) patch.nin = encryptField(body.nin);
+
+      directors[dirIndex] = { ...directors[dirIndex], ...patch };
+      await db.update(companyProfiles).set({ directors, updatedAt: new Date() }).where(eq(companyProfiles.id, profileId));
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_director_identity_set",
+        entityType: "company_profile",
+        entityId: String(profileId),
+        details: { dirIndex, directorName: directors[dirIndex].name, fieldsSet: Object.keys(patch) },
+      });
+
+      res.json({ message: "Director identity updated" });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      console.error("[AdminDirectorIdentity] Error:", err.message);
+      res.status(500).json({ message: "Failed to update director identity" });
     }
   });
 

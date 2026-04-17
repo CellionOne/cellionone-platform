@@ -8,6 +8,7 @@ import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
@@ -42,6 +43,7 @@ import {
   RefreshCw,
   Clock,
   UserCheck,
+  Pencil,
 } from "lucide-react";
 import type { CompanyProfile, ProfileChecklistItem } from "@shared/schema";
 
@@ -172,6 +174,9 @@ export default function AdminExistingCompaniesPage() {
   const [deleteTarget, setDeleteTarget] = useState<CompanyProfile | null>(null);
   const [docReviewItemId, setDocReviewItemId] = useState<number | null>(null);
   const [docReviewNotes, setDocReviewNotes] = useState("");
+  const [editIdTarget, setEditIdTarget] = useState<{ profileId: number; dirIndex: number; dirName: string } | null>(null);
+  const [editBvn, setEditBvn] = useState("");
+  const [editNin, setEditNin] = useState("");
 
   const { data: bankPartners = [] } = useQuery<BankPartner[]>({
     queryKey: ["/api/admin/banking-partners"],
@@ -328,6 +333,22 @@ export default function AdminExistingCompaniesPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/existing-companies", selected?.id, "biometric-invites"] });
     },
     onError: (e: Error) => toast({ title: "Resend failed", description: e.message, variant: "destructive" }),
+  });
+
+  const editIdMutation = useMutation({
+    mutationFn: async ({ profileId, dirIndex, bvn, nin }: { profileId: number; dirIndex: number; bvn?: string; nin?: string }) => {
+      const res = await apiRequest("PATCH", `/api/admin/existing-companies/${profileId}/directors/${dirIndex}/identity`, { bvn: bvn || undefined, nin: nin || undefined });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Identity updated", description: "BVN/NIN saved and encrypted. The bank portal will now show the number." });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/existing-companies", editIdTarget?.profileId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/existing-companies"] });
+      setEditIdTarget(null);
+      setEditBvn("");
+      setEditNin("");
+    },
+    onError: (e: Error) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
   });
 
   const reviewableStatuses = ["pending_review", "documents_under_review", "under_review"];
@@ -631,11 +652,29 @@ export default function AdminExistingCompaniesPage() {
                     <div className="space-y-2">
                       {(detail.directors as DirectorRecord[]).map((d, i) => (
                         <div key={i} className="rounded-md border p-2.5 space-y-1.5">
-                          <div className="flex items-center gap-2 text-sm">
-                            <User className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="font-medium">{d.name}</span>
-                            {d.role && <Badge variant="outline" className="text-xs">{d.role}</Badge>}
-                            {d.email && <span className="text-muted-foreground text-xs">{d.email}</span>}
+                          <div className="flex items-center justify-between gap-2 text-sm">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span className="font-medium">{d.name}</span>
+                              {d.role && <Badge variant="outline" className="text-xs">{d.role}</Badge>}
+                              {d.email && <span className="text-muted-foreground text-xs">{d.email}</span>}
+                            </div>
+                            {d.entityType !== "corporate" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-xs shrink-0"
+                                data-testid={`button-edit-director-id-${i}`}
+                                onClick={() => {
+                                  setEditIdTarget({ profileId: detail.id, dirIndex: i, dirName: d.name });
+                                  setEditBvn("");
+                                  setEditNin("");
+                                }}
+                              >
+                                <Pencil className="h-3 w-3 mr-1" />
+                                Set BVN/NIN
+                              </Button>
+                            )}
                           </div>
                           <div className="flex flex-wrap gap-1.5">
                             {d.bvn && (
@@ -1019,6 +1058,63 @@ export default function AdminExistingCompaniesPage() {
               data-testid="button-confirm-reject"
             >
               {rejectMutation.isPending ? "Rejecting…" : "Confirm Rejection"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Set Director BVN/NIN Dialog ── */}
+      <Dialog open={!!editIdTarget} onOpenChange={open => { if (!open) { setEditIdTarget(null); setEditBvn(""); setEditNin(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4" />
+              Set BVN / NIN for Director
+            </DialogTitle>
+            <DialogDescription>
+              Enter the BVN or NIN for <strong>{editIdTarget?.dirName}</strong>. The number will be encrypted before storage and will appear in the bank portal.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-bvn">BVN (Bank Verification Number)</Label>
+              <Input
+                id="edit-bvn"
+                placeholder="11-digit BVN"
+                maxLength={11}
+                value={editBvn}
+                onChange={e => setEditBvn(e.target.value.replace(/\D/g, ""))}
+                data-testid="input-director-bvn"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-nin">NIN (National Identification Number)</Label>
+              <Input
+                id="edit-nin"
+                placeholder="11-digit NIN"
+                maxLength={11}
+                value={editNin}
+                onChange={e => setEditNin(e.target.value.replace(/\D/g, ""))}
+                data-testid="input-director-nin"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">You only need to enter at least one. Leave blank to skip.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setEditIdTarget(null); setEditBvn(""); setEditNin(""); }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => editIdTarget && editIdMutation.mutate({
+                profileId: editIdTarget.profileId,
+                dirIndex: editIdTarget.dirIndex,
+                bvn: editBvn || undefined,
+                nin: editNin || undefined,
+              })}
+              disabled={editIdMutation.isPending || (!editBvn && !editNin) || (!!editBvn && editBvn.length !== 11) || (!!editNin && editNin.length !== 11)}
+              data-testid="button-save-director-id"
+            >
+              {editIdMutation.isPending ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

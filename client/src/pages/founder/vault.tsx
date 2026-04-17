@@ -293,7 +293,7 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                           onCheckedChange={async (value) => {
                             const previous = bankShareState[item.id] ?? item.shareWithBank ?? false;
                             try {
-                              const res = await apiRequest("PATCH", `/api/documents/${item.id}/bank-share`, { shareWithBank: value });
+                              const res = await apiRequest("PATCH", `/api/founder/company-profiles/${group.profileId}/documents/${item.id}/share-with-bank`, { shareWithBank: value });
                               if (!res.ok) throw new Error("Failed to update");
                               const payload = await res.json().catch(() => null);
                               const nextValue = typeof payload?.shareWithBank === "boolean" ? payload.shareWithBank : value;

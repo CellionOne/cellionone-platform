@@ -812,6 +812,7 @@ export const profileChecklistItems = pgTable("profile_checklist_items", {
   required: boolean("required").default(true),
   status: varchar("status", { length: 50 }).default("missing"),
   filePath: varchar("file_path", { length: 500 }),
+  shareWithBank: boolean("share_with_bank").default(false).notNull(),
   uploadedAt: timestamp("uploaded_at"),
   reviewerNotes: text("reviewer_notes"),
   createdAt: timestamp("created_at").defaultNow(),

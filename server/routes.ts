@@ -8495,6 +8495,34 @@ Important guidelines:
     }
   });
 
+  app.patch("/api/founder/company-profiles/:profileId/documents/:itemId/share-with-bank", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const profileId = parseInt(req.params.profileId, 10);
+      const itemId = parseInt(req.params.itemId, 10);
+      const { shareWithBank } = z.object({ shareWithBank: z.boolean() }).parse(req.body);
+      if (isNaN(profileId) || isNaN(itemId)) return res.status(400).json({ message: "Invalid IDs" });
+
+      const [profile] = await db.select().from(companyProfiles).where(and(eq(companyProfiles.id, profileId), eq(companyProfiles.founderId, userId)));
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const [item] = await db.select().from(profileChecklistItems)
+        .where(and(eq(profileChecklistItems.id, itemId), eq(profileChecklistItems.companyProfileId, profileId)));
+      if (!item) return res.status(404).json({ message: "Document not found" });
+      if (!item.filePath || item.status !== "provided") return res.status(400).json({ message: "Upload the document before sharing it with the bank" });
+
+      const [result] = await db.update(profileChecklistItems)
+        .set({ shareWithBank, updatedAt: new Date() })
+        .where(and(eq(profileChecklistItems.id, itemId), eq(profileChecklistItems.companyProfileId, profileId)))
+        .returning();
+
+      res.json({ success: true, itemId: result?.id ?? item.id, shareWithBank, filePath: item.filePath });
+    } catch (error: any) {
+      console.error("Error updating existing company document sharing:", error);
+      res.status(500).json({ message: error.message || "Failed to update sharing setting" });
+    }
+  });
+
   // Download a document from the existing company profile checklist
   app.get("/api/founder/company-profiles/:id/documents/:itemId/download", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {

@@ -15,11 +15,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, getCsrfToken } from "@/lib/queryClient";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import {
   BarChart3, Upload, Settings2, Banknote, Zap, TrendingUp,
   RefreshCw, Plus, Trash2, CheckCircle2,
   Users, DollarSign, Activity, Star, ArrowUpDown,
-  Save, Send, Power, Handshake, Copy, Check, KeyRound, Edit2, Sparkles,
+  Save, Send, Power, Handshake, Copy, Check, KeyRound, Edit2, Sparkles, Download,
 } from "lucide-react";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,13 +66,23 @@ interface Revenue {
   }>;
 }
 
+interface RejectedRow {
+  rawSymbol: string;
+  rawDate: string;
+  rawClose: string;
+  reason: string;
+  source: "csv" | "xlsx" | "pdf";
+}
+
 interface PreviewResult {
   previewToken: string;
   filename: string;
   rowsExtracted: number;
   rowsAccepted: number;
+  rowsRejected: number;
   acceptedRows: Array<{ rowIndex: number; [key: string]: string | number | null }>;
   previewRows: Array<Record<string, string | number | null>>;
+  rejectedRows: RejectedRow[];
 }
 
 interface CiePartner {
@@ -446,6 +457,76 @@ function PriceUploadTab() {
                 <div className="text-muted-foreground">…and {preview.previewRows.length - 10} more</div>
               )}
             </div>
+            {(preview.rowsRejected ?? 0) > 0 && (
+              <Accordion type="single" collapsible className="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/20 px-3" data-testid="accordion-rejected-rows">
+                <AccordionItem value="rejected" className="border-0">
+                  <AccordionTrigger className="text-xs font-semibold text-red-700 dark:text-red-400 hover:no-underline py-3" data-testid="trigger-rejected-rows">
+                    <span className="flex items-center gap-2">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 text-xs font-bold">
+                        {preview.rowsRejected}
+                      </span>
+                      Rejected rows {(preview.rejectedRows?.length ?? 0) < preview.rowsRejected ? `(showing ${preview.rejectedRows?.length ?? 0} of ${preview.rowsRejected})` : ""}
+                    </span>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    {(preview.rejectedRows?.length ?? 0) > 0 ? (
+                      <>
+                        <div className="overflow-x-auto rounded border border-red-100 dark:border-red-900">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-red-100/60 dark:bg-red-950/40">
+                                <TableHead className="text-xs py-2 h-auto">#</TableHead>
+                                <TableHead className="text-xs py-2 h-auto">Symbol</TableHead>
+                                <TableHead className="text-xs py-2 h-auto">Date</TableHead>
+                                <TableHead className="text-xs py-2 h-auto">Close</TableHead>
+                                <TableHead className="text-xs py-2 h-auto">Reason</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {preview.rejectedRows.map((row, i) => (
+                                <TableRow key={i} data-testid={`row-rejected-${i}`} className="text-xs">
+                                  <TableCell className="py-1.5 text-muted-foreground font-mono">{i + 1}</TableCell>
+                                  <TableCell className="py-1.5 font-mono font-semibold">{row.rawSymbol || "—"}</TableCell>
+                                  <TableCell className="py-1.5 font-mono">{row.rawDate || "—"}</TableCell>
+                                  <TableCell className="py-1.5 font-mono">{row.rawClose || "—"}</TableCell>
+                                  <TableCell className="py-1.5 text-red-600 dark:text-red-400">{row.reason}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                        <div className="mt-3 flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-2 text-xs"
+                            data-testid="button-download-rejected-csv"
+                            onClick={() => {
+                              const headers = ["#", "Symbol", "Date", "Close", "Reason"];
+                              const rows = preview.rejectedRows.map((r, i) =>
+                                [i + 1, r.rawSymbol, r.rawDate, r.rawClose, r.reason].map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")
+                              );
+                              const csv = [headers.join(","), ...rows].join("\n");
+                              const blob = new Blob([csv], { type: "text/csv" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = `${preview.filename.replace(/\.[^.]+$/, "")}_rejected.csv`;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                          >
+                            <Download className="h-3.5 w-3.5" /> Download rejected rows as CSV
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-xs text-muted-foreground pb-2">Row details are not available for this preview.</p>
+                    )}
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            )}
             {preview.rowsAccepted === 0 && (
               <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400" data-testid="warning-no-rows">
                 <span className="mt-0.5 shrink-0">⚠</span>

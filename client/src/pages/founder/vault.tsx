@@ -172,6 +172,11 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
     setBankShareState(nextState);
   }, [group.items]);
 
+  const shareableCompanyItems = STANDARD_VAULT_DOCS.filter(({ key }) => {
+    const item = itemsByKey[key];
+    return Boolean(item?.id && item.status === "provided" && item.filePath);
+  });
+
   const dispatchedByBankId: Record<number, DispatchRecord> = {};
   for (const d of dispatchesQuery.data || []) {
     if (!dispatchedByBankId[d.bankPartnerId]) dispatchedByBankId[d.bankPartnerId] = d;
@@ -222,7 +227,7 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
         </CardHeader>
         <CardContent>
           <div className="divide-y">
-            {STANDARD_VAULT_DOCS.map(({ key, label, hint }) => {
+            {shareableCompanyItems.map(({ key, label, hint }) => {
               const item = itemsByKey[key];
               const isUploaded = item?.status === "provided" && !!item.filePath;
               const isUploading = uploadingKey === key && uploadMutation.isPending;

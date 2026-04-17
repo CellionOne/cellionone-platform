@@ -837,7 +837,7 @@ export default function BankCompanyDetailPage() {
             ) : (
               <div className="divide-y">
                 {bankDocuments.map((doc) => (
-                  <div key={doc.id} className="py-3 flex items-center justify-between gap-3" data-testid={`row-bankdoc-${doc.id}`}>
+                  <div key={`${doc.source ?? "vault"}-${doc.id}`} className="py-3 flex items-center justify-between gap-3" data-testid={`row-bankdoc-${doc.source ?? "vault"}-${doc.id}`}>
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="h-8 w-8 rounded bg-muted flex items-center justify-center shrink-0">
                         <FileText className="h-4 w-4 text-muted-foreground" />

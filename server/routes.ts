@@ -1626,20 +1626,25 @@ export async function registerRoutes(
             return res.status(500).json({ message: "Login failed after verification" });
           }
 
-          storage.createAuditLog({
-            actorUserId: user.id,
-            action: "login",
-            entityType: "session",
-            details: { email: user.email, method: "email_password_2fa" },
-            ipAddress: req.ip,
-          });
+          try {
+            storage.createAuditLog({
+              actorUserId: user.id,
+              action: "login",
+              entityType: "session",
+              details: { email: user.email, method: "email_password_2fa" },
+              ipAddress: req.ip,
+            });
 
-          const fresh2faCsrfToken = generateCsrfToken(req);
-          const twoFaRoles = await storage.getUserRoles(user.id);
-          const { passwordHash: _ph, verificationToken: _vt, verificationTokenExpiry: _vte, resetToken: _rt, resetTokenExpiry: _rte, twoFactorSecret: _tfs, twoFactorBackupCodes: _tbc, ...safe2faUser } = user;
-          req.session.save(() => {
-            res.json({ success: true, message: "Verification successful", user: { ...safe2faUser, roles: twoFaRoles }, csrfToken: fresh2faCsrfToken });
-          });
+            const fresh2faCsrfToken = generateCsrfToken(req);
+            const twoFaRoles = await storage.getUserRoles(user.id);
+            const { passwordHash: _ph, verificationToken: _vt, verificationTokenExpiry: _vte, resetToken: _rt, resetTokenExpiry: _rte, twoFactorSecret: _tfs, twoFactorBackupCodes: _tbc, ...safe2faUser } = user;
+            req.session.save(() => {
+              res.json({ success: true, message: "Verification successful", user: { ...safe2faUser, roles: twoFaRoles }, csrfToken: fresh2faCsrfToken });
+            });
+          } catch (postLoginErr) {
+            console.error("Session post-login error after 2FA:", postLoginErr);
+            res.status(500).json({ message: "Login failed after verification" });
+          }
         });
       }
     } catch (error) {

@@ -13,6 +13,17 @@ import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUp
 // Log as early as possible so deployment systems can confirm startup
 console.log(`[Startup] Cellion One server starting — NODE_ENV=${process.env.NODE_ENV || "development"} PID=${process.pid}`);
 
+// Runtime dependency check: pdftoppm (Poppler) is required for scanned-PDF vision extraction
+{
+  const { execFileSync } = await import("child_process");
+  try {
+    execFileSync("pdftoppm", ["-v"], { stdio: "ignore" });
+    console.log("[Startup] pdftoppm (Poppler) available — scanned PDF vision extraction enabled");
+  } catch {
+    console.warn("[Startup] WARNING: pdftoppm not found — scanned PDF vision extraction will be unavailable. Install poppler-utils to enable this feature.");
+  }
+}
+
 // ============== MANDATORY SECURITY SECRETS CHECK ==============
 // ENCRYPTION_KEY is required for field-level AES-256-GCM encryption of PII (BVN, NIN).
 // Fail fast in production — development allows missing key for easier local setup.

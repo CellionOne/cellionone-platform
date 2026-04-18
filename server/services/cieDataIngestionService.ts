@@ -431,6 +431,174 @@ interface GptResponsePayload {
   prices?: GptPriceRow[];
 }
 
+// ============================================================
+// Shared helper: map raw GPT rows → validated PriceRow[]
+// ============================================================
+function gptRowsToPriceRows(raw: GptResponsePayload | GptPriceRow[]): PriceRow[] {
+  const arr: GptPriceRow[] = Array.isArray(raw)
+    ? (raw as GptPriceRow[])
+    : ((raw as GptResponsePayload).rows ?? (raw as GptResponsePayload).data ?? (raw as GptResponsePayload).prices ?? []);
+
+  return arr.filter(Boolean).map((r: GptPriceRow): PriceRow => {
+    const symbol = String(r.symbol ?? "").trim().toUpperCase();
+    const date = normaliseDate(r.date ?? "") ?? "";
+    const close = parseNumber(r.close);
+    const rawConfidence = typeof r.confidence === "number" ? Math.min(1, Math.max(0, r.confidence)) : 0.7;
+
+    if (!symbol || !date || close === undefined || close <= 0) {
+      return {
+        rowIndex: -1,
+        symbol,
+        date,
+        close: 0,
+        confidence: rawConfidence,
+        lowConfidence: true,
+        source: "pdf",
+        error: "GPT row invalid: missing symbol/date/close",
+      };
+    }
+
+    const lowConfidence = rawConfidence < 0.7;
+    return {
+      rowIndex: -1,
+      symbol,
+      date,
+      close,
+      open:   parseNumber(r.open),
+      high:   parseNumber(r.high),
+      low:    parseNumber(r.low),
+      volume: r.volume !== undefined ? Math.round(parseNumber(r.volume) ?? 0) : undefined,
+      confidence: rawConfidence,
+      lowConfidence,
+      source: "pdf",
+    };
+  });
+}
+
+// ============================================================
+// Vision fallback: convert PDF pages to images via pdftoppm
+// then send to GPT-4o as base64 image_url content blocks
+// ============================================================
+const PDF_SCANNED_THRESHOLD = 50; // characters — below this we treat it as a scanned image PDF
+const PDF_VISION_MAX_PAGES  = 5;  // cap to avoid excessive token usage
+
+async function pdfToBase64Images(buffer: Buffer): Promise<string[]> {
+  const { execFile }  = await import("child_process");
+  const { promisify } = await import("util");
+  const { tmpdir }    = await import("os");
+  const path          = await import("path");
+  const fs            = await import("fs");
+  const execFileAsync = promisify(execFile);
+
+  const tmpDir   = tmpdir();
+  const pdfPath  = path.join(tmpDir, `cie_pdf_${Date.now()}.pdf`);
+  const outPrefix = path.join(tmpDir, `cie_pdf_${Date.now()}_page`);
+
+  try {
+    await fs.promises.writeFile(pdfPath, buffer);
+
+    // Convert first N pages to PNG at 150 dpi (good for text OCR, reasonable size)
+    await execFileAsync("pdftoppm", [
+      "-r", "150",
+      "-f", "1",
+      "-l", String(PDF_VISION_MAX_PAGES),
+      "-png",
+      pdfPath,
+      outPrefix,
+    ]);
+
+    // pdftoppm names files as <prefix>-1.png, <prefix>-2.png, etc.
+    const files = (await fs.promises.readdir(tmpDir))
+      .filter(f => f.startsWith(path.basename(outPrefix)) && f.endsWith(".png"))
+      .sort()
+      .map(f => path.join(tmpDir, f));
+
+    const images: string[] = [];
+    for (const file of files) {
+      const data = await fs.promises.readFile(file);
+      images.push(`data:image/png;base64,${data.toString("base64")}`);
+      await fs.promises.unlink(file).catch(() => undefined);
+    }
+
+    return images;
+  } finally {
+    await fs.promises.unlink(pdfPath).catch(() => undefined);
+  }
+}
+
+async function parsePdfViaVision(buffer: Buffer): Promise<PriceRow[]> {
+  let images: string[];
+  try {
+    images = await pdfToBase64Images(buffer);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[CIEIngest] pdftoppm image conversion failed:", errMsg);
+    console.warn("[CIEIngest] Scanned PDF detected — text extraction not possible (pdftoppm unavailable)");
+    return [];
+  }
+
+  if (images.length === 0) {
+    console.warn("[CIEIngest] Scanned PDF detected — text extraction not possible (pdftoppm produced no images)");
+    return [];
+  }
+
+  console.info(`[CIEIngest] Scanned PDF detected — sending ${images.length} page image(s) to GPT-4o Vision`);
+
+  const visionSystemPrompt = `You are a financial data extraction engine.
+You will be shown images of pages from an NGX (Nigerian Exchange Group) equity price list.
+Extract ALL stock price rows visible in the images.
+Return ONLY a JSON object with a "rows" array. Each item must have:
+  symbol    (string, NGX ticker code, required)
+  date      (string, YYYY-MM-DD, required)
+  open      (number, Naira, optional)
+  high      (number, Naira, optional)
+  low       (number, Naira, optional)
+  close     (number, Naira, required)
+  volume    (integer, shares, optional)
+  confidence (number 0-1: 1.0 = clearly readable, 0.5 = inferred/partial, 0.2 = uncertain/guess)
+Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
+
+  const imageContent = images.map(url => ({
+    type: "image_url" as const,
+    image_url: { url, detail: "high" as const },
+  }));
+
+  try {
+    const openai = await getOpenAI();
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: visionSystemPrompt },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Extract all NGX price rows from these PDF page images." },
+            ...imageContent,
+          ],
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+      max_tokens: 4096,
+    });
+
+    const content = response.choices[0]?.message?.content ?? "{}";
+    let parsed: GptResponsePayload | GptPriceRow[];
+    try {
+      parsed = JSON.parse(content) as GptResponsePayload | GptPriceRow[];
+    } catch {
+      console.error("[CIEIngest] GPT-4o Vision returned invalid JSON for scanned PDF");
+      return [];
+    }
+
+    return gptRowsToPriceRows(parsed);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[CIEIngest] GPT-4o Vision extraction failed:", errMsg);
+    return [];
+  }
+}
+
 export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise<PriceRow[]> {
   // Step 1: Extract raw text from the PDF using pdf-parse
   let rawText = "";
@@ -444,9 +612,10 @@ export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise
     return [];
   }
 
-  if (!rawText.trim()) {
-    console.warn("[CIEIngest] PDF yielded no text content — cannot extract price data");
-    return [];
+  // Step 2: Detect scanned (image-based) PDFs — fall back to GPT-4o Vision
+  if (rawText.trim().length < PDF_SCANNED_THRESHOLD) {
+    console.warn("[CIEIngest] Scanned PDF detected (text < 50 chars) — falling back to vision extraction");
+    return parsePdfViaVision(buffer);
   }
 
   const systemPrompt = `You are a financial data extraction engine.
@@ -462,7 +631,7 @@ Return ONLY a JSON object with a "rows" array. Each item must have:
   confidence (number 0-1: 1.0 = clearly readable, 0.5 = inferred/partial, 0.2 = uncertain/guess)
 Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
 
-  // Step 2: Send extracted text to GPT-4o as a text prompt (no Vision API)
+  // Step 3: Send extracted text to GPT-4o as a text prompt
   try {
     const openai = await getOpenAI();
     const response = await openai.chat.completions.create({
@@ -485,44 +654,7 @@ Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
       return [];
     }
 
-    const arr: GptPriceRow[] = Array.isArray(parsed)
-      ? (parsed as GptPriceRow[])
-      : ((parsed as GptResponsePayload).rows ?? (parsed as GptResponsePayload).data ?? (parsed as GptResponsePayload).prices ?? []);
-
-    return arr.filter(Boolean).map((r: GptPriceRow): PriceRow => {
-      const symbol = String(r.symbol ?? "").trim().toUpperCase();
-      const date = normaliseDate(r.date ?? "") ?? "";
-      const close = parseNumber(r.close);
-      const rawConfidence = typeof r.confidence === "number" ? Math.min(1, Math.max(0, r.confidence)) : 0.7;
-
-      if (!symbol || !date || close === undefined || close <= 0) {
-        return {
-          rowIndex: -1,
-          symbol,
-          date,
-          close: 0,
-          confidence: rawConfidence,
-          lowConfidence: true,
-          source: "pdf",
-          error: "GPT row invalid: missing symbol/date/close",
-        };
-      }
-
-      const lowConfidence = rawConfidence < 0.7;
-      return {
-        rowIndex: -1,
-        symbol,
-        date,
-        close,
-        open:   parseNumber(r.open),
-        high:   parseNumber(r.high),
-        low:    parseNumber(r.low),
-        volume: r.volume !== undefined ? Math.round(parseNumber(r.volume) ?? 0) : undefined,
-        confidence: rawConfidence,
-        lowConfidence,
-        source: "pdf",
-      };
-    });
+    return gptRowsToPriceRows(parsed);
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error("[CIEIngest] PDF extraction failed:", errMsg);

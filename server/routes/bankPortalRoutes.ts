@@ -128,7 +128,7 @@ type DispatchCompanyProfile = {
   businessActivities?: string[] | null;
   registeredAddress?: { line1?: string; city?: string; state?: string } | null;
   operatingAddress?: { line1?: string; city?: string; state?: string } | null;
-  directors?: { name: string; role?: string; ninVerified?: boolean; bvnVerified?: boolean; biometricStatus?: string; amlIsHit?: boolean }[] | null;
+  directors?: { name: string; role?: string; bvn?: string; nin?: string; ninVerified?: boolean; bvnVerified?: boolean; biometricStatus?: string; amlIsHit?: boolean }[] | null;
   shareholders?: { name: string; shares?: number; percentage?: number }[] | null;
   smileKybResult?: Record<string, unknown> | null;
   existingCompanyStatus?: string | null;
@@ -137,6 +137,24 @@ type DispatchCompanyProfile = {
   founderIdentitySource?: string | null;
   founderSelfieUrl?: string | null;
 };
+
+function decryptDirectorIds(directors: { name?: string; bvn?: string; nin?: string }[]): { name: string; bvn?: string; nin?: string }[] {
+  return directors.map((d) => {
+    let bvn: string | undefined;
+    let nin: string | undefined;
+    try {
+      if (d.bvn) bvn = isEncryptedField(d.bvn) ? decryptField(d.bvn) : d.bvn;
+    } catch (err) {
+      console.warn(`[Dispatch] BVN decryption failed for director ${d.name || "unknown"}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      if (d.nin) nin = isEncryptedField(d.nin) ? decryptField(d.nin) : d.nin;
+    } catch (err) {
+      console.warn(`[Dispatch] NIN decryption failed for director ${d.name || "unknown"}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return { name: d.name || "", bvn, nin };
+  });
+}
 
 async function sendDispatchEmail(
   emails: { label: string; address: string }[],
@@ -149,7 +167,9 @@ async function sendDispatchEmail(
     const addresses = emails.map(e => e.address).filter(Boolean);
     if (addresses.length === 0) return;
 
-    const directors = Array.isArray(company.directors) ? company.directors : [];
+    const rawDirectors = Array.isArray(company.directors) ? company.directors : [];
+    const decryptedDirectors = decryptDirectorIds(rawDirectors);
+    const directors = rawDirectors.map((d, i) => ({ ...d, ...decryptedDirectors[i] }));
     const registeredAddr = company.registeredAddress
       ? [company.registeredAddress.line1, company.registeredAddress.city, company.registeredAddress.state]
           .filter(Boolean).join(", ")
@@ -163,6 +183,8 @@ async function sendDispatchEmail(
       <tr>
         <td style="padding: 6px 8px; border-bottom: 1px solid #eee;">${d.name || "—"}</td>
         <td style="padding: 6px 8px; border-bottom: 1px solid #eee;">${d.role || "Director"}</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #eee;">${d.bvn || "—"}</td>
+        <td style="padding: 6px 8px; border-bottom: 1px solid #eee;">${d.nin || "—"}</td>
         <td style="padding: 6px 8px; border-bottom: 1px solid #eee;">
           ${d.ninVerified === true ? "NIN Verified" : d.bvnVerified === true ? "BVN Verified" : "Pending"}
         </td>
@@ -266,6 +288,8 @@ async function sendDispatchEmail(
               <tr style="background: #f1f5f9;">
                 <th style="padding:6px 8px;text-align:left;font-size:12px;color:#555;">Name</th>
                 <th style="padding:6px 8px;text-align:left;font-size:12px;color:#555;">Role</th>
+                <th style="padding:6px 8px;text-align:left;font-size:12px;color:#555;">BVN</th>
+                <th style="padding:6px 8px;text-align:left;font-size:12px;color:#555;">NIN</th>
                 <th style="padding:6px 8px;text-align:left;font-size:12px;color:#555;">Identity</th>
                 <th style="padding:6px 8px;text-align:left;font-size:12px;color:#555;">Biometric</th>
                 <th style="padding:6px 8px;text-align:left;font-size:12px;color:#555;">AML</th>
@@ -1651,12 +1675,13 @@ export function registerBankPortalRoutes(app: Express): void {
         sentByUserId: adminUserId,
       });
 
+      const directorIds = decryptDirectorIds(Array.isArray(profile.directors) ? (profile.directors as { name?: string; bvn?: string; nin?: string }[]) : []);
       await storage.createAuditLog({
         actorUserId: adminUserId,
         action: "admin_bank_dispatch_sent",
         entityType: "bank_company_dispatch",
         entityId: String(dispatch.id),
-        details: { companyProfileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName },
+        details: { companyProfileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName, directorIds },
       });
 
       res.status(201).json(dispatch);
@@ -1828,12 +1853,13 @@ export function registerBankPortalRoutes(app: Express): void {
         sentByUserId: userId,
       });
 
+      const directorIds = decryptDirectorIds(Array.isArray(profile.directors) ? (profile.directors as { name?: string; bvn?: string; nin?: string }[]) : []);
       await storage.createAuditLog({
         actorUserId: userId,
         action: "founder_bank_dispatch_sent",
         entityType: "bank_company_dispatch",
         entityId: String(dispatch.id),
-        details: { companyProfileId: profileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName },
+        details: { companyProfileId: profileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName, directorIds },
       });
 
       res.status(201).json({ ...dispatch, bankName: partner.name });

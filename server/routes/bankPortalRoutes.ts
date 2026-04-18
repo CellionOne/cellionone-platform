@@ -1597,6 +1597,15 @@ export function registerBankPortalRoutes(app: Express): void {
       const directors: DirectorEntry[] = Array.isArray(profile.directors) ? (profile.directors as DirectorEntry[]) : [];
       const kybResult = profile.smileKybResult as Record<string, unknown> | null | undefined;
       const kybStatus = kybResult?.ResultCode === "1012" ? "VERIFIED" : kybResult ? "CHECKED" : "PENDING";
+      const decryptedIds = decryptDirectorIds(directors);
+      const directorsPreview = directors.map((d, i) => ({
+        name: d.name,
+        role: d.role,
+        bvn: decryptedIds[i]?.bvn,
+        nin: decryptedIds[i]?.nin,
+        bvnVerified: d.bvnVerified,
+        ninVerified: d.ninVerified,
+      }));
       res.json({
         companyName: profile.companyName,
         rcNumber: profile.rcNumber,
@@ -1609,6 +1618,7 @@ export function registerBankPortalRoutes(app: Express): void {
         checklistTotal: checklistRows.length,
         checklistSubmitted: submitted,
         kybStatus,
+        directors: directorsPreview,
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

@@ -284,6 +284,7 @@ export default function AdminExistingCompaniesPage() {
   const { data: bankPreview, isLoading: bankPreviewLoading } = useQuery<{
     companyName: string; rcNumber?: string; companyType?: string; existingCompanyStatus?: string;
     directorCount: number; verifiedDirectors: number; checklistTotal: number; checklistSubmitted: number; kybStatus: string;
+    directors?: { name: string; role?: string; bvn?: string; nin?: string; bvnVerified?: boolean; ninVerified?: boolean }[];
   }>({
     queryKey: ["/api/admin/company-profiles", selected?.id, "bank-preview"],
     queryFn: async () => {
@@ -947,6 +948,27 @@ export default function AdminExistingCompaniesPage() {
                   <span>Directors</span><span className="text-foreground">{bankPreview.directorCount} ({bankPreview.verifiedDirectors} verified)</span>
                   <span>Documents</span><span className="text-foreground">{bankPreview.checklistSubmitted}/{bankPreview.checklistTotal} submitted</span>
                 </div>
+                {bankPreview.directors && bankPreview.directors.length > 0 && (
+                  <div className="pt-1 border-t border-border/50 space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Director Identity Numbers</p>
+                    {bankPreview.directors.map((d, i) => (
+                      <div key={i} className="text-xs" data-testid={`director-ids-${i}`}>
+                        <p className="font-medium text-foreground mb-0.5">{d.name}{d.role ? ` (${d.role})` : ""}</p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-muted-foreground">
+                          {d.bvn ? (
+                            <><span>BVN</span><span className="text-foreground font-mono" data-testid={`text-bvn-${i}`}>{d.bvn}</span></>
+                          ) : null}
+                          {d.nin ? (
+                            <><span>NIN</span><span className="text-foreground font-mono" data-testid={`text-nin-${i}`}>{d.nin}</span></>
+                          ) : null}
+                          {!d.bvn && !d.nin && (
+                            <span className="col-span-2 italic text-muted-foreground">No ID numbers on file</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : null}
             <div className="space-y-1.5">

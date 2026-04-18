@@ -944,7 +944,7 @@ export async function sendCieDataAlert(
         from: fromEmail,
         to: recipient.email,
         subject,
-        html: htmlTemplate(recipient.firstName),
+        html: htmlTemplate(recipient.firstName || "Admin"),
       });
       console.log(`[Email] CIE data alert (${opts.kind}) sent to ${recipient.email}`);
     } catch (err: any) {

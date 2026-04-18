@@ -1591,7 +1591,13 @@ export default function AdminCieCockpit() {
     ? new Date(committedPriceLogs[0].committedAt)
     : null;
   const daysSinceLastUpload = latestCommittedAt
-    ? Math.floor((Date.now() - latestCommittedAt.getTime()) / (24 * 60 * 60 * 1000))
+    ? (() => {
+        const todayMidnight = new Date();
+        todayMidnight.setHours(0, 0, 0, 0);
+        const uploadMidnight = new Date(latestCommittedAt);
+        uploadMidnight.setHours(0, 0, 0, 0);
+        return Math.round((todayMidnight.getTime() - uploadMidnight.getTime()) / (24 * 60 * 60 * 1000));
+      })()
     : null;
   const isStale = !noDataEver && daysSinceLastUpload !== null && daysSinceLastUpload > 3;
 

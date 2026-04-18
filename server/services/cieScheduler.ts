@@ -62,6 +62,20 @@ async function getLatestPriceIngestionCommittedAt(): Promise<Date | null> {
   return rows[0]?.committedAt ?? null;
 }
 
+/**
+ * True calendar-day difference between a past date and now, computed in WAT (UTC+1).
+ * Avoids the off-by-one that occurs near midnight when using elapsed milliseconds.
+ */
+function calendarDaysDiffWAT(past: Date): number {
+  const WAT_OFFSET_MS = WAT_OFFSET_HOURS * 60 * 60 * 1000;
+  // Shift both dates into WAT, then compare their UTC date components
+  const nowWAT = new Date(Date.now() + WAT_OFFSET_MS);
+  const pastWAT = new Date(past.getTime() + WAT_OFFSET_MS);
+  const nowMidnight = Date.UTC(nowWAT.getUTCFullYear(), nowWAT.getUTCMonth(), nowWAT.getUTCDate());
+  const pastMidnight = Date.UTC(pastWAT.getUTCFullYear(), pastWAT.getUTCMonth(), pastWAT.getUTCDate());
+  return Math.round((nowMidnight - pastMidnight) / (24 * 60 * 60 * 1000));
+}
+
 let priceCheckTimer: NodeJS.Timeout | null = null;
 let scoreRunTimer: NodeJS.Timeout | null = null;
 
@@ -125,8 +139,7 @@ async function runPriceReconciliation(): Promise<void> {
         // No upload ever — covered by Alert 1 above when missingCount > 0.
         // No separate stale email needed; Alert 1 covers the "no data" case.
       } else {
-        const msPerDay = 24 * 60 * 60 * 1000;
-        const daysSince = Math.floor((Date.now() - latestCommittedAt.getTime()) / msPerDay);
+        const daysSince = calendarDaysDiffWAT(latestCommittedAt);
 
         if (daysSince > STALE_THRESHOLD_DAYS) {
           try {

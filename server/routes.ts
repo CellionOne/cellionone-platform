@@ -807,6 +807,26 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/admin/csp-violations", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const violations = await storage.getCspViolationSummary();
+      res.json(violations);
+    } catch (error: any) {
+      console.error("Error fetching CSP violations:", error);
+      res.status(500).json({ message: "Failed to fetch CSP violations" });
+    }
+  });
+
+  app.delete("/api/admin/csp-violations/old", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const deleted = await storage.clearOldCspViolations();
+      res.json({ deleted, message: `Cleared ${deleted} old CSP violation records` });
+    } catch (error: any) {
+      console.error("Error clearing old CSP violations:", error);
+      res.status(500).json({ message: "Failed to clear old CSP violations" });
+    }
+  });
+
   // Debug endpoint to test email sending (temporary)
   app.get("/api/test-email", async (req, res) => {
     try {

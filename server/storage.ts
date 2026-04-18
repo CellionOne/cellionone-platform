@@ -278,6 +278,8 @@ export interface IStorage {
   getSecurityEvents(filters?: { eventType?: string; severity?: string; limit?: number; offset?: number }): Promise<SecurityEvent[]>;
   getSecurityEventCount(filters?: { eventType?: string; severity?: string; since?: Date }): Promise<number>;
   getSecuritySummary(): Promise<{ total24h: number; critical24h: number; lockedAccounts: number; uniqueFailedIps24h: number }>;
+  getCspViolationSummary(): Promise<Array<{ blockedUri: string; violatedDirective: string; documentUri: string; count: number; lastSeen: string }>>;
+  clearOldCspViolations(): Promise<number>;
 
   // User Login History
   recordLoginHistory(data: { userId: string; ipAddress: string | null; userAgent: string | null; isNewIp: boolean }): Promise<UserLoginHistoryEntry>;
@@ -1447,6 +1449,34 @@ export class DatabaseStorage implements IStorage {
       lockedAccounts: lockedAccounts.length,
       uniqueFailedIps24h: failedIps.length,
     };
+  }
+
+  async getCspViolationSummary(): Promise<Array<{ blockedUri: string; violatedDirective: string; documentUri: string; count: number; lastSeen: string }>> {
+    const rows = await db.select({
+      blockedUri: sql<string>`details->>'blockedUri'`,
+      violatedDirective: sql<string>`details->>'violatedDirective'`,
+      documentUri: sql<string>`MAX(details->>'documentUri')`,
+      count: count(),
+      lastSeen: sql<string>`MAX(${securityEvents.createdAt})`,
+    }).from(securityEvents)
+      .where(eq(securityEvents.eventType, "csp_violation"))
+      .groupBy(
+        sql`details->>'blockedUri'`,
+        sql`details->>'violatedDirective'`
+      )
+      .orderBy(desc(sql`MAX(${securityEvents.createdAt})`));
+    return rows as Array<{ blockedUri: string; violatedDirective: string; documentUri: string; count: number; lastSeen: string }>;
+  }
+
+  async clearOldCspViolations(): Promise<number> {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const deleted = await db.delete(securityEvents)
+      .where(and(
+        eq(securityEvents.eventType, "csp_violation"),
+        sql`${securityEvents.createdAt} < ${thirtyDaysAgo}`
+      ))
+      .returning({ id: securityEvents.id });
+    return deleted.length;
   }
 
   // User Login History

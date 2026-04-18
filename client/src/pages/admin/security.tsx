@@ -28,7 +28,7 @@ import {
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, ChevronDown } from "lucide-react";
+import { Shield, ChevronDown, Trash2 } from "lucide-react";
 
 interface SecuritySummary {
   total24h: number;
@@ -58,6 +58,14 @@ interface NewIpLogin {
   userAgent: string;
   loginTime: string;
   isNewIp: boolean;
+}
+
+interface CspViolation {
+  blockedUri: string;
+  violatedDirective: string;
+  documentUri: string;
+  count: number;
+  lastSeen: string;
 }
 
 const eventTypeOptions = [
@@ -162,6 +170,24 @@ export default function AdminSecurity() {
     },
   });
 
+  const { data: cspViolations, isLoading: cspLoading } = useQuery<CspViolation[]>({
+    queryKey: ["/api/admin/csp-violations"],
+  });
+
+  const clearOldCspMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("DELETE", "/api/admin/csp-violations/old");
+      return res.json() as Promise<{ deleted: number; message: string }>;
+    },
+    onSuccess: (data) => {
+      toast({ title: "Old violations cleared", description: data?.message ?? "Done" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/csp-violations"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to clear violations", description: error.message, variant: "destructive" });
+    },
+  });
+
   const unlockMutation = useMutation({
     mutationFn: (identifier: string) =>
       apiRequest("POST", "/api/admin/unlock-account", { identifier }),
@@ -253,6 +279,7 @@ export default function AdminSecurity() {
             <TabsTrigger value="events" data-testid="tab-events">Events</TabsTrigger>
             <TabsTrigger value="locked" data-testid="tab-locked">Locked Accounts</TabsTrigger>
             <TabsTrigger value="anomalies" data-testid="tab-anomalies">Login Anomalies</TabsTrigger>
+            <TabsTrigger value="csp" data-testid="tab-csp">CSP Violations</TabsTrigger>
           </TabsList>
 
           <TabsContent value="events" className="space-y-4">
@@ -441,6 +468,69 @@ export default function AdminSecurity() {
                               <Badge variant="secondary" className="no-default-hover-elevate no-default-active-elevate">Known</Badge>
                             )}
                           </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </Card>
+            )}
+          </TabsContent>
+          <TabsContent value="csp" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Grouped by unique blocked URI and violated directive pair. Showing most recent first.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => clearOldCspMutation.mutate()}
+                disabled={clearOldCspMutation.isPending}
+                data-testid="button-clear-old-csp"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {clearOldCspMutation.isPending ? "Clearing..." : "Clear old violations (>30 days)"}
+              </Button>
+            </div>
+            {cspLoading ? (
+              <div className="flex justify-center py-12">
+                <LoadingSpinner size="lg" />
+              </div>
+            ) : (
+              <Card>
+                <Table data-testid="table-csp-violations">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Blocked URI</TableHead>
+                      <TableHead>Violated Directive</TableHead>
+                      <TableHead>Document URI</TableHead>
+                      <TableHead className="text-right">Count</TableHead>
+                      <TableHead>Last Seen</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {!cspViolations?.length ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                          No CSP violations found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      cspViolations.map((v, idx) => (
+                        <TableRow key={idx} data-testid={`row-csp-${idx}`}>
+                          <TableCell className="font-mono text-xs max-w-[220px] truncate" title={v.blockedUri || "—"}>
+                            {v.blockedUri || "—"}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="no-default-hover-elevate no-default-active-elevate text-xs">
+                              {v.violatedDirective || "—"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs max-w-[220px] truncate" title={v.documentUri || "—"}>
+                            {v.documentUri || "—"}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">{v.count}</TableCell>
+                          <TableCell className="whitespace-nowrap">{formatDate(v.lastSeen)}</TableCell>
                         </TableRow>
                       ))
                     )}

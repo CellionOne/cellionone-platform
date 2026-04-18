@@ -128,7 +128,7 @@ async function runPriceReconciliation(): Promise<void> {
         const msPerDay = 24 * 60 * 60 * 1000;
         const daysSince = Math.floor((Date.now() - latestCommittedAt.getTime()) / msPerDay);
 
-        if (daysSince >= STALE_THRESHOLD_DAYS) {
+        if (daysSince > STALE_THRESHOLD_DAYS) {
           try {
             const admins = await storage.getUsersByRole("admin");
             await sendCieDataAlert(admins, {

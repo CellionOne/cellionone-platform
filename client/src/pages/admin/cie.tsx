@@ -39,7 +39,7 @@ interface SecurityScore {
 
 interface IngestionLog {
   id: number; filename: string; rowsAccepted: number; rowsRejected: number;
-  status: string; createdAt: string; committedAt?: string | null;
+  status: string; dataType?: string; createdAt: string; committedAt?: string | null;
 }
 
 interface ModelVersion {
@@ -282,16 +282,12 @@ function SecuritiesTab() {
 
 // ─── Price Upload Tab ─────────────────────────────────────────────────────────
 
-function PriceUploadTab() {
+function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
   const { toast } = useToast();
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  const { data: logsData } = useQuery<{ logs: IngestionLog[] }>({
-    queryKey: ["/api/admin/cie/ingest/logs"],
-  });
 
   const scoreMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/cie/scores/run", {}),
@@ -1587,15 +1583,17 @@ export default function AdminCieCockpit() {
     queryKey: ["/api/admin/cie/ingest/logs"],
   });
 
-  const committedLogs = (logsData?.logs ?? []).filter(l => l.status === "committed");
-  const noDataEver = logsLoaded && committedLogs.length === 0;
-  const latestCommittedAt = committedLogs[0]?.committedAt
-    ? new Date(committedLogs[0].committedAt)
+  const committedPriceLogs = (logsData?.logs ?? []).filter(
+    l => l.status === "committed" && l.dataType === "prices"
+  );
+  const noDataEver = logsLoaded && committedPriceLogs.length === 0;
+  const latestCommittedAt = committedPriceLogs[0]?.committedAt
+    ? new Date(committedPriceLogs[0].committedAt)
     : null;
   const daysSinceLastUpload = latestCommittedAt
     ? Math.floor((Date.now() - latestCommittedAt.getTime()) / (24 * 60 * 60 * 1000))
     : null;
-  const isStale = !noDataEver && daysSinceLastUpload !== null && daysSinceLastUpload >= 3;
+  const isStale = !noDataEver && daysSinceLastUpload !== null && daysSinceLastUpload > 3;
 
   const showAlert = logsLoaded && (noDataEver || isStale);
 
@@ -1661,7 +1659,7 @@ export default function AdminCieCockpit() {
           </TabsList>
 
           {!isCieAnalyst && <TabsContent value="securities"><SecuritiesTab /></TabsContent>}
-          <TabsContent value="prices"><PriceUploadTab /></TabsContent>
+          <TabsContent value="prices"><PriceUploadTab logsData={logsData} /></TabsContent>
           {!isCieAnalyst && <TabsContent value="model"><ModelEditorTab /></TabsContent>}
           {!isCieAnalyst && <TabsContent value="dividends"><DividendsTab /></TabsContent>}
           <TabsContent value="signals"><SignalsTab /></TabsContent>

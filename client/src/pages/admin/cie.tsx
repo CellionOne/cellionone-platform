@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, getCsrfToken } from "@/lib/queryClient";
@@ -21,6 +22,7 @@ import {
   RefreshCw, Plus, Trash2, CheckCircle2,
   Users, DollarSign, Activity, Star, ArrowUpDown,
   Save, Send, Power, Handshake, Copy, Check, KeyRound, Edit2, Sparkles, Download,
+  AlertTriangle,
 } from "lucide-react";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,7 +39,7 @@ interface SecurityScore {
 
 interface IngestionLog {
   id: number; filename: string; rowsAccepted: number; rowsRejected: number;
-  status: string; createdAt: string;
+  status: string; createdAt: string; committedAt?: string | null;
 }
 
 interface ModelVersion {
@@ -1579,6 +1581,24 @@ export default function AdminCieCockpit() {
   const isFullAdmin = userRoles.includes("admin");
   const isCieAnalyst = userRoles.includes("cie_analyst") && !isFullAdmin;
 
+  const [activeTab, setActiveTab] = useState<string>(isCieAnalyst ? "prices" : "securities");
+
+  const { data: logsData, isSuccess: logsLoaded } = useQuery<{ logs: IngestionLog[] }>({
+    queryKey: ["/api/admin/cie/ingest/logs"],
+  });
+
+  const committedLogs = (logsData?.logs ?? []).filter(l => l.status === "committed");
+  const noDataEver = logsLoaded && committedLogs.length === 0;
+  const latestCommittedAt = committedLogs[0]?.committedAt
+    ? new Date(committedLogs[0].committedAt)
+    : null;
+  const daysSinceLastUpload = latestCommittedAt
+    ? Math.floor((Date.now() - latestCommittedAt.getTime()) / (24 * 60 * 60 * 1000))
+    : null;
+  const isStale = !noDataEver && daysSinceLastUpload !== null && daysSinceLastUpload >= 3;
+
+  const showAlert = logsLoaded && (noDataEver || isStale);
+
   return (
     <DashboardLayout role="admin" breadcrumbs={[{ label: "Admin", href: "/admin/dashboard" }, { label: "CIE Engine" }]}>
       <div className="px-4 sm:px-6 lg:px-8 py-6">
@@ -1594,7 +1614,32 @@ export default function AdminCieCockpit() {
           </div>
         </div>
 
-        <Tabs defaultValue={isCieAnalyst ? "prices" : "securities"}>
+        {showAlert && (
+          <Alert
+            className="mb-6 border-amber-400 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-600"
+            data-testid="alert-cie-data-warning"
+          >
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            <AlertDescription className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <span className="text-amber-800 dark:text-amber-300 flex-1">
+                {noDataEver
+                  ? "The CIE engine has no price data. Upload today's NGX official price list — data is expected by 18:30 WAT daily."
+                  : `Price data is stale — last upload was ${daysSinceLastUpload} day${daysSinceLastUpload !== 1 ? "s" : ""} ago. Upload the NGX official price list (due by 18:30 WAT each trading day).`}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-amber-500 text-amber-700 hover:bg-amber-100 dark:border-amber-500 dark:text-amber-300 dark:hover:bg-amber-900/30 shrink-0"
+                onClick={() => setActiveTab("prices")}
+                data-testid="button-go-to-price-upload"
+              >
+                Go to Price Upload
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6 flex-wrap h-auto gap-1" data-testid="tabs-cie-cockpit">
             {!isCieAnalyst && (
               <TabsTrigger value="securities" className="gap-2" data-testid="tab-securities"><ArrowUpDown className="h-4 w-4" />Securities</TabsTrigger>

@@ -74,6 +74,7 @@ export interface IStorage {
   getUserByResetToken(token: string): Promise<User | undefined>;
   getAllUsers(): Promise<User[]>;
   getUserRoles(userId: string): Promise<string[]>;
+  getUsersByRole(role: string): Promise<{ id: string; email: string; firstName: string; lastName: string }[]>;
   addUserRole(userId: string, role: string): Promise<UserRole>;
   removeUserRole(userId: string, role: string): Promise<void>;
   createUserWithPassword(data: {
@@ -515,6 +516,14 @@ export class DatabaseStorage implements IStorage {
   async getUserRoles(userId: string): Promise<string[]> {
     const roles = await db.select().from(userRoles).where(eq(userRoles.userId, userId));
     return roles.map(r => r.role);
+  }
+
+  async getUsersByRole(role: string): Promise<{ id: string; email: string; firstName: string; lastName: string }[]> {
+    return db
+      .select({ id: users.id, email: users.email, firstName: users.firstName, lastName: users.lastName })
+      .from(userRoles)
+      .innerJoin(users, eq(userRoles.userId, users.id))
+      .where(eq(userRoles.role, role));
   }
 
   async addUserRole(userId: string, role: string): Promise<UserRole> {

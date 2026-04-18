@@ -6,13 +6,24 @@
  *   19:00 WAT (18:00 UTC) — Full IAS/RS/CS score recomputation via CIE Score Engine
  *
  * Uses setInterval pattern consistent with existing schedulers in this codebase.
+ *
+ * Alert deduplication: module-level Set<string> keyed on `${alertType}-${YYYY-MM-DD}`
+ * prevents the same alert type from being sent more than once per server uptime day.
  */
 
 import { computeAndPersistScores } from "./cieScoreEngine";
 import { generateCieMarketCommentary, isOpenAIAvailable } from "./aiService";
+import { sendCieDataAlert } from "./emailService";
 import { storage } from "../storage";
+import { db } from "../db";
+import { cieIngestionLogs } from "@shared/schema";
+import { eq, desc, and } from "drizzle-orm";
 
 const WAT_OFFSET_HOURS = 1; // WAT = UTC+1
+const STALE_THRESHOLD_DAYS = 3;
+
+/** Tracks which alert+date combos have already been sent this server uptime session */
+const alertsSent = new Set<string>();
 
 function getWATHours(): { hours: number; minutes: number } {
   const now = new Date();
@@ -37,6 +48,18 @@ function msUntilNextWAT(targetHour: number, targetMin: number): number {
   }
 
   return next.getTime() - utcNow;
+}
+
+/** Returns the committedAt date of the most recent committed price ingestion, or null if none. */
+async function getLatestPriceIngestionCommittedAt(): Promise<Date | null> {
+  const rows = await db
+    .select({ committedAt: cieIngestionLogs.committedAt })
+    .from(cieIngestionLogs)
+    .where(and(eq(cieIngestionLogs.dataType, "prices"), eq(cieIngestionLogs.status, "committed")))
+    .orderBy(desc(cieIngestionLogs.committedAt))
+    .limit(1);
+
+  return rows[0]?.committedAt ?? null;
 }
 
 let priceCheckTimer: NodeJS.Timeout | null = null;
@@ -70,8 +93,58 @@ async function runPriceReconciliation(): Promise<void> {
         entityId: today,
         details: { missingSecurities: missingCount, totalSecurities: securities.length, date: today },
       });
+
+      // Alert 1 — today's data is missing
+      const alert1Key = `missing_today-${today}`;
+      if (!alertsSent.has(alert1Key)) {
+        try {
+          const admins = await storage.getUsersByRole("admin");
+          await sendCieDataAlert(admins, {
+            kind: "missing_today",
+            missingCount,
+            totalCount: securities.length,
+          });
+          alertsSent.add(alert1Key);
+          console.log(`[CIEScheduler] Missing-data alert sent to ${admins.length} admin(s)`);
+        } catch (err: any) {
+          console.error("[CIEScheduler] Failed to send missing-data alert:", err.message);
+        }
+      } else {
+        console.log("[CIEScheduler] Missing-data alert already sent today — skipping");
+      }
     } else {
       console.log(`[CIEScheduler] Price reconciliation: all ${securities.length} securities have today's data ✓`);
+    }
+
+    // Alert 2 — multi-day staleness check (independent of today's gap check)
+    const alert2Key = `stale-${today}`;
+    if (!alertsSent.has(alert2Key)) {
+      const latestCommittedAt = await getLatestPriceIngestionCommittedAt();
+
+      if (latestCommittedAt === null) {
+        // No upload ever — covered by Alert 1 above when missingCount > 0.
+        // No separate stale email needed; Alert 1 covers the "no data" case.
+      } else {
+        const msPerDay = 24 * 60 * 60 * 1000;
+        const daysSince = Math.floor((Date.now() - latestCommittedAt.getTime()) / msPerDay);
+
+        if (daysSince >= STALE_THRESHOLD_DAYS) {
+          try {
+            const admins = await storage.getUsersByRole("admin");
+            await sendCieDataAlert(admins, {
+              kind: "stale",
+              daysSinceLastUpload: daysSince,
+              lastUploadDate: latestCommittedAt,
+            });
+            alertsSent.add(alert2Key);
+            console.log(`[CIEScheduler] Staleness alert sent to ${admins.length} admin(s) — ${daysSince} days since last upload`);
+          } catch (err: any) {
+            console.error("[CIEScheduler] Failed to send staleness alert:", err.message);
+          }
+        }
+      }
+    } else {
+      console.log("[CIEScheduler] Staleness alert already sent today — skipping");
     }
   } catch (err: any) {
     console.error("[CIEScheduler] Price reconciliation error:", err.message);

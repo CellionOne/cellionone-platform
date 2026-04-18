@@ -829,3 +829,126 @@ export async function sendServiceRequestStatusUpdateEmail(
   console.log(`[Email] Service request status update sent to ${founderEmail}`);
   return result;
 }
+
+type CieDataAlertOpts =
+  | { kind: "missing_today"; missingCount: number; totalCount: number }
+  | { kind: "stale"; daysSinceLastUpload: number; lastUploadDate: Date };
+
+/**
+ * Sends a CIE price data alert email to a list of admin recipients.
+ * Used by the 18:30 WAT scheduler job.
+ */
+export async function sendCieDataAlert(
+  recipients: { email: string; firstName: string }[],
+  opts: CieDataAlertOpts
+): Promise<void> {
+  if (recipients.length === 0) return;
+
+  const { client, fromEmail } = await getResendClient();
+  const cockpitUrl = process.env.SITE_URL
+    ? `${process.env.SITE_URL}/admin/cie`
+    : "https://cellionone.com/admin/cie";
+
+  const isMissingToday = opts.kind === "missing_today";
+
+  const subject = isMissingToday
+    ? "[CIE] Today's NGX price data has not been uploaded — due by 18:30 WAT"
+    : `[CIE] Price data is stale — last upload was ${opts.daysSinceLastUpload} day${opts.daysSinceLastUpload !== 1 ? "s" : ""} ago`;
+
+  const detailBlock = isMissingToday
+    ? `
+      <div style="background: #fefce8; border-left: 4px solid #f59e0b; padding: 16px; margin-bottom: 24px; border-radius: 0 8px 8px 0;">
+        <p style="color: #92400e; font-size: 15px; font-weight: 600; margin: 0 0 8px 0;">
+          ${opts.missingCount} of ${opts.totalCount} active securities are missing today's price data.
+        </p>
+        <p style="color: #92400e; font-size: 14px; margin: 0; line-height: 1.6;">
+          The NGX official price list is due to be uploaded by <strong>18:30 WAT</strong> each trading day.
+          Please log in to the CIE cockpit, navigate to the <strong>Price Upload</strong> tab, and upload
+          today's NGX daily official price list as soon as possible.
+        </p>
+      </div>`
+    : `
+      <div style="background: #fefce8; border-left: 4px solid #f59e0b; padding: 16px; margin-bottom: 24px; border-radius: 0 8px 8px 0;">
+        <p style="color: #92400e; font-size: 15px; font-weight: 600; margin: 0 0 8px 0;">
+          No price data has been uploaded for ${opts.daysSinceLastUpload} day${opts.daysSinceLastUpload !== 1 ? "s" : ""}.
+        </p>
+        <p style="color: #92400e; font-size: 14px; margin: 0 0 8px 0;">
+          Last successful upload: <strong>${opts.lastUploadDate.toLocaleDateString("en-NG", {
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: "Africa/Lagos",
+          })} WAT</strong>
+        </p>
+        <p style="color: #92400e; font-size: 14px; margin: 0; line-height: 1.6;">
+          The NGX official price list is expected by <strong>18:30 WAT</strong> each trading day.
+          Please upload the missing data as soon as possible to keep subscriber insights current.
+        </p>
+      </div>`;
+
+  const htmlTemplate = (firstName: string) => `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+          <div style="text-align: center; margin-bottom: 32px;">
+            <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+              <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
+            </div>
+            <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
+          </div>
+
+          <div style="display: inline-block; background: #fef3c7; color: #92400e; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 16px;">
+            CIE DATA ALERT
+          </div>
+
+          <h2 style="color: #18181b; font-size: 20px; margin-bottom: 8px;">
+            ${isMissingToday ? "Today's price data is missing" : "Price data is stale"}
+          </h2>
+
+          <p style="color: #52525b; font-size: 15px; line-height: 1.6; margin-bottom: 24px;">
+            Hi ${firstName}, this is an automated alert from the Cellion Intelligence Engine.
+          </p>
+
+          ${detailBlock}
+
+          <div style="text-align: center; margin-bottom: 24px;">
+            <a href="${cockpitUrl}" style="display: inline-block; background: #d97706; color: white; padding: 12px 32px; border-radius: 6px; text-decoration: none; font-weight: 600;">
+              Go to CIE Price Upload
+            </a>
+          </div>
+
+          <p style="color: #71717a; font-size: 13px; line-height: 1.6;">
+            This alert is sent automatically by the CIE scheduler at 18:30 WAT when price data is missing or stale.
+            You will receive one alert per calendar day until the data is uploaded.
+          </p>
+
+          <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 32px 0;">
+          <p style="color: #a1a1aa; font-size: 12px; text-align: center;">
+            &copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.
+          </p>
+        </div>
+      </body>
+    </html>`;
+
+  for (const recipient of recipients) {
+    try {
+      await client.emails.send({
+        from: fromEmail,
+        to: recipient.email,
+        subject,
+        html: htmlTemplate(recipient.firstName),
+      });
+      console.log(`[Email] CIE data alert (${opts.kind}) sent to ${recipient.email}`);
+    } catch (err: any) {
+      console.error(`[Email] Failed to send CIE data alert to ${recipient.email}:`, err.message);
+    }
+  }
+}

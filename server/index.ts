@@ -8,20 +8,18 @@ import { runComplianceDeadlineCheck } from "./services/complianceScheduler";
 import { runKycExpiryCheck, runSanctionsMonitoring, runIndividualExpiryCheck, runDocumentFilesExpiryCheck } from "./services/kycSchedulerService";
 import { startCieScheduler } from "./services/cieScheduler";
 import { runEscrowExpiry } from "./routes/escrowApiRoutes";
+import { execFileSync } from "child_process";
 import { setupSecurityMiddleware, securityLogger, sessionTimeout, validateFileUploadMiddleware } from "./middleware/security";
 
 // Log as early as possible so deployment systems can confirm startup
 console.log(`[Startup] Cellion One server starting — NODE_ENV=${process.env.NODE_ENV || "development"} PID=${process.pid}`);
 
 // Runtime dependency check: pdftoppm (Poppler) is required for scanned-PDF vision extraction
-{
-  const { execFileSync } = await import("child_process");
-  try {
-    execFileSync("pdftoppm", ["-v"], { stdio: "ignore" });
-    console.log("[Startup] pdftoppm (Poppler) available — scanned PDF vision extraction enabled");
-  } catch {
-    console.warn("[Startup] WARNING: pdftoppm not found — scanned PDF vision extraction will be unavailable. Install poppler-utils to enable this feature.");
-  }
+try {
+  execFileSync("pdftoppm", ["-v"], { stdio: "ignore" });
+  console.log("[Startup] pdftoppm (Poppler) available — scanned PDF vision extraction enabled");
+} catch {
+  console.warn("[Startup] WARNING: pdftoppm not found — scanned PDF vision extraction will be unavailable. Install poppler-utils to enable this feature.");
 }
 
 // ============== MANDATORY SECURITY SECRETS CHECK ==============

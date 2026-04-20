@@ -353,10 +353,15 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
   }, [uploadFile]);
 
   const confirmMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/admin/cie/ingest/confirm", {
-      previewToken: preview?.previewToken,
-      acceptedRowIndices: (preview?.acceptedRows ?? []).map(r => r.rowIndex),
-    }),
+    mutationFn: () => {
+      if (!preview?.previewToken) {
+        throw new Error("Preview token missing. Please upload the file again.");
+      }
+      return apiRequest("POST", "/api/admin/cie/ingest/confirm", {
+        previewToken: preview.previewToken,
+        acceptedRowIndices: (preview.acceptedRows ?? []).map(r => r.rowIndex),
+      });
+    },
     onSuccess: () => {
       toast({ title: "Data ingested successfully" });
       setPreview(null);

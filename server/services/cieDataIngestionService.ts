@@ -503,10 +503,11 @@ function parseNgxPriceText(rawText: string, tradeDate: string | null): PriceRow[
   for (const line of lines) {
     const lc = line.toLowerCase();
 
-    // Detect the header line: must contain "symbol" + "close" + at least 4 of the 6 signals
+    // Detect the header line: must contain ALL six required column signals
+    // (symbol, open, high, low, close, volume) — tight match to avoid false positives
     if (!headerFound) {
       const hits = NGX_HEADER_SIGNALS.filter(s => lc.includes(s)).length;
-      if (hits >= 4 && lc.includes("symbol") && lc.includes("close")) {
+      if (hits === NGX_HEADER_SIGNALS.length) {
         headerFound = true;
       }
       continue; // skip header row itself (and all pre-header lines)

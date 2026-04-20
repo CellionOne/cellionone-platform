@@ -186,8 +186,8 @@ export function parseDateFromFilename(filename: string): string | null {
   if (!filename) return null;
   const base = filename.replace(/\.[^.]+$/, ""); // strip extension
 
-  // ISO with separators: 2026-04-10 or 2026/04/10 or 2026 04 10
-  const isoMatch = base.match(/(\d{4})[\s\-\/](\d{2})[\s\-\/](\d{2})/);
+  // ISO with separators: 2026-04-10 or 2026/04/10 or 2026 04 10 or 2026_04_10
+  const isoMatch = base.match(/(\d{4})[\s\-\/\_](\d{2})[\s\-\/\_](\d{2})/);
   if (isoMatch) {
     const [, y, m, d] = isoMatch;
     return `${y}-${m}-${d}`;
@@ -476,6 +476,98 @@ function gptRowsToPriceRows(raw: GptResponsePayload | GptPriceRow[]): PriceRow[]
 }
 
 // ============================================================
+// Deterministic NGX daily price list parser
+//
+// Handles the Zenith / NGX "Full Price List" column format:
+//   Symbol | PClose | Open | High | Low | Close | Sign | Change |
+//   Volume | Value | %Change | WeekHigh52 | WeekLow52
+//
+// The "Sign" column (index 6) is always exactly "+" or "-", which
+// makes column positions fixed and parseable without any AI call.
+// Trade date is obtained from the filename via parseDateFromFilename().
+// ============================================================
+
+const NGX_HEADER_SIGNALS = ["symbol", "open", "high", "low", "close", "volume"] as const;
+
+/**
+ * Attempt to parse an NGX/Zenith daily equity price list from extracted PDF text.
+ *
+ * Returns a non-empty PriceRow[] if the text matches the NGX column layout;
+ * returns [] if the format is not recognised (caller should fall back to GPT-4o).
+ */
+function parseNgxPriceText(rawText: string, tradeDate: string | null): PriceRow[] {
+  const lines = rawText.split(/\r?\n/);
+  const rows: PriceRow[] = [];
+  let headerFound = false;
+
+  for (const line of lines) {
+    const lc = line.toLowerCase();
+
+    // Detect the header line: must contain "symbol" + "close" + at least 4 of the 6 signals
+    if (!headerFound) {
+      const hits = NGX_HEADER_SIGNALS.filter(s => lc.includes(s)).length;
+      if (hits >= 4 && lc.includes("symbol") && lc.includes("close")) {
+        headerFound = true;
+      }
+      continue; // skip header row itself (and all pre-header lines)
+    }
+
+    // Skip blank / whitespace-only lines
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Tokenise by whitespace
+    const tokens = trimmed.split(/\s+/);
+
+    // Minimum expected: Symbol PClose Open High Low Close Sign Change Volume (= 9 tokens)
+    if (tokens.length < 9) continue;
+
+    // tokens[0] must be an NGX ticker code: uppercase letters + digits, 1–20 chars
+    const symbol = tokens[0].toUpperCase();
+    if (!/^[A-Z0-9]+$/.test(symbol) || symbol.length > 20) continue;
+
+    // tokens[6] must be exactly "+" or "-" (the Sign column)
+    const sign = tokens[6];
+    if (sign !== "+" && sign !== "-") continue;
+
+    // Helper: strip thousand-separator commas then parse float
+    const pn = (t: string): number | undefined => {
+      const v = parseFloat(t.replace(/,/g, ""));
+      return isNaN(v) ? undefined : v;
+    };
+
+    const open   = pn(tokens[2]);
+    const high   = pn(tokens[3]);
+    const low    = pn(tokens[4]);
+    const close  = pn(tokens[5]);
+    const rawVol = pn(tokens[8]);
+    const volume = rawVol !== undefined ? Math.round(rawVol) : undefined;
+
+    // close must be a positive number
+    if (close === undefined || close <= 0) continue;
+
+    // A valid trade date is required — comes from the filename
+    if (!tradeDate) continue;
+
+    rows.push({
+      rowIndex:     -1,
+      symbol,
+      date:         tradeDate,
+      open,
+      high,
+      low,
+      close,
+      volume,
+      confidence:   1.0,
+      lowConfidence: false,
+      source:       "pdf",
+    });
+  }
+
+  return rows;
+}
+
+// ============================================================
 // Vision fallback: convert PDF pages to images via pdftoppm
 // then send to GPT-4o as base64 image_url content blocks
 // ============================================================
@@ -579,7 +671,7 @@ Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
       ],
       response_format: { type: "json_object" },
       temperature: 0.1,
-      max_tokens: 4096,
+      max_tokens: 16384,
     });
 
     const content = response.choices[0]?.message?.content ?? "{}";
@@ -618,6 +710,16 @@ export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise
     return parsePdfViaVision(buffer);
   }
 
+  // Step 3: Try deterministic NGX price list parser (fast, no AI, handles Zenith/NGX daily format)
+  const tradeDate = filename ? parseDateFromFilename(filename) : null;
+  const ngxRows = parseNgxPriceText(rawText, tradeDate);
+  if (ngxRows.length > 0) {
+    console.info(`[CIEIngest] NGX deterministic parser extracted ${ngxRows.length} rows (date: ${tradeDate ?? "unknown"})`);
+    return ngxRows;
+  }
+
+  console.info("[CIEIngest] NGX deterministic parser found 0 rows — falling back to GPT-4o text extraction");
+
   const systemPrompt = `You are a financial data extraction engine.
 Extract NGX (Nigerian Exchange Group) equity price data from the text below.
 Return ONLY a JSON object with a "rows" array. Each item must have:
@@ -631,7 +733,7 @@ Return ONLY a JSON object with a "rows" array. Each item must have:
   confidence (number 0-1: 1.0 = clearly readable, 0.5 = inferred/partial, 0.2 = uncertain/guess)
 Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
 
-  // Step 3: Send extracted text to GPT-4o as a text prompt
+  // Step 4: Send extracted text to GPT-4o as a text prompt (fallback for unrecognised formats)
   try {
     const openai = await getOpenAI();
     const response = await openai.chat.completions.create({
@@ -642,7 +744,7 @@ Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
       ],
       response_format: { type: "json_object" },
       temperature: 0.1,
-      max_tokens: 4096,
+      max_tokens: 16384,
     });
 
     const content = response.choices[0]?.message?.content ?? "{}";

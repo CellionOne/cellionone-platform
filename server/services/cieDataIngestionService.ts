@@ -520,16 +520,10 @@ function parseNgxPriceText(rawText: string, tradeDate: string | null): PriceRow[
     // Tokenise by whitespace
     const tokens = trimmed.split(/\s+/);
 
-    // Minimum expected: Symbol PClose Open High Low Close Sign Change Volume (= 9 tokens)
-    if (tokens.length < 9) continue;
-
-    // tokens[0] must be an NGX ticker code: uppercase letters + digits, 1–20 chars
-    const symbol = tokens[0].toUpperCase();
+    const symbolIndex = tokens.findIndex(t => /^[A-Z][A-Z0-9]{1,19}$/.test(t.toUpperCase()));
+    if (symbolIndex < 0) continue;
+    const symbol = tokens[symbolIndex].toUpperCase();
     if (!/^[A-Z0-9]+$/.test(symbol) || symbol.length > 20) continue;
-
-    // tokens[6] must be exactly "+" or "-" (the Sign column)
-    const sign = tokens[6];
-    if (sign !== "+" && sign !== "-") continue;
 
     // Helper: strip thousand-separator commas then parse float
     const pn = (t: string): number | undefined => {
@@ -537,11 +531,21 @@ function parseNgxPriceText(rawText: string, tradeDate: string | null): PriceRow[
       return isNaN(v) ? undefined : v;
     };
 
-    const open   = pn(tokens[2]);
-    const high   = pn(tokens[3]);
-    const low    = pn(tokens[4]);
-    const close  = pn(tokens[5]);
-    const rawVol = pn(tokens[8]);
+    const numericTokens = tokens
+      .slice(symbolIndex + 1)
+      .map(t => t.replace(/[%(),]/g, ""))
+      .filter(t => t.length > 0)
+      .map(t => ({ raw: t, value: pn(t) }))
+      .filter(t => t.value !== undefined);
+
+    if (numericTokens.length < 4) continue;
+
+    const open = numericTokens[0]?.value;
+    const high = numericTokens[1]?.value;
+    const low = numericTokens[2]?.value;
+    const close = numericTokens[3]?.value;
+    const volumeCandidate = numericTokens.find(t => (t.value ?? 0) >= 1_000);
+    const rawVol = volumeCandidate?.value ?? numericTokens[4]?.value;
     const volume = rawVol !== undefined ? Math.round(rawVol) : undefined;
 
     // close must be a positive number

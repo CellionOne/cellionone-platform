@@ -7,6 +7,7 @@
  *
  * GET /api/cie-portal/status          — subscription status + tier (all users)
  * GET /api/cie-portal/pulse           — market pulse (all tiers)
+ * GET /api/cie-portal/market-summary  — macro ticker data (subscriber+)
  * GET /api/cie-portal/securities      — securities list (subscriber+)
  * GET /api/cie-portal/securities/:ticker — security detail + history (subscriber+)
  * GET /api/cie-portal/signals         — analyst signals (pro+)
@@ -204,6 +205,33 @@ export function registerCiePortalRoutes(app: Express): void {
       res.status(500).json({ error: errMsg(err) });
     }
   });
+
+  // ── GET /api/cie-portal/market-summary ──────────────────────────────────
+  // Macro ticker data (ASI, Brent, NGN/USD, CBN MPR) — Subscriber+
+  app.get(
+    "/api/cie-portal/market-summary",
+    isAuthenticated,
+    requireCieTierSession("subscriber"),
+    async (_req: AuthRequest, res: Response) => {
+      try {
+        const ctx = await storage.getLatestCieMarketContext();
+        if (!ctx) {
+          return res.json({ available: false });
+        }
+        return res.json({
+          available: true,
+          contextDate: ctx.contextDate,
+          asiClose:    ctx.asiCloseKobo   != null ? ctx.asiCloseKobo / 100   : null,
+          asiChangePct: ctx.asiChangePctBps != null ? ctx.asiChangePctBps / 100 : null,
+          brentUsd:    ctx.brentUsdCents  != null ? ctx.brentUsdCents / 100  : null,
+          ngnPerUsd:   ctx.ngnPerUsd      != null ? ctx.ngnPerUsd / 100      : null,
+          cbnMpr:      ctx.cbnMprBps      != null ? ctx.cbnMprBps / 100      : null,
+        });
+      } catch (err: unknown) {
+        res.status(500).json({ error: errMsg(err) });
+      }
+    },
+  );
 
   // ── GET /api/cie-portal/securities ──────────────────────────────────────
   app.get(

@@ -10,6 +10,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Star, ChevronDown } from "lucide-react";
+import { MacroBar } from "@/components/cie/macro-bar";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,10 @@ export default function CieSecurities() {
         <div>
           <h2 className="text-lg font-semibold mb-1" data-testid="text-securities-heading">NGX Securities</h2>
           <p className="text-sm text-muted-foreground">IAS, RS, CS scores and recommendations for all NGX-listed securities.</p>
+        </div>
+
+        <div className="p-3 rounded-lg border border-border/60 bg-muted/30">
+          <MacroBar />
         </div>
 
         <div className="flex flex-wrap items-start gap-3">

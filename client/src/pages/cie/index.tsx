@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Activity, BarChart3, Zap, Key, Sparkles } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { MacroBar } from "@/components/cie/macro-bar";
 
 interface StatusData { tier: "free" | "subscriber" | "pro"; isPaid: boolean; subscription: unknown }
 interface PulseData {
@@ -140,6 +141,12 @@ export default function CieMarketPulse() {
           <h2 className="text-lg font-semibold mb-1" data-testid="text-pulse-heading">Market Pulse</h2>
           <p className="text-sm text-muted-foreground">Live summary of the Nigerian Exchange Group — available to all users.</p>
         </div>
+
+        {(tier === "subscriber" || tier === "pro") && (
+          <div className="p-3 rounded-lg border border-border/60 bg-muted/30">
+            <MacroBar />
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center py-16"><LoadingSpinner /></div>

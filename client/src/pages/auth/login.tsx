@@ -76,6 +76,13 @@ export default function LoginPage() {
       }
       toast({ title: "Welcome back!", description: "You have been logged in successfully." });
       queryClient.setQueryData(["/api/auth/user"], data.user);
+      // Founders who haven't verified identity yet go to the identity screen
+      const isFounder = Array.isArray(data.user?.roles) && data.user.roles.includes("founder");
+      if (isFounder && !data.user?.isIdentityVerified) {
+        const dest = inviteToken ? `/verify-identity?invite=${inviteToken}` : "/verify-identity";
+        setLocation(dest);
+        return;
+      }
       if (inviteToken) {
         setLocation(`/invite/${inviteToken}`);
       } else {
@@ -101,6 +108,12 @@ export default function LoginPage() {
       if (data.success) {
         toast({ title: "Welcome back!", description: "You have been logged in successfully." });
         queryClient.setQueryData(["/api/auth/user"], data.user);
+        const isFounder = Array.isArray(data.user?.roles) && data.user.roles.includes("founder");
+        if (isFounder && !data.user?.isIdentityVerified) {
+          const dest = inviteToken ? `/verify-identity?invite=${inviteToken}` : "/verify-identity";
+          setLocation(dest);
+          return;
+        }
         if (inviteToken) {
           setLocation(`/invite/${inviteToken}`);
         } else {

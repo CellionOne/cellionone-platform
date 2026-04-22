@@ -11,14 +11,12 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Loader2, CheckCircle, Eye, EyeOff, Users, UserPlus } from "lucide-react";
+import { Loader2, CheckCircle, Eye, EyeOff, Users, UserPlus, ShieldCheck } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
 import { usePageMeta } from "@/hooks/use-page-meta";
 import { useState, useEffect } from "react";
 
 const registerSchema = z.object({
-  firstName: z.string().min(1, "First name is required"),
-  lastName: z.string().min(1, "Last name is required"),
   email: z.string().email("Please enter a valid email address"),
   password: z.string().min(8, "Password must be at least 8 characters"),
   confirmPassword: z.string(),
@@ -74,8 +72,6 @@ export default function RegisterPage() {
   const form = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
-      firstName: "",
-      lastName: "",
       email: "",
       password: "",
       confirmPassword: "",
@@ -91,8 +87,6 @@ export default function RegisterPage() {
   const registerMutation = useMutation({
     mutationFn: async (data: RegisterForm) => {
       const res = await apiRequest("POST", "/api/auth/register", {
-        firstName: data.firstName,
-        lastName: data.lastName,
         email: data.email,
         password: data.password,
       });
@@ -152,6 +146,12 @@ export default function RegisterPage() {
                   </AlertDescription>
                 </Alert>
               )}
+              <Alert className="text-left">
+                <ShieldCheck className="h-4 w-4" />
+                <AlertDescription>
+                  After verifying your email, you'll complete a quick identity check using your BVN and NIN to secure your account.
+                </AlertDescription>
+              </Alert>
               <p className="text-sm text-muted-foreground">
                 Didn't receive the email? Check your spam folder or request a new verification email.
               </p>
@@ -191,7 +191,7 @@ export default function RegisterPage() {
                   <strong>{formatRole(inviteInfo.role)}</strong>
                 </>
               ) : (
-                "Create your account to get started"
+                "Sign up in seconds — your name is confirmed via BVN/NIN after login"
               )}
             </CardDescription>
           </CardHeader>
@@ -200,48 +200,12 @@ export default function RegisterPage() {
               <Alert className="mb-4">
                 <UserPlus className="h-4 w-4" />
                 <AlertDescription>
-                  Create your account to accept this invitation. After registering, you'll need to complete your personal profile for verification.
+                  Create your account to accept this invitation. After registering, you'll complete a quick identity check using your BVN and NIN.
                 </AlertDescription>
               </Alert>
             )}
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="firstName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>First Name</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="John"
-                            data-testid="input-first-name"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="lastName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Last Name</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="Doe"
-                            data-testid="input-last-name"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
                 <FormField
                   control={form.control}
                   name="email"
@@ -336,6 +300,13 @@ export default function RegisterPage() {
                     </FormItem>
                   )}
                 />
+
+                <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/50 rounded-md p-3">
+                  <ShieldCheck className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                  <span>
+                    Your name and date of birth will be confirmed automatically via your BVN and NIN after you log in — no manual entry needed.
+                  </span>
+                </div>
 
                 <p className="text-xs text-muted-foreground">
                   By creating an account, you agree to our{" "}

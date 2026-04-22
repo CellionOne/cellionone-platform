@@ -34,6 +34,8 @@ export const founderProfiles = pgTable("founder_profiles", {
   kybPrefilled: boolean("kyb_prefilled").default(false),
   kybSourceCompanyProfileId: integer("kyb_source_company_profile_id"),
   lockedFields: json("locked_fields").$type<string[]>(),
+  profilePopulatedFromKyc: boolean("profile_populated_from_kyc").default(false),
+  kycPopulatedAt: timestamp("kyc_populated_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

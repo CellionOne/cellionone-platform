@@ -22,7 +22,7 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
     return { success: false, message: validation.error.errors[0].message };
   }
 
-  const { email, password, firstName, lastName } = validation.data;
+  const { email, password } = validation.data;
 
   const existingUser = await storage.getUserByEmail(email.toLowerCase());
   
@@ -40,21 +40,17 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
       return { success: false, message: "An account with this email already exists" };
     }
     
-    // Update the existing unverified account with new details
+    // Update the existing unverified account with new password/token
     user = await storage.updateUser(existingUser.id, {
-      firstName,
-      lastName,
       passwordHash,
       verificationToken,
       verificationTokenExpiry,
     });
     console.log(`[Auth] Re-registration for unverified account: ${email}`);
   } else {
-    // Create new user
+    // Create new user — firstName/lastName not captured at signup; populated via BVN/NIN verification
     user = await storage.createUserWithPassword({
       email: email.toLowerCase(),
-      firstName,
-      lastName,
       passwordHash,
       verificationToken,
       verificationTokenExpiry,
@@ -73,7 +69,7 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
   return {
     success: true,
     message: "Registration successful. Please check your email to verify your account.",
-    user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName },
+    user: { id: user.id, email: user.email },
     requiresVerification: true,
   };
 }
@@ -120,6 +116,7 @@ export async function loginUser(input: LoginInput): Promise<AuthResult> {
       lastName: user.lastName,
       profileImageUrl: user.profileImageUrl,
       primaryIntent: user.primaryIntent,
+      isIdentityVerified: user.isIdentityVerified ?? false,
       roles,
     },
   };
@@ -142,8 +139,8 @@ export async function verifyEmail(token: string): Promise<AuthResult> {
   await storage.markEmailVerified(user.id);
 
   try {
-    if (user.email && user.firstName) {
-      await sendWelcomeEmail(user.email, user.firstName);
+    if (user.email) {
+      await sendWelcomeEmail(user.email, user.firstName ?? undefined);
     }
   } catch (error) {
     console.error("Failed to send welcome email:", error);

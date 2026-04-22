@@ -114,6 +114,7 @@ interface PersonalProfile {
   kybPrefilled?: boolean;
   kybSourceCompanyProfileId?: number | null;
   lockedFields?: string[];
+  profilePopulatedFromKyc?: boolean;
 }
 
 function ProfileBottomCTA() {
@@ -262,13 +263,18 @@ function ProfileHeader() {
   );
 }
 
-function LockedFieldBadge() {
+function LockedFieldBadge({ source = "kyb" }: { source?: "kyb" | "kyc" }) {
+  const label = source === "kyc" ? "Govt-verified" : "KYB-verified";
+  const title =
+    source === "kyc"
+      ? "This field was confirmed via your BVN/NIN and cannot be edited."
+      : "This field was verified during your company registration and cannot be edited.";
   return (
     <span
-      title="This field was verified during your company registration and cannot be edited."
+      title={title}
       className="inline-flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 border border-primary/20 rounded px-1.5 py-0.5 ml-2 cursor-help"
     >
-      <Lock className="h-3 w-3" /> KYB-verified
+      <Lock className="h-3 w-3" /> {label}
     </span>
   );
 }
@@ -308,6 +314,8 @@ function ProfileForm() {
   });
 
   const isLocked = (fieldKey: string) => (profile?.lockedFields ?? []).includes(fieldKey);
+  const lockSource = (fieldKey: string): "kyc" | "kyb" =>
+    profile?.profilePopulatedFromKyc && (profile?.lockedFields ?? []).includes(fieldKey) ? "kyc" : "kyb";
 
   const form = useForm<ProfileFormData>({
     resolver: zodResolver(profileFormSchema),
@@ -395,7 +403,7 @@ function ProfileForm() {
                   <FormItem className="md:col-span-2">
                     <FormLabel className="flex items-center">
                       Full Legal Name
-                      {isLocked("fullName") && <LockedFieldBadge />}
+                      {isLocked("fullName") && <LockedFieldBadge source={lockSource("fullName")} />}
                     </FormLabel>
                     <FormControl>
                       <Input
@@ -419,7 +427,7 @@ function ProfileForm() {
                   <FormItem>
                     <FormLabel className="flex items-center">
                       Phone Number
-                      {isLocked("phone") && <LockedFieldBadge />}
+                      {isLocked("phone") && <LockedFieldBadge source={lockSource("phone")} />}
                     </FormLabel>
                     <FormControl>
                       <Input
@@ -442,9 +450,19 @@ function ProfileForm() {
                 name="dateOfBirth"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Date of Birth</FormLabel>
+                    <FormLabel className="flex items-center">
+                      Date of Birth
+                      {isLocked("dateOfBirth") && <LockedFieldBadge source={lockSource("dateOfBirth")} />}
+                    </FormLabel>
                     <FormControl>
-                      <Input type="date" data-testid="input-dob" {...field} />
+                      <Input
+                        type="date"
+                        data-testid="input-dob"
+                        readOnly={isLocked("dateOfBirth")}
+                        title={isLocked("dateOfBirth") ? "This field was confirmed via your BVN/NIN and cannot be edited." : undefined}
+                        className={isLocked("dateOfBirth") ? "bg-muted/60 cursor-not-allowed" : ""}
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -514,7 +532,7 @@ function ProfileForm() {
                     <FormItem className="md:col-span-2">
                       <FormLabel className="flex items-center">
                         Address Line 1
-                        {isLocked("addressLine1") && <LockedFieldBadge />}
+                        {isLocked("addressLine1") && <LockedFieldBadge source={lockSource("addressLine1")} />}
                       </FormLabel>
                       <FormControl>
                         <Input
@@ -566,7 +584,7 @@ function ProfileForm() {
                     <FormItem>
                       <FormLabel className="flex items-center">
                         State
-                        {isLocked("state") && <LockedFieldBadge />}
+                        {isLocked("state") && <LockedFieldBadge source={lockSource("state")} />}
                       </FormLabel>
                       {isLocked("state") ? (
                         <Input

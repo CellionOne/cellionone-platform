@@ -87,6 +87,7 @@ const PersonalProfilePage = lazy(() => import("@/pages/personal-profile"));
 const CompanyPeoplePage = lazy(() => import("@/pages/founder/company-people"));
 const FounderDataSharing = lazy(() => import("@/pages/founder/data-sharing"));
 const VerifyPage = lazy(() => import("@/pages/verify"));
+const VerifyIdentityPage = lazy(() => import("@/pages/verify-identity"));
 const InviteAcceptPage = lazy(() => import("@/pages/invite-accept"));
 const DirectorBiometricPage = lazy(() => import("@/pages/director-biometric"));
 const NotificationsPage = lazy(() => import("@/pages/notifications"));
@@ -489,6 +490,7 @@ function Router() {
 
         <Route path="/login" component={LoginPage} />
         <Route path="/register" component={RegisterPage} />
+        <Route path="/verify-identity" component={VerifyIdentityPage} />
         <Route path="/invite/:token" component={InviteAcceptPage} />
         <Route path="/director-biometric" component={DirectorBiometricPage} />
         <Route path="/forgot-password" component={ForgotPasswordPage} />

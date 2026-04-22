@@ -181,7 +181,8 @@ export async function sendPasswordResetEmail(to: string, token: string, baseUrl:
   return result;
 }
 
-export async function sendWelcomeEmail(to: string, firstName: string) {
+export async function sendWelcomeEmail(to: string, firstName?: string) {
+  const displayName = firstName || "there";
   const { client, fromEmail } = await getResendClient();
   
   const result = await client.emails.send({
@@ -204,7 +205,7 @@ export async function sendWelcomeEmail(to: string, firstName: string) {
               <h1 style="color: #18181b; font-size: 24px; margin: 0;">Cellion One</h1>
             </div>
             
-            <h2 style="color: #18181b; font-size: 20px; margin-bottom: 16px;">Welcome, ${firstName}!</h2>
+            <h2 style="color: #18181b; font-size: 20px; margin-bottom: 16px;">Welcome, ${displayName}!</h2>
             
             <p style="color: #52525b; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
               Thank you for joining Cellion One - Nigeria's premier company incorporation platform. You're now ready to start your business journey.

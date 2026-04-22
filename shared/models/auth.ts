@@ -38,6 +38,7 @@ export const users = pgTable("users", {
   // Intent captured on the post-registration welcome screen
   // Values: founder_new_co | founder_existing_co | kyc_service | procurement
   primaryIntent: varchar("primary_intent", { length: 50 }),
+  pendingInviteToken: varchar("pending_invite_token"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -85,6 +86,7 @@ export const registerSchema = z.object({
   password: passwordSchema,
   firstName: z.string().optional(),
   lastName: z.string().optional(),
+  inviteToken: z.string().optional(),
 });
 
 export const loginSchema = z.object({

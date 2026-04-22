@@ -2230,8 +2230,8 @@ export async function registerRoutes(
 
   // ============== BVN/NIN-FIRST IDENTITY VERIFICATION + PROFILE AUTO-POPULATE ==============
   // POST /api/founder/profile/verify-identity
-  // Accepts BVN + NIN, verifies both via Smile ID Job Type 5,
-  // and auto-populates the founder profile with government-verified data.
+  // Accepts BVN + NIN, verifies both via Smile ID Job Type 5 (lookupBvn/lookupNin),
+  // and auto-populates the founder profile with government-verified data (name, DOB, gender, phone).
   app.post("/api/founder/profile/verify-identity", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
@@ -2247,37 +2247,55 @@ export async function registerRoutes(
       const smileIdService = await import("./services/smileIdService");
       const { encryptField } = await import("./services/encryptionService");
 
-      // Run both verifications in parallel
-      const [bvnResult, ninResult] = await Promise.all([
-        smileIdService.verifyBvn(bvn, userId, `bvn_profile_${userId}_${Date.now()}`),
-        smileIdService.verifyNin(nin, userId, `nin_profile_${userId}_${Date.now()}`),
-      ]);
-
-      const bvnSuccess = bvnResult.success;
-      const ninSuccess = ninResult.success;
-
-      // At least one must verify successfully (or Smile ID is unconfigured — accept in sandbox)
-      const notConfigured = bvnResult.resultCode === "NOT_CONFIGURED" || ninResult.resultCode === "NOT_CONFIGURED";
-      if (!bvnSuccess && !ninSuccess && !notConfigured) {
-        return res.status(422).json({
-          message: "Identity verification failed. Please check your BVN and NIN and try again.",
-          bvn: { success: bvnSuccess, message: bvnResult.resultText },
-          nin: { success: ninSuccess, message: ninResult.resultText },
-        });
-      }
-
-      // Log sensitive data access
+      // Log sensitive data access before external calls
       await Promise.all([
         storage.logSensitiveDataAccess({ accessorUserId: userId, targetUserId: userId, dataType: "bvn", action: "verify_smile_id", ipAddress: req.ip, userAgent: req.headers["user-agent"] }),
         storage.logSensitiveDataAccess({ accessorUserId: userId, targetUserId: userId, dataType: "nin", action: "verify_smile_id", ipAddress: req.ip, userAgent: req.headers["user-agent"] }),
       ]);
 
-      // Extract government-verified data (prefer BVN result, fallback to NIN)
-      const govData = bvnSuccess ? bvnResult : (ninSuccess ? ninResult : bvnResult);
-      const govFullName = govData.fullName ?? null;
-      const govDob = govData.dob ?? null;
+      const ts = Date.now();
+      let bvnVerified = false;
+      let ninVerified = false;
+      let govFullName: string | null = null;
+      let govDob: string | null = null;
+      let govGender: string | null = null;
+      let govPhone: string | null = null;
+      let sandboxMode = false;
 
-      // Parse firstName/lastName from govFullName (format: "SURNAME FIRSTNAME MIDDLENAME")
+      if (!smileIdService.isSmileIdConfigured()) {
+        // Sandbox: Smile ID not configured — accept without real verification; no gov data populated
+        sandboxMode = true;
+        bvnVerified = true;
+        ninVerified = true;
+        console.log(`[VerifyIdentity] Sandbox mode — Smile ID not configured, accepting BVN/NIN for user ${userId}`);
+      } else {
+        // Real verification — run BVN and NIN lookups in parallel
+        const [bvnResult, ninResult] = await Promise.all([
+          smileIdService.lookupBvn(bvn, `bvn_profile_${userId}_${ts}`),
+          smileIdService.lookupNin(nin, `nin_profile_${userId}_${ts}`),
+        ]);
+
+        bvnVerified = bvnResult.verified;
+        ninVerified = ninResult.verified;
+
+        if (!bvnVerified && !ninVerified) {
+          return res.status(422).json({
+            message: "Identity verification failed. Please check your BVN and NIN and try again.",
+            bvn: { success: false, message: bvnResult.reason },
+            nin: { success: false, message: ninResult.reason },
+          });
+        }
+
+        // Prefer BVN data (NIBSS has richer data), fallback to NIN (NIMC)
+        const primary = bvnVerified ? bvnResult : ninResult;
+        const secondary = bvnVerified ? ninResult : bvnResult;
+        govFullName = primary.fullName ?? secondary.fullName ?? null;
+        govDob = primary.dob ?? secondary.dob ?? null;
+        govGender = primary.gender ?? secondary.gender ?? null;
+        govPhone = primary.phone ?? secondary.phone ?? null;
+      }
+
+      // Parse firstName/lastName from govFullName (NIBSS format: "SURNAME FIRSTNAME MIDDLENAME")
       let firstName: string | null = null;
       let lastName: string | null = null;
       if (govFullName) {
@@ -2296,13 +2314,14 @@ export async function registerRoutes(
 
       const now = new Date();
 
-      // Update users table: firstName, lastName, isIdentityVerified
+      // Update users table: firstName, lastName, isIdentityVerified, clear pendingInviteToken
       await db.update(usersTable)
         .set({
           ...(firstName ? { firstName } : {}),
           ...(lastName ? { lastName } : {}),
           isIdentityVerified: true,
           identityVerifiedAt: now,
+          pendingInviteToken: null,
           updatedAt: now,
         })
         .where(eq(usersTable.id, userId));
@@ -2324,47 +2343,70 @@ export async function registerRoutes(
         console.error(`[VerifyIdentity] upsertVerifiedIndividual error: ${e.message}`)
       );
 
-      // Build founder profile update with gov-verified fields
+      // Build founder profile update using proper typed fields
       const existingProfile = await storage.getFounderProfile(userId);
-      const lockedFields = [...(existingProfile?.lockedFields ?? [])];
+      const lockedFields: string[] = [...(existingProfile?.lockedFields as string[] ?? [])];
       if (govFullName && !lockedFields.includes("fullName")) lockedFields.push("fullName");
       if (govDob && !lockedFields.includes("dateOfBirth")) lockedFields.push("dateOfBirth");
+      if (govGender && !lockedFields.includes("gender")) lockedFields.push("gender");
 
-      const profileData: Record<string, unknown> = {
-        userId,
-        bvnEncrypted,
-        ninEncrypted,
-        profilePopulatedFromKyc: true,
-        kycPopulatedAt: now,
-        lockedFields,
-        updatedAt: now,
-      };
-      if (govFullName) profileData.fullName = govFullName;
-      if (govDob) profileData.dateOfBirth = govDob;
+      // Merge gov-verified data with existing profile for completeness calculation
+      const mergedFullName = govFullName ?? existingProfile?.fullName ?? null;
+      const mergedDob = govDob ?? existingProfile?.dateOfBirth ?? null;
+      const mergedGender = govGender ?? existingProfile?.gender ?? null;
+      const mergedPhone = govPhone ?? existingProfile?.phone ?? null;
+      const mergedNationality = existingProfile?.nationality ?? null;
+      const mergedOccupation = existingProfile?.occupation ?? null;
+      const mergedAddressLine1 = existingProfile?.addressLine1 ?? null;
+      const mergedCity = existingProfile?.city ?? null;
+      const mergedState = existingProfile?.state ?? null;
+      const mergedCountry = existingProfile?.country ?? "Nigeria";
+      const mergedIdType = existingProfile?.idType ?? null;
 
-      // Recalculate profile completion using the updated values
-      const mergedProfile = { ...existingProfile, ...profileData };
       const completionFields = [
-        mergedProfile.fullName, mergedProfile.phone, mergedProfile.dateOfBirth,
-        mergedProfile.nationality, mergedProfile.gender, mergedProfile.occupation,
-        mergedProfile.addressLine1, mergedProfile.city, mergedProfile.state,
-        mergedProfile.country ?? "Nigeria", mergedProfile.idType,
+        mergedFullName, mergedPhone, mergedDob,
+        mergedNationality, mergedGender, mergedOccupation,
+        mergedAddressLine1, mergedCity, mergedState,
+        mergedCountry, mergedIdType,
       ];
       const filled = completionFields.filter(Boolean).length;
       const total = completionFields.length;
-      const hasDocuments = !!(mergedProfile.passportPhotoPath && mergedProfile.signaturePath && mergedProfile.idDocumentPath);
+      const hasDocuments = !!(existingProfile?.passportPhotoPath && existingProfile?.signaturePath && existingProfile?.idDocumentPath);
       const hasIds = true; // BVN/NIN just stored
-      profileData.profileCompletion = Math.round((filled / total) * 70) + (hasDocuments ? 15 : 0) + (hasIds ? 15 : 0);
-      profileData.isProfileComplete = (profileData.profileCompletion as number) >= 85;
+      const profileCompletion = Math.round((filled / total) * 70) + (hasDocuments ? 15 : 0) + (hasIds ? 15 : 0);
+      const isProfileComplete = profileCompletion >= 85;
 
-      const profile = await storage.upsertFounderProfile(profileData as any);
+      // Build properly typed profile update (no 'any' cast)
+      const profileInsert: Parameters<typeof storage.upsertFounderProfile>[0] = {
+        userId,
+        bvnEncrypted,
+        ninEncrypted,
+        profilePopulatedFromKyc: !sandboxMode,
+        kycPopulatedAt: sandboxMode ? (existingProfile?.kycPopulatedAt ?? null) : now,
+        lockedFields,
+        profileCompletion,
+        isProfileComplete,
+        ...(govFullName ? { fullName: govFullName } : {}),
+        ...(govDob ? { dateOfBirth: govDob } : {}),
+        ...(govGender ? { gender: govGender } : {}),
+        ...(govPhone ? { phone: govPhone } : {}),
+      };
+
+      const profile = await storage.upsertFounderProfile(profileInsert);
 
       await storage.createAuditLog({
         actorUserId: userId,
         action: "identity_verified_bvn_nin_profile_populated",
         entityType: "founder_profile",
         entityId: String(profile.id),
-        details: { bvnSuccess, ninSuccess, govFullName: govFullName ?? "N/A", notConfigured },
+        details: {
+          bvnVerified,
+          ninVerified,
+          sandboxMode,
+          govFullName: govFullName ?? "N/A",
+          govGender: govGender ?? "N/A",
+          hasPhone: !!govPhone,
+        },
         ipAddress: req.ip,
       });
 
@@ -2372,15 +2414,17 @@ export async function registerRoutes(
         success: true,
         message: "Identity verified successfully. Your profile has been updated.",
         isIdentityVerified: true,
-        profileCompletion: profileData.profileCompletion,
+        sandboxMode,
+        profileCompletion,
         profile: {
           fullName: profile.fullName,
           dateOfBirth: profile.dateOfBirth,
+          gender: profile.gender,
           profileCompletion: profile.profileCompletion,
           profilePopulatedFromKyc: profile.profilePopulatedFromKyc,
         },
-        bvn: { success: bvnSuccess },
-        nin: { success: ninSuccess },
+        bvn: { success: bvnVerified },
+        nin: { success: ninVerified },
       });
     } catch (error) {
       console.error("[VerifyIdentity] Error:", error);

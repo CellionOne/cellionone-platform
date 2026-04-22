@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,12 +69,28 @@ export default function VerifyIdentityPage() {
       }
       return res.json();
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       // Update cached user to reflect isIdentityVerified = true
       queryClient.setQueryData(["/api/auth/user"], (old: any) =>
-        old ? { ...old, isIdentityVerified: true, firstName: data.profile?.fullName?.split(" ").slice(1).join(" ") ?? old.firstName } : old
+        old ? { ...old, isIdentityVerified: true, pendingInviteToken: null } : old
       );
       queryClient.invalidateQueries({ queryKey: ["/api/profile/personal"] });
+
+      // Auto-consume pending invite if present
+      if (inviteToken) {
+        try {
+          const csrf = await getCsrfToken();
+          await fetch("/api/company-people/accept-invite", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+            body: JSON.stringify({ inviteToken }),
+          });
+        } catch {
+          // Non-fatal — user can still accept manually via /invite/:token
+        }
+      }
+
       setVerifiedName(data.profile?.fullName ?? null);
       setVerified(true);
       toast({ title: "Identity verified!", description: "Your profile has been updated with government-verified data." });
@@ -89,15 +105,13 @@ export default function VerifyIdentityPage() {
   });
 
   const handleContinue = () => {
-    if (inviteToken) {
-      setLocation(`/invite/${inviteToken}`);
-    } else {
-      setLocation("/");
-    }
+    // Invite was already auto-consumed after verification — go to intent gate / dashboard
+    setLocation("/");
   };
 
   const handleSkip = () => {
     if (inviteToken) {
+      // When skipping, preserve invite for manual acceptance
       setLocation(`/invite/${inviteToken}`);
     } else {
       setLocation("/");

@@ -141,6 +141,59 @@ function ProfileBottomCTA() {
   );
 }
 
+function VerifyIdentityBanner() {
+  const { data: profile } = useQuery<PersonalProfile>({ queryKey: ["/api/profile/personal"] });
+  const { user } = useAuth();
+  const isFounder = Array.isArray(user?.roles) && user.roles.includes("founder");
+  if (!isFounder) return null;
+  if (profile?.isVerified) return null;
+  return (
+    <div className="flex items-start gap-3 rounded-lg border-2 border-primary/40 bg-primary/5 dark:bg-primary/10 px-4 py-4" data-testid="banner-verify-identity-prompt">
+      <ShieldCheck className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+      <div className="flex-1">
+        <p className="text-sm font-semibold text-foreground">Verify Your Identity to unlock all features</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Enter your BVN and NIN to verify your identity. Your name, date of birth, and gender will be auto-populated from government records — no manual entry needed.
+        </p>
+      </div>
+      <Link href="/verify-identity">
+        <Button size="sm" className="shrink-0" data-testid="button-banner-verify-identity">
+          Verify Now <ArrowRight className="h-3 w-3 ml-1" />
+        </Button>
+      </Link>
+    </div>
+  );
+}
+
+function KycPrefilledBanner() {
+  const [dismissed, setDismissed] = useState(false);
+  const { data: profile } = useQuery<PersonalProfile>({ queryKey: ["/api/profile/personal"] });
+  if (!profile?.profilePopulatedFromKyc || dismissed) return null;
+  const lockedCount = (profile.lockedFields ?? []).filter(f => ["fullName", "dateOfBirth", "gender"].includes(f)).length;
+  if (lockedCount === 0) return null;
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 dark:bg-primary/10 px-4 py-3" data-testid="banner-kyc-prefilled">
+      <ShieldCheck className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+      <div className="flex-1">
+        <p className="text-sm font-medium text-foreground">
+          Profile auto-populated from Government Records
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {lockedCount} field{lockedCount !== 1 ? "s were" : " was"} filled automatically using data verified via your BVN/NIN (NIBSS/NIMC). These fields are locked with a "Govt-verified" badge.
+        </p>
+      </div>
+      <button
+        onClick={() => setDismissed(true)}
+        className="text-muted-foreground hover:text-foreground transition-colors"
+        data-testid="button-dismiss-kyc-banner"
+        aria-label="Dismiss"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 function KybPrefilledBanner() {
   const [dismissed, setDismissed] = useState(false);
   const { data: profile } = useQuery<PersonalProfile>({ queryKey: ["/api/profile/personal"] });
@@ -186,6 +239,8 @@ export default function PersonalProfilePage() {
     >
       <div className="max-w-3xl mx-auto space-y-6 p-4 overflow-y-auto h-full">
         <InvitationBanner />
+        <VerifyIdentityBanner />
+        <KycPrefilledBanner />
         <KybPrefilledBanner />
         <ProfileHeader />
         <ProfileForm />
@@ -474,18 +529,33 @@ function ProfileForm() {
                 name="gender"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Gender</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <FormLabel className="flex items-center">
+                      Gender
+                      {isLocked("gender") && <LockedFieldBadge source={lockSource("gender")} />}
+                    </FormLabel>
+                    {isLocked("gender") ? (
                       <FormControl>
-                        <SelectTrigger data-testid="select-gender">
-                          <SelectValue placeholder="Select gender" />
-                        </SelectTrigger>
+                        <Input
+                          data-testid="input-gender"
+                          readOnly
+                          value={field.value ? field.value.charAt(0).toUpperCase() + field.value.slice(1) : ""}
+                          className="bg-muted/60 cursor-not-allowed"
+                          title="This field was confirmed via your BVN/NIN and cannot be edited."
+                        />
                       </FormControl>
-                      <SelectContent>
-                        <SelectItem value="male">Male</SelectItem>
-                        <SelectItem value="female">Female</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    ) : (
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-gender">
+                            <SelectValue placeholder="Select gender" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="male">Male</SelectItem>
+                          <SelectItem value="female">Female</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}

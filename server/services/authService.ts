@@ -22,7 +22,7 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
     return { success: false, message: validation.error.errors[0].message };
   }
 
-  const { email, password } = validation.data;
+  const { email, password, inviteToken } = validation.data;
 
   const existingUser = await storage.getUserByEmail(email.toLowerCase());
   
@@ -45,6 +45,7 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
       passwordHash,
       verificationToken,
       verificationTokenExpiry,
+      ...(inviteToken ? { pendingInviteToken: inviteToken } : {}),
     });
     console.log(`[Auth] Re-registration for unverified account: ${email}`);
   } else {
@@ -55,6 +56,7 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
       verificationToken,
       verificationTokenExpiry,
       emailVerified: false,
+      ...(inviteToken ? { pendingInviteToken: inviteToken } : {}),
     });
 
     await storage.addUserRole(user.id, "founder");
@@ -117,6 +119,7 @@ export async function loginUser(input: LoginInput): Promise<AuthResult> {
       profileImageUrl: user.profileImageUrl,
       primaryIntent: user.primaryIntent,
       isIdentityVerified: user.isIdentityVerified ?? false,
+      pendingInviteToken: user.pendingInviteToken ?? null,
       roles,
     },
   };

@@ -76,15 +76,18 @@ export default function LoginPage() {
       }
       toast({ title: "Welcome back!", description: "You have been logged in successfully." });
       queryClient.setQueryData(["/api/auth/user"], data.user);
-      // Founders who haven't verified identity yet go to the identity screen
       const isFounder = Array.isArray(data.user?.roles) && data.user.roles.includes("founder");
+      // Resolve the effective invite token: URL param takes priority, fallback to stored pendingInviteToken
+      const effectiveInviteToken = inviteToken || data.user?.pendingInviteToken || null;
       if (isFounder && !data.user?.isIdentityVerified) {
-        const dest = inviteToken ? `/verify-identity?invite=${inviteToken}` : "/verify-identity";
+        // Not yet verified — go to identity screen, preserve invite token if any
+        const dest = effectiveInviteToken ? `/verify-identity?invite=${effectiveInviteToken}` : "/verify-identity";
         setLocation(dest);
         return;
       }
-      if (inviteToken) {
-        setLocation(`/invite/${inviteToken}`);
+      // Already verified — go to invite page or home
+      if (effectiveInviteToken) {
+        setLocation(`/invite/${effectiveInviteToken}`);
       } else {
         setLocation("/");
       }
@@ -109,13 +112,14 @@ export default function LoginPage() {
         toast({ title: "Welcome back!", description: "You have been logged in successfully." });
         queryClient.setQueryData(["/api/auth/user"], data.user);
         const isFounder = Array.isArray(data.user?.roles) && data.user.roles.includes("founder");
+        const effectiveInviteToken2fa = inviteToken || data.user?.pendingInviteToken || null;
         if (isFounder && !data.user?.isIdentityVerified) {
-          const dest = inviteToken ? `/verify-identity?invite=${inviteToken}` : "/verify-identity";
+          const dest = effectiveInviteToken2fa ? `/verify-identity?invite=${effectiveInviteToken2fa}` : "/verify-identity";
           setLocation(dest);
           return;
         }
-        if (inviteToken) {
-          setLocation(`/invite/${inviteToken}`);
+        if (effectiveInviteToken2fa) {
+          setLocation(`/invite/${effectiveInviteToken2fa}`);
         } else {
           setLocation("/");
         }

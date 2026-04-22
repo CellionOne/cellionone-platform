@@ -89,6 +89,7 @@ export default function RegisterPage() {
       const res = await apiRequest("POST", "/api/auth/register", {
         email: data.email,
         password: data.password,
+        ...(inviteToken ? { inviteToken } : {}),
       });
       return res.json();
     },

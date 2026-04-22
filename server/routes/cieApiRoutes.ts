@@ -456,9 +456,10 @@ export function registerCieApiRoutes(app: Express): void {
     requireCieTier("pro"),
     async (req: ApiKeyRequest, res: Response) => {
       try {
-        const [scores, allDividends] = await Promise.all([
+        const [scores, allDividends, marketCtx] = await Promise.all([
           storage.getLatestCieScores(),
           storage.listCieDividends(true),
+          storage.getLatestCieMarketContext(),
         ]);
 
         const today = new Date().toISOString().slice(0, 10);
@@ -535,6 +536,8 @@ export function registerCieApiRoutes(app: Express): void {
         return res.json({
           scoreDate,
           totalSecurities: scores.length,
+          contextDate: marketCtx?.contextDate ?? null,
+          analystNotes: marketCtx?.notes ?? null,
           sectors,
         });
       } catch (e: unknown) {

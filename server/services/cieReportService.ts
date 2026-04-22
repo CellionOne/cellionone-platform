@@ -566,13 +566,16 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
     return avgB - avgA;
   })) {
     const avgIas = Math.round(items.reduce((s, i) => s + (i.ias ?? 0), 0) / items.length);
-    const avgDayBps = Math.round(items.reduce((s, i) => s + (i.weekReturn ?? 0), 0) / items.length);
-    const trend = sectorTrend(avgDayBps);
+    // Use actual Day% for trend when available; fall back to weekReturn
+    const avgDayPct = items.length > 0
+      ? items.reduce((acc, i) => acc + (dayPctNum(i.securityId) ?? (i.weekReturn ?? 0) / 100), 0) / items.length
+      : 0;
+    const trend = sectorTrend(Math.round(avgDayPct * 100)); // convert to bps for sectorTrend
 
     const topMovers = [...items]
-      .sort((a, b) => Math.abs(b.weekReturn ?? 0) - Math.abs(a.weekReturn ?? 0))
+      .sort((a, b) => Math.abs(dayPctNum(b.securityId) ?? (b.weekReturn ?? 0) / 100) - Math.abs(dayPctNum(a.securityId) ?? (a.weekReturn ?? 0) / 100))
       .slice(0, 2)
-      .map(s => `${s.symbol} (${bpsToPercent(s.weekReturn)})`)
+      .map(s => `${s.symbol} (${dayPctStr(s.securityId)})`)
       .join(", ") || "N/A";
 
     const sectorDivs = items.filter(s => s.divDaysLeft !== null && s.divDaysLeft >= 0 && s.divDaysLeft <= 30);

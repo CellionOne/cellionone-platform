@@ -101,7 +101,7 @@ interface PreviewResult {
   rowsAccepted: number;
   rowsRejected: number;
   acceptedRows: Array<{ rowIndex: number; [key: string]: string | number | null }>;
-  previewRows: Array<Record<string, string | number | null>>;
+  previewRows: Array<Record<string, string | number | boolean | null> & { lowConfidence?: boolean }>;
   rejectedRows: RejectedRow[];
 }
 
@@ -656,8 +656,20 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
     }
   };
 
-  // Preview table columns derived from actual row keys
-  const previewCols = preview?.previewRows?.[0] ? Object.keys(preview.previewRows[0]) : [];
+  // Preview table columns derived from actual row keys (exclude internal flags)
+  const EXCLUDED_COLS = new Set(["lowConfidence", "rowIndex", "confidence", "source", "error"]);
+  const previewCols = preview?.previewRows?.[0]
+    ? Object.keys(preview.previewRows[0]).filter(k => !EXCLUDED_COLS.has(k))
+    : [];
+
+  // Template CSV downloads
+  const downloadTemplate = useCallback((name: string, headers: string[], exampleRow: string[]) => {
+    const csv = [headers.join(","), exampleRow.join(",")].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -733,6 +745,22 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
                 <p className="text-sm font-medium">Drag & drop CSV / XLSX / PDF here</p>
                 <p className="text-xs text-muted-foreground mt-1">Columns: ticker, trade_date, open, high, low, close, volume</p>
                 <p className="text-xs text-muted-foreground">or click to browse</p>
+                <div className="flex gap-2 mt-3" onClick={e => e.preventDefault()}>
+                  <Button
+                    type="button" variant="outline" size="sm" className="gap-1 text-xs h-7 px-2"
+                    onClick={() => downloadTemplate("prices_template.csv",
+                      ["ticker","trade_date","open","high","low","close","volume"],
+                      ["DANGCEM","2026-04-22","450.50","455.00","448.00","452.00","1200000"])}
+                    data-testid="button-template-prices"
+                  ><Download className="h-3 w-3" /> Prices Template</Button>
+                  <Button
+                    type="button" variant="outline" size="sm" className="gap-1 text-xs h-7 px-2"
+                    onClick={() => downloadTemplate("dividends_template.csv",
+                      ["ticker","amount_per_share","ex_dividend_date","payment_date"],
+                      ["DANGCEM","3.50","2026-05-10","2026-05-31"])}
+                    data-testid="button-template-dividends"
+                  ><Download className="h-3 w-3" /> Dividends Template</Button>
+                </div>
               </>
             )}
           </label>
@@ -860,6 +888,13 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Row legend */}
+            <div className="flex gap-4 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-green-100 dark:bg-green-950 border border-green-300 dark:border-green-800 flex-shrink-0" />Accepted</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-amber-100 dark:bg-amber-950 border border-amber-300 dark:border-amber-800 flex-shrink-0" />Low confidence / unrecognized symbol</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-100 dark:bg-red-950 border border-red-300 dark:border-red-800 flex-shrink-0" />Rejected (see below)</span>
+            </div>
+
             {/* Accepted rows table */}
             {(preview.previewRows ?? []).length > 0 && (
               <div className="rounded-md border overflow-x-auto max-h-72 overflow-y-auto">
@@ -873,24 +908,29 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(preview.previewRows ?? []).slice(0, 20).map((row, i) => (
-                      <TableRow key={i} data-testid={`row-preview-${i}`} className="text-xs">
-                        <TableCell className="py-1.5 text-muted-foreground font-mono">{i + 1}</TableCell>
-                        {previewCols.map(col => {
-                          const isClose = col === "close";
-                          const open = typeof row.open === "number" ? row.open : null;
-                          const val = row[col];
-                          return (
-                            <TableCell
-                              key={col}
-                              className={`py-1.5 font-mono ${isClose ? colourForClose(typeof val === "number" ? val : null, open) : ""}`}
-                            >
-                              {val ?? "—"}
-                            </TableCell>
-                          );
-                        })}
-                      </TableRow>
-                    ))}
+                    {(preview.previewRows ?? []).slice(0, 20).map((row, i) => {
+                      const rowBg = row.lowConfidence
+                        ? "bg-amber-50 dark:bg-amber-950/30"
+                        : "bg-green-50/40 dark:bg-green-950/20";
+                      return (
+                        <TableRow key={i} data-testid={`row-preview-${i}`} className={`text-xs ${rowBg}`}>
+                          <TableCell className="py-1.5 text-muted-foreground font-mono">{i + 1}</TableCell>
+                          {previewCols.map(col => {
+                            const isClose = col === "close";
+                            const open = typeof row.open === "number" ? row.open : null;
+                            const val = row[col];
+                            return (
+                              <TableCell
+                                key={col}
+                                className={`py-1.5 font-mono ${isClose ? colourForClose(typeof val === "number" ? val : null, open) : ""}`}
+                              >
+                                {val ?? "—"}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      );
+                    })}
                     {(preview.previewRows ?? []).length > 20 && (
                       <TableRow>
                         <TableCell colSpan={previewCols.length + 1} className="text-center text-xs text-muted-foreground py-2">

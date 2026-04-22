@@ -34,7 +34,7 @@ import {
 } from "../services/cieDataIngestionService";
 import { triggerImmediateScoreRun } from "../services/cieScheduler";
 import { generateCieSignalDraft, generateCieMarketCommentary, isOpenAIAvailable } from "../services/aiService";
-import { generateAlphaIntelReport } from "../services/cieReportService";
+import { generateAlphaIntelReport, getCachedAlphaIntelReport, setCachedAlphaIntelReport } from "../services/cieReportService";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -332,6 +332,10 @@ export function registerCieAdminRoutes(app: Express): void {
       try {
         await triggerImmediateScoreRun();
         newScores = await storage.getLatestCieScores();
+        // Regenerate and cache the Alpha Intel report in the background (non-blocking)
+        generateAlphaIntelReport()
+          .then(buf => setCachedAlphaIntelReport(buf))
+          .catch(err => console.error("[CIEAdmin] Background report regeneration failed:", err instanceof Error ? err.message : String(err)));
       } catch (err: unknown) {
         console.error("[CIEAdmin] Score recomputation after confirm failed:", err instanceof Error ? err.message : String(err));
       }
@@ -1210,8 +1214,16 @@ export function registerCieAdminRoutes(app: Express): void {
     try {
       if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
-      const buf = await generateAlphaIntelReport();
       const today = new Date().toISOString().slice(0, 10);
+      // Serve cached report if it was generated today, otherwise generate fresh
+      const cached = getCachedAlphaIntelReport();
+      let buf: Buffer;
+      if (cached && cached.date === today) {
+        buf = cached.buf;
+      } else {
+        buf = await generateAlphaIntelReport();
+        setCachedAlphaIntelReport(buf);
+      }
 
       res.setHeader("Content-Disposition", `attachment; filename="AlphaIntel_NGX_${today}.xlsx"`);
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

@@ -242,6 +242,25 @@ function buildFallbackThesis(s: SecurityForAI): string {
   return `${s.name} rated ${s.recommendation} with IAS ${s.ias}/100.${entryNote} Target: ₦${s.targetPrice?.toFixed(2) ?? "analyst TBD"}.`.slice(0, 250);
 }
 
+// ─── Report Cache ─────────────────────────────────────────────────────────────
+// Holds the last successfully generated report buffer so that the admin download
+// endpoint can serve a cached version immediately after an ingest + score run.
+
+let _cachedReportBuf: Buffer | null = null;
+let _cachedReportDate: string | null = null;
+
+export function getCachedAlphaIntelReport(): { buf: Buffer; date: string } | null {
+  if (_cachedReportBuf && _cachedReportDate) {
+    return { buf: _cachedReportBuf, date: _cachedReportDate };
+  }
+  return null;
+}
+
+export function setCachedAlphaIntelReport(buf: Buffer): void {
+  _cachedReportBuf = buf;
+  _cachedReportDate = new Date().toISOString().slice(0, 10);
+}
+
 // ─── Main Report Generator ────────────────────────────────────────────────────
 
 export async function generateAlphaIntelReport(): Promise<Buffer> {
@@ -565,7 +584,7 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
     sectorMap.get(s.sector)!.push(s);
   }
 
-  const tab4Headers = ["Sector", "Active", "Trend", "Avg IAS", "Key Movers", "Div Angle", "AI Alpha Intel Notes"];
+  const tab4Headers = ["Sector", "Active", "Trend", "Avg IAS", "Outlook", "Key Movers", "Div Angle", "AI Alpha Intel Notes"];
   const tab4Rows: (string | number | null)[][] = [
     [`Alpha Intel — Sector Summary | ${today}`],
     [],
@@ -597,12 +616,20 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
 
     const aiNote = await generateSectorAINote(sector, avgIas, trend, topMovers, divAngle);
 
-    tab4Rows.push([sector, items.length, trend, avgIas, topMovers, divAngle, aiNote]);
+    // Outlook: combine IAS threshold with trend direction
+    const outlook =
+      avgIas >= 65 && trend === "↑" ? "Strong Bullish" :
+      avgIas >= 50 && trend !== "↓" ? "Bullish" :
+      avgIas >= 40 ? "Neutral" :
+      avgIas >= 25 && trend !== "↑" ? "Bearish" :
+      "Strong Bearish";
+
+    tab4Rows.push([sector, items.length, trend, avgIas, outlook, topMovers, divAngle, aiNote]);
   }
 
   const tab4WS = XLSX.utils.aoa_to_sheet(tab4Rows);
   tab4WS["!cols"] = [
-    { wch: 25 }, { wch: 8 }, { wch: 10 }, { wch: 8 },
+    { wch: 25 }, { wch: 8 }, { wch: 10 }, { wch: 8 }, { wch: 16 },
     { wch: 30 }, { wch: 30 }, { wch: 60 },
   ];
   XLSX.utils.book_append_sheet(wb, tab4WS, "Sector Summary");

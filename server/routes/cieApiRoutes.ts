@@ -249,9 +249,38 @@ export function registerCieApiRoutes(app: Express): void {
           return res.status(404).json({ error: `Security '${ticker}' not found` });
         }
 
-        const score = await storage.getLatestCieScore(security.id);
-        const latestPrice = await storage.getLatestCiePrice(security.id);
+        const [score, latestPrice, allUpcomingDivs, allSignals] = await Promise.all([
+          storage.getLatestCieScore(security.id),
+          storage.getLatestCiePrice(security.id),
+          storage.listCieDividends(true),           // upcoming only
+          storage.listCieSignals(true, 200),          // published, last 200
+        ]);
+
         const latestPriceNaira = latestPrice?.closeKobo != null ? latestPrice.closeKobo / 100 : null;
+        const today = new Date().toISOString().slice(0, 10);
+
+        // Dividend enrichment: nearest upcoming ex-div for this security
+        const secDivs = allUpcomingDivs.filter(d => d.securityId === security.id)
+          .sort((a, b) => a.exDividendDate.localeCompare(b.exDividendDate));
+        const nearestDiv = secDivs[0] ?? null;
+        const daysToExDiv = nearestDiv
+          ? Math.round((new Date(nearestDiv.exDividendDate).getTime() - new Date(today).getTime()) / 86400000)
+          : null;
+        const divAmountNaira = nearestDiv?.amountPerShareKobo != null ? nearestDiv.amountPerShareKobo / 100 : null;
+        const divYieldPct = divAmountNaira != null && latestPriceNaira && latestPriceNaira > 0
+          ? parseFloat(((divAmountNaira / latestPriceNaira) * 100).toFixed(4))
+          : null;
+
+        // Day% — open→close on latest price date
+        const dayChangePct = latestPrice?.openKobo && latestPrice.openKobo > 0
+          ? parseFloat((((latestPrice.closeKobo - latestPrice.openKobo) / latestPrice.openKobo) * 100).toFixed(4))
+          : null;
+
+        // Latest signal for this security
+        const secSignal = allSignals.find(sig => sig.securityId === security.id) ?? null;
+        const latestSignal = secSignal
+          ? { type: secSignal.type, sentiment: secSignal.sentiment, content: secSignal.content, publishedAt: secSignal.publishedAt }
+          : null;
 
         let aiSummary: Record<string, unknown> | null = null;
         if (wantsAiSummary && score) {
@@ -284,6 +313,16 @@ export function registerCieApiRoutes(app: Express): void {
           entryZoneLow:        formatKoboToNaira(security.entryZoneLowKobo),
           entryZoneHigh:       formatKoboToNaira(security.entryZoneHighKobo),
           targetPrice:         formatKoboToNaira(security.targetPriceKobo),
+          // Dividend enrichment fields (parity with /securities list)
+          divYieldPct:         divYieldPct,
+          nextExDivDate:       nearestDiv?.exDividendDate ?? null,
+          daysToExDiv:         daysToExDiv,
+          daysToQual:          daysToExDiv !== null ? Math.max(0, daysToExDiv - 1) : null,
+          divAmountNaira:      divAmountNaira,
+          // Latest analyst signal
+          latestSignal:        latestSignal,
+          // Day% (explicit, top-level)
+          dayChangePct:        dayChangePct,
           latestPrice:    latestPrice
             ? {
                 date:        latestPrice.tradeDate,

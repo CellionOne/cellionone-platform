@@ -59,18 +59,19 @@ export default function LoginPage() {
   });
 
   // Auto-accept a company invite for a user who is already identity-verified at login time.
-  // This is fire-and-forget; failure is non-fatal (invite can be accepted manually).
-  async function autoAcceptInvite(token: string): Promise<void> {
+  // Returns true if invite was successfully accepted; false on any failure.
+  async function autoAcceptInvite(token: string): Promise<boolean> {
     try {
       const csrf = await getCsrfToken();
-      await fetch("/api/company-people/accept-invite", {
+      const res = await fetch("/api/company-people/accept-invite", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
         body: JSON.stringify({ inviteToken: token }),
       });
+      return res.ok;
     } catch {
-      // Non-fatal — user can still accept manually via /invite/:token
+      return false;
     }
   }
 
@@ -101,11 +102,13 @@ export default function LoginPage() {
         setLocation(dest);
         return;
       }
-      // Already verified — auto-accept invite if pending, then go to intent gate
+      // Already verified — auto-accept invite if pending, redirect based on result
       if (effectiveInviteToken) {
-        await autoAcceptInvite(effectiveInviteToken);
+        const accepted = await autoAcceptInvite(effectiveInviteToken);
+        setLocation(accepted ? "/" : `/invite/${effectiveInviteToken}`);
+      } else {
+        setLocation("/");
       }
-      setLocation("/");
     },
     onError: (error: any) => {
       const message = error?.message || "Login failed. Please check your credentials.";
@@ -133,11 +136,13 @@ export default function LoginPage() {
           setLocation(dest);
           return;
         }
-        // Already verified — auto-accept invite if pending, then go to intent gate
+        // Already verified — auto-accept invite if pending, redirect based on result
         if (effectiveInviteToken2fa) {
-          await autoAcceptInvite(effectiveInviteToken2fa);
+          const accepted2fa = await autoAcceptInvite(effectiveInviteToken2fa);
+          setLocation(accepted2fa ? "/" : `/invite/${effectiveInviteToken2fa}`);
+        } else {
+          setLocation("/");
         }
-        setLocation("/");
       } else {
         toast({ title: "Verification failed", description: data.message, variant: "destructive" });
       }

@@ -10,6 +10,7 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { authenticateApiKey, invalidateCieApiKeyTierCache, type ApiKeyRequest } from "../middleware/apiKeyAuth";
 import { generateCieScoreNarrative, isOpenAIAvailable } from "../services/aiService";
+import { generateSectorAINote } from "../services/cieReportService";
 
 type CieTier = "free" | "subscriber" | "pro";
 const TIER_ORDER: Record<CieTier, number> = { free: 0, subscriber: 1, pro: 2 };
@@ -514,6 +515,8 @@ export function registerCieApiRoutes(app: Express): void {
           const momentum: "bullish" | "bearish" | "neutral" =
             avgIas >= 60 ? "bullish" : avgIas <= 35 ? "bearish" : "neutral";
 
+          const keyMovers = top3.slice(0, 2).map(t => `${t.ticker} (${t.recommendation})`).join(", ") || "N/A";
+
           return {
             sector,
             avgIas,
@@ -525,11 +528,26 @@ export function registerCieApiRoutes(app: Express): void {
             avgWeekReturnPct: avgWeekBps / 100,
             top3,
             dividendAngle: sectorDivs,
+            keyMovers,        // needed for AI note generation below
           };
         });
 
         // Sort by avgIas descending
         sectors.sort((a, b) => b.avgIas - a.avgIas);
+
+        // Generate per-sector AI notes in parallel (with fallback if AI unavailable)
+        const sectorDivAngles = new Map<string, string>();
+        for (const s of sectors) {
+          sectorDivAngles.set(s.sector, s.dividendAngle.length > 0
+            ? `${s.dividendAngle.length} dividend(s) upcoming`
+            : "No upcoming dividends");
+        }
+        const sectorsWithNotes = await Promise.all(sectors.map(async s => {
+          const divAngle = sectorDivAngles.get(s.sector) ?? "N/A";
+          const aiNote = await generateSectorAINote(s.sector, s.avgIas, s.trendArrow, s.keyMovers, divAngle);
+          const { keyMovers: _km, ...rest } = s;
+          return { ...rest, aiNote };
+        }));
 
         const scoreDate = scores.length > 0 ? scores[0].scoreDate : null;
 
@@ -538,7 +556,7 @@ export function registerCieApiRoutes(app: Express): void {
           totalSecurities: scores.length,
           contextDate: marketCtx?.contextDate ?? null,
           analystNotes: marketCtx?.notes ?? null,
-          sectors,
+          sectors: sectorsWithNotes,
         });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Internal error";

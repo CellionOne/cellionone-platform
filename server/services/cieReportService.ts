@@ -156,7 +156,7 @@ ${s.entryLow !== null ? `Entry Zone: ₦${s.entryLow?.toFixed(2)}-₦${s.entryHi
   return results;
 }
 
-async function generateSectorAINote(
+export async function generateSectorAINote(
   sector: string,
   avgIas: number,
   trend: string,
@@ -251,18 +251,18 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
   const [allScores, allSecurities, allDividends, marketCtx] = await Promise.all([
     storage.getLatestCieScores(),
     storage.listCieSecurities(false),
-    storage.listCieDividends(false),
+    storage.listCieDividends(true), // upcoming only — exclude historical/stale rows
     storage.getLatestCieMarketContext(),
   ]);
 
   // Build a map of securityId → security for quick lookup
   const secById = new Map(allSecurities.map(s => [s.id, s]));
 
-  // Build a map of securityId → upcoming dividend
+  // Build a map of securityId → nearest upcoming dividend (smallest future ex-date)
   const divBySecId = new Map<number, (typeof allDividends)[0]>();
   for (const d of allDividends) {
     const existing = divBySecId.get(d.securityId);
-    if (!existing || d.exDividendDate > existing.exDividendDate) {
+    if (!existing || d.exDividendDate < existing.exDividendDate) {
       divBySecId.set(d.securityId, d);
     }
   }
@@ -494,6 +494,18 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
   const gainers = marketCtx?.gainersCount ?? enriched.filter(s => dayPctNum(s.securityId) !== null ? (dayPctNum(s.securityId)! > 0) : (s.weekReturn ?? 0) > 0).length;
   const losers = marketCtx?.losersCount ?? enriched.filter(s => dayPctNum(s.securityId) !== null ? (dayPctNum(s.securityId)! < 0) : (s.weekReturn ?? 0) < 0).length;
 
+  // Notable recommendations: Strong Buy / Strong Sell / highest-star securities
+  const strongBuys = enriched.filter(s => s.recommendation === "Strong Buy").slice(0, 3);
+  const strongSells = enriched.filter(s => s.recommendation === "Strong Sell").slice(0, 3);
+  const notableRecs = [
+    ...strongBuys.map(s => `${s.symbol} Strong Buy (IAS ${s.ias}★${s.stars ?? ""})`),
+    ...strongSells.map(s => `${s.symbol} Strong Sell (IAS ${s.ias})`),
+  ].join(", ") || enriched
+    .filter(s => (s.stars ?? 0) >= 4)
+    .slice(0, 3)
+    .map(s => `${s.symbol} ${s.recommendation} ★${s.stars}`)
+    .join(", ") || "None";
+
   // AI alerts
   const alertsText = await generateKeyAlerts(
     `ASI: ${asiClose} (${asiChangePct}), Brent: $${brentUsd}, NGN/USD: ${ngnUsd}`,
@@ -503,7 +515,7 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
       .map(s => `${s.symbol} (${s.divDaysLeft}d)`).join(", ") || "None",
     enriched.filter(s => s.rsi14 !== null && (s.rsi14 > 70 || s.rsi14 < 30))
       .map(s => `${s.symbol} RSI${s.rsi14}`).join(", ") || "None",
-    "" // recommendation changes would need historical data
+    notableRecs
   );
 
   const moverHeaders = ["#", "Ticker", "Company", "Sector", "Close (₦)", "Day%", "Wk%", "Mo%", "RSI", "Rec"];

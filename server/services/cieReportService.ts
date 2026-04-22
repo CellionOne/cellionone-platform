@@ -616,12 +616,12 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
 
     const aiNote = await generateSectorAINote(sector, avgIas, trend, topMovers, divAngle);
 
-    // Outlook: combine IAS threshold with trend direction
+    // Outlook: combine IAS threshold with trend direction (sectorTrend returns "Bullish"/"Neutral"/"Bearish")
     const outlook =
-      avgIas >= 65 && trend === "↑" ? "Strong Bullish" :
-      avgIas >= 50 && trend !== "↓" ? "Bullish" :
-      avgIas >= 40 ? "Neutral" :
-      avgIas >= 25 && trend !== "↑" ? "Bearish" :
+      avgIas >= 65 && trend === "Bullish"  ? "Strong Bullish" :
+      avgIas >= 50 && trend !== "Bearish"  ? "Bullish" :
+      avgIas >= 40                          ? "Neutral" :
+      avgIas >= 25 && trend !== "Bullish"  ? "Bearish" :
       "Strong Bearish";
 
     tab4Rows.push([sector, items.length, trend, avgIas, outlook, topMovers, divAngle, aiNote]);

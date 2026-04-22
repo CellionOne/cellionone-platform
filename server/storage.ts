@@ -2243,7 +2243,6 @@ export class DatabaseStorage implements IStorage {
       lowKobo: ciePrices.lowKobo,
       closeKobo: ciePrices.closeKobo,
       volume: ciePrices.volume,
-      source: ciePrices.source,
       createdAt: ciePrices.createdAt,
     })
       .from(ciePrices)

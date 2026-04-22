@@ -308,9 +308,17 @@ export function registerCieAdminRoutes(app: Express): void {
       const body = schema.parse(req.body);
       const userId = getUserId(req);
 
-      // Snapshot previous prices before commit (for threshold comparison)
-      const prevPrices = await storage.listLatestCiePricesAllActive();
+      type WhatChangedItem = { ticker: string; field: string; oldVal: string; newVal: string };
+
+      // Snapshot previous prices + scores before commit (for threshold comparison)
+      const [prevPrices, prevScores, allSecurities] = await Promise.all([
+        storage.listLatestCiePricesAllActive(),
+        storage.getLatestCieScores(),
+        storage.listCieSecurities(true),
+      ]);
       const prevPriceMap = new Map(prevPrices.map(p => [p.securityId, p]));
+      const prevScoreMap = new Map(prevScores.map(s => [s.securityId, s]));
+      const secById = new Map(allSecurities.map(s => [s.id, s]));
 
       const result = await commitFromToken(
         body.previewToken,
@@ -319,21 +327,24 @@ export function registerCieAdminRoutes(app: Express): void {
         userId
       );
 
-      // Load new prices and compare for threshold crossings
-      const [newPrices, allSecurities] = await Promise.all([
-        storage.listLatestCiePricesAllActive(),
-        storage.listCieSecurities(true),
-      ]);
-      const secById = new Map(allSecurities.map(s => [s.id, s]));
+      // Run score engine synchronously so we can diff pre/post recommendations
+      let newScores: typeof prevScores = [];
+      try {
+        await triggerImmediateScoreRun();
+        newScores = await storage.getLatestCieScores();
+      } catch (err: unknown) {
+        console.error("[CIEAdmin] Score recomputation after confirm failed:", err instanceof Error ? err.message : String(err));
+      }
+      // Load new prices for Day% computation
+      const newPrices = await storage.listLatestCiePricesAllActive();
 
-      type WhatChangedItem = { ticker: string; field: string; oldVal: string; newVal: string };
       const whatChanged: WhatChangedItem[] = [];
 
       for (const np of newPrices) {
         const old = prevPriceMap.get(np.securityId);
         const ticker = secById.get(np.securityId)?.symbol ?? String(np.securityId);
 
-        // Day% threshold crossing (flag if abs day% > 2%)
+        // Day% threshold crossing (flag if abs day% >= 2%)
         if (np.openKobo && np.openKobo > 0) {
           const dayPct = ((np.closeKobo - np.openKobo) / np.openKobo) * 100;
           if (Math.abs(dayPct) >= 2) {
@@ -348,7 +359,7 @@ export function registerCieAdminRoutes(app: Express): void {
           }
         }
 
-        // Close price change >5% vs previous day's close
+        // Close price change >=5% vs previous day's close
         if (old && old.closeKobo > 0) {
           const changePct = ((np.closeKobo - old.closeKobo) / old.closeKobo) * 100;
           if (Math.abs(changePct) >= 5) {
@@ -357,6 +368,39 @@ export function registerCieAdminRoutes(app: Express): void {
               field: "Close vs prev close",
               oldVal: `₦${(old.closeKobo / 100).toFixed(2)}`,
               newVal: `₦${(np.closeKobo / 100).toFixed(2)} (${changePct > 0 ? "+" : ""}${changePct.toFixed(2)}%)`,
+            });
+          }
+        }
+      }
+
+      // Recommendation transitions from score engine recomputation
+      for (const ns of newScores) {
+        const ps = prevScoreMap.get(ns.securityId);
+        if (!ps) continue;
+        if (ps.recommendation !== ns.recommendation && ps.recommendation && ns.recommendation) {
+          const ticker = secById.get(ns.securityId)?.symbol ?? String(ns.securityId);
+          whatChanged.push({
+            ticker,
+            field: "Recommendation",
+            oldVal: ps.recommendation,
+            newVal: ns.recommendation,
+          });
+        }
+        // RSI threshold crossings (entering/exiting overbought 70 or oversold 30)
+        const prevRsi = ps.rsi14 ?? null;
+        const newRsi = ns.rsi14 ?? null;
+        if (prevRsi !== null && newRsi !== null) {
+          const enteredOverbought = prevRsi <= 70 && newRsi > 70;
+          const exitedOverbought = prevRsi > 70 && newRsi <= 70;
+          const enteredOversold = prevRsi >= 30 && newRsi < 30;
+          const exitedOversold = prevRsi < 30 && newRsi >= 30;
+          if (enteredOverbought || exitedOverbought || enteredOversold || exitedOversold) {
+            const ticker = secById.get(ns.securityId)?.symbol ?? String(ns.securityId);
+            whatChanged.push({
+              ticker,
+              field: "RSI(14)",
+              oldVal: prevRsi.toFixed(1),
+              newVal: `${newRsi.toFixed(1)} (${enteredOverbought ? "⚠️ Overbought" : exitedOverbought ? "Exit overbought" : enteredOversold ? "📉 Oversold" : "Exit oversold"})`,
             });
           }
         }
@@ -376,17 +420,12 @@ export function registerCieAdminRoutes(app: Express): void {
         },
       });
 
-      // Background score recomputation
-      triggerImmediateScoreRun().catch(err => {
-        console.error("[CIEAdmin] Score recomputation after confirm failed:", err.message);
-      });
-
       res.json({
         logId: result.logId,
         uploadId: result.uploadId,
         committed: result.committed,
         skipped: result.skipped,
-        message: `${result.committed} price rows committed. Score recomputation triggered.`,
+        message: `${result.committed} price rows committed. Score recomputation complete.`,
         whatChanged,
       });
     } catch (e: unknown) {

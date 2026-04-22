@@ -1782,9 +1782,9 @@ export async function registerRoutes(
         // For locked fields, always keep the stored value regardless of what was sent
         fullName: lockedFields.includes("fullName") && existingForLock?.fullName ? existingForLock.fullName : fullName,
         phone: lockedFields.includes("phone") && existingForLock?.phone ? existingForLock.phone : phone,
-        dateOfBirth,
+        dateOfBirth: lockedFields.includes("dateOfBirth") && existingForLock?.dateOfBirth ? existingForLock.dateOfBirth : dateOfBirth,
         nationality,
-        gender,
+        gender: lockedFields.includes("gender") && existingForLock?.gender ? existingForLock.gender : gender,
         occupation,
         addressLine1: lockedFields.includes("addressLine1") && existingForLock?.addressLine1 ? existingForLock.addressLine1 : addressLine1,
         addressLine2,

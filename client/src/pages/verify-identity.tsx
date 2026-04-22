@@ -51,6 +51,7 @@ export default function VerifyIdentityPage() {
   const { toast } = useToast();
   const [verified, setVerified] = useState(false);
   const [verifiedName, setVerifiedName] = useState<string | null>(null);
+  const [inviteAccepted, setInviteAccepted] = useState(false);
 
   const params = new URLSearchParams(searchString);
   const inviteToken = params.get("invite");
@@ -76,22 +77,26 @@ export default function VerifyIdentityPage() {
       );
       queryClient.invalidateQueries({ queryKey: ["/api/profile/personal"] });
 
-      // Auto-consume pending invite if present
+      // Auto-consume pending invite if present — check response status
+      let inviteAccepted = false;
       if (inviteToken) {
         try {
           const csrf = await getCsrfToken();
-          await fetch("/api/company-people/accept-invite", {
+          const inviteRes = await fetch("/api/company-people/accept-invite", {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
             body: JSON.stringify({ inviteToken }),
           });
+          inviteAccepted = inviteRes.ok;
         } catch {
-          // Non-fatal — user can still accept manually via /invite/:token
+          // Network failure — pendingInviteToken preserved in DB for manual acceptance
+          inviteAccepted = false;
         }
       }
 
       setVerifiedName(data.profile?.fullName ?? null);
+      setInviteAccepted(inviteAccepted);
       setVerified(true);
       toast({ title: "Identity verified!", description: "Your profile has been updated with government-verified data." });
     },
@@ -105,8 +110,14 @@ export default function VerifyIdentityPage() {
   });
 
   const handleContinue = () => {
-    // Invite was already auto-consumed after verification — go to intent gate / dashboard
-    setLocation("/");
+    if (inviteToken && !inviteAccepted) {
+      // Auto-accept failed — redirect to invite page for manual acceptance
+      // (pendingInviteToken is still in the DB since we only clear on successful accept)
+      setLocation(`/invite/${inviteToken}`);
+    } else {
+      // Invite was auto-accepted (or no invite) — go to intent gate / dashboard
+      setLocation("/");
+    }
   };
 
   const handleSkip = () => {

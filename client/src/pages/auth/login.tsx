@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient, setCsrfToken } from "@/lib/queryClient";
+import { apiRequest, queryClient, setCsrfToken, getCsrfToken } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -58,12 +58,28 @@ export default function LoginPage() {
     },
   });
 
+  // Auto-accept a company invite for a user who is already identity-verified at login time.
+  // This is fire-and-forget; failure is non-fatal (invite can be accepted manually).
+  async function autoAcceptInvite(token: string): Promise<void> {
+    try {
+      const csrf = await getCsrfToken();
+      await fetch("/api/company-people/accept-invite", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify({ inviteToken: token }),
+      });
+    } catch {
+      // Non-fatal — user can still accept manually via /invite/:token
+    }
+  }
+
   const loginMutation = useMutation({
     mutationFn: async (data: LoginForm) => {
       const res = await apiRequest("POST", "/api/auth/login", data);
       return res.json();
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       if (data.csrfToken) setCsrfToken(data.csrfToken);
       if (data.requiresTwoFactor) {
         setTwoFactorState({ userId: data.userId, message: data.message });
@@ -85,12 +101,11 @@ export default function LoginPage() {
         setLocation(dest);
         return;
       }
-      // Already verified — go to invite page or home
+      // Already verified — auto-accept invite if pending, then go to intent gate
       if (effectiveInviteToken) {
-        setLocation(`/invite/${effectiveInviteToken}`);
-      } else {
-        setLocation("/");
+        await autoAcceptInvite(effectiveInviteToken);
       }
+      setLocation("/");
     },
     onError: (error: any) => {
       const message = error?.message || "Login failed. Please check your credentials.";
@@ -106,7 +121,7 @@ export default function LoginPage() {
       const res = await apiRequest("POST", "/api/auth/two-factor/verify", payload);
       return res.json();
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       if (data.csrfToken) setCsrfToken(data.csrfToken);
       if (data.success) {
         toast({ title: "Welcome back!", description: "You have been logged in successfully." });
@@ -118,11 +133,11 @@ export default function LoginPage() {
           setLocation(dest);
           return;
         }
+        // Already verified — auto-accept invite if pending, then go to intent gate
         if (effectiveInviteToken2fa) {
-          setLocation(`/invite/${effectiveInviteToken2fa}`);
-        } else {
-          setLocation("/");
+          await autoAcceptInvite(effectiveInviteToken2fa);
         }
+        setLocation("/");
       } else {
         toast({ title: "Verification failed", description: data.message, variant: "destructive" });
       }

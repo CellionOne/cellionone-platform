@@ -65,11 +65,11 @@ const NIGERIAN_STATES = [
 ];
 
 const profileFormSchema = z.object({
-  fullName: z.string().min(2, "Full name is required"),
+  fullName: z.string().optional(),
   phone: z.string().min(10, "Phone number is required"),
-  dateOfBirth: z.string().min(1, "Date of birth is required"),
+  dateOfBirth: z.string().optional(),
   nationality: z.string().min(1, "Nationality is required"),
-  gender: z.string().min(1, "Gender is required"),
+  gender: z.string().optional(),
   occupation: z.string().min(1, "Occupation is required"),
   addressLine1: z.string().min(1, "Address is required"),
   addressLine2: z.string().optional(),
@@ -441,6 +441,8 @@ function ProfileForm() {
     );
   }
 
+  const isVerified = profile?.isVerified ?? false;
+
   return (
     <Card id="personal-info">
       <CardHeader>
@@ -450,30 +452,45 @@ function ProfileForm() {
       <CardContent>
         <Form {...form}>
           <form onSubmit={form.handleSubmit((data) => updateMutation.mutate(data))} className="space-y-6">
+            {/* Name / DOB / Gender — only shown after identity verification */}
+            {!isVerified ? (
+              <div className="rounded-lg border border-dashed border-primary/30 bg-muted/30 px-4 py-5 text-center space-y-2" data-testid="placeholder-verify-first">
+                <ShieldCheck className="h-6 w-6 text-primary mx-auto" />
+                <p className="text-sm font-medium text-foreground">Full name, date of birth, and gender will appear here after identity verification</p>
+                <p className="text-xs text-muted-foreground">These fields are auto-populated from government records — you won't need to enter them manually.</p>
+                <Link href="/verify-identity">
+                  <Button type="button" size="sm" className="mt-1" data-testid="button-verify-identity-from-profile">
+                    Verify Your Identity <ArrowRight className="h-3 w-3 ml-1" />
+                  </Button>
+                </Link>
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="fullName"
-                render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel className="flex items-center">
-                      Full Legal Name
-                      {isLocked("fullName") && <LockedFieldBadge source={lockSource("fullName")} />}
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="As on government ID"
-                        data-testid="input-full-name"
-                        readOnly={isLocked("fullName")}
-                        title={isLocked("fullName") ? "This field was verified during your company registration and cannot be edited." : undefined}
-                        className={isLocked("fullName") ? "bg-muted/60 cursor-not-allowed" : ""}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {isVerified && (
+                <FormField
+                  control={form.control}
+                  name="fullName"
+                  render={({ field }) => (
+                    <FormItem className="md:col-span-2">
+                      <FormLabel className="flex items-center">
+                        Full Legal Name
+                        {isLocked("fullName") && <LockedFieldBadge source={lockSource("fullName")} />}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="As on government ID"
+                          data-testid="input-full-name"
+                          readOnly={isLocked("fullName")}
+                          title={isLocked("fullName") ? "This field was confirmed via your BVN/NIN and cannot be edited." : undefined}
+                          className={isLocked("fullName") ? "bg-muted/60 cursor-not-allowed" : ""}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <FormField
                 control={form.control}
@@ -500,66 +517,70 @@ function ProfileForm() {
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="dateOfBirth"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center">
-                      Date of Birth
-                      {isLocked("dateOfBirth") && <LockedFieldBadge source={lockSource("dateOfBirth")} />}
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        type="date"
-                        data-testid="input-dob"
-                        readOnly={isLocked("dateOfBirth")}
-                        title={isLocked("dateOfBirth") ? "This field was confirmed via your BVN/NIN and cannot be edited." : undefined}
-                        className={isLocked("dateOfBirth") ? "bg-muted/60 cursor-not-allowed" : ""}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="gender"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center">
-                      Gender
-                      {isLocked("gender") && <LockedFieldBadge source={lockSource("gender")} />}
-                    </FormLabel>
-                    {isLocked("gender") ? (
+              {isVerified && (
+                <FormField
+                  control={form.control}
+                  name="dateOfBirth"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center">
+                        Date of Birth
+                        {isLocked("dateOfBirth") && <LockedFieldBadge source={lockSource("dateOfBirth")} />}
+                      </FormLabel>
                       <FormControl>
                         <Input
-                          data-testid="input-gender"
-                          readOnly
-                          value={field.value ? field.value.charAt(0).toUpperCase() + field.value.slice(1) : ""}
-                          className="bg-muted/60 cursor-not-allowed"
-                          title="This field was confirmed via your BVN/NIN and cannot be edited."
+                          type="date"
+                          data-testid="input-dob"
+                          readOnly={isLocked("dateOfBirth")}
+                          title={isLocked("dateOfBirth") ? "This field was confirmed via your BVN/NIN and cannot be edited." : undefined}
+                          className={isLocked("dateOfBirth") ? "bg-muted/60 cursor-not-allowed" : ""}
+                          {...field}
                         />
                       </FormControl>
-                    ) : (
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {isVerified && (
+                <FormField
+                  control={form.control}
+                  name="gender"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center">
+                        Gender
+                        {isLocked("gender") && <LockedFieldBadge source={lockSource("gender")} />}
+                      </FormLabel>
+                      {isLocked("gender") ? (
                         <FormControl>
-                          <SelectTrigger data-testid="select-gender">
-                            <SelectValue placeholder="Select gender" />
-                          </SelectTrigger>
+                          <Input
+                            data-testid="input-gender"
+                            readOnly
+                            value={field.value ? field.value.charAt(0).toUpperCase() + field.value.slice(1) : ""}
+                            className="bg-muted/60 cursor-not-allowed"
+                            title="This field was confirmed via your BVN/NIN and cannot be edited."
+                          />
                         </FormControl>
-                        <SelectContent>
-                          <SelectItem value="male">Male</SelectItem>
-                          <SelectItem value="female">Female</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                      ) : (
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger data-testid="select-gender">
+                              <SelectValue placeholder="Select gender" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="male">Male</SelectItem>
+                            <SelectItem value="female">Female</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <FormField
                 control={form.control}

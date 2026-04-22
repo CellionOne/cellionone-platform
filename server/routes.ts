@@ -2253,6 +2253,14 @@ export async function registerRoutes(
         storage.logSensitiveDataAccess({ accessorUserId: userId, targetUserId: userId, dataType: "nin", action: "verify_smile_id", ipAddress: req.ip, userAgent: req.headers["user-agent"] }),
       ]);
 
+      // Require Smile ID to be configured — never auto-verify without provider confirmation
+      if (!smileIdService.isSmileIdConfigured()) {
+        return res.status(503).json({
+          message: "Identity verification is temporarily unavailable. Please try again later or contact support.",
+          code: "VERIFICATION_SERVICE_UNAVAILABLE",
+        });
+      }
+
       const ts = Date.now();
       let bvnVerified = false;
       let ninVerified = false;
@@ -2260,40 +2268,31 @@ export async function registerRoutes(
       let govDob: string | null = null;
       let govGender: string | null = null;
       let govPhone: string | null = null;
-      let sandboxMode = false;
 
-      if (!smileIdService.isSmileIdConfigured()) {
-        // Sandbox: Smile ID not configured — accept without real verification; no gov data populated
-        sandboxMode = true;
-        bvnVerified = true;
-        ninVerified = true;
-        console.log(`[VerifyIdentity] Sandbox mode — Smile ID not configured, accepting BVN/NIN for user ${userId}`);
-      } else {
-        // Real verification — run BVN and NIN lookups in parallel
-        const [bvnResult, ninResult] = await Promise.all([
-          smileIdService.lookupBvn(bvn, `bvn_profile_${userId}_${ts}`),
-          smileIdService.lookupNin(nin, `nin_profile_${userId}_${ts}`),
-        ]);
+      // Real verification — run BVN and NIN lookups in parallel
+      const [bvnResult, ninResult] = await Promise.all([
+        smileIdService.lookupBvn(bvn, `bvn_profile_${userId}_${ts}`),
+        smileIdService.lookupNin(nin, `nin_profile_${userId}_${ts}`),
+      ]);
 
-        bvnVerified = bvnResult.verified;
-        ninVerified = ninResult.verified;
+      bvnVerified = bvnResult.verified;
+      ninVerified = ninResult.verified;
 
-        if (!bvnVerified && !ninVerified) {
-          return res.status(422).json({
-            message: "Identity verification failed. Please check your BVN and NIN and try again.",
-            bvn: { success: false, message: bvnResult.reason },
-            nin: { success: false, message: ninResult.reason },
-          });
-        }
-
-        // Prefer BVN data (NIBSS has richer data), fallback to NIN (NIMC)
-        const primary = bvnVerified ? bvnResult : ninResult;
-        const secondary = bvnVerified ? ninResult : bvnResult;
-        govFullName = primary.fullName ?? secondary.fullName ?? null;
-        govDob = primary.dob ?? secondary.dob ?? null;
-        govGender = primary.gender ?? secondary.gender ?? null;
-        govPhone = primary.phone ?? secondary.phone ?? null;
+      if (!bvnVerified && !ninVerified) {
+        return res.status(422).json({
+          message: "Identity verification failed. Please check your BVN and NIN and try again.",
+          bvn: { success: false, message: bvnResult.reason },
+          nin: { success: false, message: ninResult.reason },
+        });
       }
+
+      // Prefer BVN data (NIBSS has richer data), fallback to NIN (NIMC)
+      const primary = bvnVerified ? bvnResult : ninResult;
+      const secondary = bvnVerified ? ninResult : bvnResult;
+      govFullName = primary.fullName ?? secondary.fullName ?? null;
+      govDob = primary.dob ?? secondary.dob ?? null;
+      govGender = primary.gender ?? secondary.gender ?? null;
+      govPhone = primary.phone ?? secondary.phone ?? null;
 
       // Parse firstName/lastName from govFullName (NIBSS format: "SURNAME FIRSTNAME MIDDLENAME")
       let firstName: string | null = null;
@@ -2314,14 +2313,16 @@ export async function registerRoutes(
 
       const now = new Date();
 
-      // Update users table: firstName, lastName, isIdentityVerified, clear pendingInviteToken
+      // Update users table: firstName, lastName, isIdentityVerified
+      // NOTE: pendingInviteToken is intentionally NOT cleared here — it remains
+      // in the DB until the invite is successfully accepted (either auto-consumed
+      // by the client after this response or manually via /invite/:token).
       await db.update(usersTable)
         .set({
           ...(firstName ? { firstName } : {}),
           ...(lastName ? { lastName } : {}),
           isIdentityVerified: true,
           identityVerifiedAt: now,
-          pendingInviteToken: null,
           updatedAt: now,
         })
         .where(eq(usersTable.id, userId));
@@ -2381,8 +2382,8 @@ export async function registerRoutes(
         userId,
         bvnEncrypted,
         ninEncrypted,
-        profilePopulatedFromKyc: !sandboxMode,
-        kycPopulatedAt: sandboxMode ? (existingProfile?.kycPopulatedAt ?? null) : now,
+        profilePopulatedFromKyc: true,
+        kycPopulatedAt: now,
         lockedFields,
         profileCompletion,
         isProfileComplete,
@@ -2402,7 +2403,6 @@ export async function registerRoutes(
         details: {
           bvnVerified,
           ninVerified,
-          sandboxMode,
           govFullName: govFullName ?? "N/A",
           govGender: govGender ?? "N/A",
           hasPhone: !!govPhone,
@@ -2414,7 +2414,6 @@ export async function registerRoutes(
         success: true,
         message: "Identity verified successfully. Your profile has been updated.",
         isIdentityVerified: true,
-        sandboxMode,
         profileCompletion,
         profile: {
           fullName: profile.fullName,
@@ -3304,6 +3303,11 @@ export async function registerRoutes(
         personUserId: userId,
         inviteStatus: 'accepted',
       });
+
+      // Clear pendingInviteToken now that the invite has been successfully accepted
+      await db.update(usersTable)
+        .set({ pendingInviteToken: null })
+        .where(eq(usersTable.id, userId));
 
       await storage.createAuditLog({
         actorUserId: userId,

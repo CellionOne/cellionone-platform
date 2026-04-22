@@ -267,6 +267,11 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
     }
   }
 
+  // Fetch latest prices for all active securities in ONE query
+  const allLatestPrices = await storage.listLatestCiePricesAllActive();
+  // Map securityId → { closeKobo, openKobo } for Day% computation
+  const priceDetailBySecId = new Map(allLatestPrices.map(p => [p.securityId, p]));
+
   // Enrich scores with security extra fields
   type EnrichedScore = (typeof allScores)[0] & {
     divBehaviourPattern: string | null;
@@ -296,11 +301,27 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
     };
   });
 
-  // Fetch latest price for each security to get today's close
-  const priceBySecId = new Map<number, number>();
-  for (const score of enriched) {
-    const lp = await storage.getLatestCiePrice(score.securityId);
-    if (lp) priceBySecId.set(score.securityId, lp.closeKobo);
+  // Convenience map for legacy use (closeKobo only)
+  const priceBySecId = new Map<number, number>(
+    allLatestPrices.map(p => [p.securityId, p.closeKobo])
+  );
+
+  /** Compute Day% from actual open/close. Returns "N/A" if data unavailable. */
+  function dayPctStr(securityId: number): string {
+    const pd = priceDetailBySecId.get(securityId);
+    if (!pd || !pd.openKobo || pd.openKobo === 0) {
+      // Fallback: use directional signal only (no magnitude)
+      return "N/A";
+    }
+    const pct = ((pd.closeKobo - pd.openKobo) / pd.openKobo) * 100;
+    return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+  }
+
+  /** Numeric day% for sorting (null if unavailable). */
+  function dayPctNum(securityId: number): number | null {
+    const pd = priceDetailBySecId.get(securityId);
+    if (!pd || !pd.openKobo || pd.openKobo === 0) return null;
+    return ((pd.closeKobo - pd.openKobo) / pd.openKobo) * 100;
   }
 
   // Build AI input list
@@ -362,7 +383,7 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
       s.name,
       s.sector,
       closeN?.toFixed(2) ?? "N/A",
-      bpsToPercent(s.dSig === "↑" ? Math.abs(s.weekReturn ?? 0) : -(Math.abs(s.weekReturn ?? 0))), // day% approximation from dSig
+      dayPctStr(s.securityId),
       bpsToPercent(s.weekReturn),
       bpsToPercent(s.monthReturn),
       bpsToPercent(s.ytdReturn),
@@ -458,8 +479,9 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
   // TAB 3 — Market Movers & Key Alerts
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // Sort by dSig and weekReturn for gainers/losers
-  const sortedByDay = [...enriched].sort((a, b) => (b.weekReturn ?? 0) - (a.weekReturn ?? 0));
+  // Sort by actual Day% (close vs open) for gainers/losers; fall back to weekReturn if no open data
+  const withDayPct = enriched.map(s => ({ ...s, _dayPct: dayPctNum(s.securityId) ?? (s.weekReturn ?? 0) / 100 }));
+  const sortedByDay = [...withDayPct].sort((a, b) => b._dayPct - a._dayPct);
   const top8Gainers = sortedByDay.slice(0, 8);
   const top8Losers = sortedByDay.slice(-8).reverse();
 
@@ -469,14 +491,14 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
   const brentUsd = marketCtx ? (marketCtx.brentUsdCents ? (marketCtx.brentUsdCents / 100).toFixed(2) : "N/A") : "N/A";
   const ngnUsd = marketCtx ? (marketCtx.ngnPerUsd ? (marketCtx.ngnPerUsd / 100).toFixed(2) : "N/A") : "N/A";
   const cbnMpr = marketCtx ? (marketCtx.cbnMprBps ? (marketCtx.cbnMprBps / 100).toFixed(2) + "%" : "N/A") : "N/A";
-  const gainers = marketCtx?.gainersCount ?? enriched.filter(s => (s.weekReturn ?? 0) > 0).length;
-  const losers = marketCtx?.losersCount ?? enriched.filter(s => (s.weekReturn ?? 0) < 0).length;
+  const gainers = marketCtx?.gainersCount ?? enriched.filter(s => dayPctNum(s.securityId) !== null ? (dayPctNum(s.securityId)! > 0) : (s.weekReturn ?? 0) > 0).length;
+  const losers = marketCtx?.losersCount ?? enriched.filter(s => dayPctNum(s.securityId) !== null ? (dayPctNum(s.securityId)! < 0) : (s.weekReturn ?? 0) < 0).length;
 
   // AI alerts
   const alertsText = await generateKeyAlerts(
     `ASI: ${asiClose} (${asiChangePct}), Brent: $${brentUsd}, NGN/USD: ${ngnUsd}`,
-    top8Gainers.slice(0, 3).map(s => `${s.symbol} ${bpsToPercent(s.weekReturn)}`).join(", "),
-    top8Losers.slice(0, 3).map(s => `${s.symbol} ${bpsToPercent(s.weekReturn)}`).join(", "),
+    top8Gainers.slice(0, 3).map(s => `${s.symbol} ${dayPctStr(s.securityId)}`).join(", "),
+    top8Losers.slice(0, 3).map(s => `${s.symbol} ${dayPctStr(s.securityId)}`).join(", "),
     enriched.filter(s => s.divDaysLeft !== null && s.divDaysLeft >= 0 && s.divDaysLeft <= 7)
       .map(s => `${s.symbol} (${s.divDaysLeft}d)`).join(", ") || "None",
     enriched.filter(s => s.rsi14 !== null && (s.rsi14 > 70 || s.rsi14 < 30))
@@ -484,7 +506,7 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
     "" // recommendation changes would need historical data
   );
 
-  const moverHeaders = ["#", "Ticker", "Company", "Sector", "Close (₦)", "Wk%", "Mo%", "RSI", "Rec"];
+  const moverHeaders = ["#", "Ticker", "Company", "Sector", "Close (₦)", "Day%", "Wk%", "Mo%", "RSI", "Rec"];
   const tab3Rows: (string | number | null)[][] = [
     [`Alpha Intel — Market Movers & Key Alerts | ${today}`],
     [],
@@ -492,21 +514,21 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
     ["ASI Close", asiClose, "ASI Change", asiChangePct, "Gainers", String(gainers), "Losers", String(losers)],
     ["Brent Crude (USD)", `$${brentUsd}`, "NGN/USD", ngnUsd, "CBN MPR", cbnMpr],
     [],
-    ["📈 TOP 8 GAINERS (Weekly)"],
+    ["📈 TOP 8 GAINERS (Day%)"],
     moverHeaders,
     ...top8Gainers.map((s, i) => [
       i + 1, s.symbol, s.name, s.sector,
       koboToNaira(priceBySecId.get(s.securityId))?.toFixed(2) ?? "N/A",
-      bpsToPercent(s.weekReturn), bpsToPercent(s.monthReturn),
+      dayPctStr(s.securityId), bpsToPercent(s.weekReturn), bpsToPercent(s.monthReturn),
       s.rsi14 ?? "N/A", s.recommendation ?? "Hold",
     ]),
     [],
-    ["📉 TOP 8 LOSERS (Weekly)"],
+    ["📉 TOP 8 LOSERS (Day%)"],
     moverHeaders,
     ...top8Losers.map((s, i) => [
       i + 1, s.symbol, s.name, s.sector,
       koboToNaira(priceBySecId.get(s.securityId))?.toFixed(2) ?? "N/A",
-      bpsToPercent(s.weekReturn), bpsToPercent(s.monthReturn),
+      dayPctStr(s.securityId), bpsToPercent(s.weekReturn), bpsToPercent(s.monthReturn),
       s.rsi14 ?? "N/A", s.recommendation ?? "Hold",
     ]),
     [],
@@ -517,7 +539,7 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
   const tab3WS = XLSX.utils.aoa_to_sheet(tab3Rows);
   tab3WS["!cols"] = [
     { wch: 4 }, { wch: 8 }, { wch: 30 }, { wch: 20 },
-    { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 6 }, { wch: 12 },
+    { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 6 }, { wch: 12 },
   ];
   XLSX.utils.book_append_sheet(wb, tab3WS, "Market Movers");
 
@@ -612,8 +634,8 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
       closeN?.toFixed(2) ?? "N/A",
       divN?.toFixed(4) ?? "N/A",
       yieldPct,
-      "INTERIM",            // div type placeholder — not in current schema
-      "Upcoming",           // NGX status placeholder
+      "CASH",               // NGX dividends are cash unless notes indicate otherwise
+      daysLeft !== null && daysLeft <= 0 ? "Ex-Div" : daysLeft !== null && daysLeft <= 7 ? "Urgent" : "Upcoming",
       s.divExDate ?? "N/A",
       s.divPayDate ?? "N/A",
       daysLeft !== null ? String(daysLeft) : "N/A",

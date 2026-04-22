@@ -454,6 +454,62 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
   const [whatChanged, setWhatChanged] = useState<WhatChangedItem[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Dividend dropzone state
+  const [divDragging, setDivDragging] = useState(false);
+  const [divFileName, setDivFileName] = useState<string | null>(null);
+  const [divUploading, setDivUploading] = useState(false);
+  const [divResults, setDivResults] = useState<{ added: number; errors: string[] } | null>(null);
+  const divFileRef = useRef<HTMLInputElement>(null);
+
+  const handleDivFile = useCallback(async (file: File) => {
+    setDivUploading(true);
+    setDivFileName(file.name);
+    setDivResults(null);
+    try {
+      const text = await file.text();
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+      if (lines.length < 2) throw new Error("File must have a header row and at least one data row.");
+      const header = lines[0].toLowerCase().split(",").map(h => h.trim().replace(/^["']|["']$/g, ""));
+      const rows = lines.slice(1);
+      let added = 0;
+      const errors: string[] = [];
+      const csrfToken = await getCsrfToken();
+      for (const row of rows) {
+        const cols = row.split(",").map(c => c.trim().replace(/^["']|["']$/g, ""));
+        const get = (keys: string[]) => { for (const k of keys) { const i = header.indexOf(k); if (i >= 0) return cols[i]; } return ""; };
+        const ticker = get(["ticker", "symbol"]);
+        const amtStr = get(["amount_per_share", "amount", "dividend"]);
+        const exDate = get(["ex_dividend_date", "ex_date", "exdate"]);
+        const payDate = get(["payment_date", "pay_date", "paydate"]);
+        if (!ticker || !amtStr || !exDate) { errors.push(`Row skipped (missing ticker/amount/ex_date): ${row.slice(0, 40)}`); continue; }
+        const amount = parseFloat(amtStr);
+        if (isNaN(amount) || amount <= 0) { errors.push(`${ticker}: invalid amount "${amtStr}"`); continue; }
+        try {
+          const res = await fetch("/api/admin/cie/dividends", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+            body: JSON.stringify({ ticker, amountPerShareNaira: amount, exDividendDate: exDate, paymentDate: payDate || undefined }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: res.statusText }));
+            errors.push(`${ticker}: ${err.error ?? res.statusText}`);
+          } else { added++; }
+        } catch (e) { errors.push(`${ticker}: network error`); }
+      }
+      setDivResults({ added, errors });
+      if (added > 0) {
+        toast({ title: `Dividend upload: ${added} record${added !== 1 ? "s" : ""} added${errors.length ? `, ${errors.length} errors` : ""}` });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/dividends"] });
+      } else {
+        toast({ title: "Dividend upload: no records added", variant: "destructive" });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Upload failed";
+      toast({ title: msg, variant: "destructive" });
+    } finally { setDivUploading(false); }
+  }, [toast]);
+
   // Market Context inputs
   const [ctxDate, setCtxDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [ctxAsi, setCtxAsi] = useState("");
@@ -498,18 +554,18 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
   const ctxMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/cie/market-context", {
       contextDate: ctxDate,
-      asiCloseKobo: ctxAsi ? Math.round(parseFloat(ctxAsi) * 100) : undefined,
-      asiChangePctBps: ctxAsiChange ? Math.round(parseFloat(ctxAsiChange) * 100) : undefined,
-      brentUsdCents: ctxBrent ? Math.round(parseFloat(ctxBrent) * 100) : undefined,
-      ngnPerUsd: ctxNgn ? Math.round(parseFloat(ctxNgn) * 100) : undefined,
-      cbnMprBps: ctxMpr ? Math.round(parseFloat(ctxMpr) * 100) : undefined,
+      asiClose: ctxAsi ? parseFloat(ctxAsi) : undefined,
+      asiChangePct: ctxAsiChange ? parseFloat(ctxAsiChange) : undefined,
+      brentUsd: ctxBrent ? parseFloat(ctxBrent) : undefined,
+      ngnPerUsd: ctxNgn ? parseFloat(ctxNgn) : undefined,
+      cbnMpr: ctxMpr ? parseFloat(ctxMpr) : undefined,
       gainersCount: ctxGainers ? parseInt(ctxGainers) : undefined,
       losersCount: ctxLosers ? parseInt(ctxLosers) : undefined,
       notes: ctxNotes || undefined,
     }),
     onSuccess: () => {
       toast({ title: "Market context saved" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/market-context"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/market-context/latest"] });
     },
     onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed to save context"), variant: "destructive" }),
   });
@@ -737,6 +793,51 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
                 Save Market Context
               </Button>
             </div>
+          </div>
+
+          {/* Optional Dividend Bulk Upload */}
+          <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold text-foreground">Optional: Dividend Data Upload</p>
+              <span className="text-xs text-muted-foreground">(CSV with ticker, amount_per_share, ex_dividend_date, payment_date)</span>
+            </div>
+            <label
+              htmlFor="div-file-input"
+              className={`flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
+                divDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 bg-background"
+              }`}
+              data-testid="dropzone-dividend-upload"
+              onDragOver={e => { e.preventDefault(); setDivDragging(true); }}
+              onDragLeave={() => setDivDragging(false)}
+              onDrop={e => { e.preventDefault(); setDivDragging(false); const f = e.dataTransfer.files[0]; if (f) handleDivFile(f); }}
+            >
+              <input
+                id="div-file-input"
+                ref={divFileRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleDivFile(f); e.target.value = ""; }}
+                data-testid="input-dividend-file-upload"
+              />
+              {divUploading ? <LoadingSpinner size="sm" /> : <Upload className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
+              <span className="text-xs text-muted-foreground">
+                {divUploading ? "Processing…" : divFileName ? divFileName : "Drop CSV or click to browse"}
+              </span>
+            </label>
+            {divResults && (
+              <div className="text-xs space-y-1">
+                <p className={divResults.added > 0 ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}>
+                  {divResults.added} dividend record{divResults.added !== 1 ? "s" : ""} added
+                </p>
+                {divResults.errors.slice(0, 5).map((err, i) => (
+                  <p key={i} className="text-red-600 dark:text-red-400">{err}</p>
+                ))}
+                {divResults.errors.length > 5 && (
+                  <p className="text-muted-foreground">…and {divResults.errors.length - 5} more errors</p>
+                )}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

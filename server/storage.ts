@@ -438,6 +438,8 @@ export interface IStorage {
   upsertCiePrice(data: InsertCiePrice): Promise<CiePrice>;
   listCiePrices(securityId: number, days?: number): Promise<CiePrice[]>;
   getLatestCiePrice(securityId: number): Promise<CiePrice | undefined>;
+  /** Returns the most recent CiePrice row for every active security (one query). */
+  listLatestCiePricesAllActive(): Promise<CiePrice[]>;
 
   // CIE Scores
   upsertCieScore(data: InsertCieScore): Promise<CieScore>;
@@ -2218,6 +2220,37 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(ciePrices.tradeDate))
       .limit(1);
     return price;
+  }
+
+  async listLatestCiePricesAllActive(): Promise<CiePrice[]> {
+    // Subquery: max trade date per security for active securities
+    const maxDates = db.select({
+      securityId: ciePrices.securityId,
+      maxDate: sql<string>`MAX(${ciePrices.tradeDate})`.as("max_date"),
+    })
+      .from(ciePrices)
+      .innerJoin(cieSecurities, eq(ciePrices.securityId, cieSecurities.id))
+      .where(eq(cieSecurities.isActive, true))
+      .groupBy(ciePrices.securityId)
+      .as("max_dates");
+
+    return db.select({
+      id: ciePrices.id,
+      securityId: ciePrices.securityId,
+      tradeDate: ciePrices.tradeDate,
+      openKobo: ciePrices.openKobo,
+      highKobo: ciePrices.highKobo,
+      lowKobo: ciePrices.lowKobo,
+      closeKobo: ciePrices.closeKobo,
+      volume: ciePrices.volume,
+      source: ciePrices.source,
+      createdAt: ciePrices.createdAt,
+    })
+      .from(ciePrices)
+      .innerJoin(maxDates, and(
+        eq(ciePrices.securityId, maxDates.securityId),
+        eq(ciePrices.tradeDate, maxDates.maxDate),
+      ));
   }
 
   // ============== CIE Scores ==============

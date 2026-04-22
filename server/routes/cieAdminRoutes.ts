@@ -308,12 +308,59 @@ export function registerCieAdminRoutes(app: Express): void {
       const body = schema.parse(req.body);
       const userId = getUserId(req);
 
+      // Snapshot previous prices before commit (for threshold comparison)
+      const prevPrices = await storage.listLatestCiePricesAllActive();
+      const prevPriceMap = new Map(prevPrices.map(p => [p.securityId, p]));
+
       const result = await commitFromToken(
         body.previewToken,
         body.acceptedRowIndices ?? null, // null = commit all accepted rows
         userId,
         userId
       );
+
+      // Load new prices and compare for threshold crossings
+      const [newPrices, allSecurities] = await Promise.all([
+        storage.listLatestCiePricesAllActive(),
+        storage.listCieSecurities(true),
+      ]);
+      const secById = new Map(allSecurities.map(s => [s.id, s]));
+
+      type WhatChangedItem = { ticker: string; field: string; oldVal: string; newVal: string };
+      const whatChanged: WhatChangedItem[] = [];
+
+      for (const np of newPrices) {
+        const old = prevPriceMap.get(np.securityId);
+        const ticker = secById.get(np.securityId)?.symbol ?? String(np.securityId);
+
+        // Day% threshold crossing (flag if abs day% > 2%)
+        if (np.openKobo && np.openKobo > 0) {
+          const dayPct = ((np.closeKobo - np.openKobo) / np.openKobo) * 100;
+          if (Math.abs(dayPct) >= 2) {
+            whatChanged.push({
+              ticker,
+              field: "Day%",
+              oldVal: old?.openKobo && old.openKobo > 0
+                ? `${(((old.closeKobo - old.openKobo) / old.openKobo) * 100).toFixed(2)}%`
+                : "—",
+              newVal: `${dayPct.toFixed(2)}%`,
+            });
+          }
+        }
+
+        // Close price change >5% vs previous day's close
+        if (old && old.closeKobo > 0) {
+          const changePct = ((np.closeKobo - old.closeKobo) / old.closeKobo) * 100;
+          if (Math.abs(changePct) >= 5) {
+            whatChanged.push({
+              ticker,
+              field: "Close vs prev close",
+              oldVal: `₦${(old.closeKobo / 100).toFixed(2)}`,
+              newVal: `₦${(np.closeKobo / 100).toFixed(2)} (${changePct > 0 ? "+" : ""}${changePct.toFixed(2)}%)`,
+            });
+          }
+        }
+      }
 
       await storage.createAuditLog({
         actorUserId: userId,
@@ -325,6 +372,7 @@ export function registerCieAdminRoutes(app: Express): void {
           committed: result.committed,
           skipped: result.skipped,
           analystSelectedRows: body.acceptedRowIndices?.length ?? "all",
+          whatChangedCount: whatChanged.length,
         },
       });
 
@@ -339,6 +387,7 @@ export function registerCieAdminRoutes(app: Express): void {
         committed: result.committed,
         skipped: result.skipped,
         message: `${result.committed} price rows committed. Score recomputation triggered.`,
+        whatChanged,
       });
     } catch (e: unknown) {
       if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
@@ -761,20 +810,30 @@ export function registerCieAdminRoutes(app: Express): void {
     }
   });
 
-  /** POST /api/admin/cie/dividends — create a dividend record */
+  /** POST /api/admin/cie/dividends — create a dividend record (accepts securityId OR ticker) */
   app.post("/api/admin/cie/dividends", isAuthenticated, async (req: Request, res: Response) => {
     try {
       if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const schema = z.object({
-        securityId: z.number().int().positive(),
+        securityId: z.number().int().positive().optional(),
+        ticker: z.string().optional(),
         exDividendDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         amountPerShareNaira: z.number().positive(),
         notes: z.string().max(500).optional(),
-      });
+      }).refine(d => d.securityId != null || d.ticker != null, { message: "securityId or ticker is required" });
       const body = schema.parse(req.body);
+
+      let resolvedSecId = body.securityId;
+      if (!resolvedSecId && body.ticker) {
+        const secs = await storage.listCieSecurities(false);
+        const found = secs.find(s => s.symbol.toUpperCase() === body.ticker!.toUpperCase());
+        if (!found) return res.status(404).json({ error: `Security not found: ${body.ticker}` });
+        resolvedSecId = found.id;
+      }
+
       const div = await storage.createCieDividend({
-        securityId: body.securityId,
+        securityId: resolvedSecId!,
         exDividendDate: body.exDividendDate,
         paymentDate: body.paymentDate ?? null,
         amountPerShareKobo: Math.round(body.amountPerShareNaira * 100),

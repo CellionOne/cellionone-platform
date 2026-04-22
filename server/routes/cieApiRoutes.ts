@@ -114,7 +114,31 @@ export function registerCieApiRoutes(app: Express): void {
         });
         const { page, limit, sector } = schema.parse(req.query);
 
-        const scores = await storage.getLatestCieScores();
+        // Load all supporting data in parallel
+        const [scores, allSecurities, allDividends, allLatestPrices, allSignals] = await Promise.all([
+          storage.getLatestCieScores(),
+          storage.listCieSecurities(true),
+          storage.listCieDividends(true),
+          storage.listLatestCiePricesAllActive(),
+          storage.listCieSignals(true, 200),
+        ]);
+
+        // Build lookup maps
+        const secBySecId = new Map(allSecurities.map(s => [s.id, s]));
+        const divBySecId = new Map<number, typeof allDividends[0]>();
+        for (const d of allDividends) {
+          const ex = divBySecId.get(d.securityId);
+          if (!ex || d.exDividendDate < ex.exDividendDate) divBySecId.set(d.securityId, d);
+        }
+        const priceBySecId = new Map(allLatestPrices.map(p => [p.securityId, p]));
+
+        // Latest published signal per security
+        const latestSignalBySecId = new Map<number, typeof allSignals[0]>();
+        for (const sig of [...allSignals].reverse()) {
+          if (sig.securityId != null) latestSignalBySecId.set(sig.securityId, sig);
+        }
+
+        const today = new Date().toISOString().slice(0, 10);
 
         // Optional sector filter
         const filtered = sector
@@ -126,29 +150,70 @@ export function registerCieApiRoutes(app: Express): void {
         const paged = filtered.slice(start, start + limit);
 
         return res.json({
-          securities: paged.map(s => ({
-            ticker:          s.symbol,
-            name:            s.name,
-            sector:          s.sector,
-            ias:             s.ias,
-            rs:              s.rs,
-            cs:              s.cs,
-            recommendation:  s.recommendation,
-            scoreDate:       s.scoreDate,
-            // Technical indicators
-            rsi14:           s.rsi14 ?? null,
-            ma50:            formatKoboToNaira(s.ma50Kobo),
-            aboveMa50:       s.aboveMa50 ?? null,
-            weekReturnPct:   s.weekReturn != null ? s.weekReturn / 100 : null,
-            monthReturnPct:  s.monthReturn != null ? s.monthReturn / 100 : null,
-            ytdReturnPct:    s.ytdReturn != null ? s.ytdReturn / 100 : null,
-            dSig:            s.dSig ?? null,
-            wSig:            s.wSig ?? null,
-            mSig:            s.mSig ?? null,
-            ySig:            s.ySig ?? null,
-            stars:           s.stars ?? null,
-            updatedAt:       s.createdAt,
-          })),
+          securities: paged.map(s => {
+            const sec = secBySecId.get(s.securityId);
+            const div = divBySecId.get(s.securityId);
+            const price = priceBySecId.get(s.securityId);
+            const sig = latestSignalBySecId.get(s.securityId);
+
+            const closeKobo = price?.closeKobo ?? null;
+            const openKobo = price?.openKobo ?? null;
+            const dayChangePct = closeKobo && openKobo && openKobo !== 0
+              ? parseFloat(((closeKobo - openKobo) / openKobo * 100).toFixed(2))
+              : null;
+
+            const divAmountKobo = div?.amountPerShareKobo ?? null;
+            const divYieldPct = closeKobo && divAmountKobo && closeKobo > 0
+              ? parseFloat(((divAmountKobo / closeKobo) * 100).toFixed(2))
+              : null;
+
+            const nextExDivDate = div?.exDividendDate ?? null;
+            const daysToExDiv = nextExDivDate
+              ? Math.ceil((new Date(nextExDivDate).getTime() - new Date(today).getTime()) / 86400000)
+              : null;
+
+            return {
+              ticker:          s.symbol,
+              name:            s.name,
+              sector:          s.sector,
+              ias:             s.ias,
+              rs:              s.rs,
+              cs:              s.cs,
+              recommendation:  s.recommendation,
+              scoreDate:       s.scoreDate,
+              // Technical indicators
+              rsi14:           s.rsi14 ?? null,
+              ma50:            formatKoboToNaira(s.ma50Kobo),
+              aboveMa50:       s.aboveMa50 ?? null,
+              dayChangePct,
+              weekReturnPct:   s.weekReturn != null ? s.weekReturn / 100 : null,
+              monthReturnPct:  s.monthReturn != null ? s.monthReturn / 100 : null,
+              ytdReturnPct:    s.ytdReturn != null ? s.ytdReturn / 100 : null,
+              dSig:            s.dSig ?? null,
+              wSig:            s.wSig ?? null,
+              mSig:            s.mSig ?? null,
+              ySig:            s.ySig ?? null,
+              stars:           s.stars ?? null,
+              latestPriceNaira: formatKoboToNaira(closeKobo),
+              // Analyst intelligence fields
+              behaviourPattern: sec?.divBehaviourPattern ?? null,
+              entryZone: sec?.entryZoneLowKobo && sec?.entryZoneHighKobo
+                ? { low: formatKoboToNaira(sec.entryZoneLowKobo), high: formatKoboToNaira(sec.entryZoneHighKobo) }
+                : null,
+              targetPrice: formatKoboToNaira(sec?.targetPriceKobo),
+              // Dividend intelligence
+              nextExDivDate,
+              daysToExDiv,
+              daysToQual: daysToExDiv != null ? daysToExDiv - 1 : null,
+              divYieldPct,
+              divAmountNaira: formatKoboToNaira(divAmountKobo),
+              // Latest signal
+              latestSignal: sig
+                ? { type: sig.type, sentiment: sig.sentiment, publishedAt: sig.publishedAt }
+                : null,
+              updatedAt:       s.createdAt,
+            };
+          }),
           pagination: {
             page,
             limit,
@@ -489,31 +554,42 @@ export function registerCieApiRoutes(app: Express): void {
     requireCieTier("subscriber"),
     async (req: ApiKeyRequest, res: Response) => {
       try {
-        const [scores, marketCtx] = await Promise.all([
+        const [scores, marketCtx, allLatestPrices] = await Promise.all([
           storage.getLatestCieScores(),
           storage.getLatestCieMarketContext(),
+          storage.listLatestCiePricesAllActive(),
         ]);
 
-        const sorted = [...scores].sort((a, b) => (b.weekReturn ?? 0) - (a.weekReturn ?? 0));
-        const top5Gainers = sorted.slice(0, 5).map(s => ({
-          ticker: s.symbol,
-          name: s.name,
-          sector: s.sector,
-          weekReturnPct: s.weekReturn != null ? s.weekReturn / 100 : null,
-          recommendation: s.recommendation,
-          stars: s.stars ?? null,
-        }));
-        const top5Losers = sorted.slice(-5).reverse().map(s => ({
-          ticker: s.symbol,
-          name: s.name,
-          sector: s.sector,
-          weekReturnPct: s.weekReturn != null ? s.weekReturn / 100 : null,
-          recommendation: s.recommendation,
-          stars: s.stars ?? null,
-        }));
+        // Build map securityId → day% (close vs open)
+        const dayPctMap = new Map<number, number>();
+        for (const p of allLatestPrices) {
+          if (p.openKobo && p.openKobo !== 0) {
+            dayPctMap.set(p.securityId, ((p.closeKobo - p.openKobo) / p.openKobo) * 100);
+          }
+        }
 
-        const gainersCount = marketCtx?.gainersCount ?? scores.filter(s => (s.weekReturn ?? 0) > 0).length;
-        const losersCount = marketCtx?.losersCount ?? scores.filter(s => (s.weekReturn ?? 0) < 0).length;
+        // Sort by actual Day%, fallback to weekReturn if no open data
+        const withDay = scores.map(s => ({
+          ...s,
+          dayPct: dayPctMap.get(s.securityId) ?? (s.weekReturn != null ? s.weekReturn / 100 : 0),
+        }));
+        const sorted = [...withDay].sort((a, b) => b.dayPct - a.dayPct);
+
+        const mapMover = (s: typeof sorted[0]) => ({
+          ticker: s.symbol,
+          name: s.name,
+          sector: s.sector,
+          dayChangePct: dayPctMap.has(s.securityId) ? parseFloat(s.dayPct.toFixed(2)) : null,
+          weekReturnPct: s.weekReturn != null ? s.weekReturn / 100 : null,
+          recommendation: s.recommendation,
+          stars: s.stars ?? null,
+        });
+
+        const top5Gainers = sorted.slice(0, 5).map(mapMover);
+        const top5Losers = sorted.slice(-5).reverse().map(mapMover);
+
+        const gainersCount = marketCtx?.gainersCount ?? withDay.filter(s => s.dayPct > 0).length;
+        const losersCount = marketCtx?.losersCount ?? withDay.filter(s => s.dayPct < 0).length;
 
         return res.json({
           date: marketCtx?.contextDate ?? new Date().toISOString().slice(0, 10),

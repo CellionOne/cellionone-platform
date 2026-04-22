@@ -2278,21 +2278,24 @@ export async function registerRoutes(
       bvnVerified = bvnResult.verified;
       ninVerified = ninResult.verified;
 
-      if (!bvnVerified && !ninVerified) {
+      // Both BVN and NIN must verify successfully — partial verification is not accepted
+      if (!bvnVerified || !ninVerified) {
         return res.status(422).json({
-          message: "Identity verification failed. Please check your BVN and NIN and try again.",
-          bvn: { success: false, message: bvnResult.reason },
-          nin: { success: false, message: ninResult.reason },
+          message: !bvnVerified && !ninVerified
+            ? "Both BVN and NIN could not be verified. Please check the numbers and try again."
+            : !bvnVerified
+              ? "BVN could not be verified. Please check your Bank Verification Number."
+              : "NIN could not be verified. Please check your National Identification Number.",
+          bvn: { success: bvnVerified, message: bvnResult.reason },
+          nin: { success: ninVerified, message: ninResult.reason },
         });
       }
 
-      // Prefer BVN data (NIBSS has richer data), fallback to NIN (NIMC)
-      const primary = bvnVerified ? bvnResult : ninResult;
-      const secondary = bvnVerified ? ninResult : bvnResult;
-      govFullName = primary.fullName ?? secondary.fullName ?? null;
-      govDob = primary.dob ?? secondary.dob ?? null;
-      govGender = primary.gender ?? secondary.gender ?? null;
-      govPhone = primary.phone ?? secondary.phone ?? null;
+      // Both verified — prefer BVN data (NIBSS has richer data), supplement with NIN (NIMC)
+      govFullName = bvnResult.fullName ?? ninResult.fullName ?? null;
+      govDob = bvnResult.dob ?? ninResult.dob ?? null;
+      govGender = bvnResult.gender ?? ninResult.gender ?? null;
+      govPhone = bvnResult.phone ?? ninResult.phone ?? null;
 
       // Parse firstName/lastName from govFullName (NIBSS format: "SURNAME FIRSTNAME MIDDLENAME")
       let firstName: string | null = null;

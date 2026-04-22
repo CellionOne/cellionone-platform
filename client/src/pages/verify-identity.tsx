@@ -264,16 +264,18 @@ export default function VerifyIdentityPage() {
                 </form>
               </Form>
 
-              <div className="text-center">
-                <button
-                  type="button"
-                  className="text-sm text-muted-foreground hover:text-foreground hover:underline"
-                  onClick={handleSkip}
-                  data-testid="button-skip-verify"
-                >
-                  Skip for now — I'll verify later
-                </button>
-              </div>
+              {!inviteToken && (
+                <div className="text-center">
+                  <button
+                    type="button"
+                    className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+                    onClick={handleSkip}
+                    data-testid="button-skip-verify"
+                  >
+                    Skip for now — I'll verify later
+                  </button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

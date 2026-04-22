@@ -2268,6 +2268,7 @@ export async function registerRoutes(
       let govDob: string | null = null;
       let govGender: string | null = null;
       let govPhone: string | null = null;
+      let govPhotoStoragePath: string | null = null;
 
       // Real verification — run BVN and NIN lookups in parallel
       const [bvnResult, ninResult] = await Promise.all([
@@ -2296,6 +2297,43 @@ export async function registerRoutes(
       govDob = bvnResult.dob ?? ninResult.dob ?? null;
       govGender = bvnResult.gender ?? ninResult.gender ?? null;
       govPhone = bvnResult.phone ?? ninResult.phone ?? null;
+      const govPhotoBase64 = bvnResult.photo ?? ninResult.photo ?? null;
+
+      // Upload government ID photo to object storage (best effort — never blocks verification)
+      if (govPhotoBase64) {
+        try {
+          let photoBuffer: Buffer;
+          // Smile ID returns a raw base64 string or a data-URI; detect and handle both.
+          // If the value looks like a URL (starts with http/https), fetch the image bytes instead.
+          if (/^https?:\/\//i.test(govPhotoBase64)) {
+            const imgResp = await fetch(govPhotoBase64);
+            if (!imgResp.ok) throw new Error(`Govt photo URL fetch failed: ${imgResp.status}`);
+            photoBuffer = Buffer.from(await imgResp.arrayBuffer());
+          } else {
+            const cleanBase64 = govPhotoBase64.replace(/^data:image\/\w+;base64,/, "");
+            photoBuffer = Buffer.from(cleanBase64, "base64");
+          }
+          if (photoBuffer.length >= 100) {
+            const objectStorageSvc = new ObjectStorageService();
+            const uploadURL = await objectStorageSvc.getObjectEntityUploadURL();
+            const objectPath = objectStorageSvc.normalizeObjectEntityPath(uploadURL);
+            const putResp = await fetch(uploadURL, {
+              method: "PUT",
+              body: photoBuffer,
+              headers: { "Content-Type": "image/jpeg" },
+            });
+            if (putResp.ok) {
+              govPhotoStoragePath = objectPath;
+              console.log(`[VerifyIdentity] Government photo stored at ${objectPath} for user ${userId}`);
+            } else {
+              console.warn(`[VerifyIdentity] Government photo PUT failed: ${putResp.status}`);
+            }
+          }
+        } catch (photoErr: unknown) {
+          const msg = photoErr instanceof Error ? photoErr.message : String(photoErr);
+          console.warn(`[VerifyIdentity] Government photo upload error (non-fatal): ${msg}`);
+        }
+      }
 
       // Parse firstName/lastName from govFullName (NIBSS format: "SURNAME FIRSTNAME MIDDLENAME")
       let firstName: string | null = null;
@@ -2375,7 +2413,7 @@ export async function registerRoutes(
       ];
       const filled = completionFields.filter(Boolean).length;
       const total = completionFields.length;
-      const hasDocuments = !!(existingProfile?.passportPhotoPath && existingProfile?.signaturePath && existingProfile?.idDocumentPath);
+      const hasDocuments = !!((existingProfile?.passportPhotoPath || govPhotoStoragePath) && existingProfile?.signaturePath && existingProfile?.idDocumentPath);
       const hasIds = true; // BVN/NIN just stored
       const profileCompletion = Math.round((filled / total) * 70) + (hasDocuments ? 15 : 0) + (hasIds ? 15 : 0);
       const isProfileComplete = profileCompletion >= 85;
@@ -2394,6 +2432,8 @@ export async function registerRoutes(
         ...(govDob ? { dateOfBirth: govDob } : {}),
         ...(govGender ? { gender: govGender } : {}),
         ...(govPhone ? { phone: govPhone } : {}),
+        // Only store the government photo if the founder has not already uploaded their own
+        ...(govPhotoStoragePath && !existingProfile?.passportPhotoPath ? { passportPhotoPath: govPhotoStoragePath } : {}),
       };
 
       const profile = await storage.upsertFounderProfile(profileInsert);
@@ -2409,6 +2449,7 @@ export async function registerRoutes(
           govFullName: govFullName ?? "N/A",
           govGender: govGender ?? "N/A",
           hasPhone: !!govPhone,
+          hasGovtPhoto: !!govPhotoStoragePath,
         },
         ipAddress: req.ip,
       });

@@ -1233,6 +1233,7 @@ function DocumentsSection() {
       icon: Camera,
       uploaded: profile?.hasPassportPhoto || false,
       accept: "image/jpeg,image/png",
+      govtSource: !!(profile?.profilePopulatedFromKyc && profile?.hasPassportPhoto),
     },
   ];
 
@@ -1353,11 +1354,16 @@ function DocumentsSection() {
                   <doc.icon className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-sm">{doc.label}</span>
                     {doc.uploaded && (
                       <Badge variant="default" className="gap-1 text-xs">
                         <CheckCircle2 className="h-3 w-3" /> Uploaded
+                      </Badge>
+                    )}
+                    {doc.govtSource && (
+                      <Badge variant="outline" className="gap-1 text-xs border-primary/50 text-primary" data-testid={`badge-govt-source-${doc.type}`}>
+                        <ShieldCheck className="h-3 w-3" /> Source: Govt ID
                       </Badge>
                     )}
                   </div>

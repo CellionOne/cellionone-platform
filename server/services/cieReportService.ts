@@ -561,7 +561,7 @@ export async function generateAlphaIntelReport(): Promise<Buffer> {
   ];
 
   for (const [sector, items] of Array.from(sectorMap.entries()).sort((a, b) => {
-    const avgA = items.reduce((s, i) => s + (i.ias ?? 0), 0) / items.length;
+    const avgA = a[1].reduce((s, i) => s + (i.ias ?? 0), 0) / a[1].length;
     const avgB = b[1].reduce((s, i) => s + (i.ias ?? 0), 0) / b[1].length;
     return avgB - avgA;
   })) {

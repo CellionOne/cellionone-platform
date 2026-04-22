@@ -34,6 +34,7 @@ import {
 } from "../services/cieDataIngestionService";
 import { triggerImmediateScoreRun } from "../services/cieScheduler";
 import { generateCieSignalDraft, generateCieMarketCommentary, isOpenAIAvailable } from "../services/aiService";
+import { generateAlphaIntelReport } from "../services/cieReportService";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -205,6 +206,11 @@ export function registerCieAdminRoutes(app: Express): void {
         name: z.string().min(2).max(255).optional(),
         sector: z.string().min(2).max(100).optional(),
         isActive: z.boolean().optional(),
+        // Intelligence fields (analyst-maintained)
+        divBehaviourPattern: z.enum(["HEAVY_SELL", "MODERATE", "HOLDER", "HOLDER_PLUS", "UNKNOWN"]).nullable().optional(),
+        entryZoneLowKobo: z.number().int().nullable().optional(),
+        entryZoneHighKobo: z.number().int().nullable().optional(),
+        targetPriceKobo: z.number().int().nullable().optional(),
       });
       const body = schema.parse(req.body);
       const sec = await storage.updateCieSecurity(id, body);
@@ -1088,6 +1094,92 @@ export function registerCieAdminRoutes(app: Express): void {
       }));
 
       res.json(result);
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  // ================================================================
+  // REPORT DOWNLOAD
+  // ================================================================
+
+  /**
+   * GET /api/admin/cie/report/latest
+   * Download the latest Alpha Intel Excel report (5 tabs, all securities).
+   * Report is generated on-demand — first call after a score run may take ~10s.
+   */
+  app.get("/api/admin/cie/report/latest", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const buf = await generateAlphaIntelReport();
+      const today = new Date().toISOString().slice(0, 10);
+
+      res.setHeader("Content-Disposition", `attachment; filename="AlphaIntel_NGX_${today}.xlsx"`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Length", buf.length);
+      res.send(buf);
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  // ================================================================
+  // MARKET CONTEXT
+  // ================================================================
+
+  /**
+   * POST /api/admin/cie/market-context
+   * Persist or update today's analyst macro inputs (ASI close, Brent, NGN/USD, CBN MPR).
+   */
+  app.post("/api/admin/cie/market-context", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const schema = z.object({
+        contextDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(new Date().toISOString().slice(0, 10)),
+        asiClose: z.number().optional(),         // Naira value e.g. 101234.50
+        asiChangePct: z.number().optional(),     // e.g. 1.25 means 1.25%
+        brentUsd: z.number().optional(),          // e.g. 76.50
+        ngnPerUsd: z.number().optional(),          // e.g. 1580.50
+        cbnMpr: z.number().optional(),             // e.g. 26.50 (percent)
+        gainersCount: z.number().int().optional(),
+        losersCount: z.number().int().optional(),
+        notes: z.string().optional(),
+      });
+
+      const body = schema.parse(req.body);
+      const userId = getUserId(req);
+
+      const ctx = await storage.upsertCieMarketContext({
+        contextDate: body.contextDate,
+        asiCloseKobo: body.asiClose != null ? Math.round(body.asiClose * 100) : null,
+        asiChangePctBps: body.asiChangePct != null ? Math.round(body.asiChangePct * 100) : null,
+        brentUsdCents: body.brentUsd != null ? Math.round(body.brentUsd * 100) : null,
+        ngnPerUsd: body.ngnPerUsd != null ? Math.round(body.ngnPerUsd * 100) : null,
+        cbnMprBps: body.cbnMpr != null ? Math.round(body.cbnMpr * 100) : null,
+        gainersCount: body.gainersCount ?? null,
+        losersCount: body.losersCount ?? null,
+        notes: body.notes ?? null,
+        createdByUserId: userId,
+      });
+
+      res.json({ success: true, context: ctx });
+    } catch (e: unknown) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /**
+   * GET /api/admin/cie/market-context/latest
+   * Fetch the most recent analyst market context entry.
+   */
+  app.get("/api/admin/cie/market-context/latest", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const ctx = await storage.getLatestCieMarketContext();
+      res.json(ctx ?? null);
     } catch (e: unknown) {
       res.status(500).json({ error: errMsg(e) });
     }

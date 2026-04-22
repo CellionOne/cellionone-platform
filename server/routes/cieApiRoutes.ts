@@ -135,6 +135,18 @@ export function registerCieApiRoutes(app: Express): void {
             cs:              s.cs,
             recommendation:  s.recommendation,
             scoreDate:       s.scoreDate,
+            // Technical indicators
+            rsi14:           s.rsi14 ?? null,
+            ma50:            formatKoboToNaira(s.ma50Kobo),
+            aboveMa50:       s.aboveMa50 ?? null,
+            weekReturnPct:   s.weekReturn != null ? s.weekReturn / 100 : null,
+            monthReturnPct:  s.monthReturn != null ? s.monthReturn / 100 : null,
+            ytdReturnPct:    s.ytdReturn != null ? s.ytdReturn / 100 : null,
+            dSig:            s.dSig ?? null,
+            wSig:            s.wSig ?? null,
+            mSig:            s.mSig ?? null,
+            ySig:            s.ySig ?? null,
+            stars:           s.stars ?? null,
             updatedAt:       s.createdAt,
           })),
           pagination: {
@@ -201,6 +213,11 @@ export function registerCieApiRoutes(app: Express): void {
           name:     security.name,
           sector:   security.sector,
           exchange: security.exchange,
+          // Analyst-maintained intelligence fields
+          divBehaviourPattern: security.divBehaviourPattern ?? null,
+          entryZoneLow:        formatKoboToNaira(security.entryZoneLowKobo),
+          entryZoneHigh:       formatKoboToNaira(security.entryZoneHighKobo),
+          targetPrice:         formatKoboToNaira(security.targetPriceKobo),
           latestPrice:    latestPrice
             ? {
                 date:        latestPrice.tradeDate,
@@ -220,6 +237,18 @@ export function registerCieApiRoutes(app: Express): void {
                 recommendation: score.recommendation,
                 pillarBreakdown: score.pillarBreakdown,
                 dataPointsUsed: score.dataPointsUsed,
+                // Technical indicators
+                rsi14:          score.rsi14 ?? null,
+                ma50:           formatKoboToNaira(score.ma50Kobo),
+                aboveMa50:      score.aboveMa50 ?? null,
+                weekReturnPct:  score.weekReturn != null ? score.weekReturn / 100 : null,
+                monthReturnPct: score.monthReturn != null ? score.monthReturn / 100 : null,
+                ytdReturnPct:   score.ytdReturn != null ? score.ytdReturn / 100 : null,
+                dSig:           score.dSig ?? null,
+                wSig:           score.wSig ?? null,
+                mSig:           score.mSig ?? null,
+                ySig:           score.ySig ?? null,
+                stars:          score.stars ?? null,
                 updatedAt:      score.createdAt,
               }
             : null,
@@ -354,7 +383,7 @@ export function registerCieApiRoutes(app: Express): void {
 
   // ──────────────────────────────────────────────────────────────────────────
   // GET /api/v1/cie/sector-rotation
-  // Sector-level IAS rankings and momentum direction — Pro only
+  // Enriched sector-level IAS rankings — Pro only
   // ──────────────────────────────────────────────────────────────────────────
   app.get(
     "/api/v1/cie/sector-rotation",
@@ -362,7 +391,15 @@ export function registerCieApiRoutes(app: Express): void {
     requireCieTier("pro"),
     async (req: ApiKeyRequest, res: Response) => {
       try {
-        const scores = await storage.getLatestCieScores();
+        const [scores, allDividends] = await Promise.all([
+          storage.getLatestCieScores(),
+          storage.listCieDividends(true),
+        ]);
+
+        const today = new Date().toISOString().slice(0, 10);
+
+        // Build div map by securityId
+        const divBySecId = new Map(allDividends.map(d => [d.securityId, d]));
 
         // Group scores by sector
         const sectorMap = new Map<string, typeof scores>();
@@ -377,17 +414,52 @@ export function registerCieApiRoutes(app: Express): void {
           const maxIas  = Math.max(...iasList);
           const minIas  = Math.min(...iasList);
 
+          // Avg week return for trend arrow
+          const avgWeekBps = items.length > 0
+            ? Math.round(items.reduce((s, i) => s + (i.weekReturn ?? 0), 0) / items.length)
+            : 0;
+          const trendArrow = avgWeekBps > 50 ? "↑" : avgWeekBps < -50 ? "↓" : "─";
+
           // Top 3 by IAS
           const top3 = [...items]
             .sort((a, b) => (b.ias ?? 0) - (a.ias ?? 0))
             .slice(0, 3)
-            .map(i => ({ ticker: i.symbol, name: i.name, ias: i.ias, recommendation: i.recommendation }));
+            .map(i => ({
+              ticker: i.symbol, name: i.name, ias: i.ias,
+              recommendation: i.recommendation,
+              weekReturnPct: i.weekReturn != null ? i.weekReturn / 100 : null,
+              stars: i.stars ?? null,
+            }));
 
-          // Momentum heuristic: avgIas ≥ 60 → bullish; ≤ 35 → bearish; else neutral
+          // Dividend angle — nearest ex-div dates in sector
+          const sectorDivs = items
+            .map(i => ({ ticker: i.symbol, div: divBySecId.get(i.securityId) }))
+            .filter(x => x.div)
+            .map(x => ({
+              ticker: x.ticker,
+              exDivDate: x.div!.exDividendDate,
+              daysUntil: Math.ceil((new Date(x.div!.exDividendDate).getTime() - new Date(today).getTime()) / 86400000),
+            }))
+            .filter(x => x.daysUntil >= -1)
+            .sort((a, b) => a.daysUntil - b.daysUntil)
+            .slice(0, 3);
+
+          // Momentum heuristic
           const momentum: "bullish" | "bearish" | "neutral" =
             avgIas >= 60 ? "bullish" : avgIas <= 35 ? "bearish" : "neutral";
 
-          return { sector, avgIas, maxIas, minIas, count: items.length, momentum, top3 };
+          return {
+            sector,
+            avgIas,
+            maxIas,
+            minIas,
+            count: items.length,
+            momentum,
+            trendArrow,
+            avgWeekReturnPct: avgWeekBps / 100,
+            top3,
+            dividendAngle: sectorDivs,
+          };
         });
 
         // Sort by avgIas descending
@@ -399,6 +471,70 @@ export function registerCieApiRoutes(app: Express): void {
           scoreDate,
           totalSecurities: scores.length,
           sectors,
+        });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Internal error";
+        res.status(500).json({ error: msg });
+      }
+    },
+  );
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // GET /api/v1/cie/market-summary
+  // Daily market summary — gainers/losers counts, top movers, macro context — Subscriber+
+  // ──────────────────────────────────────────────────────────────────────────
+  app.get(
+    "/api/v1/cie/market-summary",
+    cieAuth,
+    requireCieTier("subscriber"),
+    async (req: ApiKeyRequest, res: Response) => {
+      try {
+        const [scores, marketCtx] = await Promise.all([
+          storage.getLatestCieScores(),
+          storage.getLatestCieMarketContext(),
+        ]);
+
+        const sorted = [...scores].sort((a, b) => (b.weekReturn ?? 0) - (a.weekReturn ?? 0));
+        const top5Gainers = sorted.slice(0, 5).map(s => ({
+          ticker: s.symbol,
+          name: s.name,
+          sector: s.sector,
+          weekReturnPct: s.weekReturn != null ? s.weekReturn / 100 : null,
+          recommendation: s.recommendation,
+          stars: s.stars ?? null,
+        }));
+        const top5Losers = sorted.slice(-5).reverse().map(s => ({
+          ticker: s.symbol,
+          name: s.name,
+          sector: s.sector,
+          weekReturnPct: s.weekReturn != null ? s.weekReturn / 100 : null,
+          recommendation: s.recommendation,
+          stars: s.stars ?? null,
+        }));
+
+        const gainersCount = marketCtx?.gainersCount ?? scores.filter(s => (s.weekReturn ?? 0) > 0).length;
+        const losersCount = marketCtx?.losersCount ?? scores.filter(s => (s.weekReturn ?? 0) < 0).length;
+
+        return res.json({
+          date: marketCtx?.contextDate ?? new Date().toISOString().slice(0, 10),
+          totalSecurities: scores.length,
+          gainersCount,
+          losersCount,
+          unchanged: scores.length - gainersCount - losersCount,
+          // Macro context from analyst inputs
+          macro: marketCtx
+            ? {
+                asiClose:       marketCtx.asiCloseKobo != null ? marketCtx.asiCloseKobo / 100 : null,
+                asiChangePct:   marketCtx.asiChangePctBps != null ? marketCtx.asiChangePctBps / 100 : null,
+                brentUsd:       marketCtx.brentUsdCents != null ? marketCtx.brentUsdCents / 100 : null,
+                ngnPerUsd:      marketCtx.ngnPerUsd != null ? marketCtx.ngnPerUsd / 100 : null,
+                cbnMpr:         marketCtx.cbnMprBps != null ? marketCtx.cbnMprBps / 100 : null,
+                contextDate:    marketCtx.contextDate,
+              }
+            : null,
+          top5Gainers,
+          top5Losers,
+          scoreDate: scores.length > 0 ? scores[0].scoreDate : null,
         });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Internal error";

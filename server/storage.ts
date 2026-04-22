@@ -62,6 +62,7 @@ import {
   cieSignals, type CieSignal, type InsertCieSignal,
   cieModelVersions, type CieModelVersion, type InsertCieModelVersion,
   cieMarketPulse, type CieMarketPulse, type InsertCieMarketPulse,
+  cieMarketContext, type CieMarketContext, type InsertCieMarketContext,
   cieIngestionLogs, type CieIngestionLog, type InsertCieIngestionLog,
   cieSubscriptions, type CieSubscription, type InsertCieSubscription,
 } from "@shared/schema";
@@ -470,6 +471,11 @@ export interface IStorage {
   getLatestCieMarketPulse(): Promise<CieMarketPulse | undefined>;
   upsertCieMarketPulse(data: InsertCieMarketPulse): Promise<CieMarketPulse>;
   updateLatestCieMarketPulseCommentary(commentary: string): Promise<boolean>;
+
+  // CIE Market Context
+  upsertCieMarketContext(data: InsertCieMarketContext): Promise<CieMarketContext>;
+  getLatestCieMarketContext(): Promise<CieMarketContext | undefined>;
+  getCieMarketContextByDate(date: string): Promise<CieMarketContext | undefined>;
 
   // CIE Ingestion Logs
   createCieIngestionLog(data: InsertCieIngestionLog): Promise<CieIngestionLog>;
@@ -2227,6 +2233,18 @@ export class DatabaseStorage implements IStorage {
           pillarBreakdown: data.pillarBreakdown,
           modelVersionId: data.modelVersionId,
           dataPointsUsed: data.dataPointsUsed,
+          // Technical indicators
+          rsi14: data.rsi14,
+          ma50Kobo: data.ma50Kobo,
+          aboveMa50: data.aboveMa50,
+          weekReturn: data.weekReturn,
+          monthReturn: data.monthReturn,
+          ytdReturn: data.ytdReturn,
+          dSig: data.dSig,
+          wSig: data.wSig,
+          mSig: data.mSig,
+          ySig: data.ySig,
+          stars: data.stars,
         },
       }).returning();
     return score;
@@ -2261,6 +2279,18 @@ export class DatabaseStorage implements IStorage {
         pillarBreakdown: cieScores.pillarBreakdown,
         modelVersionId: cieScores.modelVersionId,
         dataPointsUsed: cieScores.dataPointsUsed,
+        // Technical indicators
+        rsi14: cieScores.rsi14,
+        ma50Kobo: cieScores.ma50Kobo,
+        aboveMa50: cieScores.aboveMa50,
+        weekReturn: cieScores.weekReturn,
+        monthReturn: cieScores.monthReturn,
+        ytdReturn: cieScores.ytdReturn,
+        dSig: cieScores.dSig,
+        wSig: cieScores.wSig,
+        mSig: cieScores.mSig,
+        ySig: cieScores.ySig,
+        stars: cieScores.stars,
         createdAt: cieScores.createdAt,
         symbol: cieSecurities.symbol,
         name: cieSecurities.name,
@@ -2436,6 +2466,39 @@ export class DatabaseStorage implements IStorage {
       .set({ commentary })
       .where(eq(cieMarketPulse.id, latest.id));
     return true;
+  }
+
+  // ============== CIE Market Context ==============
+  async upsertCieMarketContext(data: InsertCieMarketContext): Promise<CieMarketContext> {
+    const [ctx] = await db.insert(cieMarketContext).values(data)
+      .onConflictDoUpdate({
+        target: cieMarketContext.contextDate,
+        set: {
+          asiCloseKobo: data.asiCloseKobo,
+          asiChangePctBps: data.asiChangePctBps,
+          brentUsdCents: data.brentUsdCents,
+          ngnPerUsd: data.ngnPerUsd,
+          cbnMprBps: data.cbnMprBps,
+          gainersCount: data.gainersCount,
+          losersCount: data.losersCount,
+          notes: data.notes,
+          updatedAt: new Date(),
+        },
+      }).returning();
+    return ctx;
+  }
+
+  async getLatestCieMarketContext(): Promise<CieMarketContext | undefined> {
+    const [ctx] = await db.select().from(cieMarketContext)
+      .orderBy(desc(cieMarketContext.contextDate))
+      .limit(1);
+    return ctx;
+  }
+
+  async getCieMarketContextByDate(date: string): Promise<CieMarketContext | undefined> {
+    const [ctx] = await db.select().from(cieMarketContext)
+      .where(eq(cieMarketContext.contextDate, date));
+    return ctx;
   }
 
   // ============== CIE Ingestion Logs ==============

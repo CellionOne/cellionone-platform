@@ -2276,6 +2276,11 @@ export const cieSecurities = pgTable("cie_securities", {
   sector: varchar("sector", { length: 100 }).notNull(),
   exchange: varchar("exchange", { length: 50 }).default("NGX"),
   isActive: boolean("is_active").default(true),
+  // Analyst-maintained intelligence fields
+  divBehaviourPattern: varchar("div_behaviour_pattern", { length: 30 }), // HEAVY_SELL, MODERATE, HOLDER, HOLDER_PLUS, UNKNOWN
+  entryZoneLowKobo: integer("entry_zone_low_kobo"),   // analyst entry zone low (kobo)
+  entryZoneHighKobo: integer("entry_zone_high_kobo"),  // analyst entry zone high (kobo)
+  targetPriceKobo: integer("target_price_kobo"),       // analyst target price (kobo)
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -2358,6 +2363,18 @@ export const cieScores = pgTable("cie_scores", {
   }>(),
   modelVersionId: integer("model_version_id").references(() => cieModelVersions.id),
   dataPointsUsed: integer("data_points_used"),
+  // Technical indicators (computed per score run)
+  rsi14: integer("rsi14"),                         // RSI(14) value 0-100
+  ma50Kobo: integer("ma50_kobo"),                  // 50-day simple moving average in kobo
+  aboveMa50: boolean("above_ma50"),                // close > MA50
+  weekReturn: integer("week_return"),              // 5-day return × 100 (e.g. 345 = 3.45%)
+  monthReturn: integer("month_return"),            // ~21-day return × 100
+  ytdReturn: integer("ytd_return"),                // year-to-date return × 100
+  dSig: varchar("d_sig", { length: 5 }),           // ↑ / ↓ / ─ for day
+  wSig: varchar("w_sig", { length: 5 }),           // ↑ / ↓ / ─ for week
+  mSig: varchar("m_sig", { length: 5 }),           // ↑ / ↓ / ─ for month
+  ySig: varchar("y_sig", { length: 5 }),           // ↑ / ↓ / ─ for YTD
+  stars: integer("stars"),                         // 1-5 star rating derived from IAS
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   index("idx_cie_scores_sec_date").on(table.securityId, table.scoreDate),
@@ -2427,6 +2444,31 @@ export const cieMarketPulse = pgTable("cie_market_pulse", {
 export const insertCieMarketPulseSchema = createInsertSchema(cieMarketPulse).omit({ id: true, createdAt: true });
 export type CieMarketPulse = typeof cieMarketPulse.$inferSelect;
 export type InsertCieMarketPulse = z.infer<typeof insertCieMarketPulseSchema>;
+
+// ============== CIE MARKET CONTEXT (daily analyst macro inputs) ==============
+// Stores the analyst's daily macro entries: ASI close, Brent crude, NGN/USD, CBN MPR.
+// Used by the report generator for Tab 3 (Market Movers) macro rows and Tab 1 summary.
+export const cieMarketContext = pgTable("cie_market_context", {
+  id: serial("id").primaryKey(),
+  contextDate: varchar("context_date", { length: 20 }).notNull().unique(), // YYYY-MM-DD
+  asiCloseKobo: integer("asi_close_kobo"),        // ASI close × 100 for decimal precision
+  asiChangePctBps: integer("asi_change_pct_bps"), // daily change in basis points (bps = pct × 10000)
+  brentUsdCents: integer("brent_usd_cents"),      // Brent crude in USD cents
+  ngnPerUsd: integer("ngn_per_usd"),              // NGN per USD × 100
+  cbnMprBps: integer("cbn_mpr_bps"),              // CBN MPR in basis points (e.g. 2650 = 26.50%)
+  gainersCount: integer("gainers_count"),
+  losersCount: integer("losers_count"),
+  notes: text("notes"),
+  createdByUserId: varchar("created_by_user_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_cie_mctx_date").on(table.contextDate),
+]);
+
+export const insertCieMarketContextSchema = createInsertSchema(cieMarketContext).omit({ id: true, createdAt: true, updatedAt: true });
+export type CieMarketContext = typeof cieMarketContext.$inferSelect;
+export type InsertCieMarketContext = z.infer<typeof insertCieMarketContextSchema>;
 
 // ============== CIE INGESTION LOGS ==============
 export const cieIngestionLogs = pgTable("cie_ingestion_logs", {

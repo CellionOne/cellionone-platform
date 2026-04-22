@@ -21,6 +21,14 @@
  * All IAS, RS, CS are cross-sectionally normalised per sector (rank transform → 0–100).
  * Recommendation thresholds (IAS, high CS, low RS):
  *   85+ Strong Buy | 70+ Accumulate | 50+ Hold | 35+ Reduce | < 35 Sell
+ *
+ * Technical indicators (added per Task #116):
+ *   RSI(14) — 14-period Relative Strength Index
+ *   MA50    — 50-day simple moving average (in kobo)
+ *   aboveMa50 — boolean flag
+ *   weekReturn, monthReturn, ytdReturn — period returns × 100 (e.g. 345 = 3.45%)
+ *   dSig, wSig, mSig, ySig — directional signals ↑ / ↓ / ─
+ *   stars  — 1–5 star rating mapped from IAS tiers
  */
 
 import { storage } from "../storage";
@@ -44,6 +52,18 @@ export interface SecurityScore {
   recommendation: string;
   pillarBreakdown: PillarBreakdown;
   dataPointsUsed: number;
+  // Technical indicators
+  rsi14: number | null;
+  ma50Kobo: number | null;
+  aboveMa50: boolean | null;
+  weekReturn: number | null;
+  monthReturn: number | null;
+  ytdReturn: number | null;
+  dSig: string | null;
+  wSig: string | null;
+  mSig: string | null;
+  ySig: string | null;
+  stars: number;
 }
 
 const DEFAULT_WEIGHTS = {
@@ -83,11 +103,70 @@ function getRecommendation(ias: number, rs: number): string {
   return "Sell";
 }
 
+/** Map IAS to star rating (1–5) */
+function iasToStars(ias: number): number {
+  if (ias >= 80) return 5;
+  if (ias >= 65) return 4;
+  if (ias >= 50) return 3;
+  if (ias >= 30) return 2;
+  return 1;
+}
+
+/** Return directional signal character */
+function dirSignal(returnBps: number | null): string {
+  if (returnBps === null) return "─";
+  if (returnBps > 50) return "↑";  // > +0.5%
+  if (returnBps < -50) return "↓"; // < -0.5%
+  return "─";
+}
+
 /** Days between two YYYY-MM-DD strings */
 function daysBetween(dateA: string, dateB: string): number {
   const msA = new Date(dateA).getTime();
   const msB = new Date(dateB).getTime();
   return Math.round(Math.abs(msA - msB) / 86400000);
+}
+
+/**
+ * Compute RSI(14) from an ascending array of close prices.
+ * Returns null if fewer than 15 prices are available.
+ */
+function computeRsi14(closes: number[]): number | null {
+  if (closes.length < 15) return null;
+
+  const gains: number[] = [];
+  const losses: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? -diff : 0);
+  }
+
+  // Initial average using the first 14 periods
+  const seedGains = gains.slice(0, 14);
+  const seedLosses = losses.slice(0, 14);
+  let avgGain = seedGains.reduce((a, b) => a + b, 0) / 14;
+  let avgLoss = seedLosses.reduce((a, b) => a + b, 0) / 14;
+
+  // Wilder smoothing for the remaining periods
+  for (let i = 14; i < gains.length; i++) {
+    avgGain = (avgGain * 13 + gains[i]) / 14;
+    avgLoss = (avgLoss * 13 + losses[i]) / 14;
+  }
+
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return Math.round(100 - 100 / (1 + rs));
+}
+
+/**
+ * Compute 50-day simple moving average (average of last ≤50 closes).
+ * Returns null if fewer than 10 closes are available.
+ */
+function computeMa50(closes: number[]): number | null {
+  const window = closes.slice(-50);
+  if (window.length < 10) return null;
+  return Math.round(window.reduce((a, b) => a + b, 0) / window.length);
 }
 
 /**
@@ -108,11 +187,20 @@ interface RawPillars {
   // Confidence ingredients
   dataPoints: number;       // total available price points
   latestTradeDate: string;  // YYYY-MM-DD of most recent price point (for recency-gap)
+  // Technical indicators
+  rsi14: number | null;
+  ma50Kobo: number | null;
+  aboveMa50: boolean | null;
+  dayReturn: number | null;  // latest 1-day return × 100 bps
+  weekReturn: number | null; // 5-day return × 100 bps
+  monthReturn: number | null;// ~21-day return × 100 bps
+  ytdReturn: number | null;  // YTD return × 100 bps
+  latestClose: number;       // latest close in kobo
 }
 
 async function computeRawPillars(securityId: number): Promise<RawPillars | null> {
-  // Fetch up to 90 days of history for full-window RS metrics
-  const prices = await storage.listCiePrices(securityId, 90);
+  // Fetch up to 260 days to have enough for YTD + RSI + MA50
+  const prices = await storage.listCiePrices(securityId, 260);
 
   if (prices.length < 5) return null; // insufficient data minimum
 
@@ -122,6 +210,7 @@ async function computeRawPillars(securityId: number): Promise<RawPillars | null>
   const volumes = sorted.map(p => p.volume ?? 0);
   const n = closes.length;
   const latestTradeDate = sorted[n - 1].tradeDate;
+  const latestClose = closes[n - 1];
 
   // ── Momentum (IAS: 20-day window) ─────────────────────────────────────────
   const latest = closes[n - 1];
@@ -169,6 +258,37 @@ async function computeRawPillars(securityId: number): Promise<RawPillars | null>
     if (dd > maxDrawdown90d) maxDrawdown90d = dd;
   }
 
+  // ── Technical indicators ──────────────────────────────────────────────────
+  const rsi14 = computeRsi14(closes);
+  const ma50Kobo = computeMa50(closes);
+  const aboveMa50 = ma50Kobo !== null ? latestClose > ma50Kobo : null;
+
+  // Day return (most recent single-day change in basis points ×100)
+  const prev1 = n >= 2 ? closes[n - 2] : null;
+  const dayReturn = prev1 && prev1 > 0
+    ? Math.round(((latestClose - prev1) / prev1) * 10000)
+    : null;
+
+  // Week return (5-trading-day)
+  const prev5wk = closes[Math.max(0, n - 6)];
+  const weekReturn = prev5wk > 0
+    ? Math.round(((latestClose - prev5wk) / prev5wk) * 10000)
+    : null;
+
+  // Month return (~21-trading-day)
+  const prev21 = closes[Math.max(0, n - 22)];
+  const monthReturn = prev21 > 0
+    ? Math.round(((latestClose - prev21) / prev21) * 10000)
+    : null;
+
+  // YTD return — find the first price in current calendar year
+  const currentYear = new Date().getFullYear();
+  const yearStart = `${currentYear}-01-01`;
+  const ytdBase = sorted.find(p => p.tradeDate >= yearStart);
+  const ytdReturn = ytdBase && ytdBase.closeKobo > 0
+    ? Math.round(((latestClose - ytdBase.closeKobo) / ytdBase.closeKobo) * 10000)
+    : null;
+
   return {
     securityId,
     momentum20d,
@@ -179,6 +299,14 @@ async function computeRawPillars(securityId: number): Promise<RawPillars | null>
     maxDrawdown90d,
     dataPoints: n,
     latestTradeDate,
+    latestClose,
+    rsi14,
+    ma50Kobo,
+    aboveMa50,
+    dayReturn,
+    weekReturn,
+    monthReturn,
+    ytdReturn,
   };
 }
 
@@ -211,10 +339,11 @@ async function scoreSector(
     const anomalyRate = r.volatility90d > 80 ? 0.4 : r.volatility90d > 60 ? 0.7 : 1.0;
     const csRaw = completeness * 0.40 + recencyFreshness * 0.30 + anomalyRate * 0.30;
     const cs = clamp(Math.round(csRaw * 100));
+    const ias = 50;
 
     result.set(r.securityId, {
       securityId: r.securityId,
-      ias: 50,
+      ias,
       rs: 50,
       cs,
       recommendation: "Hold",
@@ -224,6 +353,17 @@ async function scoreSector(
         rawMomentum: r.momentum20d, rawLiquidity: r.avgDailyValue20d,
       },
       dataPointsUsed: r.dataPoints,
+      rsi14: r.rsi14,
+      ma50Kobo: r.ma50Kobo,
+      aboveMa50: r.aboveMa50,
+      weekReturn: r.weekReturn,
+      monthReturn: r.monthReturn,
+      ytdReturn: r.ytdReturn,
+      dSig: dirSignal(r.dayReturn),
+      wSig: dirSignal(r.weekReturn),
+      mSig: dirSignal(r.monthReturn),
+      ySig: dirSignal(r.ytdReturn),
+      stars: iasToStars(ias),
     });
     return result;
   }
@@ -306,6 +446,17 @@ async function scoreSector(
         rawLiquidity: r.avgDailyValue20d,
       },
       dataPointsUsed: r.dataPoints,
+      rsi14: r.rsi14,
+      ma50Kobo: r.ma50Kobo,
+      aboveMa50: r.aboveMa50,
+      weekReturn: r.weekReturn,
+      monthReturn: r.monthReturn,
+      ytdReturn: r.ytdReturn,
+      dSig: dirSignal(r.dayReturn),
+      wSig: dirSignal(r.weekReturn),
+      mSig: dirSignal(r.monthReturn),
+      ySig: dirSignal(r.ytdReturn),
+      stars: iasToStars(ias),
     });
   }
 
@@ -359,6 +510,17 @@ export async function computeAndPersistScores(): Promise<{ scored: number; skipp
         pillarBreakdown: score.pillarBreakdown,
         modelVersionId,
         dataPointsUsed: score.dataPointsUsed,
+        rsi14: score.rsi14,
+        ma50Kobo: score.ma50Kobo,
+        aboveMa50: score.aboveMa50,
+        weekReturn: score.weekReturn,
+        monthReturn: score.monthReturn,
+        ytdReturn: score.ytdReturn,
+        dSig: score.dSig,
+        wSig: score.wSig,
+        mSig: score.mSig,
+        ySig: score.ySig,
+        stars: score.stars,
       });
       scored++;
     }

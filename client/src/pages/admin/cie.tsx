@@ -29,6 +29,24 @@ import {
 interface Security {
   id: number; symbol: string; name: string; sector: string;
   isActive: boolean; exchange: string;
+  // Analyst-maintained intelligence fields
+  divBehaviourPattern?: string | null;
+  entryZoneLowKobo?: number | null;
+  entryZoneHighKobo?: number | null;
+  targetPriceKobo?: number | null;
+}
+
+interface MarketContext {
+  id?: number;
+  contextDate: string;
+  asiCloseKobo?: number | null;
+  asiChangePctBps?: number | null;
+  brentUsdCents?: number | null;
+  ngnPerUsd?: number | null;
+  cbnMprBps?: number | null;
+  gainersCount?: number | null;
+  losersCount?: number | null;
+  notes?: string | null;
 }
 
 interface SecurityScore {
@@ -150,6 +168,26 @@ function recoBadge(rec: string | null) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[rec] ?? "bg-muted text-muted-foreground"}`}>{rec}</span>;
 }
 
+const DIV_BEHAVIOUR_OPTIONS = [
+  { value: "UNKNOWN", label: "Unknown" },
+  { value: "HEAVY_SELL", label: "Heavy Sell (sell after ex-div)" },
+  { value: "MODERATE", label: "Moderate (some sell-off)" },
+  { value: "HOLDER", label: "Holder (price holds post-div)" },
+  { value: "HOLDER_PLUS", label: "Holder+ (price rises post-div)" },
+];
+
+function divBehaviourBadge(pattern: string | null | undefined) {
+  if (!pattern || pattern === "UNKNOWN") return <span className="text-muted-foreground text-xs">—</span>;
+  const map: Record<string, string> = {
+    HEAVY_SELL: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+    MODERATE: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+    HOLDER: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+    HOLDER_PLUS: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+  };
+  const labels: Record<string, string> = { HEAVY_SELL: "Heavy Sell", MODERATE: "Moderate", HOLDER: "Holder", HOLDER_PLUS: "Holder+" };
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[pattern] ?? "bg-muted text-muted-foreground"}`}>{labels[pattern] ?? pattern}</span>;
+}
+
 // ─── Securities Tab ───────────────────────────────────────────────────────────
 
 function SecuritiesTab() {
@@ -157,6 +195,11 @@ function SecuritiesTab() {
   const [newTicker, setNewTicker] = useState("");
   const [newName, setNewName] = useState("");
   const [newSector, setNewSector] = useState("");
+  const [editingSec, setEditingSec] = useState<Security | null>(null);
+  const [editBehaviour, setEditBehaviour] = useState("UNKNOWN");
+  const [editEntryLow, setEditEntryLow] = useState("");
+  const [editEntryHigh, setEditEntryHigh] = useState("");
+  const [editTarget, setEditTarget] = useState("");
 
   const { data: securitiesData, isLoading } = useQuery<{ securities: Security[] }>({
     queryKey: ["/api/admin/cie/securities", "all"],
@@ -190,6 +233,38 @@ function SecuritiesTab() {
     onError: (err: unknown) => { toast({ title: toErrorMessage(err, "Failed to add security"), variant: "destructive" }); },
   });
 
+  const updateIntelMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Record<string, unknown> }) =>
+      apiRequest("PUT", `/api/admin/cie/securities/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/securities"] });
+      toast({ title: "Intelligence fields updated" });
+      setEditingSec(null);
+    },
+    onError: (err: unknown) => { toast({ title: toErrorMessage(err, "Failed to update"), variant: "destructive" }); },
+  });
+
+  const openEdit = (sec: Security) => {
+    setEditingSec(sec);
+    setEditBehaviour(sec.divBehaviourPattern ?? "UNKNOWN");
+    setEditEntryLow(sec.entryZoneLowKobo ? String(sec.entryZoneLowKobo / 100) : "");
+    setEditEntryHigh(sec.entryZoneHighKobo ? String(sec.entryZoneHighKobo / 100) : "");
+    setEditTarget(sec.targetPriceKobo ? String(sec.targetPriceKobo / 100) : "");
+  };
+
+  const saveIntel = () => {
+    if (!editingSec) return;
+    updateIntelMutation.mutate({
+      id: editingSec.id,
+      data: {
+        divBehaviourPattern: editBehaviour === "UNKNOWN" ? null : editBehaviour,
+        entryZoneLowKobo: editEntryLow ? Math.round(parseFloat(editEntryLow) * 100) : null,
+        entryZoneHighKobo: editEntryHigh ? Math.round(parseFloat(editEntryHigh) * 100) : null,
+        targetPriceKobo: editTarget ? Math.round(parseFloat(editTarget) * 100) : null,
+      },
+    });
+  };
+
   const securities = securitiesData?.securities ?? [];
 
   return (
@@ -218,6 +293,7 @@ function SecuritiesTab() {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">NGX Securities ({securities.length})</CardTitle>
+          <CardDescription className="text-xs">Click the Edit icon on any security to set dividend behaviour pattern, entry zone, and target price.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
@@ -231,10 +307,10 @@ function SecuritiesTab() {
                     <TableHead>Name</TableHead>
                     <TableHead>Sector</TableHead>
                     <TableHead className="text-center">IAS</TableHead>
-                    <TableHead className="text-center">RS</TableHead>
-                    <TableHead className="text-center">CS</TableHead>
-                    <TableHead>Recommendation</TableHead>
-                    <TableHead>Score Date</TableHead>
+                    <TableHead>Rec</TableHead>
+                    <TableHead>Div Behaviour</TableHead>
+                    <TableHead>Entry Zone (₦)</TableHead>
+                    <TableHead>Target (₦)</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead />
                   </TableRow>
@@ -242,30 +318,47 @@ function SecuritiesTab() {
                 <TableBody>
                   {securities.map(s => {
                     const sc = scoreMap.get(s.id);
+                    const entryLow = s.entryZoneLowKobo ? (s.entryZoneLowKobo / 100).toFixed(2) : null;
+                    const entryHigh = s.entryZoneHighKobo ? (s.entryZoneHighKobo / 100).toFixed(2) : null;
+                    const target = s.targetPriceKobo ? (s.targetPriceKobo / 100).toFixed(2) : null;
                     return (
                       <TableRow key={s.id} data-testid={`row-security-${s.id}`}>
                         <TableCell className="font-mono font-semibold text-primary">{s.symbol}</TableCell>
                         <TableCell className="text-sm">{s.name}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{s.sector}</TableCell>
                         <TableCell className="text-center text-sm">{sc?.ias?.toFixed(1) ?? "—"}</TableCell>
-                        <TableCell className="text-center text-sm">{sc?.rs?.toFixed(1) ?? "—"}</TableCell>
-                        <TableCell className="text-center text-sm">{sc?.cs?.toFixed(1) ?? "—"}</TableCell>
                         <TableCell>{recoBadge(sc?.recommendation ?? null)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{formatDate(sc?.scoreDate)}</TableCell>
+                        <TableCell>{divBehaviourBadge(s.divBehaviourPattern)}</TableCell>
+                        <TableCell className="text-xs font-mono">
+                          {entryLow && entryHigh ? `${entryLow}–${entryHigh}` : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="text-xs font-mono">
+                          {target ?? <span className="text-muted-foreground">—</span>}
+                        </TableCell>
                         <TableCell>
                           <Badge variant={s.isActive ? "default" : "secondary"} data-testid={`badge-active-${s.id}`}>
                             {s.isActive ? "Active" : "Inactive"}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Button
-                            size="sm" variant="outline"
-                            onClick={() => toggleMutation.mutate({ id: s.id, isActive: !s.isActive })}
-                            disabled={toggleMutation.isPending}
-                            data-testid={`button-toggle-security-${s.id}`}
-                          >
-                            {s.isActive ? "Deactivate" : "Activate"}
-                          </Button>
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm" variant="ghost" className="h-7 w-7 p-0"
+                              onClick={() => openEdit(s)}
+                              data-testid={`button-edit-intel-${s.id}`}
+                              title="Edit intelligence fields"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => toggleMutation.mutate({ id: s.id, isActive: !s.isActive })}
+                              disabled={toggleMutation.isPending}
+                              data-testid={`button-toggle-security-${s.id}`}
+                            >
+                              {s.isActive ? "Deactivate" : "Activate"}
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -276,23 +369,121 @@ function SecuritiesTab() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Intelligence Fields Dialog */}
+      <Dialog open={!!editingSec} onOpenChange={open => { if (!open) setEditingSec(null); }}>
+        <DialogContent className="max-w-sm" data-testid="dialog-edit-intel">
+          <DialogHeader>
+            <DialogTitle>Edit Intel Fields — {editingSec?.symbol}</DialogTitle>
+            <DialogDescription className="text-xs">Set dividend behaviour pattern, entry zone, and analyst target price. These fields are used in the Alpha Intel report and the public API.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Dividend Behaviour Pattern</Label>
+              <Select value={editBehaviour} onValueChange={setEditBehaviour} data-testid="select-div-behaviour">
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DIV_BEHAVIOUR_OPTIONS.map(o => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Entry Zone Low (₦)</Label>
+                <Input
+                  type="number" step="0.01" placeholder="e.g. 42.50"
+                  value={editEntryLow} onChange={e => setEditEntryLow(e.target.value)}
+                  className="h-9 text-sm" data-testid="input-entry-low"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Entry Zone High (₦)</Label>
+                <Input
+                  type="number" step="0.01" placeholder="e.g. 48.00"
+                  value={editEntryHigh} onChange={e => setEditEntryHigh(e.target.value)}
+                  className="h-9 text-sm" data-testid="input-entry-high"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Analyst Target Price (₦)</Label>
+              <Input
+                type="number" step="0.01" placeholder="e.g. 65.00"
+                value={editTarget} onChange={e => setEditTarget(e.target.value)}
+                className="h-9 text-sm" data-testid="input-target-price"
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button
+                onClick={saveIntel}
+                disabled={updateIntelMutation.isPending}
+                className="flex-1 gap-2"
+                data-testid="button-save-intel"
+              >
+                {updateIntelMutation.isPending ? <LoadingSpinner size="sm" /> : <Save className="h-4 w-4" />}
+                Save
+              </Button>
+              <Button variant="outline" onClick={() => setEditingSec(null)} className="flex-1">Cancel</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 // ─── Price Upload Tab ─────────────────────────────────────────────────────────
 
+type WhatChangedItem = { ticker: string; field: string; oldVal: string; newVal: string };
+
+function colourForClose(close: number | null | undefined, open: number | null | undefined) {
+  if (close == null || open == null || open === 0) return "";
+  if (close > open) return "text-green-600 dark:text-green-400 font-semibold";
+  if (close < open) return "text-red-600 dark:text-red-400 font-semibold";
+  return "text-muted-foreground";
+}
+
 function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
   const { toast } = useToast();
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [whatChanged, setWhatChanged] = useState<WhatChangedItem[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Market Context inputs
+  const [ctxDate, setCtxDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [ctxAsi, setCtxAsi] = useState("");
+  const [ctxAsiChange, setCtxAsiChange] = useState("");
+  const [ctxBrent, setCtxBrent] = useState("");
+  const [ctxNgn, setCtxNgn] = useState("");
+  const [ctxMpr, setCtxMpr] = useState("");
+  const [ctxGainers, setCtxGainers] = useState("");
+  const [ctxLosers, setCtxLosers] = useState("");
+  const [ctxNotes, setCtxNotes] = useState("");
+
+  const { data: latestCtxRaw } = useQuery<MarketContext | null>({
+    queryKey: ["/api/admin/cie/market-context/latest"],
+    staleTime: 60 * 1000,
+  });
+  const latestCtx = { context: latestCtxRaw ?? null };
+
+  const { data: aiStatus } = useQuery<{ available: boolean }>({
+    queryKey: ["/api/cie-portal/ai-status"],
+    staleTime: 5 * 60 * 1000,
+  });
+  const aiAvailable = aiStatus?.available !== false;
 
   const scoreMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/cie/scores/run", {}),
-    onSuccess: () => toast({ title: "Score recomputation triggered" }),
-    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed to trigger recomputation"), variant: "destructive" }),
+    onSuccess: () => {
+      toast({ title: "Score engine triggered — results update in ~30 seconds" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/scores"] });
+    },
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed to trigger score engine"), variant: "destructive" }),
   });
 
   const aiCommentaryMutation = useMutation({
@@ -304,14 +495,29 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
     onError: (err: unknown) => toast({ title: toErrorMessage(err, "AI commentary failed"), variant: "destructive" }),
   });
 
-  const { data: aiStatus } = useQuery<{ available: boolean }>({
-    queryKey: ["/api/cie-portal/ai-status"],
-    staleTime: 5 * 60 * 1000,
+  const ctxMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/admin/cie/market-context", {
+      contextDate: ctxDate,
+      asiCloseKobo: ctxAsi ? Math.round(parseFloat(ctxAsi) * 100) : undefined,
+      asiChangePctBps: ctxAsiChange ? Math.round(parseFloat(ctxAsiChange) * 100) : undefined,
+      brentUsdCents: ctxBrent ? Math.round(parseFloat(ctxBrent) * 100) : undefined,
+      ngnPerUsd: ctxNgn ? Math.round(parseFloat(ctxNgn) * 100) : undefined,
+      cbnMprBps: ctxMpr ? Math.round(parseFloat(ctxMpr) * 100) : undefined,
+      gainersCount: ctxGainers ? parseInt(ctxGainers) : undefined,
+      losersCount: ctxLosers ? parseInt(ctxLosers) : undefined,
+      notes: ctxNotes || undefined,
+    }),
+    onSuccess: () => {
+      toast({ title: "Market context saved" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/market-context"] });
+    },
+    onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed to save context"), variant: "destructive" }),
   });
-  const aiAvailable = aiStatus?.available !== false;
 
   const uploadFile = useCallback(async (file: File) => {
     setIsUploading(true);
+    setIsConfirmed(false);
+    setWhatChanged([]);
     try {
       const form = new FormData();
       form.append("file", file);
@@ -353,122 +559,259 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
   }, [uploadFile]);
 
   const confirmMutation = useMutation({
-    mutationFn: () => {
-      if (!preview?.previewToken) {
-        throw new Error("Preview token missing. Please upload the file again.");
-      }
-      return apiRequest("POST", "/api/admin/cie/ingest/confirm", {
+    mutationFn: async () => {
+      if (!preview?.previewToken) throw new Error("Preview token missing. Please upload the file again.");
+      const res = await apiRequest("POST", "/api/admin/cie/ingest/confirm", {
         previewToken: preview.previewToken,
         acceptedRowIndices: (preview.acceptedRows ?? []).map(r => r.rowIndex),
       });
+      return res.json() as Promise<{ whatChanged?: WhatChangedItem[] }>;
     },
-    onSuccess: () => {
-      toast({ title: "Data ingested successfully" });
+    onSuccess: (data) => {
+      toast({ title: `${preview?.rowsAccepted ?? 0} rows ingested successfully` });
+      setWhatChanged(data?.whatChanged ?? []);
+      setIsConfirmed(true);
       setPreview(null);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/ingest/logs"] });
     },
     onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed to confirm"), variant: "destructive" }),
   });
 
+  // Download Alpha Intel report
+  const downloadReport = async () => {
+    try {
+      const csrfToken = await getCsrfToken();
+      const res = await fetch("/api/admin/cie/report/latest", {
+        credentials: "include",
+        headers: { "X-CSRF-Token": csrfToken },
+      });
+      if (!res.ok) throw new Error("Report generation failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `Alpha_Intel_NGX_${date}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Alpha Intel report downloaded" });
+    } catch (err: unknown) {
+      toast({ title: toErrorMessage(err, "Failed to download report"), variant: "destructive" });
+    }
+  };
+
+  // Preview table columns derived from actual row keys
+  const previewCols = preview?.previewRows?.[0] ? Object.keys(preview.previewRows[0]) : [];
+
   return (
     <div className="space-y-6">
-      <div className="grid sm:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Upload End-of-Day Prices</CardTitle>
-            <CardDescription className="text-xs">Accepts CSV, XLSX, or PDF with headers: ticker, trade_date, open, high, low, close, volume</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <label
-              htmlFor="price-file-input"
-              className={`flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-                isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
-              }`}
-              data-testid="dropzone-price-upload"
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <input
-                id="price-file-input"
-                ref={fileRef}
-                type="file"
-                accept=".csv,.xlsx,.pdf"
-                className="hidden"
-                onChange={handleFileChange}
-                data-testid="input-file-upload"
-              />
-              <Upload className={`h-8 w-8 mb-3 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
-              {isUploading ? (
-                <p className="text-sm text-muted-foreground">Processing…</p>
-              ) : isDragging ? (
-                <p className="text-sm text-primary font-medium">Drop to upload</p>
-              ) : (
-                <>
-                  <p className="text-sm text-muted-foreground">Drag & drop CSV / XLSX / PDF here</p>
-                  <p className="text-xs text-muted-foreground mt-1">or click to browse</p>
-                </>
+
+      {/* ── Daily Upload Card ─────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle className="text-sm">Daily Upload</CardTitle>
+              <CardDescription className="text-xs mt-0.5">
+                Drop the NGX end-of-day price file then fill in the market context for today. Deadline: <strong>18:30 WAT</strong>.
+              </CardDescription>
+            </div>
+            <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+              <Button
+                variant="outline" size="sm" className="gap-1.5 text-xs"
+                onClick={downloadReport}
+                data-testid="button-download-report"
+              >
+                <Download className="h-3.5 w-3.5" /> Alpha Intel Report
+              </Button>
+              <Button
+                variant="outline" size="sm" className="gap-1.5 text-xs"
+                onClick={() => scoreMutation.mutate()}
+                disabled={scoreMutation.isPending}
+                data-testid="button-recompute-scores"
+              >
+                {scoreMutation.isPending ? <LoadingSpinner size="sm" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                Run Score Engine
+              </Button>
+              <Button
+                variant="outline" size="sm" className="gap-1.5 text-xs"
+                onClick={() => aiCommentaryMutation.mutate()}
+                disabled={aiCommentaryMutation.isPending || !aiAvailable}
+                title={!aiAvailable ? "AI unavailable — OPENAI_API_KEY not configured" : undefined}
+                data-testid="button-regenerate-commentary"
+              >
+                {aiCommentaryMutation.isPending ? <LoadingSpinner size="sm" /> : <Sparkles className="h-3.5 w-3.5 text-primary" />}
+                AI Commentary
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Drop zone */}
+          <label
+            htmlFor="price-file-input"
+            className={`flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+              isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+            }`}
+            data-testid="dropzone-price-upload"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <input
+              id="price-file-input"
+              ref={fileRef}
+              type="file"
+              accept=".csv,.xlsx,.pdf"
+              className="hidden"
+              onChange={handleFileChange}
+              data-testid="input-file-upload"
+            />
+            <Upload className={`h-8 w-8 mb-3 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
+            {isUploading ? (
+              <><LoadingSpinner size="sm" /><p className="text-sm text-muted-foreground mt-2">Extracting rows…</p></>
+            ) : isDragging ? (
+              <p className="text-sm text-primary font-medium">Drop to preview</p>
+            ) : (
+              <>
+                <p className="text-sm font-medium">Drag & drop CSV / XLSX / PDF here</p>
+                <p className="text-xs text-muted-foreground mt-1">Columns: ticker, trade_date, open, high, low, close, volume</p>
+                <p className="text-xs text-muted-foreground">or click to browse</p>
+              </>
+            )}
+          </label>
+
+          {/* Market Context inputs */}
+          <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-foreground">Market Context</p>
+              {latestCtx?.context && (
+                <span className="text-xs text-muted-foreground">Last saved: {formatDate(latestCtx.context.contextDate)}</span>
               )}
-            </label>
-          </CardContent>
-        </Card>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Date</Label>
+                <Input type="date" value={ctxDate} onChange={e => setCtxDate(e.target.value)} className="h-8 text-xs" data-testid="input-ctx-date" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">ASI Close (₦)</Label>
+                <Input type="number" step="0.01" placeholder="e.g. 98242.15" value={ctxAsi} onChange={e => setCtxAsi(e.target.value)} className="h-8 text-xs" data-testid="input-ctx-asi" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">ASI Change %</Label>
+                <Input type="number" step="0.01" placeholder="e.g. -0.45" value={ctxAsiChange} onChange={e => setCtxAsiChange(e.target.value)} className="h-8 text-xs" data-testid="input-ctx-asi-change" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Gainers / Losers</Label>
+                <div className="flex gap-1">
+                  <Input type="number" placeholder="G" value={ctxGainers} onChange={e => setCtxGainers(e.target.value)} className="h-8 text-xs w-full" data-testid="input-ctx-gainers" />
+                  <Input type="number" placeholder="L" value={ctxLosers} onChange={e => setCtxLosers(e.target.value)} className="h-8 text-xs w-full" data-testid="input-ctx-losers" />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Brent Crude (USD)</Label>
+                <Input type="number" step="0.01" placeholder="e.g. 74.20" value={ctxBrent} onChange={e => setCtxBrent(e.target.value)} className="h-8 text-xs" data-testid="input-ctx-brent" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">NGN/USD Rate</Label>
+                <Input type="number" step="0.01" placeholder="e.g. 1595.00" value={ctxNgn} onChange={e => setCtxNgn(e.target.value)} className="h-8 text-xs" data-testid="input-ctx-ngn" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">CBN MPR %</Label>
+                <Input type="number" step="0.25" placeholder="e.g. 27.50" value={ctxMpr} onChange={e => setCtxMpr(e.target.value)} className="h-8 text-xs" data-testid="input-ctx-mpr" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Analyst notes</Label>
+                <Input placeholder="Optional headline" value={ctxNotes} onChange={e => setCtxNotes(e.target.value)} className="h-8 text-xs" data-testid="input-ctx-notes" />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                size="sm" className="gap-2 text-xs"
+                onClick={() => ctxMutation.mutate()}
+                disabled={ctxMutation.isPending}
+                data-testid="button-save-market-context"
+              >
+                {ctxMutation.isPending ? <LoadingSpinner size="sm" /> : <Save className="h-3.5 w-3.5" />}
+                Save Market Context
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Score Engine</CardTitle>
-            <CardDescription className="text-xs">Manually trigger a full IAS/RS/CS recomputation across all active securities</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Button
-              className="w-full gap-2" variant="outline"
-              onClick={() => scoreMutation.mutate()}
-              disabled={scoreMutation.isPending}
-              data-testid="button-recompute-scores"
-            >
-              {scoreMutation.isPending ? <LoadingSpinner size="sm" /> : <RefreshCw className="h-4 w-4" />}
-              Recompute All Scores
-            </Button>
-            <Button
-              className="w-full gap-2" variant="outline"
-              onClick={() => aiCommentaryMutation.mutate()}
-              disabled={aiCommentaryMutation.isPending || !aiAvailable}
-              title={!aiAvailable ? "AI unavailable — OPENAI_API_KEY not configured" : undefined}
-              data-testid="button-regenerate-commentary"
-            >
-              {aiCommentaryMutation.isPending ? <LoadingSpinner size="sm" /> : <Sparkles className="h-4 w-4 text-primary" />}
-              Regenerate AI Commentary
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
+      {/* ── Colour-coded Preview Table ─────────────────────────── */}
       {preview && (
         <Card className="border-primary/40">
           <CardHeader>
-            <CardTitle className="text-sm">Preview — {preview.rowsExtracted} rows extracted</CardTitle>
-            <CardDescription className="text-xs">{preview.filename} · {preview.rowsAccepted} accepted · {preview.rowsExtracted - preview.rowsAccepted} rejected</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="max-h-60 overflow-y-auto mb-4 text-xs font-mono bg-muted rounded p-3 space-y-1">
-              {(preview.previewRows ?? []).slice(0, 10).map((row: Record<string, string | number | null>, i: number) => (
-                <div key={i} className="flex gap-2">
-                  <span className="text-muted-foreground w-4">{i + 1}</span>
-                  <span>{JSON.stringify(row)}</span>
-                </div>
-              ))}
-              {(preview.previewRows ?? []).length > 10 && (
-                <div className="text-muted-foreground">…and {preview.previewRows.length - 10} more</div>
-              )}
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-sm">
+                  Preview — {preview.rowsExtracted} rows
+                  <span className="ml-2 text-xs font-normal text-green-600 dark:text-green-400">{preview.rowsAccepted} accepted</span>
+                  {preview.rowsRejected > 0 && (
+                    <span className="ml-1 text-xs font-normal text-red-600 dark:text-red-400">{preview.rowsRejected} rejected</span>
+                  )}
+                </CardTitle>
+                <CardDescription className="text-xs">{preview.filename}</CardDescription>
+              </div>
             </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Accepted rows table */}
+            {(preview.previewRows ?? []).length > 0 && (
+              <div className="rounded-md border overflow-x-auto max-h-72 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/60 hover:bg-muted/60">
+                      <TableHead className="text-xs py-2 h-auto w-6">#</TableHead>
+                      {previewCols.map(col => (
+                        <TableHead key={col} className="text-xs py-2 h-auto capitalize">{col.replace(/_/g, " ")}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(preview.previewRows ?? []).slice(0, 20).map((row, i) => (
+                      <TableRow key={i} data-testid={`row-preview-${i}`} className="text-xs">
+                        <TableCell className="py-1.5 text-muted-foreground font-mono">{i + 1}</TableCell>
+                        {previewCols.map(col => {
+                          const isClose = col === "close";
+                          const open = typeof row.open === "number" ? row.open : null;
+                          const val = row[col];
+                          return (
+                            <TableCell
+                              key={col}
+                              className={`py-1.5 font-mono ${isClose ? colourForClose(typeof val === "number" ? val : null, open) : ""}`}
+                            >
+                              {val ?? "—"}
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    ))}
+                    {(preview.previewRows ?? []).length > 20 && (
+                      <TableRow>
+                        <TableCell colSpan={previewCols.length + 1} className="text-center text-xs text-muted-foreground py-2">
+                          …and {preview.previewRows.length - 20} more rows
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {/* Rejected rows accordion */}
             {(preview.rowsRejected ?? 0) > 0 && (
-              <Accordion type="single" collapsible className="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/20 px-3" data-testid="accordion-rejected-rows">
+              <Accordion type="single" collapsible className="rounded-md border border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/20 px-3" data-testid="accordion-rejected-rows">
                 <AccordionItem value="rejected" className="border-0">
                   <AccordionTrigger className="text-xs font-semibold text-red-700 dark:text-red-400 hover:no-underline py-3" data-testid="trigger-rejected-rows">
                     <span className="flex items-center gap-2">
                       <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 text-xs font-bold">
                         {preview.rowsRejected}
                       </span>
-                      Rejected rows {(preview.rejectedRows?.length ?? 0) < preview.rowsRejected ? `(showing ${preview.rejectedRows?.length ?? 0} of ${preview.rowsRejected})` : ""}
+                      Rejected rows {(preview.rejectedRows?.length ?? 0) < preview.rowsRejected ? `(showing ${preview.rejectedRows?.length ?? 0})` : ""}
                     </span>
                   </AccordionTrigger>
                   <AccordionContent>
@@ -500,9 +843,7 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
                         </div>
                         <div className="mt-3 flex justify-end">
                           <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-2 text-xs"
+                            size="sm" variant="outline" className="gap-2 text-xs"
                             data-testid="button-download-rejected-csv"
                             onClick={() => {
                               const headers = ["#", "Symbol", "Date", "Close", "Reason"];
@@ -519,23 +860,25 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
                               URL.revokeObjectURL(url);
                             }}
                           >
-                            <Download className="h-3.5 w-3.5" /> Download rejected rows as CSV
+                            <Download className="h-3.5 w-3.5" /> Download rejected CSV
                           </Button>
                         </div>
                       </>
                     ) : (
-                      <p className="text-xs text-muted-foreground pb-2">Row details are not available for this preview.</p>
+                      <p className="text-xs text-muted-foreground pb-2">Row details not available for this preview.</p>
                     )}
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
             )}
+
             {preview.rowsAccepted === 0 && (
-              <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400" data-testid="warning-no-rows">
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400" data-testid="warning-no-rows">
                 <span className="mt-0.5 shrink-0">⚠</span>
-                <span>No rows could be extracted from this file. Check the file format — it may use unsupported column names, be image-based (scanned PDF), or contain no price data. Contact support if the issue persists.</span>
+                <span>No rows could be extracted. Check file format — unsupported column names, scanned PDF, or no price data. Contact support if the issue persists.</span>
               </div>
             )}
+
             <div className="flex gap-3">
               <Button
                 onClick={() => confirmMutation.mutate()}
@@ -543,7 +886,8 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
                 className="gap-2"
                 data-testid="button-confirm-upload"
               >
-                <CheckCircle2 className="h-4 w-4" /> Confirm & Ingest
+                {confirmMutation.isPending ? <LoadingSpinner size="sm" /> : <CheckCircle2 className="h-4 w-4" />}
+                Confirm & Ingest
               </Button>
               <Button variant="outline" onClick={() => setPreview(null)} data-testid="button-cancel-upload">Cancel</Button>
             </div>
@@ -551,6 +895,62 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
         </Card>
       )}
 
+      {/* ── What Changed Panel ─────────────────────────────────── */}
+      {isConfirmed && (
+        <Card className="border-green-500/40 bg-green-50/30 dark:bg-green-950/10">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-sm text-green-700 dark:text-green-400">Upload Complete</CardTitle>
+                <CardDescription className="text-xs">Prices committed. Run the Score Engine to update IAS/RS/CS and generate fresh signals.</CardDescription>
+              </div>
+              <Button
+                className="gap-2 shrink-0"
+                onClick={() => scoreMutation.mutate()}
+                disabled={scoreMutation.isPending}
+                data-testid="button-run-engine-post-confirm"
+              >
+                {scoreMutation.isPending ? <LoadingSpinner size="sm" /> : <RefreshCw className="h-4 w-4" />}
+                Run Score Engine
+              </Button>
+            </div>
+          </CardHeader>
+          {whatChanged.length > 0 && (
+            <CardContent className="pt-0">
+              <p className="text-xs font-semibold mb-2 text-foreground">Threshold crossings detected ({whatChanged.length})</p>
+              <div className="rounded-md border overflow-x-auto max-h-60 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/60 hover:bg-muted/60">
+                      <TableHead className="text-xs py-2 h-auto">Ticker</TableHead>
+                      <TableHead className="text-xs py-2 h-auto">Field</TableHead>
+                      <TableHead className="text-xs py-2 h-auto">Previous</TableHead>
+                      <TableHead className="text-xs py-2 h-auto">New</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {whatChanged.map((item, i) => (
+                      <TableRow key={i} className="text-xs" data-testid={`row-changed-${i}`}>
+                        <TableCell className="py-1.5 font-mono font-semibold text-primary">{item.ticker}</TableCell>
+                        <TableCell className="py-1.5 text-muted-foreground">{item.field}</TableCell>
+                        <TableCell className="py-1.5 font-mono text-red-600 dark:text-red-400">{item.oldVal}</TableCell>
+                        <TableCell className="py-1.5 font-mono text-green-600 dark:text-green-400">{item.newVal}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          )}
+          {whatChanged.length === 0 && isConfirmed && (
+            <CardContent className="pt-0">
+              <p className="text-xs text-muted-foreground">No recommendation threshold crossings on this upload.</p>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* ── Ingestion Log ─────────────────────────────────────── */}
       <Card>
         <CardHeader><CardTitle className="text-sm">Recent Ingestion Logs</CardTitle></CardHeader>
         <CardContent className="p-0">
@@ -568,10 +968,10 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
               {(logsData?.logs ?? []).slice(0, 10).map(log => (
                 <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
                   <TableCell className="text-sm font-mono">{log.filename}</TableCell>
-                  <TableCell className="text-center text-green-600">{log.rowsAccepted}</TableCell>
+                  <TableCell className="text-center text-green-600 dark:text-green-400">{log.rowsAccepted}</TableCell>
                   <TableCell className="text-center text-red-500">{log.rowsRejected}</TableCell>
                   <TableCell>
-                    <Badge variant={log.status === "completed" ? "default" : "secondary"}>{log.status}</Badge>
+                    <Badge variant={log.status === "committed" ? "default" : log.status === "completed" ? "default" : "secondary"}>{log.status}</Badge>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">{formatDate(log.createdAt)}</TableCell>
                 </TableRow>

@@ -394,10 +394,9 @@ export default function AdminKycOverview() {
     queryKey: ["/api/admin/kyc/rescreening-batches"],
   });
   const [approveConfirmBatch, setApproveConfirmBatch] = useState<any | null>(null);
-  const [approvingItems, setApprovingItems] = useState<number[]>([]);
   const [approveResults, setApproveResults] = useState<any[] | null>(null);
 
-  const approveMutation = useMutation({
+  const rescreeningApproveMutation = useMutation({
     mutationFn: async ({ batchId, itemIds }: { batchId: number; itemIds?: number[] }) => {
       const res = await apiRequest("POST", `/api/admin/kyc/rescreening-batches/${batchId}/approve`, { itemIds });
       return res.json();
@@ -1393,7 +1392,7 @@ export default function AdminKycOverview() {
                                   <Button
                                     size="sm"
                                     onClick={() => { setApproveConfirmBatch(batch); setApproveResults(null); }}
-                                    disabled={approveMutation.isPending}
+                                    disabled={rescreeningApproveMutation.isPending}
                                     data-testid={`button-approve-batch-${batch.id}`}
                                   >
                                     <PlayCircle className="h-4 w-4 mr-2" />
@@ -2131,11 +2130,11 @@ export default function AdminKycOverview() {
               <DialogFooter>
                 <Button variant="outline" onClick={() => setApproveConfirmBatch(null)} data-testid="button-cancel-approve">Cancel</Button>
                 <Button
-                  disabled={approveMutation.isPending}
-                  onClick={() => approveMutation.mutate({ batchId: approveConfirmBatch?.id })}
+                  disabled={rescreeningApproveMutation.isPending}
+                  onClick={() => rescreeningApproveMutation.mutate({ batchId: approveConfirmBatch?.id })}
                   data-testid="button-confirm-approve"
                 >
-                  {approveMutation.isPending ? "Screening…" : "Confirm & Run Screening"}
+                  {rescreeningApproveMutation.isPending ? "Screening…" : "Confirm & Run Screening"}
                 </Button>
               </DialogFooter>
             </>

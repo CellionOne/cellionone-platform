@@ -9,6 +9,7 @@ import {
   kycSupplierProfiles, kycSubmittedDocuments, kycSupplierPeople,
   kycApiKeys, kycApiUsageLogs, kycBillingAccounts, kycBillingRequests, kycCreditTransactions, kycInvoices,
   kycSessions, kycSanctionsLogs, kycStrReports, kycVerifiedIdentityData,
+  kycRescreeningBatches, kycRescreeningBatchItems,
   sensitiveDataAccessLogs, identityVerifications,
   users, userRoles,
   type KycOrganisation, type KycOrgMember, type KycVerificationRequest,
@@ -31,6 +32,7 @@ import {
   getIdentityProfile,
   getGovernmentPhotoUrl,
 } from "../services/identityProfileService";
+import { executeRescreeningItem } from "../services/kycSchedulerService";
 
 const TERMS_VERSION = "1.0";
 const objectStorageService = new ObjectStorageService();
@@ -4098,6 +4100,148 @@ export function registerKycServiceRoutes(app: Express) {
     } catch (error: any) {
       console.error("[KYC Identity] Admin list error:", error);
       res.status(500).json({ message: "Failed to list identity records" });
+    }
+  });
+
+  // ============ ADMIN: RESCREENING BATCHES ============
+
+  // GET /api/admin/kyc/rescreening-batches — list all batches (newest first)
+  app.get("/api/admin/kyc/rescreening-batches", isAuthenticated, requireAdmin, async (_req: any, res: Response) => {
+    try {
+      const batches = await db.select().from(kycRescreeningBatches)
+        .orderBy(desc(kycRescreeningBatches.createdAt))
+        .limit(50);
+
+      const batchIds = batches.map(b => b.id);
+      const allItems = batchIds.length
+        ? await db.select().from(kycRescreeningBatchItems)
+            .where(inArray(kycRescreeningBatchItems.batchId, batchIds))
+            .orderBy(asc(kycRescreeningBatchItems.id))
+        : [];
+
+      const itemsByBatch = new Map<number, typeof allItems>();
+      for (const item of allItems) {
+        if (!itemsByBatch.has(item.batchId)) itemsByBatch.set(item.batchId, []);
+        itemsByBatch.get(item.batchId)!.push(item);
+      }
+
+      const result = batches.map(b => ({
+        ...b,
+        items: itemsByBatch.get(b.id) ?? [],
+      }));
+
+      res.json({ batches: result });
+    } catch (err: any) {
+      console.error("[Rescreening] List error:", err);
+      res.status(500).json({ message: "Failed to list rescreening batches" });
+    }
+  });
+
+  // POST /api/admin/kyc/rescreening-batches/:batchId/approve
+  // Body: { itemIds?: number[] } — if omitted, approves all pending items in the batch
+  app.post("/api/admin/kyc/rescreening-batches/:batchId/approve", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    const batchId = parseInt(req.params.batchId, 10);
+    if (isNaN(batchId)) return res.status(400).json({ message: "Invalid batch ID" });
+
+    const { itemIds } = req.body as { itemIds?: number[] };
+
+    try {
+      const [batch] = await db.select().from(kycRescreeningBatches)
+        .where(eq(kycRescreeningBatches.id, batchId));
+
+      if (!batch) return res.status(404).json({ message: "Batch not found" });
+      if (batch.status !== "pending") return res.status(400).json({ message: "Batch is not in pending status" });
+
+      // Determine which items to process
+      const allItems = await db.select().from(kycRescreeningBatchItems)
+        .where(eq(kycRescreeningBatchItems.batchId, batchId));
+
+      const toApprove = allItems.filter(i =>
+        !i.skipped &&
+        !i.screeningResult &&
+        (!itemIds || itemIds.includes(i.id))
+      );
+
+      const results: { itemId: number; subjectName: string; result?: string; error?: string }[] = [];
+
+      for (const item of toApprove) {
+        const outcome = await executeRescreeningItem(item.id, batchId);
+        results.push({ itemId: item.id, subjectName: item.subjectName, ...outcome });
+      }
+
+      // Recalculate batch counters
+      const refreshedItems = await db.select().from(kycRescreeningBatchItems)
+        .where(eq(kycRescreeningBatchItems.batchId, batchId));
+
+      const approvedCount = refreshedItems.filter(i => !!i.screeningResult && !i.skipped).length;
+      const skippedCount = refreshedItems.filter(i => i.skipped).length;
+      const pendingCount = refreshedItems.filter(i => !i.screeningResult && !i.skipped).length;
+      const newStatus = pendingCount === 0 ? "approved" : "pending";
+
+      await db.update(kycRescreeningBatches)
+        .set({
+          approvedItems: approvedCount,
+          skippedItems: skippedCount,
+          status: newStatus,
+          resolvedAt: newStatus === "approved" ? new Date() : null,
+          resolvedByUserId: newStatus === "approved" ? req.user?.claims?.sub : null,
+        })
+        .where(eq(kycRescreeningBatches.id, batchId));
+
+      await req.storage?.createAuditLog?.({
+        actorUserId: req.user?.claims?.sub,
+        action: "kyc_rescreening_batch_approved",
+        entityType: "kyc_rescreening_batch",
+        entityId: String(batchId),
+        details: { approvedCount: toApprove.length, results },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Screening complete", results, batchStatus: newStatus });
+    } catch (err: any) {
+      console.error("[Rescreening] Approve error:", err);
+      res.status(500).json({ message: "Failed to process rescreening batch" });
+    }
+  });
+
+  // POST /api/admin/kyc/rescreening-batches/:batchId/items/:itemId/skip
+  app.post("/api/admin/kyc/rescreening-batches/:batchId/items/:itemId/skip", isAuthenticated, requireAdmin, async (req: any, res: Response) => {
+    const batchId = parseInt(req.params.batchId, 10);
+    const itemId = parseInt(req.params.itemId, 10);
+    if (isNaN(batchId) || isNaN(itemId)) return res.status(400).json({ message: "Invalid ID" });
+
+    const { note } = req.body as { note?: string };
+
+    try {
+      const [item] = await db.select().from(kycRescreeningBatchItems)
+        .where(and(
+          eq(kycRescreeningBatchItems.id, itemId),
+          eq(kycRescreeningBatchItems.batchId, batchId),
+        ));
+
+      if (!item) return res.status(404).json({ message: "Item not found" });
+      if (item.screeningResult) return res.status(400).json({ message: "Item already screened" });
+
+      await db.update(kycRescreeningBatchItems)
+        .set({ skipped: true, skipNote: note || null })
+        .where(eq(kycRescreeningBatchItems.id, itemId));
+
+      // Update batch skip counter
+      const skippedCount = await db.select({ count: sql<number>`count(*)` })
+        .from(kycRescreeningBatchItems)
+        .where(and(
+          eq(kycRescreeningBatchItems.batchId, batchId),
+          eq(kycRescreeningBatchItems.skipped, true),
+        ));
+
+      await db.update(kycRescreeningBatches)
+        .set({ skippedItems: Number(skippedCount[0]?.count ?? 0) })
+        .where(eq(kycRescreeningBatches.id, batchId));
+
+      res.json({ message: "Item skipped" });
+    } catch (err: any) {
+      console.error("[Rescreening] Skip error:", err);
+      res.status(500).json({ message: "Failed to skip item" });
     }
   });
 

@@ -390,6 +390,34 @@ export default function AdminKycOverview() {
     queryFn: () => fetch("/api/kyc-service/admin/sanctions-overview", { credentials: "include" }).then(r => r.json()),
   });
 
+  const { data: rescreeningData, isLoading: rescreeningLoading } = useQuery<{ batches: any[] }>({
+    queryKey: ["/api/admin/kyc/rescreening-batches"],
+  });
+  const [approveConfirmBatch, setApproveConfirmBatch] = useState<any | null>(null);
+  const [approvingItems, setApprovingItems] = useState<number[]>([]);
+  const [approveResults, setApproveResults] = useState<any[] | null>(null);
+
+  const approveMutation = useMutation({
+    mutationFn: async ({ batchId, itemIds }: { batchId: number; itemIds?: number[] }) => {
+      const res = await apiRequest("POST", `/api/admin/kyc/rescreening-batches/${batchId}/approve`, { itemIds });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setApproveResults(data.results ?? []);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/kyc/rescreening-batches"] });
+    },
+    onError: () => toast({ title: "Approval failed", description: "Could not process the screening batch.", variant: "destructive" }),
+  });
+
+  const skipItemMutation = useMutation({
+    mutationFn: async ({ batchId, itemId, note }: { batchId: number; itemId: number; note?: string }) => {
+      const res = await apiRequest("POST", `/api/admin/kyc/rescreening-batches/${batchId}/items/${itemId}/skip`, { note });
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/admin/kyc/rescreening-batches"] }),
+    onError: () => toast({ title: "Skip failed", description: "Could not skip item.", variant: "destructive" }),
+  });
+
   const [strStatusFilter, setStrStatusFilter] = useState("");
   const [strOrgFilter, setStrOrgFilter] = useState("");
   const strQuery = new URLSearchParams();
@@ -636,6 +664,14 @@ export default function AdminKycOverview() {
                 </TabsTrigger>
                 <TabsTrigger value="str-reports" data-testid="tab-str-reports">STR Reports</TabsTrigger>
                 <TabsTrigger value="identity-records" data-testid="tab-identity-records">Identity Records</TabsTrigger>
+                <TabsTrigger value="rescreening" data-testid="tab-rescreening">
+                  Rescreening
+                  {(rescreeningData?.batches ?? []).some((b: any) => b.status === "pending") && (
+                    <Badge variant="destructive" className="ml-2">
+                      {(rescreeningData?.batches ?? []).filter((b: any) => b.status === "pending").length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="organisations">
@@ -1233,6 +1269,145 @@ export default function AdminKycOverview() {
 
               <TabsContent value="identity-records">
                 <IdentityRecordsTab />
+              </TabsContent>
+
+              {/* ── Rescreening Batches Tab ──────────────────────────────────── */}
+              <TabsContent value="rescreening">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4 text-primary" />
+                      Annual AML Re-screening Batches
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      When the annual AML scheduler identifies individuals due for re-screening, it creates a batch here for your approval.
+                      No Smile ID credits are consumed until you click <strong>Approve</strong>.
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    {rescreeningLoading ? (
+                      <div className="flex justify-center py-8"><LoadingSpinner /></div>
+                    ) : !rescreeningData?.batches?.length ? (
+                      <div className="flex flex-col items-center gap-3 py-10 text-center">
+                        <ShieldCheck className="h-8 w-8 text-green-500" />
+                        <p className="text-sm font-medium text-green-700 dark:text-green-400">No rescreening batches</p>
+                        <p className="text-xs text-muted-foreground">The annual scheduler will create a batch here when individuals are due.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {(rescreeningData.batches as any[]).map((batch: any) => {
+                          const isPending = batch.status === "pending";
+                          const pendingItems = (batch.items ?? []).filter((i: any) => !i.screeningResult && !i.skipped);
+                          return (
+                            <div key={batch.id} className={cn("border rounded-lg p-4 space-y-3", isPending && "border-amber-400 dark:border-amber-600")}>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-sm">Batch #{batch.id}</span>
+                                  <Badge
+                                    variant={batch.status === "pending" ? "outline" : batch.status === "approved" ? "default" : "secondary"}
+                                    className={cn("capitalize", batch.status === "pending" && "border-amber-500 text-amber-600 dark:text-amber-400")}
+                                    data-testid={`badge-batch-status-${batch.id}`}
+                                  >
+                                    {batch.status}
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <span>{new Date(batch.createdAt).toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" })}</span>
+                                  <span>·</span>
+                                  <span>{batch.totalItems} subject(s)</span>
+                                  {batch.approvedItems > 0 && <span>· {batch.approvedItems} screened</span>}
+                                  {batch.skippedItems > 0 && <span>· {batch.skippedItems} skipped</span>}
+                                </div>
+                              </div>
+
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Subject</TableHead>
+                                    <TableHead>Organisation</TableHead>
+                                    <TableHead>Last Screened</TableHead>
+                                    <TableHead>Current Risk</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    {isPending && <TableHead className="text-right">Action</TableHead>}
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {(batch.items ?? []).map((item: any) => (
+                                    <TableRow key={item.id} data-testid={`row-rescreen-item-${item.id}`}>
+                                      <TableCell>
+                                        <div className="font-medium text-sm">{item.subjectName}</div>
+                                        {item.subjectEmail && <div className="text-xs text-muted-foreground">{item.subjectEmail}</div>}
+                                      </TableCell>
+                                      <TableCell className="text-sm">{item.orgName || `Org #${item.orgId}`}</TableCell>
+                                      <TableCell className="text-xs text-muted-foreground">
+                                        {item.lastScreenedAt ? new Date(item.lastScreenedAt).toLocaleDateString("en-NG") : "Never"}
+                                      </TableCell>
+                                      <TableCell>
+                                        {item.currentRiskScore ? (
+                                          <Badge
+                                            variant={item.currentRiskScore === "red" ? "destructive" : "outline"}
+                                            className={cn("capitalize border-0", item.currentRiskScore === "green" && "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400")}
+                                          >
+                                            {item.currentRiskScore}
+                                          </Badge>
+                                        ) : <span className="text-xs text-muted-foreground">—</span>}
+                                      </TableCell>
+                                      <TableCell>
+                                        {item.skipped ? (
+                                          <span className="text-xs text-muted-foreground">Skipped{item.skipNote ? ` — ${item.skipNote}` : ""}</span>
+                                        ) : item.screeningResult ? (
+                                          <Badge
+                                            variant={item.screeningResult === "alert" ? "destructive" : item.screeningResult === "error" ? "outline" : "default"}
+                                            className={cn("capitalize border-0", item.screeningResult === "clear" && "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400")}
+                                            data-testid={`badge-rescreen-result-${item.id}`}
+                                          >
+                                            {item.screeningResult === "clear" ? "Clear" : item.screeningResult === "alert" ? "Alert" : "Error"}
+                                          </Badge>
+                                        ) : (
+                                          <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-400">Pending</Badge>
+                                        )}
+                                      </TableCell>
+                                      {isPending && (
+                                        <TableCell className="text-right">
+                                          {!item.screeningResult && !item.skipped && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                                              disabled={skipItemMutation.isPending}
+                                              onClick={() => skipItemMutation.mutate({ batchId: batch.id, itemId: item.id })}
+                                              data-testid={`button-skip-item-${item.id}`}
+                                            >
+                                              <XCircle className="h-3.5 w-3.5 mr-1" />Skip
+                                            </Button>
+                                          )}
+                                        </TableCell>
+                                      )}
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+
+                              {isPending && pendingItems.length > 0 && (
+                                <div className="flex justify-end pt-2">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => { setApproveConfirmBatch(batch); setApproveResults(null); }}
+                                    disabled={approveMutation.isPending}
+                                    data-testid={`button-approve-batch-${batch.id}`}
+                                  >
+                                    <PlayCircle className="h-4 w-4 mr-2" />
+                                    Approve All & Run Screening ({pendingItems.length})
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </TabsContent>
 
             </Tabs>
@@ -1930,6 +2105,71 @@ export default function AdminKycOverview() {
           )}
         </DialogContent>
       </Dialog>
+      {/* ── Rescreening Approval Confirmation Dialog ──────────────── */}
+      <Dialog open={!!approveConfirmBatch} onOpenChange={(open) => { if (!open) { setApproveConfirmBatch(null); setApproveResults(null); } }}>
+        <DialogContent className="max-w-lg">
+          {!approveResults ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Confirm AML Re-screening</DialogTitle>
+                <DialogDescription>
+                  This will call Smile ID for each pending subject in Batch #{approveConfirmBatch?.id}. Smile ID credits will be consumed — one per subject.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-2 space-y-1">
+                <p className="text-sm font-medium">Subjects to be screened ({(approveConfirmBatch?.items ?? []).filter((i: any) => !i.screeningResult && !i.skipped).length}):</p>
+                <ul className="text-sm text-muted-foreground space-y-0.5 max-h-48 overflow-y-auto">
+                  {(approveConfirmBatch?.items ?? []).filter((i: any) => !i.screeningResult && !i.skipped).map((i: any) => (
+                    <li key={i.id} className="flex items-center gap-2">
+                      <ShieldCheck className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <span>{i.subjectName}</span>
+                      <span className="text-xs opacity-60">— {i.orgName}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setApproveConfirmBatch(null)} data-testid="button-cancel-approve">Cancel</Button>
+                <Button
+                  disabled={approveMutation.isPending}
+                  onClick={() => approveMutation.mutate({ batchId: approveConfirmBatch?.id })}
+                  data-testid="button-confirm-approve"
+                >
+                  {approveMutation.isPending ? "Screening…" : "Confirm & Run Screening"}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Screening Complete</DialogTitle>
+                <DialogDescription>Results for Batch #{approveConfirmBatch?.id}</DialogDescription>
+              </DialogHeader>
+              <div className="py-2 space-y-1 max-h-64 overflow-y-auto">
+                {approveResults.map((r: any) => (
+                  <div key={r.itemId} className="flex items-center gap-2 text-sm">
+                    {r.result === "clear" ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                    ) : r.result === "alert" ? (
+                      <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+                    )}
+                    <span className="flex-1">{r.subjectName}</span>
+                    <span className={cn("text-xs capitalize font-medium", r.result === "clear" && "text-green-600", r.result === "alert" && "text-red-600", (!r.result || r.error) && "text-muted-foreground")}>
+                      {r.result ?? "error"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <DialogFooter>
+                <Button onClick={() => { setApproveConfirmBatch(null); setApproveResults(null); }} data-testid="button-close-results">Close</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </DashboardLayout>
   );
 }

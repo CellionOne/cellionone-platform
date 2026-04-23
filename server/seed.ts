@@ -31,14 +31,14 @@ export async function seedDatabase() {
       { key: "enable_verification_payment_required", isEnabled: false, description: "Require payment for identity verification (beta: false)" },
       { key: "enable_incorporation_payment_required", isEnabled: false, description: "Require payment for incorporation (beta: false)" },
       { key: "enable_escrow_payments", isEnabled: true, description: "Enable escrow payment system for procurement contracts and Escrow-as-a-Service API" },
-      { key: "enable_sanctions_monitoring", isEnabled: true, description: "Enable weekly automated sanctions/AML re-screening for all verified individuals" },
+      { key: "enable_sanctions_monitoring", isEnabled: false, description: "Enable annual admin-gated AML re-screening batch notifications for verified individuals" },
       { key: "enable_kyc_hosted_sessions", isEnabled: true, description: "Enable hosted KYC session links (no-code verification URLs for API customers)" },
       { key: "enable_cie_service", isEnabled: true, description: "Enable CIE (Cellion Intelligence Engine) — NGX equity intelligence scores and signals" },
     ];
     
     // Upsert feature flags — keep existing isEnabled values unless flag is new,
     // EXCEPT for flags we want to force-enable on startup (controlled list below)
-    const forceEnabled = new Set(["enable_sanctions_monitoring"]);
+    const forceEnabled = new Set<string>([]);
     for (const flag of allFlags) {
       if (forceEnabled.has(flag.key)) {
         await db.insert(featureFlags).values(flag).onConflictDoUpdate({

@@ -1377,6 +1377,7 @@ export const kycVerificationRequests = pgTable("kyc_verification_requests", {
   expiresAt: timestamp("expires_at").notNull(),
   certificateRef: varchar("certificate_ref", { length: 40 }).unique(),
   verifiedDataSnapshot: jsonb("verified_data_snapshot").$type<KycVerifiedSnapshot>(),
+  lastScreenedAt: timestamp("last_screened_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -1385,6 +1386,7 @@ export const kycVerificationRequests = pgTable("kyc_verification_requests", {
   index("idx_kyc_vr_status").on(table.status),
   index("idx_kyc_vr_subject").on(table.subjectUserId),
   index("idx_kyc_vr_cert_ref").on(table.certificateRef),
+  index("idx_kyc_vr_last_screened").on(table.lastScreenedAt),
 ]);
 
 export const insertKycVerificationRequestSchema = createInsertSchema(kycVerificationRequests).omit({ id: true, createdAt: true, updatedAt: true });
@@ -2596,4 +2598,57 @@ export const kybLookups = pgTable("kyb_lookups", {
 export const insertKybLookupSchema = createInsertSchema(kybLookups).omit({ id: true, createdAt: true, updatedAt: true });
 export type KybLookup = typeof kybLookups.$inferSelect;
 export type InsertKybLookup = z.infer<typeof insertKybLookupSchema>;
+
+// ============== KYC RESCREENING BATCHES ==============
+// Admin-gated annual AML re-screening. When the scheduler identifies
+// individuals due for re-screening it creates a pending batch.
+// No Smile ID credits are consumed until an admin explicitly approves.
+
+export const kycRescreeningBatches = pgTable("kyc_rescreening_batches", {
+  id: serial("id").primaryKey(),
+  status: varchar("status", { length: 20 }).notNull().default("pending"), // pending | approved | dismissed
+  totalItems: integer("total_items").notNull().default(0),
+  approvedItems: integer("approved_items").notNull().default(0),
+  skippedItems: integer("skipped_items").notNull().default(0),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedByUserId: varchar("resolved_by_user_id"),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_rb_status").on(table.status),
+  index("idx_kyc_rb_created").on(table.createdAt),
+]);
+
+export const insertKycRescreeningBatchSchema = createInsertSchema(kycRescreeningBatches).omit({ id: true, createdAt: true });
+export type KycRescreeningBatch = typeof kycRescreeningBatches.$inferSelect;
+export type InsertKycRescreeningBatch = z.infer<typeof insertKycRescreeningBatchSchema>;
+
+export const kycRescreeningBatchItems = pgTable("kyc_rescreening_batch_items", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id").notNull().references(() => kycRescreeningBatches.id),
+  verificationRequestId: integer("verification_request_id").notNull(),
+  supplierId: integer("supplier_id"), // set when item is a supplier person
+  orgId: integer("org_id").notNull(),
+  orgName: varchar("org_name", { length: 255 }),
+  subjectName: varchar("subject_name", { length: 255 }).notNull(),
+  subjectEmail: varchar("subject_email", { length: 255 }),
+  lastScreenedAt: timestamp("last_screened_at"),   // copy at batch creation time
+  currentRiskScore: varchar("current_risk_score", { length: 10 }),
+  // Set after admin approves this item
+  screeningResult: varchar("screening_result", { length: 30 }), // clear | alert | error
+  screenedAt: timestamp("screened_at"),
+  newRiskScore: varchar("new_risk_score", { length: 10 }),
+  // Set when admin skips this item
+  skipped: boolean("skipped").notNull().default(false),
+  skipNote: text("skip_note"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_kyc_rbi_batch").on(table.batchId),
+  index("idx_kyc_rbi_vr").on(table.verificationRequestId),
+  index("idx_kyc_rbi_org").on(table.orgId),
+]);
+
+export const insertKycRescreeningBatchItemSchema = createInsertSchema(kycRescreeningBatchItems).omit({ id: true, createdAt: true });
+export type KycRescreeningBatchItem = typeof kycRescreeningBatchItems.$inferSelect;
+export type InsertKycRescreeningBatchItem = z.infer<typeof insertKycRescreeningBatchItemSchema>;
 

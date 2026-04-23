@@ -10,13 +10,15 @@ import {
   kycSessions,
   kycSanctionsLogs,
   kycSupplierPeople,
+  kycRescreeningBatches,
+  kycRescreeningBatchItems,
   featureFlags,
   identityVerifications,
   documentFiles,
   notifications,
   users,
 } from "@shared/schema";
-import { getResendClient } from "./emailService";
+import { getResendClient, ADMIN_NOTIFICATION_EMAIL } from "./emailService";
 import * as webhookService from "./kycWebhookService";
 import * as billingService from "./kycBillingService";
 import * as smileIdService from "./smileIdService";
@@ -229,9 +231,23 @@ export async function runSanctionsMonitoring() {
     return;
   }
 
-  console.log("[KYCScheduler] Running weekly sanctions/AML re-screening...");
+  // Guard: skip if a pending batch already exists (e.g. admin hasn't acted yet)
+  const [existingPending] = await db.select({ id: kycRescreeningBatches.id })
+    .from(kycRescreeningBatches)
+    .where(eq(kycRescreeningBatches.status, "pending"))
+    .limit(1);
 
-  const verifiedRequests = await db.select({
+  if (existingPending) {
+    console.log(`[KYCScheduler] Pending rescreening batch #${existingPending.id} already exists — awaiting admin approval, skipping`);
+    return;
+  }
+
+  const ONE_YEAR_AGO = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+
+  console.log("[KYCScheduler] Checking for individuals due for annual AML re-screening...");
+
+  // Individual KYC requests not screened in the past year (or never screened)
+  const dueIndividuals = await db.select({
     request: kycVerificationRequests,
     org: kycOrganisations,
   })
@@ -239,102 +255,15 @@ export async function runSanctionsMonitoring() {
     .innerJoin(kycOrganisations, eq(kycVerificationRequests.orgId, kycOrganisations.id))
     .where(and(
       eq(kycVerificationRequests.status, "verified"),
-      eq(kycVerificationRequests.type, "individual")
+      eq(kycVerificationRequests.type, "individual"),
+      or(
+        isNull(kycVerificationRequests.lastScreenedAt),
+        lt(kycVerificationRequests.lastScreenedAt, ONE_YEAR_AGO),
+      )
     ));
 
-  let screened = 0;
-  let alerts = 0;
-
-  for (const row of verifiedRequests) {
-    try {
-      const amlResult = await smileIdService.performAmlCheck(
-        row.request.subjectName || "Unknown",
-        `kyc-org-${row.request.orgId}`,
-      );
-      const screeningResult: "clear" | "alert" = amlResult.isHit ? "alert" : "clear";
-      const previousRiskScore = row.request.riskScore;
-      const newRiskScore = screeningResult === "alert" ? "red" : (previousRiskScore ?? "green");
-
-      await db.insert(kycSanctionsLogs).values({
-        verificationRequestId: row.request.id,
-        orgId: row.request.orgId,
-        subjectName: row.request.subjectName,
-        previousRiskScore: previousRiskScore || null,
-        newRiskScore,
-        screeningResult,
-        matchDetails: amlResult.matchDetails,
-        alertSentAt: screeningResult === "alert" ? new Date() : null,
-      });
-
-      if (screeningResult === "alert") {
-        await db.update(kycVerificationRequests)
-          .set({ riskScore: "red", updatedAt: new Date() })
-          .where(eq(kycVerificationRequests.id, row.request.id));
-
-        // Only fire external alerts on NEW escalations — skip if already red
-        if (previousRiskScore === "red") {
-          console.log(`[KYCScheduler] Skipping repeat alert for already-red request ${row.request.id}`);
-          screened++;
-          continue;
-        }
-
-        webhookService.deliverWebhook(row.request.orgId, "sanctions.alert", {
-          requestId: row.request.id,
-          subjectName: row.request.subjectName,
-          subjectEmail: row.request.subjectEmail,
-          previousRiskScore,
-          newRiskScore: "red",
-          hitTypes: amlResult.hitTypes,
-          smileJobId: amlResult.smileJobId,
-          screenedAt: new Date().toISOString(),
-        }).catch(err => console.error("[KYCScheduler] Sanctions webhook error:", err));
-
-        // Email org admins
-        const reviewers = await db.select().from(kycOrgMembers)
-          .where(and(
-            eq(kycOrgMembers.orgId, row.request.orgId),
-            eq(kycOrgMembers.inviteStatus, "accepted"),
-            eq(kycOrgMembers.role, "org_admin")
-          ));
-
-        const hitSummary = amlResult.hitTypes.length > 0
-          ? `Hit types: ${amlResult.hitTypes.join(", ")}.`
-          : "";
-
-        const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
-          <h2 style="color:#dc2626;">${row.org.name} — Sanctions Alert</h2>
-          <p><strong>${row.request.subjectName}</strong> has been flagged during routine AML/sanctions re-screening.</p>
-          <p>${hitSummary}</p>
-          <p>Previous risk score: <strong>${previousRiskScore || "N/A"}</strong> → New: <strong>RED</strong></p>
-          <p>Please review this individual immediately in your KYC dashboard.</p>
-        </div>`;
-
-        for (const reviewer of reviewers) {
-          await sendKycEmail(reviewer.inviteEmail, `[URGENT] Sanctions Alert — ${row.request.subjectName}`, html);
-          // In-app notification for org admins who have a platform user account
-          if (reviewer.userId) {
-            storage.createNotification({
-              userId: reviewer.userId,
-              title: "Sanctions Alert",
-              message: `${row.request.subjectName || "A subject"} has been flagged during routine AML/sanctions re-screening and now has a RED risk score. ${hitSummary} Please review immediately in your KYC dashboard.`,
-              type: "error",
-              linkUrl: "/kyc/monitoring",
-            }).catch(err => console.error("[KYCScheduler] Notification error:", err));
-          }
-        }
-
-        alerts++;
-      }
-
-      screened++;
-    } catch (err) {
-      console.error(`[KYCScheduler] Sanctions screening error for request ${row.request.id}:`, err);
-    }
-  }
-
-  // --- Supplier people screening ---
-  // Screen individuals within verified supplier organisations
-  const supplierPeople = await db.select({
+  // Verified supplier people not screened in the past year
+  const dueSupplierPeople = await db.select({
     person: kycSupplierPeople,
     request: kycVerificationRequests,
     org: kycOrganisations,
@@ -349,102 +278,211 @@ export async function runSanctionsMonitoring() {
       eq(kycSupplierPeople.verificationStatus, "verified"),
     ));
 
-  for (const row of supplierPeople) {
-    try {
-      const amlResult = await smileIdService.performAmlCheck(
-        row.person.fullName,
-        `kyc-supplier-${row.request.orgId}`,
-      );
-      const screeningResult: "clear" | "alert" = amlResult.isHit ? "alert" : "clear";
+  const totalItems = dueIndividuals.length + dueSupplierPeople.length;
 
-      const [lastLog] = await db.select({ newRiskScore: kycSanctionsLogs.newRiskScore })
-        .from(kycSanctionsLogs)
-        .where(and(
-          eq(kycSanctionsLogs.verificationRequestId, row.request.id),
-          eq(kycSanctionsLogs.subjectName, row.person.fullName),
-        ))
-        .orderBy(desc(kycSanctionsLogs.createdAt))
-        .limit(1);
-      const previousRiskScore = lastLog?.newRiskScore ?? null;
-      const newRiskScore = screeningResult === "alert" ? "red" : (previousRiskScore ?? "green");
-
-      await db.insert(kycSanctionsLogs).values({
-        verificationRequestId: row.request.id,
-        orgId: row.request.orgId,
-        subjectName: row.person.fullName,
-        previousRiskScore: previousRiskScore || null,
-        newRiskScore,
-        screeningResult,
-        matchDetails: amlResult.matchDetails,
-        alertSentAt: screeningResult === "alert" ? new Date() : null,
-      });
-
-      if (screeningResult === "alert") {
-        if (previousRiskScore === "red") {
-          console.log(`[KYCScheduler] Skipping repeat supplier alert for ${row.person.fullName}`);
-          screened++;
-          continue;
-        }
-
-        // Update the supplier verification request risk score to red
-        await db.update(kycVerificationRequests)
-          .set({ riskScore: "red", updatedAt: new Date() })
-          .where(eq(kycVerificationRequests.id, row.request.id));
-
-        webhookService.deliverWebhook(row.request.orgId, "sanctions.alert", {
-          requestId: row.request.id,
-          subjectName: row.person.fullName,
-          subjectEmail: row.person.email,
-          supplierPersonId: row.person.id,
-          previousRiskScore,
-          newRiskScore: "red",
-          hitTypes: amlResult.hitTypes,
-          smileJobId: amlResult.smileJobId,
-          screenedAt: new Date().toISOString(),
-        }).catch(err => console.error("[KYCScheduler] Supplier sanctions webhook error:", err));
-
-        const reviewers = await db.select().from(kycOrgMembers)
-          .where(and(
-            eq(kycOrgMembers.orgId, row.request.orgId),
-            eq(kycOrgMembers.inviteStatus, "accepted"),
-            eq(kycOrgMembers.role, "org_admin")
-          ));
-
-        const hitSummary = amlResult.hitTypes.length > 0
-          ? `Hit types: ${amlResult.hitTypes.join(", ")}.`
-          : "";
-
-        const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
-          <h2 style="color:#dc2626;">${row.org.name} — Supplier Sanctions Alert</h2>
-          <p><strong>${row.person.fullName}</strong> (${row.person.role} of supplier <em>${row.request.subjectName || "verified supplier"}</em>) has been flagged during routine AML/sanctions re-screening.</p>
-          <p>${hitSummary}</p>
-          <p>Previous risk score: <strong>${previousRiskScore || "N/A"}</strong> → New: <strong>RED</strong></p>
-          <p>Please review this individual immediately in your KYC dashboard.</p>
-        </div>`;
-
-        for (const reviewer of reviewers) {
-          await sendKycEmail(reviewer.inviteEmail, `[URGENT] Supplier Sanctions Alert — ${row.person.fullName}`, html);
-          if (reviewer.userId) {
-            storage.createNotification({
-              userId: reviewer.userId,
-              title: "Supplier Sanctions Alert",
-              message: `${row.person.fullName} (${row.person.role}) has been flagged during routine AML/sanctions re-screening and now has a RED risk score. ${hitSummary} Please review immediately in your KYC dashboard.`,
-              type: "error",
-              linkUrl: "/kyc/monitoring",
-            }).catch(err => console.error("[KYCScheduler] Supplier notification error:", err));
-          }
-        }
-
-        alerts++;
-      }
-
-      screened++;
-    } catch (err) {
-      console.error(`[KYCScheduler] Supplier sanctions screening error for person ${row.person.id}:`, err);
-    }
+  if (totalItems === 0) {
+    console.log("[KYCScheduler] No individuals due for annual re-screening — all up to date");
+    return;
   }
 
-  console.log(`[KYCScheduler] Sanctions monitoring complete: ${screened} screened, ${alerts} alerts raised`);
+  console.log(`[KYCScheduler] ${totalItems} individual(s) due for annual AML re-screening — creating admin approval batch`);
+
+  // Create the batch header
+  const [batch] = await db.insert(kycRescreeningBatches).values({
+    status: "pending",
+    totalItems,
+    approvedItems: 0,
+    skippedItems: 0,
+  }).returning();
+
+  // Create individual batch items
+  for (const row of dueIndividuals) {
+    await db.insert(kycRescreeningBatchItems).values({
+      batchId: batch.id,
+      verificationRequestId: row.request.id,
+      orgId: row.request.orgId,
+      orgName: row.org.name,
+      subjectName: row.request.subjectName || "Unknown",
+      subjectEmail: row.request.subjectEmail || null,
+      lastScreenedAt: row.request.lastScreenedAt || null,
+      currentRiskScore: row.request.riskScore || null,
+      skipped: false,
+    });
+  }
+
+  for (const row of dueSupplierPeople) {
+    await db.insert(kycRescreeningBatchItems).values({
+      batchId: batch.id,
+      verificationRequestId: row.request.id,
+      supplierId: row.person.id,
+      orgId: row.request.orgId,
+      orgName: row.org.name,
+      subjectName: row.person.fullName,
+      subjectEmail: row.person.email || null,
+      lastScreenedAt: null,
+      currentRiskScore: row.request.riskScore || null,
+      skipped: false,
+    });
+  }
+
+  // Audit log
+  await storage.createAuditLog({
+    action: "kyc_rescreening_batch_created",
+    entityType: "kyc_rescreening_batch",
+    entityId: String(batch.id),
+    details: { totalItems, batchId: batch.id },
+  });
+
+  // Notify all platform admins (in-app)
+  try {
+    const adminUsers = await db.select({ id: users.id, email: users.email })
+      .from(users)
+      .innerJoin(
+        sql`user_roles ur ON ur.user_id = users.id AND ur.role = 'admin'`,
+        sql`TRUE`
+      );
+
+    for (const admin of adminUsers) {
+      storage.createNotification({
+        userId: admin.id,
+        title: "Annual AML Re-screening Required",
+        message: `${totalItems} verified individual(s) are due for their annual AML/sanctions re-screening. Please review and approve the batch in the KYC dashboard.`,
+        type: "warning",
+        linkUrl: "/admin/kyc?tab=rescreening",
+      }).catch(err => console.error("[KYCScheduler] Admin notification error:", err));
+    }
+  } catch (err) {
+    console.error("[KYCScheduler] Failed to send in-app notifications to admins:", err);
+  }
+
+  // Email platform admin mailbox
+  try {
+    const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+      <h2 style="color:#d97706;">Annual AML Re-screening Batch Ready</h2>
+      <p>${totalItems} verified individual(s) are due for their annual AML/sanctions re-screening.</p>
+      <p>No Smile ID credits have been consumed. The batch is awaiting your approval.</p>
+      <p>Please log in to the KYC admin dashboard and navigate to the <strong>Rescreening</strong> tab to review and approve.</p>
+      <p style="color:#6b7280;font-size:0.85em;">Batch ID: #${batch.id} | Created: ${new Date().toLocaleString("en-NG")}</p>
+    </div>`;
+    await sendKycEmail(ADMIN_NOTIFICATION_EMAIL, `[Action Required] Annual AML Re-screening — ${totalItems} Individual(s) Pending`, html);
+  } catch (err) {
+    console.error("[KYCScheduler] Failed to send admin email:", err);
+  }
+
+  console.log(`[KYCScheduler] Rescreening batch #${batch.id} created with ${totalItems} item(s) — awaiting admin approval`);
+}
+
+/**
+ * Execute AML screening for an approved rescreening batch item.
+ * Called by the admin approval endpoint — NOT the scheduler.
+ * This is the only place where Smile ID Job Type 10 credits are consumed.
+ */
+export async function executeRescreeningItem(
+  itemId: number,
+  batchId: number,
+): Promise<{ success: boolean; result?: string; error?: string }> {
+  const [item] = await db.select().from(kycRescreeningBatchItems)
+    .where(and(
+      eq(kycRescreeningBatchItems.id, itemId),
+      eq(kycRescreeningBatchItems.batchId, batchId),
+    ));
+
+  if (!item) return { success: false, error: "Item not found" };
+  if (item.skipped) return { success: false, error: "Item is skipped" };
+  if (item.screeningResult) return { success: false, error: "Item already screened" };
+
+  const [request] = await db.select().from(kycVerificationRequests)
+    .where(eq(kycVerificationRequests.id, item.verificationRequestId));
+
+  if (!request) return { success: false, error: "Verification request not found" };
+
+  try {
+    const userId = item.supplierId
+      ? `kyc-supplier-${item.orgId}`
+      : `kyc-org-${item.orgId}`;
+
+    const amlResult = await smileIdService.performAmlCheck(item.subjectName, userId);
+    const screeningResult: "clear" | "alert" = amlResult.isHit ? "alert" : "clear";
+    const previousRiskScore = request.riskScore;
+    const newRiskScore = screeningResult === "alert" ? "red" : (previousRiskScore ?? "green");
+    const now = new Date();
+
+    // Update batch item
+    await db.update(kycRescreeningBatchItems)
+      .set({ screeningResult, screenedAt: now, newRiskScore })
+      .where(eq(kycRescreeningBatchItems.id, itemId));
+
+    // Update verification request: risk score + lastScreenedAt
+    await db.update(kycVerificationRequests)
+      .set({ riskScore: newRiskScore, lastScreenedAt: now, updatedAt: now })
+      .where(eq(kycVerificationRequests.id, item.verificationRequestId));
+
+    // Insert sanctions log
+    await db.insert(kycSanctionsLogs).values({
+      verificationRequestId: item.verificationRequestId,
+      orgId: item.orgId,
+      subjectName: item.subjectName,
+      previousRiskScore: previousRiskScore || null,
+      newRiskScore,
+      screeningResult,
+      matchDetails: amlResult.matchDetails,
+      alertSentAt: screeningResult === "alert" ? now : null,
+    });
+
+    // Fire webhook + alerts on new escalations
+    if (screeningResult === "alert" && previousRiskScore !== "red") {
+      webhookService.deliverWebhook(item.orgId, "sanctions.alert", {
+        requestId: item.verificationRequestId,
+        subjectName: item.subjectName,
+        subjectEmail: item.subjectEmail,
+        previousRiskScore,
+        newRiskScore: "red",
+        hitTypes: amlResult.hitTypes,
+        smileJobId: amlResult.smileJobId,
+        screenedAt: now.toISOString(),
+      }).catch(err => console.error("[Rescreening] Webhook error:", err));
+
+      const reviewers = await db.select().from(kycOrgMembers)
+        .where(and(
+          eq(kycOrgMembers.orgId, item.orgId),
+          eq(kycOrgMembers.inviteStatus, "accepted"),
+          eq(kycOrgMembers.role, "org_admin"),
+        ));
+      const hitSummary = amlResult.hitTypes?.length
+        ? `Hit types: ${amlResult.hitTypes.join(", ")}.`
+        : "";
+      const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+        <h2 style="color:#dc2626;">AML Sanctions Alert</h2>
+        <p><strong>${item.subjectName}</strong> was flagged during annual AML re-screening.</p>
+        <p>${hitSummary}</p>
+        <p>Previous risk score: <strong>${previousRiskScore || "N/A"}</strong> → New: <strong>RED</strong></p>
+        <p>Please review in your KYC dashboard immediately.</p>
+      </div>`;
+      for (const reviewer of reviewers) {
+        sendKycEmail(reviewer.inviteEmail, `[URGENT] Sanctions Alert — ${item.subjectName}`, html).catch(() => {});
+        if (reviewer.userId) {
+          storage.createNotification({
+            userId: reviewer.userId,
+            title: "Sanctions Alert",
+            message: `${item.subjectName} was flagged during annual AML re-screening and now has a RED risk score. ${hitSummary}`,
+            type: "error",
+            linkUrl: "/kyc/monitoring",
+          }).catch(() => {});
+        }
+      }
+    }
+
+    return { success: true, result: screeningResult };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[Rescreening] Smile ID AML error for item ${itemId}:`, msg);
+
+    await db.update(kycRescreeningBatchItems)
+      .set({ screeningResult: "error", screenedAt: new Date() })
+      .where(eq(kycRescreeningBatchItems.id, itemId));
+
+    return { success: false, error: msg };
+  }
 }
 
 /**

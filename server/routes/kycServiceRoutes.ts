@@ -4226,6 +4226,14 @@ export function registerKycServiceRoutes(app: Express) {
         .set({ skipped: true, skipNote: note || null })
         .where(eq(kycRescreeningBatchItems.id, itemId));
 
+      // Stamp lastScreenedAt on the underlying verification request so this subject
+      // is excluded from daily re-batching for the next annual cycle (365 days)
+      if (item.verificationRequestId) {
+        await db.update(kycVerificationRequests)
+          .set({ lastScreenedAt: new Date() })
+          .where(eq(kycVerificationRequests.id, item.verificationRequestId));
+      }
+
       // Recalculate batch counters and check if all items are resolved
       const allAfterSkip = await db.select().from(kycRescreeningBatchItems)
         .where(eq(kycRescreeningBatchItems.batchId, batchId));

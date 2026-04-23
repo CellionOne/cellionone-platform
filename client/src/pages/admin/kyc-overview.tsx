@@ -395,6 +395,8 @@ export default function AdminKycOverview() {
   });
   const [approveConfirmBatch, setApproveConfirmBatch] = useState<any | null>(null);
   const [approveResults, setApproveResults] = useState<any[] | null>(null);
+  const [skipDialogItem, setSkipDialogItem] = useState<{ batchId: number; itemId: number; subjectName: string } | null>(null);
+  const [skipNoteText, setSkipNoteText] = useState("");
 
   const rescreeningApproveMutation = useMutation({
     mutationFn: async ({ batchId, itemIds }: { batchId: number; itemIds?: number[] }) => {
@@ -1374,7 +1376,7 @@ export default function AdminKycOverview() {
                                               size="sm"
                                               className="h-7 text-xs text-muted-foreground hover:text-destructive"
                                               disabled={skipItemMutation.isPending}
-                                              onClick={() => skipItemMutation.mutate({ batchId: batch.id, itemId: item.id })}
+                                              onClick={() => { setSkipDialogItem({ batchId: batch.id, itemId: item.id, subjectName: item.subjectName }); setSkipNoteText(""); }}
                                               data-testid={`button-skip-item-${item.id}`}
                                             >
                                               <XCircle className="h-3.5 w-3.5 mr-1" />Skip
@@ -2104,6 +2106,47 @@ export default function AdminKycOverview() {
           )}
         </DialogContent>
       </Dialog>
+      {/* ── Rescreening Skip Note Dialog ──────────────────────────── */}
+      <Dialog open={!!skipDialogItem} onOpenChange={(open) => { if (!open) { setSkipDialogItem(null); setSkipNoteText(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Skip Subject</DialogTitle>
+            <DialogDescription>
+              Skipping <strong>{skipDialogItem?.subjectName}</strong> will defer them from re-screening for 12 months.
+              Please provide a reason.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <label className="text-sm font-medium block mb-1.5">Reason for skipping</label>
+            <textarea
+              className="w-full border rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring bg-background"
+              rows={3}
+              placeholder="e.g. Subject is under active review, low-risk profile…"
+              value={skipNoteText}
+              onChange={(e) => setSkipNoteText(e.target.value)}
+              data-testid="input-skip-note"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setSkipDialogItem(null); setSkipNoteText(""); }} data-testid="button-cancel-skip">Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={skipItemMutation.isPending || !skipNoteText.trim()}
+              onClick={() => {
+                if (!skipDialogItem) return;
+                skipItemMutation.mutate(
+                  { batchId: skipDialogItem.batchId, itemId: skipDialogItem.itemId, note: skipNoteText.trim() },
+                  { onSuccess: () => { setSkipDialogItem(null); setSkipNoteText(""); } }
+                );
+              }}
+              data-testid="button-confirm-skip"
+            >
+              {skipItemMutation.isPending ? "Skipping…" : "Confirm Skip"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Rescreening Approval Confirmation Dialog ──────────────── */}
       <Dialog open={!!approveConfirmBatch} onOpenChange={(open) => { if (!open) { setApproveConfirmBatch(null); setApproveResults(null); } }}>
         <DialogContent className="max-w-lg">

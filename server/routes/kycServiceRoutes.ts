@@ -33,6 +33,7 @@ import {
   getGovernmentPhotoUrl,
 } from "../services/identityProfileService";
 import { executeRescreeningItem } from "../services/kycSchedulerService";
+import { storage } from "../storage";
 
 const TERMS_VERSION = "1.0";
 const objectStorageService = new ObjectStorageService();
@@ -4192,7 +4193,7 @@ export function registerKycServiceRoutes(app: Express) {
         })
         .where(eq(kycRescreeningBatches.id, batchId));
 
-      await req.storage?.createAuditLog?.({
+      await storage.createAuditLog({
         actorUserId: req.user?.claims?.sub,
         action: "kyc_rescreening_batch_approved",
         entityType: "kyc_rescreening_batch",

@@ -501,10 +501,8 @@ export async function executeRescreeningItem(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     console.error(`[Rescreening] Smile ID AML error for item ${itemId}:`, msg);
-
-    await db.update(kycRescreeningBatchItems)
-      .set({ screeningResult: "error", screenedAt: new Date() })
-      .where(eq(kycRescreeningBatchItems.id, itemId));
+    // Do NOT stamp screeningResult so the item stays in pending state and can be retried.
+    // The error is logged above; the approval route will leave the batch open.
 
     return { success: false, error: msg };
   }

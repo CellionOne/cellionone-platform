@@ -325,7 +325,7 @@ export async function runSanctionsMonitoring() {
       orgName: row.org.name,
       subjectName: row.person.fullName,
       subjectEmail: row.person.email || null,
-      lastScreenedAt: null,
+      lastScreenedAt: row.request.lastScreenedAt || null,
       currentRiskScore: row.request.riskScore || null,
       skipped: false,
     });

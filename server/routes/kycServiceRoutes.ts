@@ -4226,19 +4226,30 @@ export function registerKycServiceRoutes(app: Express) {
         .set({ skipped: true, skipNote: note || null })
         .where(eq(kycRescreeningBatchItems.id, itemId));
 
-      // Update batch skip counter
-      const skippedCount = await db.select({ count: sql<number>`count(*)` })
-        .from(kycRescreeningBatchItems)
-        .where(and(
-          eq(kycRescreeningBatchItems.batchId, batchId),
-          eq(kycRescreeningBatchItems.skipped, true),
-        ));
+      // Recalculate batch counters and check if all items are resolved
+      const allAfterSkip = await db.select().from(kycRescreeningBatchItems)
+        .where(eq(kycRescreeningBatchItems.batchId, batchId));
+
+      const skippedTotal = allAfterSkip.filter(i => i.skipped).length;
+      const screenedTotal = allAfterSkip.filter(i => !!i.screeningResult && !i.skipped).length;
+      const stillPending = allAfterSkip.filter(i => !i.screeningResult && !i.skipped).length;
+
+      // If nothing is left pending, resolve the batch to avoid permanent pending deadlock
+      const resolvedStatus = stillPending === 0
+        ? (screenedTotal > 0 ? "approved" : "dismissed")
+        : "pending";
 
       await db.update(kycRescreeningBatches)
-        .set({ skippedItems: Number(skippedCount[0]?.count ?? 0) })
+        .set({
+          skippedItems: skippedTotal,
+          approvedItems: screenedTotal,
+          status: resolvedStatus,
+          resolvedAt: stillPending === 0 ? new Date() : null,
+          resolvedByUserId: stillPending === 0 ? (req.user?.claims?.sub ?? null) : null,
+        })
         .where(eq(kycRescreeningBatches.id, batchId));
 
-      res.json({ message: "Item skipped" });
+      res.json({ message: "Item skipped", batchStatus: resolvedStatus });
     } catch (err: any) {
       console.error("[Rescreening] Skip error:", err);
       res.status(500).json({ message: "Failed to skip item" });

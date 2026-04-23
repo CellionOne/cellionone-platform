@@ -17,6 +17,7 @@ import {
   documentFiles,
   notifications,
   users,
+  userRoles,
 } from "@shared/schema";
 import { getResendClient, ADMIN_NOTIFICATION_EMAIL } from "./emailService";
 import * as webhookService from "./kycWebhookService";
@@ -263,6 +264,7 @@ export async function runSanctionsMonitoring() {
     ));
 
   // Verified supplier people not screened in the past year
+  // Uses the parent verification request's lastScreenedAt as the per-person screening signal
   const dueSupplierPeople = await db.select({
     person: kycSupplierPeople,
     request: kycVerificationRequests,
@@ -276,6 +278,10 @@ export async function runSanctionsMonitoring() {
       eq(kycVerificationRequests.type, "supplier"),
       eq(kycSupplierPeople.requiresVerification, true),
       eq(kycSupplierPeople.verificationStatus, "verified"),
+      or(
+        isNull(kycVerificationRequests.lastScreenedAt),
+        lt(kycVerificationRequests.lastScreenedAt, ONE_YEAR_AGO),
+      ),
     ));
 
   const totalItems = dueIndividuals.length + dueSupplierPeople.length;
@@ -355,8 +361,15 @@ export async function runSanctionsMonitoring() {
     console.error("[KYCScheduler] Failed to send in-app notifications to admins:", err);
   }
 
-  // Email platform admin mailbox
+  // Email every platform admin user individually
   try {
+    const adminEmailUsers = await db.select({ id: users.id, email: users.email })
+      .from(users)
+      .innerJoin(userRoles, and(
+        eq(userRoles.userId, users.id),
+        eq(userRoles.role, "admin"),
+      ));
+
     const html = `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
       <h2 style="color:#d97706;">Annual AML Re-screening Batch Ready</h2>
       <p>${totalItems} verified individual(s) are due for their annual AML/sanctions re-screening.</p>
@@ -364,9 +377,21 @@ export async function runSanctionsMonitoring() {
       <p>Please log in to the KYC admin dashboard and navigate to the <strong>Rescreening</strong> tab to review and approve.</p>
       <p style="color:#6b7280;font-size:0.85em;">Batch ID: #${batch.id} | Created: ${new Date().toLocaleString("en-NG")}</p>
     </div>`;
-    await sendKycEmail(ADMIN_NOTIFICATION_EMAIL, `[Action Required] Annual AML Re-screening — ${totalItems} Individual(s) Pending`, html);
+
+    const subject = `[Action Required] Annual AML Re-screening — ${totalItems} Individual(s) Pending`;
+    const emailTargets = adminEmailUsers.map(u => u.email).filter(Boolean) as string[];
+    // Always include the platform admin mailbox
+    if (ADMIN_NOTIFICATION_EMAIL && !emailTargets.includes(ADMIN_NOTIFICATION_EMAIL)) {
+      emailTargets.push(ADMIN_NOTIFICATION_EMAIL);
+    }
+
+    for (const email of emailTargets) {
+      await sendKycEmail(email, subject, html).catch(err =>
+        console.error(`[KYCScheduler] Failed to email admin ${email}:`, err)
+      );
+    }
   } catch (err) {
-    console.error("[KYCScheduler] Failed to send admin email:", err);
+    console.error("[KYCScheduler] Failed to send admin emails:", err);
   }
 
   console.log(`[KYCScheduler] Rescreening batch #${batch.id} created with ${totalItems} item(s) — awaiting admin approval`);

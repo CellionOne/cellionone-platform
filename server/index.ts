@@ -289,13 +289,13 @@ httpServer.listen(
     runDocumentFilesExpiryCheck().catch(console.error);
     setInterval(() => runDocumentFilesExpiryCheck().catch(console.error), ONE_DAY_MS);
 
-    // Run sanctions monitoring weekly (gated by feature flag)
+    // Run sanctions monitoring daily (gated by feature flag + admin-approval gate).
     // NOTE: Do NOT add a bare startup call here — the scheduler only fires on interval.
     // Calling it on startup caused uncontrolled Smile ID credit consumption on every deployment.
-    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    // The scheduler creates pending batches only; no Smile ID credits consumed until admin approves.
     setInterval(() => {
       runSanctionsMonitoring().catch(console.error);
-    }, SEVEN_DAYS_MS);
+    }, ONE_DAY_MS);
 
     // Auto-expire stale escrow API transactions every 30 minutes
     const THIRTY_MIN_MS = 30 * 60 * 1000;

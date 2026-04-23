@@ -343,10 +343,10 @@ export async function runSanctionsMonitoring() {
   try {
     const adminUsers = await db.select({ id: users.id, email: users.email })
       .from(users)
-      .innerJoin(
-        sql`user_roles ur ON ur.user_id = users.id AND ur.role = 'admin'`,
-        sql`TRUE`
-      );
+      .innerJoin(userRoles, and(
+        eq(userRoles.userId, users.id),
+        eq(userRoles.role, "admin"),
+      ));
 
     for (const admin of adminUsers) {
       storage.createNotification({

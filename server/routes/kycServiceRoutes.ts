@@ -3579,6 +3579,9 @@ export function registerKycServiceRoutes(app: Express) {
       }
 
       // Update verification request with final status, enriched notes, and certificate if issued
+      // Stamp lastScreenedAt whenever AML ran without an infrastructure error,
+      // so the annual re-screening cadence starts from initial verification.
+      const amlRunSuccessfully = amlResult && !(amlResult as smileIdService.AmlCheckResult).error;
       const sessionUpdatePayload: Record<string, any> = {
         status: finalStatus,
         notes: JSON.stringify(updatedNotes),
@@ -3586,6 +3589,7 @@ export function registerKycServiceRoutes(app: Express) {
         ...(finalStatus === "verified" ? { reviewedAt: new Date() } : {}),
         ...(sessionCertificateRef ? { certificateRef: sessionCertificateRef } : {}),
         ...(sessionVerifiedSnapshot ? { verifiedDataSnapshot: sessionVerifiedSnapshot } : {}),
+        ...(amlRunSuccessfully ? { lastScreenedAt: new Date() } : {}),
       };
       await db.update(kycVerificationRequests)
         .set(sessionUpdatePayload)

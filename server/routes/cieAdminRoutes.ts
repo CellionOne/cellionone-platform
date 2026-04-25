@@ -22,7 +22,13 @@ import {
   parseCsvBuffer,
   parseXlsxBuffer,
   parsePdfBuffer,
+  parseDocxBuffer,
+  parseTextContent,
+  parseDividendDocument,
   buildPreview,
+  buildDividendPreview,
+  getStoredDividendPreview,
+  deleteStoredDividendPreview,
   commitFromToken,
   generatePricesTemplate,
   generateDividendsTemplate,
@@ -247,7 +253,7 @@ export function registerCieAdminRoutes(app: Express): void {
 
       const mime = file.mimetype.toLowerCase();
       const filename = file.originalname.toLowerCase();
-      let format: "csv" | "xlsx" | "pdf";
+      let format: "csv" | "xlsx" | "pdf" | "docx";
       let rows;
 
       if (filename.endsWith(".csv") || mime.includes("csv")) {
@@ -259,8 +265,11 @@ export function registerCieAdminRoutes(app: Express): void {
       } else if (filename.endsWith(".pdf") || mime.includes("pdf")) {
         format = "pdf";
         rows = await parsePdfBuffer(file.buffer, file.originalname);
+      } else if (filename.endsWith(".docx") || mime.includes("wordprocessingml") || mime.includes("msword")) {
+        format = "docx";
+        rows = await parseDocxBuffer(file.buffer, file.originalname);
       } else {
-        return res.status(400).json({ error: "Unsupported file type. Upload CSV, XLSX, or PDF." });
+        return res.status(400).json({ error: "Unsupported file type. Upload CSV, XLSX, PDF, or DOCX." });
       }
 
       const preview = await buildPreview(format, rows, file.originalname);
@@ -437,6 +446,166 @@ export function registerCieAdminRoutes(app: Express): void {
       const msg = errMsg(e);
       if (msg.includes("Preview token")) return res.status(410).json({ error: msg });
       res.status(500).json({ error: msg });
+    }
+  });
+
+  /**
+   * POST /api/admin/cie/ingest/preview-text  (Step 1 — paste-text variant)
+   *
+   * Accepts { text: string } — analyst-pasted raw content from any source.
+   * Returns the same preview token structure as the file-upload preview endpoint.
+   */
+  app.post("/api/admin/cie/ingest/preview-text", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const schema = z.object({ text: z.string().min(10, "Paste at least 10 characters of text") });
+      const { text } = schema.parse(req.body);
+
+      const rows = await parseTextContent(text);
+      const preview = await buildPreview("text", rows, "pasted-text");
+
+      res.json({
+        previewToken: preview.previewToken,
+        format: preview.format,
+        filename: preview.filename,
+        rowsExtracted: preview.rowsExtracted,
+        rowsAccepted: preview.rowsAccepted,
+        rowsRejected: preview.rowsRejected,
+        rowsFlagged: preview.rowsFlagged,
+        lowConfidenceCount: preview.lowConfidenceCount,
+        flaggedSymbols: preview.flaggedSymbols,
+        acceptedRows: preview.acceptedRows,
+        rejectedRows: preview.rejectedRows.slice(0, 50),
+        previewRows: preview.previewRows,
+        expiresAt: preview.expiresAt,
+      });
+    } catch (e: unknown) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /**
+   * POST /api/admin/cie/dividends/parse-document  (Step 1 — dividend AI extraction)
+   *
+   * Accepts a file (PDF or DOCX) OR { text: string } body.
+   * Returns a dividend preview token + proposed DividendRow[] for analyst review.
+   * No data is written at this step.
+   */
+  app.post("/api/admin/cie/dividends/parse-document",
+    isAuthenticated,
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      try {
+        if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+        let rows;
+        let format: "pdf" | "docx" | "text";
+        let filename = "dividend-document";
+
+        const file = req.file;
+        if (file) {
+          const mime = file.mimetype.toLowerCase();
+          const fn = file.originalname.toLowerCase();
+          filename = file.originalname;
+
+          if (fn.endsWith(".pdf") || mime.includes("pdf")) {
+            format = "pdf";
+            rows = await parseDividendDocument({ type: "pdf", buffer: file.buffer, filename: file.originalname });
+          } else if (fn.endsWith(".docx") || mime.includes("wordprocessingml") || mime.includes("msword")) {
+            format = "docx";
+            rows = await parseDividendDocument({ type: "docx", buffer: file.buffer, filename: file.originalname });
+          } else {
+            return res.status(400).json({ error: "Unsupported file type for dividend extraction. Upload PDF or DOCX." });
+          }
+        } else {
+          // Body may be raw text
+          const schema = z.object({ text: z.string().min(10, "Paste at least 10 characters of text") });
+          const { text } = schema.parse(req.body);
+          format = "text";
+          rows = await parseDividendDocument({ type: "text", text });
+        }
+
+        const preview = await buildDividendPreview(rows, format, filename);
+
+        res.json({
+          previewToken: preview.previewToken,
+          format: preview.format,
+          filename: preview.filename,
+          rowsExtracted: preview.rowsExtracted,
+          rowsAccepted: preview.rowsAccepted,
+          rowsRejected: preview.rowsRejected,
+          acceptedRows: preview.acceptedRows,
+          rejectedRows: preview.rejectedRows,
+          previewRows: preview.previewRows,
+          expiresAt: preview.expiresAt,
+        });
+      } catch (e: unknown) {
+        if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+        res.status(500).json({ error: errMsg(e) });
+      }
+    }
+  );
+
+  /**
+   * POST /api/admin/cie/dividends/confirm-parsed
+   *
+   * Analyst commits AI-extracted dividend rows selected by rowIndex.
+   * Body: { previewToken: string, acceptedRowIndices?: number[] }
+   */
+  app.post("/api/admin/cie/dividends/confirm-parsed", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const schema = z.object({
+        previewToken: z.string().uuid("previewToken must be a valid UUID"),
+        acceptedRowIndices: z.array(z.number().int().nonnegative()).optional(),
+      });
+      const body = schema.parse(req.body);
+
+      const preview = getStoredDividendPreview(body.previewToken);
+      if (!preview) return res.status(410).json({ error: "Dividend preview token not found or expired. Please re-upload." });
+
+      const rowsToCommit = body.acceptedRowIndices != null
+        ? preview.acceptedRows.filter(r => body.acceptedRowIndices!.includes(r.rowIndex))
+        : preview.acceptedRows;
+
+      const securities = await storage.listCieSecurities(false);
+      const symbolToId = new Map(securities.map(s => [s.symbol, s.id]));
+
+      let committed = 0;
+      const errors: string[] = [];
+
+      for (const row of rowsToCommit) {
+        const secId = symbolToId.get(row.ticker);
+        if (!secId) { errors.push(`${row.ticker}: ticker not found in securities master list`); continue; }
+
+        try {
+          await storage.createCieDividend({
+            securityId: secId,
+            exDividendDate: row.exDividendDate,
+            paymentDate: row.paymentDate ?? null,
+            amountPerShareKobo: Math.round(row.amountPerShareNaira * 100),
+            notes: null,
+          });
+          committed++;
+        } catch (err: unknown) {
+          errors.push(`${row.ticker}: ${err instanceof Error ? err.message : "database error"}`);
+        }
+      }
+
+      deleteStoredDividendPreview(body.previewToken);
+
+      res.json({
+        committed,
+        skipped: rowsToCommit.length - committed,
+        errors: errors.slice(0, 20),
+        message: `${committed} dividend record${committed !== 1 ? "s" : ""} committed.`,
+      });
+    } catch (e: unknown) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      res.status(500).json({ error: errMsg(e) });
     }
   });
 

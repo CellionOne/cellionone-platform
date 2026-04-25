@@ -1,10 +1,14 @@
 /**
  * CIE Data Ingestion Service — Cellion Intelligence Engine
  *
- * Parses price data from three formats:
+ * Parses price data from five formats:
  *   CSV   — standard OHLCV (Symbol, Date, Open, High, Low, Close, Volume)
  *   Excel — .xlsx, same column structure
- *   PDF   — NGX daily official list, extracted via GPT-4o vision with per-row confidence
+ *   PDF   — any Nigerian equity/dividend document, extracted via GPT-4o
+ *   DOCX  — Word documents, text extracted via mammoth then sent to GPT-4o
+ *   Text  — raw pasted text, sent directly to GPT-4o
+ *
+ * Also supports AI dividend parsing from PDF/DOCX/text via parseDividendDocument().
  *
  * Strict two-step analyst flow:
  *   1. buildPreview()        — parse & validate, return rows + counts + previewToken, NO DB write
@@ -44,6 +48,34 @@ interface StoredPreview {
 const previewStore = new Map<string, StoredPreview>();
 const PREVIEW_TTL_MS = 30 * 60 * 1000;
 
+// Dividend preview store (same TTL)
+interface StoredDividendPreview {
+  result: DividendPreviewResult;
+  expiresAt: number;
+}
+const dividendPreviewStore = new Map<string, StoredDividendPreview>();
+
+export function storeDividendPreview(result: DividendPreviewResult): string {
+  const token = randomUUID();
+  const now = Date.now();
+  for (const [k, v] of dividendPreviewStore) {
+    if (v.expiresAt < now) dividendPreviewStore.delete(k);
+  }
+  dividendPreviewStore.set(token, { result, expiresAt: now + PREVIEW_TTL_MS });
+  return token;
+}
+
+export function getStoredDividendPreview(token: string): DividendPreviewResult | null {
+  const entry = dividendPreviewStore.get(token);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) { dividendPreviewStore.delete(token); return null; }
+  return entry.result;
+}
+
+export function deleteStoredDividendPreview(token: string): void {
+  dividendPreviewStore.delete(token);
+}
+
 function storePreview(result: IngestPreviewResult): string {
   const token = randomUUID();
   // Lazy cleanup of expired entries
@@ -73,6 +105,8 @@ export function deleteStoredPreview(token: string): void {
 // Types
 // ============================================================
 
+export type IngestFormat = "csv" | "xlsx" | "pdf" | "docx" | "text";
+
 export interface PriceRow {
   rowIndex: number;    // 0-based index within acceptedRows list (for analyst selection)
   symbol: string;
@@ -82,9 +116,9 @@ export interface PriceRow {
   low?: number;
   close: number;       // Naira (required)
   volume?: number;
-  confidence: number;  // 0–1: data extraction confidence (1.0 for CSV/XLSX, GPT-assigned for PDF)
+  confidence: number;  // 0–1: data extraction confidence (1.0 for CSV/XLSX, GPT-assigned for PDF/docx/text)
   lowConfidence: boolean; // true when confidence < 0.7
-  source: "csv" | "xlsx" | "pdf";
+  source: IngestFormat;
   error?: string;      // set if row was rejected during parsing
 }
 
@@ -93,12 +127,40 @@ export interface RejectedRow {
   rawDate: string;
   rawClose: string;
   reason: string;
-  source: "csv" | "xlsx" | "pdf";
+  source: IngestFormat;
+}
+
+// ============================================================
+// Dividend types (for AI-extracted dividend previews)
+// ============================================================
+
+export interface DividendRow {
+  rowIndex: number;
+  ticker: string;
+  exDividendDate: string;  // YYYY-MM-DD
+  paymentDate: string | null;
+  amountPerShareNaira: number;
+  confidence: number;
+  lowConfidence: boolean;
+  error?: string;
+}
+
+export interface DividendPreviewResult {
+  previewToken: string;
+  format: IngestFormat;
+  filename: string;
+  rowsExtracted: number;
+  rowsAccepted: number;
+  rowsRejected: number;
+  acceptedRows: DividendRow[];
+  rejectedRows: Array<{ raw: string; reason: string }>;
+  previewRows: DividendRow[];
+  expiresAt: string;
 }
 
 export interface IngestPreviewResult {
   previewToken: string;
-  format: "csv" | "xlsx" | "pdf";
+  format: IngestFormat;
   filename: string;
   rowsExtracted: number;
   rowsAccepted: number;
@@ -641,18 +703,32 @@ async function parsePdfViaVision(buffer: Buffer): Promise<PriceRow[]> {
 
   console.info(`[CIEIngest] Scanned PDF detected — sending ${images.length} page image(s) to GPT-4o Vision`);
 
-  const visionSystemPrompt = `You are a financial data extraction engine.
-You will be shown images of pages from an NGX (Nigerian Exchange Group) equity price list.
-Extract ALL stock price rows visible in the images.
+  const visionSystemPrompt = `You are a financial data extraction engine specialising in Nigerian equity markets.
+You will be shown images of pages from a Nigerian financial document — this may be any of:
+  - NGX (Nigerian Exchange Group) official daily price list
+  - Nairametrics or BusinessDay price/market tables
+  - Stockbroker or investment research morning notes
+  - NSE (Nigerian Stock Exchange) equity summary sheets
+  - Any other Nigerian market report containing stock price data
+
+Extract ALL stock price rows visible in the images regardless of layout.
 Return ONLY a JSON object with a "rows" array. Each item must have:
-  symbol    (string, NGX ticker code, required)
-  date      (string, YYYY-MM-DD, required)
+  symbol    (string, NGX ticker code e.g. DANGCEM GTCO ZENITHBANK MTNN, required — do NOT use the full company name)
+  date      (string, YYYY-MM-DD, required — infer from document headers, page titles, or captions if not in each row)
   open      (number, Naira, optional)
   high      (number, Naira, optional)
   low       (number, Naira, optional)
-  close     (number, Naira, required)
-  volume    (integer, shares, optional)
-  confidence (number 0-1: 1.0 = clearly readable, 0.5 = inferred/partial, 0.2 = uncertain/guess)
+  close     (number, Naira, required — labelled "closing price", "close", "last", or "market price")
+  volume    (integer, shares traded, optional)
+  confidence (number 0-1: 1.0 = clearly readable, 0.5 = partially inferred, 0.2 = uncertain)
+
+IMPORTANT: If the document shows company names instead of ticker codes, map them to their NGX ticker.
+Common mappings: "Dangote Cement"→DANGCEM, "Guaranty Trust"→GTCO, "Zenith Bank"→ZENITHBANK,
+"MTN Nigeria"→MTNN, "Airtel Africa"→AIRTELAFRI, "Access Holdings"→ACCESSCORP, "UBA"→UBA,
+"First Bank"→FBNH, "Stanbic IBTC"→STANBIC, "Nestle"→NESTLE, "Lafarge"→WAPCO,
+"Seplat"→SEPLAT, "Okomu Oil"→OKOMUOIL, "Presco"→PRESCO, "Fidelity Bank"→FIDELITYBK,
+"Ecobank"→ETI, "Flour Mills"→FLOURMILL, "Cadbury"→CADBURY, "Nigerian Breweries"→NB.
+If you cannot determine the ticker, include the company name as-is (the system will flag it).
 Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
 
   const imageContent = images.map(url => ({
@@ -725,27 +801,56 @@ export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise
 
   console.info("[CIEIngest] NGX deterministic parser found 0 rows — falling back to GPT-4o text extraction");
 
-  const systemPrompt = `You are a financial data extraction engine.
-Extract NGX (Nigerian Exchange Group) equity price data from the text below.
+  return gptExtractPriceRows(rawText, "pdf");
+}
+
+// ============================================================
+// Shared GPT-4o price extraction from raw text
+// ============================================================
+
+const PRICE_EXTRACTION_SYSTEM_PROMPT = `You are a financial data extraction engine specialising in Nigerian equity markets.
+Extract ALL stock price rows from the text below. The document may be any of:
+  - NGX (Nigerian Exchange Group) official daily price list
+  - Nairametrics, BusinessDay, or Punch market summary/table
+  - Stockbroker or investment firm morning note / research
+  - NSE or SEC equity summary sheet
+  - Any other Nigerian market report, newsletter, or announcement
+
 Return ONLY a JSON object with a "rows" array. Each item must have:
-  symbol    (string, NGX ticker code, required)
-  date      (string, YYYY-MM-DD, required)
+  symbol    (string, NGX ticker code e.g. DANGCEM GTCO ZENITHBANK MTNN, required)
+  date      (string, YYYY-MM-DD, required — infer from document headers or date mentions if not per-row)
   open      (number, Naira, optional)
   high      (number, Naira, optional)
   low       (number, Naira, optional)
-  close     (number, Naira, required)
-  volume    (integer, shares, optional)
-  confidence (number 0-1: 1.0 = clearly readable, 0.5 = inferred/partial, 0.2 = uncertain/guess)
-Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
+  close     (number, Naira, required — may be labelled "closing price", "close", "last price", "market price", or just a price column)
+  volume    (integer, shares traded, optional)
+  confidence (number 0-1: 1.0 = exact match, 0.7 = confident, 0.5 = partially inferred, 0.2 = uncertain)
 
-  // Step 4: Send extracted text to GPT-4o as a text prompt (fallback for unrecognised formats)
+IMPORTANT RULES:
+- Map company names to NGX tickers. Common mappings:
+  "Dangote Cement"→DANGCEM, "Dangote Sugar"→DANGSUGAR, "Guaranty Trust"→GTCO,
+  "Zenith Bank"→ZENITHBANK, "MTN Nigeria"→MTNN, "Airtel Africa"→AIRTELAFRI,
+  "Access Holdings"→ACCESSCORP, "UBA"/"United Bank for Africa"→UBA,
+  "First Bank"/"FBN Holdings"→FBNH, "Stanbic IBTC"→STANBIC,
+  "Nestle Nigeria"→NESTLE, "Lafarge Africa"→WAPCO, "Seplat Energy"→SEPLAT,
+  "Okomu Oil"→OKOMUOIL, "Presco"→PRESCO, "Fidelity Bank"→FIDELITYBK,
+  "Ecobank"→ETI, "Flour Mills"→FLOURMILL, "Cadbury Nigeria"→CADBURY,
+  "Nigerian Breweries"→NB, "Transcorp"→TRANSCORP, "Vitafoam"→VITAFOAM,
+  "Unilever Nigeria"→UNILEVER, "Total Energies"→TOTAL, "Conoil"→CONOIL.
+- If a ticker cannot be determined, use the company name as-is — the system will flag it.
+- Numbers may use comma as thousands separator (e.g. "1,200,000") — parse as integers/decimals.
+- Percentage change columns (% chg) are NOT prices — ignore them.
+- If the text contains no price data at all, return {"rows":[]}.
+Pure JSON only — no markdown, no explanation.`;
+
+async function gptExtractPriceRows(text: string, source: IngestFormat): Promise<PriceRow[]> {
   try {
     const openai = await getOpenAI();
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: rawText.slice(0, 48_000) }, // respect context window
+        { role: "system", content: PRICE_EXTRACTION_SYSTEM_PROMPT },
+        { role: "user", content: text.slice(0, 48_000) },
       ],
       response_format: { type: "json_object" },
       temperature: 0.1,
@@ -757,16 +862,277 @@ Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
     try {
       parsed = JSON.parse(content) as GptResponsePayload | GptPriceRow[];
     } catch {
-      console.error("[CIEIngest] GPT-4o returned invalid JSON for PDF");
+      console.error(`[CIEIngest] GPT-4o returned invalid JSON for ${source} extraction`);
       return [];
     }
 
-    return gptRowsToPriceRows(parsed);
+    return gptRowsToPriceRows(parsed).map(r => ({ ...r, source }));
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error("[CIEIngest] PDF extraction failed:", errMsg);
+    console.error(`[CIEIngest] GPT-4o text extraction failed (${source}):`, errMsg);
     return [];
   }
+}
+
+// ============================================================
+// DOCX extraction via mammoth → GPT-4o
+// ============================================================
+
+export async function parseDocxBuffer(buffer: Buffer, filename?: string): Promise<PriceRow[]> {
+  let rawText = "";
+  try {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({ buffer });
+    rawText = result.value ?? "";
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[CIEIngest] mammoth docx extraction failed:", errMsg);
+    return [];
+  }
+
+  if (rawText.trim().length < 20) {
+    console.warn("[CIEIngest] DOCX appears to have no extractable text");
+    return [];
+  }
+
+  console.info(`[CIEIngest] DOCX text extracted (${rawText.length} chars) — sending to GPT-4o${filename ? ` (${filename})` : ""}`);
+
+  // Try deterministic NGX parser first (it handles NGX-format text from any source)
+  const tradeDate = filename ? parseDateFromFilename(filename) : null;
+  const ngxRows = parseNgxPriceText(rawText, tradeDate);
+  if (ngxRows.length > 0) {
+    console.info(`[CIEIngest] NGX deterministic parser extracted ${ngxRows.length} rows from DOCX`);
+    return ngxRows.map(r => ({ ...r, source: "docx" as IngestFormat }));
+  }
+
+  return gptExtractPriceRows(rawText, "docx");
+}
+
+// ============================================================
+// Paste-text extraction — raw string → GPT-4o
+// ============================================================
+
+export async function parseTextContent(text: string): Promise<PriceRow[]> {
+  if (!text || text.trim().length < 10) return [];
+  console.info(`[CIEIngest] Paste-text extraction (${text.length} chars) — sending to GPT-4o`);
+
+  // Try deterministic NGX parser on pasted text too
+  const ngxRows = parseNgxPriceText(text, null);
+  if (ngxRows.length > 0) {
+    console.info(`[CIEIngest] NGX deterministic parser extracted ${ngxRows.length} rows from pasted text`);
+    return ngxRows.map(r => ({ ...r, source: "text" as IngestFormat }));
+  }
+
+  return gptExtractPriceRows(text, "text");
+}
+
+// ============================================================
+// Dividend extraction prompt + parser
+// ============================================================
+
+const DIVIDEND_EXTRACTION_SYSTEM_PROMPT = `You are a financial data extraction engine specialising in Nigerian equity markets.
+Extract ALL dividend announcements from the text below. The document may be any of:
+  - NGX or NSE official dividend announcement
+  - Nairametrics, BusinessDay, or Punch dividend news article
+  - Company annual report dividend section
+  - Stockbroker research note with dividend summary table
+  - Any other Nigerian market communication mentioning dividends
+
+Return ONLY a JSON object with a "dividends" array. Each item must have:
+  ticker         (string, NGX ticker code e.g. DANGCEM GTCO ZENITHBANK MTNN, required)
+  ex_date        (string, YYYY-MM-DD, required — the ex-dividend date)
+  payment_date   (string, YYYY-MM-DD, optional — the payment/payment date)
+  amount_naira   (number, Naira per share, required — e.g. 3.50 means ₦3.50 per share)
+  confidence     (number 0-1: 1.0 = exact, 0.7 = confident, 0.5 = inferred, 0.2 = uncertain)
+
+IMPORTANT RULES:
+- Map company names to NGX tickers using the same mappings as for price data.
+- "Ex-dividend date" and "ex-date" and "qualification date" all mean the same thing.
+- Amounts: if stated as kobo (e.g. "350k" or "350 kobo"), convert to naira (350k → 3.50).
+- If multiple dividends appear (interim + final), extract each as a separate row.
+- If no dividend data is present, return {"dividends":[]}.
+Pure JSON only — no markdown, no explanation.`;
+
+interface GptDividendRow {
+  ticker?: unknown;
+  ex_date?: unknown;
+  payment_date?: unknown;
+  amount_naira?: unknown;
+  confidence?: unknown;
+}
+
+function gptDividendsToDividendRows(raw: unknown): DividendRow[] {
+  const payload = raw as { dividends?: GptDividendRow[] };
+  const arr: GptDividendRow[] = Array.isArray(raw) ? (raw as GptDividendRow[]) : (payload.dividends ?? []);
+
+  return arr.filter(Boolean).map((r, i): DividendRow => {
+    const ticker = String(r.ticker ?? "").trim().toUpperCase();
+    const exDate = normaliseDate(r.ex_date ?? "") ?? "";
+    const payDate = r.payment_date ? (normaliseDate(r.payment_date) ?? null) : null;
+    const amount = typeof r.amount_naira === "number" ? r.amount_naira : parseFloat(String(r.amount_naira ?? ""));
+    const rawConf = typeof r.confidence === "number" ? Math.min(1, Math.max(0, r.confidence)) : 0.7;
+
+    if (!ticker || !exDate || isNaN(amount) || amount <= 0) {
+      return {
+        rowIndex: i,
+        ticker,
+        exDividendDate: exDate,
+        paymentDate: payDate,
+        amountPerShareNaira: 0,
+        confidence: rawConf,
+        lowConfidence: true,
+        error: "Missing or invalid ticker/ex-date/amount",
+      };
+    }
+
+    return {
+      rowIndex: i,
+      ticker,
+      exDividendDate: exDate,
+      paymentDate: payDate,
+      amountPerShareNaira: amount,
+      confidence: rawConf,
+      lowConfidence: rawConf < 0.7,
+    };
+  });
+}
+
+async function gptExtractDividendRows(text: string): Promise<DividendRow[]> {
+  try {
+    const openai = await getOpenAI();
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: DIVIDEND_EXTRACTION_SYSTEM_PROMPT },
+        { role: "user", content: text.slice(0, 48_000) },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+      max_tokens: 4096,
+    });
+    const content = response.choices[0]?.message?.content ?? "{}";
+    let parsed: unknown;
+    try { parsed = JSON.parse(content); } catch {
+      console.error("[CIEIngest] GPT-4o returned invalid JSON for dividend extraction");
+      return [];
+    }
+    return gptDividendsToDividendRows(parsed);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[CIEIngest] GPT-4o dividend extraction failed:", errMsg);
+    return [];
+  }
+}
+
+/**
+ * Parse dividend data from a PDF buffer, DOCX buffer, or raw pasted text.
+ * Returns DividendRow[] for analyst review before committing.
+ */
+export async function parseDividendDocument(
+  input: { type: "pdf"; buffer: Buffer; filename?: string }
+       | { type: "docx"; buffer: Buffer; filename?: string }
+       | { type: "text"; text: string }
+): Promise<DividendRow[]> {
+  let text = "";
+
+  if (input.type === "pdf") {
+    try {
+      const pdfParse = (await import("pdf-parse")).default;
+      const result = await pdfParse(input.buffer);
+      text = result.text ?? "";
+    } catch (err: unknown) {
+      console.error("[CIEIngest] pdf-parse failed for dividend extraction:", err instanceof Error ? err.message : err);
+      return [];
+    }
+    if (text.trim().length < 20) {
+      console.warn("[CIEIngest] PDF for dividend extraction has little text — trying vision fallback");
+      // Vision fallback: send to GPT-4o with image content
+      const images = await pdfToBase64Images(input.buffer).catch(() => [] as string[]);
+      if (images.length === 0) return [];
+      try {
+        const openai = await getOpenAI();
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            { role: "system", content: DIVIDEND_EXTRACTION_SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Extract all dividend announcements from these document images." },
+                ...images.map(url => ({ type: "image_url" as const, image_url: { url, detail: "high" as const } })),
+              ],
+            },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.1,
+          max_tokens: 4096,
+        });
+        const content = response.choices[0]?.message?.content ?? "{}";
+        let parsed: unknown;
+        try { parsed = JSON.parse(content); } catch { return []; }
+        return gptDividendsToDividendRows(parsed);
+      } catch { return []; }
+    }
+  } else if (input.type === "docx") {
+    try {
+      const mammoth = await import("mammoth");
+      const result = await mammoth.extractRawText({ buffer: input.buffer });
+      text = result.value ?? "";
+    } catch (err: unknown) {
+      console.error("[CIEIngest] mammoth failed for dividend extraction:", err instanceof Error ? err.message : err);
+      return [];
+    }
+  } else {
+    text = input.text;
+  }
+
+  if (text.trim().length < 10) return [];
+  console.info(`[CIEIngest] Dividend extraction from ${input.type} (${text.length} chars)`);
+  return gptExtractDividendRows(text);
+}
+
+/**
+ * Build a dividend preview result for analyst review.
+ */
+export async function buildDividendPreview(
+  rows: DividendRow[],
+  format: IngestFormat,
+  filename: string
+): Promise<DividendPreviewResult> {
+  const acceptedRows: DividendRow[] = [];
+  const rejectedRows: Array<{ raw: string; reason: string }> = [];
+
+  for (const row of rows) {
+    if (row.error || !row.ticker || !row.exDividendDate || row.amountPerShareNaira <= 0) {
+      rejectedRows.push({
+        raw: `${row.ticker || "?"} ex:${row.exDividendDate || "?"} ₦${row.amountPerShareNaira}`,
+        reason: row.error ?? "Missing required fields",
+      });
+    } else {
+      acceptedRows.push(row);
+    }
+  }
+
+  // Re-index
+  acceptedRows.forEach((r, i) => { r.rowIndex = i; });
+
+  const expiresAt = new Date(Date.now() + PREVIEW_TTL_MS).toISOString();
+  const result: DividendPreviewResult = {
+    previewToken: "",
+    format,
+    filename,
+    rowsExtracted: rows.length,
+    rowsAccepted: acceptedRows.length,
+    rowsRejected: rejectedRows.length,
+    acceptedRows,
+    rejectedRows: rejectedRows.slice(0, 20),
+    previewRows: acceptedRows.slice(0, 20),
+    expiresAt,
+  };
+
+  const token = storeDividendPreview(result);
+  result.previewToken = token;
+  return result;
 }
 
 // ============================================================
@@ -774,7 +1140,7 @@ Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
 // ============================================================
 
 export async function buildPreview(
-  format: "csv" | "xlsx" | "pdf",
+  format: IngestFormat,
   rows: PriceRow[],
   filename: string
 ): Promise<IngestPreviewResult> {

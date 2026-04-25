@@ -445,6 +445,25 @@ function colourForClose(close: number | null | undefined, open: number | null | 
   return "text-muted-foreground";
 }
 
+interface DividendPreviewRow {
+  rowIndex: number;
+  ticker: string;
+  exDividendDate: string;
+  paymentDate: string | null;
+  amountPerShareNaira: number;
+  confidence: number;
+  lowConfidence: boolean;
+  error?: string;
+}
+
+interface DividendParsePreview {
+  previewToken: string;
+  rowsAccepted: number;
+  rowsRejected: number;
+  acceptedRows: DividendPreviewRow[];
+  rejectedRows: Array<{ raw: string; reason: string }>;
+}
+
 function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
   const { toast } = useToast();
   const [preview, setPreview] = useState<PreviewResult | null>(null);
@@ -454,14 +473,49 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
   const [whatChanged, setWhatChanged] = useState<WhatChangedItem[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Dividend dropzone state
+  // Price input mode: file upload vs paste text
+  const [priceInputMode, setPriceInputMode] = useState<"file" | "paste">("file");
+  const [pasteText, setPasteText] = useState("");
+  const [isPasting, setIsPasting] = useState(false);
+
+  // Dividend section state
+  const [divMode, setDivMode] = useState<"csv" | "ai-file" | "ai-paste">("csv");
   const [divDragging, setDivDragging] = useState(false);
   const [divFileName, setDivFileName] = useState<string | null>(null);
   const [divUploading, setDivUploading] = useState(false);
   const [divResults, setDivResults] = useState<{ added: number; errors: string[] } | null>(null);
+  const [divPasteText, setDivPasteText] = useState("");
+  const [divAiPreview, setDivAiPreview] = useState<DividendParsePreview | null>(null);
+  const [divConfirming, setDivConfirming] = useState(false);
+  const [divSelectedRows, setDivSelectedRows] = useState<Set<number>>(new Set());
   const divFileRef = useRef<HTMLInputElement>(null);
 
-  const handleDivFile = useCallback(async (file: File) => {
+  // Handle paste-text price preview
+  const handlePastePreview = useCallback(async () => {
+    if (!pasteText.trim()) return;
+    setIsPasting(true);
+    setIsConfirmed(false);
+    setWhatChanged([]);
+    try {
+      const csrfToken = await getCsrfToken();
+      const res = await fetch("/api/admin/cie/ingest/preview-text", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({ text: pasteText }),
+      });
+      const data: PreviewResult & { error?: string } = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Preview failed");
+      setPreview(data);
+    } catch (err: unknown) {
+      toast({ title: toErrorMessage(err, "Preview failed"), variant: "destructive" });
+    } finally {
+      setIsPasting(false);
+    }
+  }, [pasteText, toast]);
+
+  // Handle CSV dividend upload (legacy fast path)
+  const handleDivCsvFile = useCallback(async (file: File) => {
     setDivUploading(true);
     setDivFileName(file.name);
     setDivResults(null);
@@ -509,6 +563,91 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
       toast({ title: msg, variant: "destructive" });
     } finally { setDivUploading(false); }
   }, [toast]);
+
+  // Handle AI dividend document parsing (PDF/DOCX file)
+  const handleDivAiFile = useCallback(async (file: File) => {
+    setDivUploading(true);
+    setDivFileName(file.name);
+    setDivAiPreview(null);
+    setDivResults(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const csrfToken = await getCsrfToken();
+      const res = await fetch("/api/admin/cie/dividends/parse-document", {
+        method: "POST",
+        body: form,
+        credentials: "include",
+        headers: { "X-CSRF-Token": csrfToken },
+      });
+      const data: DividendParsePreview & { error?: string } = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Parsing failed");
+      setDivAiPreview(data);
+      setDivSelectedRows(new Set(data.acceptedRows.map(r => r.rowIndex)));
+      if (data.rowsAccepted === 0) toast({ title: "No dividend records found in document", variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: toErrorMessage(err, "Dividend parsing failed"), variant: "destructive" });
+    } finally { setDivUploading(false); }
+  }, [toast]);
+
+  // Handle AI dividend paste text
+  const handleDivAiPaste = useCallback(async () => {
+    if (!divPasteText.trim()) return;
+    setDivUploading(true);
+    setDivAiPreview(null);
+    setDivResults(null);
+    try {
+      const csrfToken = await getCsrfToken();
+      const res = await fetch("/api/admin/cie/dividends/parse-document", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({ text: divPasteText }),
+      });
+      const data: DividendParsePreview & { error?: string } = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Parsing failed");
+      setDivAiPreview(data);
+      setDivSelectedRows(new Set(data.acceptedRows.map(r => r.rowIndex)));
+      if (data.rowsAccepted === 0) toast({ title: "No dividend records found in text", variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: toErrorMessage(err, "Dividend parsing failed"), variant: "destructive" });
+    } finally { setDivUploading(false); }
+  }, [divPasteText, toast]);
+
+  // Commit AI-extracted dividends
+  const handleDivAiConfirm = useCallback(async () => {
+    if (!divAiPreview) return;
+    setDivConfirming(true);
+    try {
+      const csrfToken = await getCsrfToken();
+      const res = await fetch("/api/admin/cie/dividends/confirm-parsed", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({
+          previewToken: divAiPreview.previewToken,
+          acceptedRowIndices: [...divSelectedRows],
+        }),
+      });
+      const data: { committed: number; skipped: number; errors: string[]; message: string; error?: string } = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Commit failed");
+      setDivResults({ added: data.committed, errors: data.errors ?? [] });
+      setDivAiPreview(null);
+      setDivSelectedRows(new Set());
+      toast({ title: data.message });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/dividends"] });
+    } catch (err: unknown) {
+      toast({ title: toErrorMessage(err, "Failed to commit dividends"), variant: "destructive" });
+    } finally { setDivConfirming(false); }
+  }, [divAiPreview, divSelectedRows, toast]);
+
+  const handleDivFile = useCallback(async (file: File) => {
+    const fn = file.name.toLowerCase();
+    if (divMode === "csv" || fn.endsWith(".csv")) {
+      return handleDivCsvFile(file);
+    }
+    return handleDivAiFile(file);
+  }, [divMode, handleDivCsvFile, handleDivAiFile]);
 
   // Market Context inputs
   const [ctxDate, setCtxDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -715,55 +854,94 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Drop zone */}
-          <label
-            htmlFor="price-file-input"
-            className={`flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-              isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
-            }`}
-            data-testid="dropzone-price-upload"
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            <input
-              id="price-file-input"
-              ref={fileRef}
-              type="file"
-              accept=".csv,.xlsx,.pdf"
-              className="hidden"
-              onChange={handleFileChange}
-              data-testid="input-file-upload"
-            />
-            <Upload className={`h-8 w-8 mb-3 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
-            {isUploading ? (
-              <><LoadingSpinner size="sm" /><p className="text-sm text-muted-foreground mt-2">Extracting rows…</p></>
-            ) : isDragging ? (
-              <p className="text-sm text-primary font-medium">Drop to preview</p>
-            ) : (
-              <>
-                <p className="text-sm font-medium">Drag & drop CSV / XLSX / PDF here</p>
-                <p className="text-xs text-muted-foreground mt-1">Columns: ticker, trade_date, open, high, low, close, volume</p>
-                <p className="text-xs text-muted-foreground">or click to browse</p>
-                <div className="flex gap-2 mt-3" onClick={e => e.preventDefault()}>
-                  <Button
-                    type="button" variant="outline" size="sm" className="gap-1 text-xs h-7 px-2"
-                    onClick={() => downloadTemplate("prices_template.csv",
-                      ["ticker","trade_date","open","high","low","close","volume"],
-                      ["DANGCEM","2026-04-22","450.50","455.00","448.00","452.00","1200000"])}
-                    data-testid="button-template-prices"
-                  ><Download className="h-3 w-3" /> Prices Template</Button>
-                  <Button
-                    type="button" variant="outline" size="sm" className="gap-1 text-xs h-7 px-2"
-                    onClick={() => downloadTemplate("dividends_template.csv",
-                      ["ticker","amount_per_share","ex_dividend_date","payment_date"],
-                      ["DANGCEM","3.50","2026-05-10","2026-05-31"])}
-                    data-testid="button-template-dividends"
-                  ><Download className="h-3 w-3" /> Dividends Template</Button>
-                </div>
-              </>
-            )}
-          </label>
+          {/* Price input mode tabs */}
+          <div className="flex gap-1 border-b border-border mb-3">
+            <button
+              className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${priceInputMode === "file" ? "bg-primary/10 text-primary border border-b-0 border-border" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => { setPriceInputMode("file"); setPreview(null); }}
+              data-testid="tab-price-file"
+            ><Upload className="inline h-3 w-3 mr-1" />Upload File</button>
+            <button
+              className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${priceInputMode === "paste" ? "bg-primary/10 text-primary border border-b-0 border-border" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => { setPriceInputMode("paste"); setPreview(null); }}
+              data-testid="tab-price-paste"
+            ><Sparkles className="inline h-3 w-3 mr-1" />Paste Text</button>
+          </div>
+
+          {priceInputMode === "file" ? (
+            /* Drop zone */
+            <label
+              htmlFor="price-file-input"
+              className={`flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+              }`}
+              data-testid="dropzone-price-upload"
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <input
+                id="price-file-input"
+                ref={fileRef}
+                type="file"
+                accept=".csv,.xlsx,.pdf,.docx"
+                className="hidden"
+                onChange={handleFileChange}
+                data-testid="input-file-upload"
+              />
+              <Upload className={`h-8 w-8 mb-3 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
+              {isUploading ? (
+                <><LoadingSpinner size="sm" /><p className="text-sm text-muted-foreground mt-2">Extracting rows…</p></>
+              ) : isDragging ? (
+                <p className="text-sm text-primary font-medium">Drop to preview</p>
+              ) : (
+                <>
+                  <p className="text-sm font-medium">Drag & drop CSV / XLSX / PDF / DOCX here</p>
+                  <p className="text-xs text-muted-foreground mt-1">NGX lists, Nairametrics tables, broker reports — any format</p>
+                  <p className="text-xs text-muted-foreground">or click to browse</p>
+                  <div className="flex gap-2 mt-3" onClick={e => e.preventDefault()}>
+                    <Button
+                      type="button" variant="outline" size="sm" className="gap-1 text-xs h-7 px-2"
+                      onClick={() => downloadTemplate("prices_template.csv",
+                        ["ticker","trade_date","open","high","low","close","volume"],
+                        ["DANGCEM","2026-04-22","450.50","455.00","448.00","452.00","1200000"])}
+                      data-testid="button-template-prices"
+                    ><Download className="h-3 w-3" /> Prices Template</Button>
+                    <Button
+                      type="button" variant="outline" size="sm" className="gap-1 text-xs h-7 px-2"
+                      onClick={() => downloadTemplate("dividends_template.csv",
+                        ["ticker","amount_per_share","ex_dividend_date","payment_date"],
+                        ["DANGCEM","3.50","2026-05-10","2026-05-31"])}
+                      data-testid="button-template-dividends"
+                    ><Download className="h-3 w-3" /> Dividends Template</Button>
+                  </div>
+                </>
+              )}
+            </label>
+          ) : (
+            /* Paste text input */
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">Paste price data from Nairametrics, NSE, broker notes, or any market source. AI will extract the rows.</p>
+              <Textarea
+                placeholder="Paste price table or market report text here…"
+                value={pasteText}
+                onChange={e => setPasteText(e.target.value)}
+                className="min-h-[140px] text-xs font-mono"
+                data-testid="textarea-price-paste"
+              />
+              <div className="flex justify-end">
+                <Button
+                  size="sm" className="gap-2 text-xs"
+                  onClick={handlePastePreview}
+                  disabled={isPasting || !pasteText.trim()}
+                  data-testid="button-paste-preview"
+                >
+                  {isPasting ? <LoadingSpinner size="sm" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {isPasting ? "Extracting…" : "Extract & Preview"}
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Market Context inputs */}
           <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
@@ -823,37 +1001,162 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
             </div>
           </div>
 
-          {/* Optional Dividend Bulk Upload */}
-          <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 space-y-2">
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold text-foreground">Optional: Dividend Data Upload</p>
-              <span className="text-xs text-muted-foreground">(CSV with ticker, amount_per_share, ex_dividend_date, payment_date)</span>
+          {/* Dividend Data Section */}
+          <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-foreground">Optional: Dividend Data</p>
+              <div className="flex gap-1">
+                {(["csv","ai-file","ai-paste"] as const).map(m => (
+                  <button key={m}
+                    className={`px-2 py-0.5 text-xs rounded transition-colors ${divMode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground border border-border"}`}
+                    onClick={() => { setDivMode(m); setDivAiPreview(null); setDivResults(null); setDivFileName(null); }}
+                    data-testid={`tab-div-${m}`}
+                  >{m === "csv" ? "CSV Template" : m === "ai-file" ? "PDF / DOCX" : "Paste Text"}</button>
+                ))}
+              </div>
             </div>
-            <label
-              htmlFor="div-file-input"
-              className={`flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
-                divDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 bg-background"
-              }`}
-              data-testid="dropzone-dividend-upload"
-              onDragOver={e => { e.preventDefault(); setDivDragging(true); }}
-              onDragLeave={() => setDivDragging(false)}
-              onDrop={e => { e.preventDefault(); setDivDragging(false); const f = e.dataTransfer.files[0]; if (f) handleDivFile(f); }}
-            >
-              <input
-                id="div-file-input"
-                ref={divFileRef}
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleDivFile(f); e.target.value = ""; }}
-                data-testid="input-dividend-file-upload"
-              />
-              {divUploading ? <LoadingSpinner size="sm" /> : <Upload className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
-              <span className="text-xs text-muted-foreground">
-                {divUploading ? "Processing…" : divFileName ? divFileName : "Drop CSV or click to browse"}
-              </span>
-            </label>
-            {divResults && (
+
+            {divMode === "csv" && (
+              <label
+                htmlFor="div-file-input"
+                className={`flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
+                  divDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 bg-background"
+                }`}
+                data-testid="dropzone-dividend-upload"
+                onDragOver={e => { e.preventDefault(); setDivDragging(true); }}
+                onDragLeave={() => setDivDragging(false)}
+                onDrop={e => { e.preventDefault(); setDivDragging(false); const f = e.dataTransfer.files[0]; if (f) handleDivFile(f); }}
+              >
+                <input
+                  id="div-file-input"
+                  ref={divFileRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleDivFile(f); e.target.value = ""; }}
+                  data-testid="input-dividend-file-upload"
+                />
+                {divUploading ? <LoadingSpinner size="sm" /> : <Upload className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
+                <span className="text-xs text-muted-foreground">
+                  {divUploading ? "Processing…" : divFileName ? divFileName : "Drop CSV or click to browse (ticker, amount_per_share, ex_dividend_date, payment_date)"}
+                </span>
+              </label>
+            )}
+
+            {divMode === "ai-file" && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Upload a dividend announcement PDF or Word document. AI will extract the records for your review.</p>
+                <label
+                  htmlFor="div-ai-file-input"
+                  className={`flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
+                    divDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 bg-background"
+                  }`}
+                  data-testid="dropzone-dividend-ai-upload"
+                  onDragOver={e => { e.preventDefault(); setDivDragging(true); }}
+                  onDragLeave={() => setDivDragging(false)}
+                  onDrop={e => { e.preventDefault(); setDivDragging(false); const f = e.dataTransfer.files[0]; if (f) handleDivAiFile(f); }}
+                >
+                  <input
+                    id="div-ai-file-input"
+                    type="file"
+                    accept=".pdf,.docx"
+                    className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleDivAiFile(f); e.target.value = ""; }}
+                    data-testid="input-dividend-ai-file-upload"
+                  />
+                  {divUploading ? <LoadingSpinner size="sm" /> : <Sparkles className="h-3.5 w-3.5 text-primary flex-shrink-0" />}
+                  <span className="text-xs text-muted-foreground">
+                    {divUploading ? "Extracting with AI…" : divFileName ? divFileName : "Drop PDF or DOCX or click to browse"}
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {divMode === "ai-paste" && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Paste a dividend announcement from Nairametrics, NSE, or any source. AI will extract ticker, ex-date, payment date, and amount.</p>
+                <Textarea
+                  placeholder="Paste dividend announcement text here…"
+                  value={divPasteText}
+                  onChange={e => setDivPasteText(e.target.value)}
+                  className="min-h-[100px] text-xs font-mono"
+                  data-testid="textarea-dividend-paste"
+                />
+                <div className="flex justify-end">
+                  <Button
+                    size="sm" className="gap-2 text-xs"
+                    onClick={handleDivAiPaste}
+                    disabled={divUploading || !divPasteText.trim()}
+                    data-testid="button-dividend-paste-extract"
+                  >
+                    {divUploading ? <LoadingSpinner size="sm" /> : <Sparkles className="h-3.5 w-3.5" />}
+                    {divUploading ? "Extracting…" : "Extract & Review"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* AI dividend preview table */}
+            {divAiPreview && (
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium">
+                    {divAiPreview.rowsAccepted} record{divAiPreview.rowsAccepted !== 1 ? "s" : ""} found
+                    {divAiPreview.rowsRejected > 0 && <span className="text-red-500 ml-1">({divAiPreview.rowsRejected} rejected)</span>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{divSelectedRows.size} selected</p>
+                </div>
+                <div className="rounded-md border overflow-auto max-h-48">
+                  <table className="w-full text-xs">
+                    <thead><tr className="bg-muted/50 text-left">
+                      <th className="px-2 py-1 font-medium w-6"></th>
+                      <th className="px-2 py-1 font-medium">Ticker</th>
+                      <th className="px-2 py-1 font-medium">Ex-Date</th>
+                      <th className="px-2 py-1 font-medium">Pay Date</th>
+                      <th className="px-2 py-1 font-medium text-right">Amount (₦)</th>
+                      <th className="px-2 py-1 font-medium">Conf.</th>
+                    </tr></thead>
+                    <tbody>
+                      {divAiPreview.acceptedRows.map(row => (
+                        <tr key={row.rowIndex} className={`border-t ${row.lowConfidence ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
+                          <td className="px-2 py-1">
+                            <input type="checkbox" checked={divSelectedRows.has(row.rowIndex)}
+                              onChange={e => {
+                                const s = new Set(divSelectedRows);
+                                if (e.target.checked) s.add(row.rowIndex); else s.delete(row.rowIndex);
+                                setDivSelectedRows(s);
+                              }}
+                              data-testid={`checkbox-div-row-${row.rowIndex}`}
+                            />
+                          </td>
+                          <td className="px-2 py-1 font-mono font-semibold">{row.ticker}</td>
+                          <td className="px-2 py-1">{row.exDividendDate}</td>
+                          <td className="px-2 py-1">{row.paymentDate ?? "—"}</td>
+                          <td className="px-2 py-1 text-right">{row.amountPerShareNaira.toFixed(2)}</td>
+                          <td className={`px-2 py-1 ${row.lowConfidence ? "text-amber-600" : "text-green-600"}`}>{(row.confidence * 100).toFixed(0)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {divAiPreview.rejectedRows.length > 0 && (
+                  <div className="space-y-0.5">
+                    {divAiPreview.rejectedRows.slice(0, 3).map((r, i) => (
+                      <p key={i} className="text-xs text-red-600 dark:text-red-400">{r.raw}: {r.reason}</p>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2 justify-end pt-1">
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => { setDivAiPreview(null); setDivFileName(null); }} data-testid="button-dividend-ai-cancel">Cancel</Button>
+                  <Button size="sm" className="gap-2 text-xs" onClick={handleDivAiConfirm} disabled={divConfirming || divSelectedRows.size === 0} data-testid="button-dividend-ai-confirm">
+                    {divConfirming ? <LoadingSpinner size="sm" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                    Commit {divSelectedRows.size} Record{divSelectedRows.size !== 1 ? "s" : ""}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {divResults && !divAiPreview && (
               <div className="text-xs space-y-1">
                 <p className={divResults.added > 0 ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}>
                   {divResults.added} dividend record{divResults.added !== 1 ? "s" : ""} added

@@ -81,9 +81,17 @@ interface UpsertVerifiedCompanyDirectData {
   country?: string;
 }
 
+/** Canonical RC/BN normalisation — must match the same logic in routes.ts */
+function normaliseRcNumber(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return raw.trim().toUpperCase().replace(/^(RC|BN|IT)\s*/i, '').replace(/\s+/g, '') || null;
+}
+
 export async function upsertVerifiedCompanyDirect(data: UpsertVerifiedCompanyDirectData): Promise<void> {
   try {
-    const { companyName, rcNumber, tinNumber, email, country } = data;
+    const { companyName, tinNumber, email, country } = data;
+    // Always store RC numbers in canonical form so Path A comparisons are consistent
+    const rcNumber = normaliseRcNumber(data.rcNumber);
     const now = new Date();
 
     let existing = null;

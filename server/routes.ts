@@ -3020,11 +3020,13 @@ export async function registerRoutes(
 
             // Retrospective check: Path A (registry) only — never fire Path C on read
             if (!isAutoVerified && person.corporateRcNumber) {
-              const rcNum = person.corporateRcNumber;
+              // Normalise before comparing in case of legacy un-normalised stored values
+              const rcNorm = person.corporateRcNumber.trim().toUpperCase()
+                .replace(/^(RC|BN|IT)\s*/i, '').replace(/\s+/g, '');
               const [registryMatch] = await db
                 .select()
                 .from(verifiedEntities)
-                .where(and(eq(verifiedEntities.entityType, 'company'), eq(verifiedEntities.rcNumber, rcNum)));
+                .where(and(eq(verifiedEntities.entityType, 'company'), eq(verifiedEntities.rcNumber, rcNorm)));
               if (registryMatch) {
                 isAutoVerified = true;
                 autoVerifyMethod = 'registry';
@@ -3038,8 +3040,8 @@ export async function registerRoutes(
               }
             }
 
-            // Retrospective check: Path B (verified rep) — never fire Path C on read
-            if (!isAutoVerified && person.inviteEmail) {
+            // Retrospective check: Path B (verified rep) — BN only, never fire Path C on read
+            if (!isAutoVerified && person.inviteEmail && person.corporateBusinessType === 'bn') {
               const [repUser] = await db
                 .select({ isIdentityVerified: usersTable.isIdentityVerified })
                 .from(usersTable)
@@ -3256,15 +3258,25 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Corporate entity name is required" });
       }
 
-      // ── Deduplication guard: same RC/BN on same application ──────────────────
-      if (isCorporate && corporateRcNumber?.trim() && applicationId) {
+      // Normalise RC/BN numbers: trim, uppercase, strip RC/BN prefix, collapse spaces
+      // e.g. "RC 123456", "rc123456", "123456" all → "123456"
+      const normaliseRcNumber = (raw: string | null | undefined): string | null => {
+        if (!raw) return null;
+        return raw.trim().toUpperCase().replace(/^(RC|BN|IT)\s*/i, '').replace(/\s+/g, '') || null;
+      };
+
+      const bizType = isCorporate ? (corporateBusinessType || 'co') : null;
+      const rcNum = isCorporate ? normaliseRcNumber(corporateRcNumber) : null;
+
+      // ── Deduplication guard: same normalised RC/BN on same application ─────────
+      if (isCorporate && rcNum && applicationId) {
         const [existing] = await db
           .select()
           .from(companyPeople)
           .where(
             and(
               eq(companyPeople.applicationId, applicationId),
-              eq(companyPeople.corporateRcNumber, corporateRcNumber.trim())
+              eq(companyPeople.corporateRcNumber, rcNum)
             )
           );
         if (existing) {
@@ -3275,8 +3287,6 @@ export async function registerRoutes(
       const cryptoMod = await import("crypto");
       const inviteToken = cryptoMod.randomBytes(32).toString('hex');
       const isDraft = !!deferInvite;
-      const bizType = isCorporate ? (corporateBusinessType || 'co') : null;
-      const rcNum = isCorporate ? (corporateRcNumber?.trim() || null) : null;
 
       // ── Auto-verify cascade for corporate/BN entities ─────────────────────────
       let autoVerified = false;
@@ -3302,8 +3312,9 @@ export async function registerRoutes(
           console.log(`[CompanyPeople] Path A: auto-verified ${rcNum} via platform registry`);
         }
 
-        // PATH B: check if rep's email belongs to a verified platform user
-        if (!autoVerified) {
+        // PATH B: rep-email match — BN only (sole proprietorships identified by verified owner)
+        // For RC limited companies, CAC lookup (Path C) is the authoritative source.
+        if (!autoVerified && bizType === 'bn') {
           const repEmail = inviteEmail.toLowerCase().trim();
           const [repUser] = await db
             .select({ isIdentityVerified: usersTable.isIdentityVerified })
@@ -3314,7 +3325,7 @@ export async function registerRoutes(
             autoVerified = true;
             autoVerifyMethod = 'rep_match';
             kybLookupStatus = 'found';
-            console.log(`[CompanyPeople] Path B: auto-verified ${rcNum} via verified rep ${repEmail}`);
+            console.log(`[CompanyPeople] Path B: auto-verified BN ${rcNum} via verified rep ${repEmail}`);
           }
         }
 

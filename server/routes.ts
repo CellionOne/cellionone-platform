@@ -29,6 +29,14 @@ import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
 import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
 
+// Maximum number of Smile ID error results for a given RC number before we
+// stop retrying live lookups. Configurable via SMILE_ID_MAX_ERROR_RETRIES env
+// var; defaults to 3. Invalid or negative values fall back to the default.
+const _rawSmileIdMaxErrors = parseInt(process.env.SMILE_ID_MAX_ERROR_RETRIES ?? '', 10);
+const SMILE_ID_MAX_ERROR_RETRIES = Number.isFinite(_rawSmileIdMaxErrors) && _rawSmileIdMaxErrors > 0
+  ? _rawSmileIdMaxErrors
+  : 3;
+
 // Validation schemas
 const operatingAddressSchema = z.object({
   line1: z.string().min(1, "Operating street address is required"),
@@ -3358,7 +3366,26 @@ export async function registerRoutes(
               });
             }
           } else {
-            // No prior lookup anywhere — call Smile ID now
+            // No prior lookup anywhere — but first check how many times this RC
+            // number has already errored on the platform. If it has exceeded the
+            // threshold we skip the live call to avoid burning API quota on a
+            // genuinely unsupported or malformed RC number.
+            const [errorCountRow] = await db
+              .select({ count: sql<number>`count(*)::int` })
+              .from(companyPeople)
+              .where(
+                and(
+                  eq(companyPeople.corporateRcNumber, rcNum),
+                  eq(companyPeople.kybLookupStatus, 'error')
+                )
+              );
+            const priorErrorCount = errorCountRow?.count ?? 0;
+
+            if (priorErrorCount >= SMILE_ID_MAX_ERROR_RETRIES) {
+              kybLookupStatus = 'error';
+              console.warn(`[CompanyPeople] Path C skipped: RC ${rcNum} has ${priorErrorCount} prior error(s) — exceeded threshold of ${SMILE_ID_MAX_ERROR_RETRIES}`);
+            } else {
+            // Call Smile ID now
             try {
               const smileIdSvc = await import("./services/smileIdService");
               const jobId = `corp-person-${Date.now()}`;
@@ -3389,6 +3416,7 @@ export async function registerRoutes(
               console.warn('[CompanyPeople] Path C Smile ID error:', errMsg);
               kybLookupStatus = 'error';
             }
+            } // end else (priorErrorCount < threshold)
           }
         }
       }
@@ -8985,8 +9013,24 @@ Important guidelines:
         }
 
         // PATH C (live): no prior lookup anywhere — optionally run a live Smile ID
-        // CAC lookup, gated by ENABLE_DIRECTOR_CAC_LOOKUP to control costs
-        if (process.env.ENABLE_DIRECTOR_CAC_LOOKUP === 'true') {
+        // CAC lookup, gated by ENABLE_DIRECTOR_CAC_LOOKUP to control costs.
+        // Before calling, check how many times this RC has already errored so we
+        // do not burn API quota on a genuinely malformed or unsupported RC number.
+        const [ecErrorCountRow] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(companyPeople)
+          .where(
+            and(
+              eq(companyPeople.corporateRcNumber, rcNorm),
+              eq(companyPeople.kybLookupStatus, 'error')
+            )
+          );
+        const ecPriorErrorCount = ecErrorCountRow?.count ?? 0;
+
+        if (ecPriorErrorCount >= SMILE_ID_MAX_ERROR_RETRIES) {
+          liveKybResults.set(idx, { rcNorm, status: 'error', d });
+          console.warn(`[ExistingCo] Path C (live) skipped: RC ${rcNorm} has ${ecPriorErrorCount} prior error(s) — exceeded threshold of ${SMILE_ID_MAX_ERROR_RETRIES}`);
+        } else if (process.env.ENABLE_DIRECTOR_CAC_LOOKUP === 'true') {
           try {
             const smileIdSvc = await import("./services/smileIdService");
             const jobId = `dir-kyb-${userId}-${Date.now()}`;

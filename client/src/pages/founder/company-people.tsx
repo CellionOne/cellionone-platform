@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -565,6 +565,19 @@ function PeopleList() {
     }
   }
 
+  // When readiness detects a retrospective auto-verify (DB was just updated),
+  // invalidate the people list so badge/invite controls re-render from fresh DB state
+  useEffect(() => {
+    if (!readiness || !people) return;
+    const hasRetroUpdate = readiness.people.some((rp) => {
+      const raw = people.find((p) => p.id === rp.id);
+      return raw && rp.isVerified && !raw.isVerified;
+    });
+    if (hasRetroUpdate) {
+      queryClient.invalidateQueries({ queryKey: ["/api/company-people"] });
+    }
+  }, [readiness, people]);
+
   const resendMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await apiRequest("POST", `/api/company-people/resend-invite/${id}`);
@@ -721,7 +734,7 @@ function PeopleList() {
                 )}
               </div>
               <div className="flex items-center gap-1">
-                {person.inviteStatus === "pending" && (
+                {person.inviteStatus === "pending" && !readinessMap.get(person.id)?.isVerified && (
                   <Button
                     variant="ghost"
                     size="sm"

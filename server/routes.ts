@@ -3328,14 +3328,16 @@ export async function registerRoutes(
 
         // PATH C: live CAC lookup via Smile ID (once only, gated globally by prior lookup in company_people)
         if (!autoVerified) {
-          // Check if this RC/BN was already looked up anywhere on the platform
+          // Check if this RC/BN was already looked up anywhere on the platform.
+          // Only reuse conclusive results (found/not_found); error rows are skipped
+          // so that transient failures can be retried via a live Smile ID call.
           const [priorLookup] = await db
             .select({ kybLookupStatus: companyPeople.kybLookupStatus })
             .from(companyPeople)
             .where(
               and(
                 eq(companyPeople.corporateRcNumber, rcNum),
-                sql`${companyPeople.kybLookupStatus} IS NOT NULL`
+                sql`${companyPeople.kybLookupStatus} IN ('found', 'not_found')`
               )
             )
             .limit(1);
@@ -8953,14 +8955,15 @@ Important guidelines:
         }
 
         // PATH C: prior Smile ID CAC lookup reuse — check company_people for any
-        // existing lookup on this RC number (across all applications on the platform)
+        // existing conclusive lookup on this RC number (across all applications on the
+        // platform). Error rows are excluded so transient failures can be retried.
         const [priorLookup] = await db
           .select({ kybLookupStatus: companyPeople.kybLookupStatus })
           .from(companyPeople)
           .where(
             and(
               eq(companyPeople.corporateRcNumber, rcNorm),
-              sql`${companyPeople.kybLookupStatus} IS NOT NULL`
+              sql`${companyPeople.kybLookupStatus} IN ('found', 'not_found')`
             )
           )
           .limit(1);

@@ -3018,6 +3018,13 @@ export async function registerRoutes(
           if (isCorporate) {
             let isAutoVerified = !!person.isVerified;
 
+            // Fallback: if kyb_lookup_status was persisted as 'found' at insert time,
+            // treat as verified (handles edge case where isVerified flag is inconsistent)
+            if (!isAutoVerified && person.kybLookupStatus === 'found') {
+              isAutoVerified = true;
+              autoVerifyMethod = person.autoVerifyMethod || 'smile_id';
+            }
+
             // Retrospective check: Path A (registry) only — never fire Path C on read
             if (!isAutoVerified && person.corporateRcNumber) {
               // Normalise before comparing in case of legacy un-normalised stored values
@@ -3384,30 +3391,47 @@ export async function registerRoutes(
         }
       }
 
-      const person = await storage.createCompanyPerson({
-        founderId: userId,
-        inviteEmail: inviteEmail.toLowerCase().trim(),
-        inviteToken,
-        inviteStatus: autoVerified ? 'accepted' : (isDraft ? "draft" : "pending"),
-        inviteSentAt: autoVerified || isDraft ? null : new Date(),
-        isVerified: autoVerified || false,
-        role,
-        title,
-        sharesAllocated: sharesAllocated || null,
-        shareClass: shareClass || null,
-        sharePercentage: sharePercentage || null,
-        applicationId: applicationId || null,
-        companyProfileId: companyProfileId || null,
-        entityType: isCorporate ? "corporate" : "individual",
-        corporateName: isCorporate ? (corporateName || null) : null,
-        corporateRcNumber: rcNum,
-        corporateCountry: isCorporate ? (corporateCountry || null) : null,
-        corporateAuthorisedRepName: isCorporate ? (corporateAuthorisedRepName || null) : null,
-        corporateBusinessType: bizType,
-        kybLookupStatus,
-        kybLookupAttemptedAt: kybLookupStatus ? new Date() : null,
-        autoVerifyMethod,
-      });
+      let person;
+      try {
+        person = await storage.createCompanyPerson({
+          founderId: userId,
+          inviteEmail: inviteEmail.toLowerCase().trim(),
+          inviteToken,
+          inviteStatus: autoVerified ? 'accepted' : (isDraft ? "draft" : "pending"),
+          inviteSentAt: autoVerified || isDraft ? null : new Date(),
+          isVerified: autoVerified || false,
+          role,
+          title,
+          sharesAllocated: sharesAllocated || null,
+          shareClass: shareClass || null,
+          sharePercentage: sharePercentage || null,
+          applicationId: applicationId || null,
+          companyProfileId: companyProfileId || null,
+          entityType: isCorporate ? "corporate" : "individual",
+          corporateName: isCorporate ? (corporateName || null) : null,
+          corporateRcNumber: rcNum,
+          corporateCountry: isCorporate ? (corporateCountry || null) : null,
+          corporateAuthorisedRepName: isCorporate ? (corporateAuthorisedRepName || null) : null,
+          corporateBusinessType: bizType,
+          kybLookupStatus,
+          kybLookupAttemptedAt: kybLookupStatus ? new Date() : null,
+          autoVerifyMethod,
+        });
+      } catch (insertErr: unknown) {
+        // Unique constraint violation (concurrent insert of same RC/BN on same application)
+        const pgCode = (insertErr as Record<string, string>)?.code;
+        if (pgCode === '23505' && isCorporate && rcNum && applicationId) {
+          const [raceWinner] = await db
+            .select()
+            .from(companyPeople)
+            .where(and(eq(companyPeople.founderId, userId), eq(companyPeople.applicationId, applicationId), eq(companyPeople.corporateRcNumber, rcNum)));
+          if (raceWinner) {
+            const { inviteToken: _tok, ...safe } = raceWinner;
+            return res.json({ ...safe, _deduplicated: true });
+          }
+        }
+        throw insertErr;
+      }
 
       // Only send invitation email if not auto-verified and not a draft
       if (!autoVerified && !isDraft) {

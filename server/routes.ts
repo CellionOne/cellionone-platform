@@ -8909,6 +8909,10 @@ Important guidelines:
       //         company KYB is a separate RC number lookup; a director's own RC
       //         is a distinct entity and incurs no duplication charge.
       const autoVerifyResults: Map<number, { verified: boolean; verifyMethod: string }> = new Map();
+      // Tracks live Path C Smile ID lookup results keyed by director index so we
+      // can persist kybLookupStatus on the company_people row created after the
+      // profile insert, enabling the prior-lookup reuse path for future requests.
+      const liveKybResults: Map<number, { rcNorm: string; status: string; d: typeof directorList[number] }> = new Map();
 
       for (let idx = 0; idx < directorList.length; idx++) {
         const d = directorList[idx];
@@ -8988,6 +8992,7 @@ Important guidelines:
 
             if (kybResult.found && kybResult.status && kybResult.status.toLowerCase().includes('active')) {
               autoVerifyResults.set(idx, { verified: true, verifyMethod: "smile_id_live" });
+              liveKybResults.set(idx, { rcNorm, status: 'found', d });
               console.log(`[ExistingCo] Path C (live): auto-verified corporate director ${rcNorm} via Smile ID CAC lookup`);
               // Persist to verified_entities so future adds use Path A
               await upsertVerifiedCompanyDirect({
@@ -8998,11 +9003,13 @@ Important guidelines:
                 country: 'NG',
               });
             } else {
+              liveKybResults.set(idx, { rcNorm, status: 'not_found', d });
               console.log(`[ExistingCo] Path C (live): Smile ID CAC lookup for ${rcNorm} — found=${kybResult.found} status=${kybResult.status} error=${kybResult.error}`);
             }
           } catch (smileErr: unknown) {
             const errMsg = smileErr instanceof Error ? smileErr.message : String(smileErr);
             console.warn(`[ExistingCo] Path C (live): Smile ID error for ${rcNorm}:`, errMsg);
+            liveKybResults.set(idx, { rcNorm, status: 'error', d });
           }
         }
       }
@@ -9061,6 +9068,38 @@ Important guidelines:
           profileDocuments: [],
         })
         .returning();
+
+      // Persist Path C live Smile ID lookup results to company_people so the
+      // prior-lookup reuse check short-circuits on future requests for the same
+      // RC number, avoiding repeated Smile ID API calls.
+      if (liveKybResults.size > 0) {
+        for (const [, { rcNorm: rcNum, status, d: dir }] of liveKybResults) {
+          try {
+            await storage.createCompanyPerson({
+              founderId: userId,
+              companyProfileId: newProfile.id,
+              applicationId: null,
+              role: (dir.role as string) || "director",
+              entityType: "corporate",
+              corporateName: (dir.name as string) || null,
+              corporateRcNumber: rcNum,
+              corporateBusinessType: (dir.corporateBusinessType as string) || "co",
+              corporateCountry: "NG",
+              corporateAuthorisedRepName: (dir.authorisedRepName as string) || null,
+              inviteEmail: (dir.email || dir.authorisedRepEmail || null) as string | null,
+              inviteStatus: "accepted",
+              isVerified: status === 'found',
+              kybLookupStatus: status,
+              kybLookupAttemptedAt: new Date(),
+              autoVerifyMethod: status === 'found' ? "smile_id_live" : null,
+            });
+            console.log(`[ExistingCo] Path C: persisted kybLookupStatus=${status} to company_people for RC ${rcNum}`);
+          } catch (cpErr: unknown) {
+            // Non-fatal — log and continue; missing row only costs an extra API call next time
+            console.warn(`[ExistingCo] Path C: failed to persist company_people for RC ${rcNum}:`, cpErr instanceof Error ? cpErr.message : String(cpErr));
+          }
+        }
+      }
 
       // Seed the 6 required document checklist items
       const EXISTING_CO_DOCS = [

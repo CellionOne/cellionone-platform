@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -162,12 +162,19 @@ function InviteDialog() {
     },
   });
 
-  const inviteMutation = useMutation({
+  interface InviteResponse {
+    id: number;
+    isVerified?: boolean;
+    _deduplicated?: boolean;
+    [key: string]: unknown;
+  }
+
+  const inviteMutation = useMutation<InviteResponse, Error, Record<string, unknown>>({
     mutationFn: async (payload: Record<string, unknown>) => {
       const res = await apiRequest("POST", "/api/company-people", payload);
-      return res.json();
+      return res.json() as Promise<InviteResponse>;
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data: InviteResponse) => {
       const isCorp = personType === "corporate" || personType === "bn";
       const wasAutoVerified = isCorp && data?.isVerified;
       const wasDeduplicated = isCorp && data?._deduplicated;
@@ -565,18 +572,6 @@ function PeopleList() {
     }
   }
 
-  // When readiness detects a retrospective auto-verify (DB was just updated),
-  // invalidate the people list so badge/invite controls re-render from fresh DB state
-  useEffect(() => {
-    if (!readiness || !people) return;
-    const hasRetroUpdate = readiness.people.some((rp) => {
-      const raw = people.find((p) => p.id === rp.id);
-      return raw && rp.isVerified && !raw.isVerified;
-    });
-    if (hasRetroUpdate) {
-      queryClient.invalidateQueries({ queryKey: ["/api/company-people"] });
-    }
-  }, [readiness, people]);
 
   const resendMutation = useMutation({
     mutationFn: async (id: number) => {

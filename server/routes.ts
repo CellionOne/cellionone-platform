@@ -3030,13 +3030,6 @@ export async function registerRoutes(
               if (registryMatch) {
                 isAutoVerified = true;
                 autoVerifyMethod = 'registry';
-                // Persist the newly discovered auto-verify status
-                await storage.updateCompanyPerson(person.id, {
-                  isVerified: true,
-                  inviteStatus: 'accepted',
-                  kybLookupStatus: 'found',
-                  autoVerifyMethod: 'registry',
-                });
               }
             }
 
@@ -3049,12 +3042,6 @@ export async function registerRoutes(
               if (repUser?.isIdentityVerified) {
                 isAutoVerified = true;
                 autoVerifyMethod = 'rep_match';
-                await storage.updateCompanyPerson(person.id, {
-                  isVerified: true,
-                  inviteStatus: 'accepted',
-                  kybLookupStatus: 'found',
-                  autoVerifyMethod: 'rep_match',
-                });
               }
             }
 
@@ -3385,8 +3372,9 @@ export async function registerRoutes(
                 // Treat all errors (including NOT_CONFIGURED) as terminal error state
                 kybLookupStatus = 'error';
               }
-            } catch (smileErr: any) {
-              console.warn('[CompanyPeople] Path C Smile ID error:', smileErr?.message);
+            } catch (smileErr: unknown) {
+              const errMsg = smileErr instanceof Error ? smileErr.message : String(smileErr);
+              console.warn('[CompanyPeople] Path C Smile ID error:', errMsg);
               kybLookupStatus = 'error';
             }
           }

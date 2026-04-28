@@ -91,6 +91,9 @@ interface CompanyPerson {
   entityType?: string | null;
   corporateName?: string | null;
   corporateRcNumber?: string | null;
+  corporateBusinessType?: string | null;
+  kybLookupStatus?: string | null;
+  autoVerifyMethod?: string | null;
 }
 
 const inviteSchema = z.object({
@@ -144,7 +147,7 @@ export default function CompanyPeoplePage() {
 function InviteDialog() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
-  const [personType, setPersonType] = useState<"individual" | "corporate">("individual");
+  const [personType, setPersonType] = useState<"individual" | "corporate" | "bn">("individual");
   const [corpForm, setCorpForm] = useState({ corporateName: "", corporateRcNumber: "", corporateCountry: "Nigeria", authorisedRepName: "", repEmail: "", role: "director" });
 
   const form = useForm<InviteFormData>({
@@ -164,9 +167,17 @@ function InviteDialog() {
       const res = await apiRequest("POST", "/api/company-people", payload);
       return res.json();
     },
-    onSuccess: () => {
-      toast({ title: "Invitation sent", description: personType === "corporate" ? "Corporate entity added. The authorised rep will receive a verification invite." : "An email has been sent to the invited person." });
+    onSuccess: (data: any) => {
+      const isCorp = personType === "corporate" || personType === "bn";
+      const wasAutoVerified = isCorp && data?.isVerified;
+      const wasDeduplicated = isCorp && data?._deduplicated;
+      let desc = "An email has been sent to the invited person.";
+      if (wasDeduplicated) desc = "This entity was already added. Showing existing record.";
+      else if (wasAutoVerified) desc = "Entity auto-verified via CAC registry — no invitation needed.";
+      else if (isCorp) desc = "Corporate entity added. The authorised rep will receive a verification invite.";
+      toast({ title: wasDeduplicated ? "Already added" : "Done", description: desc });
       queryClient.invalidateQueries({ queryKey: ["/api/company-people"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/company-people/readiness"] });
       form.reset();
       setCorpForm({ corporateName: "", corporateRcNumber: "", corporateCountry: "Nigeria", authorisedRepName: "", repEmail: "", role: "director" });
       setOpen(false);
@@ -191,8 +202,10 @@ function InviteDialog() {
 
   const handleCorporateSubmit = () => {
     if (!corpForm.corporateName.trim() || !corpForm.corporateRcNumber.trim() || !corpForm.repEmail.trim()) return;
+    const bizType = personType === "bn" ? "bn" : "co";
     inviteMutation.mutate({
       entityType: "corporate",
+      corporateBusinessType: bizType,
       corporateName: corpForm.corporateName,
       corporateRcNumber: corpForm.corporateRcNumber,
       corporateCountry: corpForm.corporateCountry || "Nigeria",
@@ -223,7 +236,7 @@ function InviteDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-1 rounded-md border p-0.5 bg-muted/40 w-fit" data-testid="toggle-invite-type">
+        <div className="flex items-center gap-1 rounded-md border p-0.5 bg-muted/40 w-fit flex-wrap" data-testid="toggle-invite-type">
           <button
             type="button"
             onClick={() => setPersonType("individual")}
@@ -238,7 +251,15 @@ function InviteDialog() {
             className={`px-3 py-1 text-xs rounded font-medium transition-colors ${personType === "corporate" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
             data-testid="toggle-corporate-invite"
           >
-            <Building2 className="h-3 w-3 inline mr-1" />Corporate
+            <Building2 className="h-3 w-3 inline mr-1" />Company (RC)
+          </button>
+          <button
+            type="button"
+            onClick={() => setPersonType("bn")}
+            className={`px-3 py-1 text-xs rounded font-medium transition-colors ${personType === "bn" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            data-testid="toggle-bn-invite"
+          >
+            <Building2 className="h-3 w-3 inline mr-1" />Business Name (BN)
           </button>
         </div>
 
@@ -363,16 +384,23 @@ function InviteDialog() {
           <div className="space-y-4">
             <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
               <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <span>Corporate entities are verified via the CAC registry. The authorised representative receives a biometric identity verification invite.</span>
+              {personType === "bn" ? (
+                <span>Business Names are verified via the CAC registry. If this business name is already registered on the platform it will be auto-verified. Otherwise, the proprietor's representative receives a verification invite.</span>
+              ) : (
+                <span>Limited companies are verified via the CAC registry. If this company is already registered on the platform it will be auto-verified. Otherwise, the authorised representative receives a biometric identity verification invite.</span>
+              )}
             </div>
             <div className="space-y-3">
               <div>
-                <label className="text-sm font-medium">Registered Company Name *</label>
-                <Input className="mt-1" placeholder="e.g. Acme Holdings Ltd" value={corpForm.corporateName} onChange={e => setCorpForm(p => ({ ...p, corporateName: e.target.value }))} data-testid="input-corp-name" />
+                <label className="text-sm font-medium">{personType === "bn" ? "Registered Business Name *" : "Registered Company Name *"}</label>
+                <Input className="mt-1" placeholder={personType === "bn" ? "e.g. Acme Ventures" : "e.g. Acme Holdings Ltd"} value={corpForm.corporateName} onChange={e => setCorpForm(p => ({ ...p, corporateName: e.target.value }))} data-testid="input-corp-name" />
               </div>
               <div>
-                <label className="text-sm font-medium">RC Number *</label>
-                <Input className="mt-1" placeholder="e.g. RC123456" value={corpForm.corporateRcNumber} onChange={e => setCorpForm(p => ({ ...p, corporateRcNumber: e.target.value }))} data-testid="input-corp-rc" />
+                <label className="text-sm font-medium">{personType === "bn" ? "BN Number *" : "RC Number *"}</label>
+                <Input className="mt-1" placeholder={personType === "bn" ? "e.g. BN1234567" : "e.g. RC123456"} value={corpForm.corporateRcNumber} onChange={e => setCorpForm(p => ({ ...p, corporateRcNumber: e.target.value }))} data-testid="input-corp-rc" />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {personType === "bn" ? "The BN number as it appears on the CAC certificate." : "The RC number as it appears on the Certificate of Incorporation."}
+                </p>
               </div>
               <div>
                 <label className="text-sm font-medium">Role</label>
@@ -386,12 +414,12 @@ function InviteDialog() {
                 </Select>
               </div>
               <div>
-                <label className="text-sm font-medium">Authorised Representative Name</label>
+                <label className="text-sm font-medium">{personType === "bn" ? "Proprietor / Representative Name" : "Authorised Representative Name"}</label>
                 <Input className="mt-1" placeholder="e.g. Ada Nwosu" value={corpForm.authorisedRepName} onChange={e => setCorpForm(p => ({ ...p, authorisedRepName: e.target.value }))} data-testid="input-corp-rep-name" />
               </div>
               <div>
-                <label className="text-sm font-medium">Authorised Representative Email *</label>
-                <Input className="mt-1" type="email" placeholder="rep@acme.com" value={corpForm.repEmail} onChange={e => setCorpForm(p => ({ ...p, repEmail: e.target.value }))} data-testid="input-corp-rep-email" />
+                <label className="text-sm font-medium">{personType === "bn" ? "Proprietor / Representative Email *" : "Authorised Representative Email *"}</label>
+                <Input className="mt-1" type="email" placeholder={personType === "bn" ? "proprietor@example.com" : "rep@acme.com"} value={corpForm.repEmail} onChange={e => setCorpForm(p => ({ ...p, repEmail: e.target.value }))} data-testid="input-corp-rep-email" />
               </div>
             </div>
             <DialogFooter>
@@ -401,7 +429,7 @@ function InviteDialog() {
                 data-testid="button-add-corporate"
               >
                 {inviteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Building2 className="h-4 w-4 mr-2" />}
-                Add Corporate Entity
+                {personType === "bn" ? "Add Business Name" : "Add Corporate Entity"}
               </Button>
             </DialogFooter>
           </div>
@@ -430,6 +458,12 @@ interface ReadinessData {
     hasBvn: boolean;
     identityExpiresAt: string | null;
     identityDaysUntilExpiry: number | null;
+    entityType?: string | null;
+    corporateName?: string | null;
+    corporateRcNumber?: string | null;
+    corporateBusinessType?: string | null;
+    kybLookupStatus?: string | null;
+    autoVerifyMethod?: string | null;
   }[];
   summary: {
     totalPeople: number;
@@ -592,8 +626,33 @@ function PeopleList() {
     }
   };
 
+  const getAutoVerifyLabel = (method: string | null | undefined) => {
+    switch (method) {
+      case 'registry': return 'Verified via platform record';
+      case 'rep_match': return 'Verified via representative';
+      case 'smile_id': return 'Verified via CAC registry';
+      default: return 'Platform Verified';
+    }
+  };
+
   const getStatusBadge = (person: CompanyPerson, readinessInfo?: ReadinessData["people"][0]) => {
     if (person.isVerified) {
+      const isCorporateAutoVerified = person.entityType === 'corporate' && (person.autoVerifyMethod || readinessInfo?.autoVerifyMethod);
+      const verifyMethod = person.autoVerifyMethod || readinessInfo?.autoVerifyMethod || null;
+
+      if (isCorporateAutoVerified) {
+        return (
+          <div className="flex items-center gap-1 flex-wrap" title={getAutoVerifyLabel(verifyMethod)}>
+            <Badge variant="default" className="gap-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600" data-testid={`badge-auto-verified-${person.id}`}>
+              <ShieldCheck className="h-3 w-3" /> Profile Ready
+            </Badge>
+            <Badge variant="outline" className="gap-1 text-xs text-green-700 dark:text-green-400 border-green-300 dark:border-green-700" data-testid={`badge-platform-verified-${person.id}`}>
+              Platform Verified
+            </Badge>
+          </div>
+        );
+      }
+
       const days = readinessInfo?.identityDaysUntilExpiry ?? null;
       const expired = days !== null && days <= 0;
       const expiringSoon = days !== null && days > 0 && days <= 30;
@@ -634,12 +693,21 @@ function PeopleList() {
                     : null
                   }
                   <span className="font-medium text-sm">{person.entityType === "corporate" ? (person.corporateName || person.title || person.inviteEmail) : person.inviteEmail}</span>
-                  {person.entityType === "corporate" && <Badge variant="secondary" className="text-xs" data-testid={`badge-corporate-person-${person.id}`}>Corporate</Badge>}
+                  {person.entityType === "corporate" && (
+                    <Badge variant="secondary" className="text-xs" data-testid={`badge-corporate-person-${person.id}`}>
+                      {person.corporateBusinessType === "bn" ? "Business Name" : "Company"}
+                    </Badge>
+                  )}
                   {getStatusBadge(person, readinessMap.get(person.id))}
                 </div>
                 <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
                   <span className="font-medium text-foreground">{getRoleLabel(person.role)}</span>
-                  {person.title && <span>{person.title}</span>}
+                  {person.entityType === 'corporate' && person.corporateRcNumber && (
+                    <span className="text-muted-foreground">
+                      {person.corporateBusinessType === 'bn' ? 'BN' : 'RC'} {person.corporateRcNumber}
+                    </span>
+                  )}
+                  {person.entityType !== 'corporate' && person.title && <span>{person.title}</span>}
                   {person.sharesAllocated && (
                     <span className="flex items-center gap-1">
                       <Percent className="h-3 w-3" />

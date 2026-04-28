@@ -66,6 +66,10 @@ export const companyPeople = pgTable("company_people", {
   corporateRcNumber: varchar("corporate_rc_number", { length: 50 }),
   corporateCountry: varchar("corporate_country", { length: 100 }),
   corporateAuthorisedRepName: varchar("corporate_authorised_rep_name", { length: 255 }),
+  corporateBusinessType: varchar("corporate_business_type", { length: 10 }), // "co" | "bn"
+  kybLookupStatus: varchar("kyb_lookup_status", { length: 20 }), // null | "found" | "not_found" | "error"
+  kybLookupAttemptedAt: timestamp("kyb_lookup_attempted_at"),
+  autoVerifyMethod: varchar("auto_verify_method", { length: 30 }), // null | "registry" | "rep_match" | "smile_id"
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

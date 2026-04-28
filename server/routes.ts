@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne, inArray } from "drizzle-orm";
 import * as services from "./services";
@@ -3010,6 +3010,86 @@ export async function registerRoutes(
           let hasBvn = false;
           let firstName: string | null = null;
           let lastName: string | null = null;
+          let autoVerifyMethod: string | null = person.autoVerifyMethod ?? null;
+
+          const isCorporate = person.entityType === 'corporate';
+
+          // For corporate/BN entities: check auto-verify status
+          if (isCorporate) {
+            let isAutoVerified = !!person.isVerified;
+
+            // Retrospective check: Path A (registry) only — never fire Path C on read
+            if (!isAutoVerified && person.corporateRcNumber) {
+              const rcNum = person.corporateRcNumber;
+              const [registryMatch] = await db
+                .select()
+                .from(verifiedEntities)
+                .where(and(eq(verifiedEntities.entityType, 'company'), eq(verifiedEntities.rcNumber, rcNum)));
+              if (registryMatch) {
+                isAutoVerified = true;
+                autoVerifyMethod = 'registry';
+                // Persist the newly discovered auto-verify status
+                await storage.updateCompanyPerson(person.id, {
+                  isVerified: true,
+                  inviteStatus: 'accepted',
+                  kybLookupStatus: 'found',
+                  autoVerifyMethod: 'registry',
+                });
+              }
+            }
+
+            // Retrospective check: Path B (verified rep) — never fire Path C on read
+            if (!isAutoVerified && person.inviteEmail) {
+              const [repUser] = await db
+                .select({ isIdentityVerified: usersTable.isIdentityVerified })
+                .from(usersTable)
+                .where(eq(usersTable.email, person.inviteEmail));
+              if (repUser?.isIdentityVerified) {
+                isAutoVerified = true;
+                autoVerifyMethod = 'rep_match';
+                await storage.updateCompanyPerson(person.id, {
+                  isVerified: true,
+                  inviteStatus: 'accepted',
+                  kybLookupStatus: 'found',
+                  autoVerifyMethod: 'rep_match',
+                });
+              }
+            }
+
+            if (isAutoVerified) {
+              profileCompletion = 100;
+              isProfileComplete = true;
+            }
+
+            return {
+              id: person.id,
+              applicationId: person.applicationId,
+              companyProfileId: person.companyProfileId,
+              inviteEmail: person.inviteEmail,
+              role: person.role,
+              inviteStatus: isAutoVerified ? 'accepted' : person.inviteStatus,
+              isVerified: isAutoVerified,
+              personUserId: person.personUserId,
+              title: person.title,
+              firstName: person.corporateName || null,
+              lastName: null,
+              profileCompletion,
+              isProfileComplete,
+              hasPassportPhoto: false,
+              hasSignature: false,
+              hasIdDocument: false,
+              hasNin: false,
+              hasBvn: false,
+              identityExpiresAt: null,
+              identityDaysUntilExpiry: null,
+              entityType: 'corporate',
+              corporateName: person.corporateName || null,
+              corporateRcNumber: person.corporateRcNumber || null,
+              corporateBusinessType: person.corporateBusinessType || 'co',
+              kybLookupStatus: isAutoVerified ? 'found' : (person.kybLookupStatus || null),
+              autoVerifyMethod,
+            };
+          }
 
           if (person.personUserId) {
             const profile = await storage.getFounderProfile(person.personUserId);
@@ -3064,6 +3144,12 @@ export async function registerRoutes(
             hasBvn,
             identityExpiresAt,
             identityDaysUntilExpiry,
+            entityType: 'individual',
+            corporateName: null,
+            corporateRcNumber: null,
+            corporateBusinessType: null,
+            kybLookupStatus: null,
+            autoVerifyMethod: null,
           };
         })
       );
@@ -3153,6 +3239,7 @@ export async function registerRoutes(
         inviteEmail, role, title, sharesAllocated, shareClass, sharePercentage,
         applicationId, companyProfileId, deferInvite,
         entityType, corporateName, corporateRcNumber, corporateCountry, corporateAuthorisedRepName,
+        corporateBusinessType,
       } = req.body;
 
       const isCorporate = entityType === "corporate";
@@ -3169,16 +3256,108 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Corporate entity name is required" });
       }
 
-      const crypto = await import("crypto");
-      const inviteToken = crypto.randomBytes(32).toString('hex');
+      // ── Deduplication guard: same RC/BN on same application ──────────────────
+      if (isCorporate && corporateRcNumber?.trim() && applicationId) {
+        const [existing] = await db
+          .select()
+          .from(companyPeople)
+          .where(
+            and(
+              eq(companyPeople.applicationId, applicationId),
+              eq(companyPeople.corporateRcNumber, corporateRcNumber.trim())
+            )
+          );
+        if (existing) {
+          return res.json({ ...existing, _deduplicated: true });
+        }
+      }
+
+      const cryptoMod = await import("crypto");
+      const inviteToken = cryptoMod.randomBytes(32).toString('hex');
       const isDraft = !!deferInvite;
+      const bizType = isCorporate ? (corporateBusinessType || 'co') : null;
+      const rcNum = isCorporate ? (corporateRcNumber?.trim() || null) : null;
+
+      // ── Auto-verify cascade for corporate/BN entities ─────────────────────────
+      let autoVerified = false;
+      let autoVerifyMethod: string | null = null;
+      let kybLookupStatus: string | null = null;
+
+      if (isCorporate && rcNum) {
+        // PATH A: check verified_entities registry by RC/BN number
+        const [registryMatch] = await db
+          .select()
+          .from(verifiedEntities)
+          .where(
+            and(
+              eq(verifiedEntities.entityType, "company"),
+              eq(verifiedEntities.rcNumber, rcNum)
+            )
+          );
+
+        if (registryMatch) {
+          autoVerified = true;
+          autoVerifyMethod = 'registry';
+          kybLookupStatus = 'found';
+          console.log(`[CompanyPeople] Path A: auto-verified ${rcNum} via platform registry`);
+        }
+
+        // PATH B: check if rep's email belongs to a verified platform user
+        if (!autoVerified) {
+          const repEmail = inviteEmail.toLowerCase().trim();
+          const [repUser] = await db
+            .select({ isIdentityVerified: usersTable.isIdentityVerified })
+            .from(usersTable)
+            .where(eq(usersTable.email, repEmail));
+
+          if (repUser?.isIdentityVerified) {
+            autoVerified = true;
+            autoVerifyMethod = 'rep_match';
+            kybLookupStatus = 'found';
+            console.log(`[CompanyPeople] Path B: auto-verified ${rcNum} via verified rep ${repEmail}`);
+          }
+        }
+
+        // PATH C: live CAC lookup via Smile ID (once only, gated by kybLookupStatus)
+        if (!autoVerified) {
+          try {
+            const smileIdSvc = await import("./services/smileIdService");
+            const jobId = `corp-person-${Date.now()}`;
+            const kybResult = await smileIdSvc.verifyBusiness(rcNum, userId, jobId, bizType || 'co');
+
+            if (kybResult.found && kybResult.status && kybResult.status.toLowerCase().includes('active')) {
+              autoVerified = true;
+              autoVerifyMethod = 'smile_id';
+              kybLookupStatus = 'found';
+              console.log(`[CompanyPeople] Path C: auto-verified ${rcNum} via Smile ID CAC lookup`);
+
+              // Persist to verified_entities so future adds use Path A
+              await upsertVerifiedCompanyDirect({
+                companyName: kybResult.companyName || corporateName,
+                rcNumber: kybResult.rcNumber || rcNum,
+                tinNumber: kybResult.tinNumber || undefined,
+                email: inviteEmail.toLowerCase().trim(),
+                country: 'NG',
+              });
+            } else if (!kybResult.error || kybResult.error === 'NOT_CONFIGURED') {
+              kybLookupStatus = kybResult.error === 'NOT_CONFIGURED' ? null : 'not_found';
+            } else {
+              kybLookupStatus = 'error';
+            }
+          } catch (smileErr: any) {
+            console.warn('[CompanyPeople] Path C Smile ID error:', smileErr?.message);
+            kybLookupStatus = 'error';
+          }
+        }
+      }
 
       const person = await storage.createCompanyPerson({
         founderId: userId,
         inviteEmail: inviteEmail.toLowerCase().trim(),
         inviteToken,
-        inviteStatus: isDraft ? "draft" : "pending",
-        inviteSentAt: isDraft ? null : new Date(),
+        inviteStatus: autoVerified ? 'accepted' : (isDraft ? "draft" : "pending"),
+        inviteSentAt: autoVerified || isDraft ? null : new Date(),
+        isVerified: autoVerified || false,
         role,
         title,
         sharesAllocated: sharesAllocated || null,
@@ -3188,12 +3367,17 @@ export async function registerRoutes(
         companyProfileId: companyProfileId || null,
         entityType: isCorporate ? "corporate" : "individual",
         corporateName: isCorporate ? (corporateName || null) : null,
-        corporateRcNumber: isCorporate ? (corporateRcNumber || null) : null,
+        corporateRcNumber: rcNum,
         corporateCountry: isCorporate ? (corporateCountry || null) : null,
         corporateAuthorisedRepName: isCorporate ? (corporateAuthorisedRepName || null) : null,
+        corporateBusinessType: bizType,
+        kybLookupStatus,
+        kybLookupAttemptedAt: kybLookupStatus ? new Date() : null,
+        autoVerifyMethod,
       });
 
-      if (!isDraft) {
+      // Only send invitation email if not auto-verified and not a draft
+      if (!autoVerified && !isDraft) {
         try {
           const emailSvc = await import("./services/emailService");
           const { client: resend, fromEmail } = await emailSvc.getResendClient();
@@ -3247,10 +3431,15 @@ export async function registerRoutes(
 
       await storage.createAuditLog({
         actorUserId: userId,
-        action: "company_person_invited",
+        action: autoVerified ? "company_person_auto_verified" : "company_person_invited",
         entityType: "company_person",
         entityId: String(person.id),
-        details: { inviteEmail, role, title, entityType: isCorporate ? "corporate" : "individual", corporateName: isCorporate ? corporateName : undefined },
+        details: {
+          inviteEmail, role, title,
+          entityType: isCorporate ? "corporate" : "individual",
+          corporateName: isCorporate ? corporateName : undefined,
+          autoVerifyMethod: autoVerified ? autoVerifyMethod : undefined,
+        },
         ipAddress: req.ip,
       });
 

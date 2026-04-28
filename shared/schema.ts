@@ -78,6 +78,9 @@ export const companyPeople = pgTable("company_people", {
   index("idx_company_people_founder").on(table.founderId),
   index("idx_company_people_person").on(table.personUserId),
   index("idx_company_people_invite_email").on(table.inviteEmail),
+  uniqueIndex("idx_company_people_app_rc_unique")
+    .on(table.applicationId, table.corporateRcNumber)
+    .where(sql`application_id IS NOT NULL AND corporate_rc_number IS NOT NULL`),
 ]);
 
 export const insertCompanyPersonSchema = createInsertSchema(companyPeople).omit({ id: true, createdAt: true, updatedAt: true });

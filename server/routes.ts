@@ -11,7 +11,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, asc, ne, inArray } from "drizzle-orm";
+import { eq, desc, and, asc, ne, inArray, sql } from "drizzle-orm";
 import * as services from "./services";
 import { registeredOfficeService } from "./services/registeredOfficeService";
 import { mailroomService } from "./services/mailroomService";
@@ -3318,35 +3318,66 @@ export async function registerRoutes(
           }
         }
 
-        // PATH C: live CAC lookup via Smile ID (once only, gated by kybLookupStatus)
+        // PATH C: live CAC lookup via Smile ID (once only, gated globally by prior lookup in company_people)
         if (!autoVerified) {
-          try {
-            const smileIdSvc = await import("./services/smileIdService");
-            const jobId = `corp-person-${Date.now()}`;
-            const kybResult = await smileIdSvc.verifyBusiness(rcNum, userId, jobId, bizType || 'co');
+          // Check if this RC/BN was already looked up anywhere on the platform
+          const [priorLookup] = await db
+            .select({ kybLookupStatus: companyPeople.kybLookupStatus })
+            .from(companyPeople)
+            .where(
+              and(
+                eq(companyPeople.corporateRcNumber, rcNum),
+                sql`${companyPeople.kybLookupStatus} IS NOT NULL`
+              )
+            )
+            .limit(1);
 
-            if (kybResult.found && kybResult.status && kybResult.status.toLowerCase().includes('active')) {
+          if (priorLookup) {
+            // Reuse prior lookup result — do not call Smile ID again
+            kybLookupStatus = priorLookup.kybLookupStatus;
+            console.log(`[CompanyPeople] Path C skipped: prior lookup found for ${rcNum} (status=${kybLookupStatus})`);
+            if (kybLookupStatus === 'found') {
+              // Prior Smile ID confirmed this entity — auto-verify and ensure verified_entities entry exists
               autoVerified = true;
               autoVerifyMethod = 'smile_id';
-              kybLookupStatus = 'found';
-              console.log(`[CompanyPeople] Path C: auto-verified ${rcNum} via Smile ID CAC lookup`);
-
-              // Persist to verified_entities so future adds use Path A
               await upsertVerifiedCompanyDirect({
-                companyName: kybResult.companyName || corporateName,
-                rcNumber: kybResult.rcNumber || rcNum,
-                tinNumber: kybResult.tinNumber || undefined,
+                companyName: corporateName || rcNum,
+                rcNumber: rcNum,
                 email: inviteEmail.toLowerCase().trim(),
                 country: 'NG',
               });
-            } else if (!kybResult.error || kybResult.error === 'NOT_CONFIGURED') {
-              kybLookupStatus = kybResult.error === 'NOT_CONFIGURED' ? null : 'not_found';
-            } else {
+            }
+          } else {
+            // No prior lookup anywhere — call Smile ID now
+            try {
+              const smileIdSvc = await import("./services/smileIdService");
+              const jobId = `corp-person-${Date.now()}`;
+              const kybResult = await smileIdSvc.verifyBusiness(rcNum, userId, jobId, bizType || 'co');
+
+              if (kybResult.found && kybResult.status && kybResult.status.toLowerCase().includes('active')) {
+                autoVerified = true;
+                autoVerifyMethod = 'smile_id';
+                kybLookupStatus = 'found';
+                console.log(`[CompanyPeople] Path C: auto-verified ${rcNum} via Smile ID CAC lookup`);
+
+                // Persist to verified_entities so future adds use Path A
+                await upsertVerifiedCompanyDirect({
+                  companyName: kybResult.companyName || corporateName,
+                  rcNumber: kybResult.rcNumber || rcNum,
+                  tinNumber: kybResult.tinNumber || undefined,
+                  email: inviteEmail.toLowerCase().trim(),
+                  country: 'NG',
+                });
+              } else if (!kybResult.error) {
+                kybLookupStatus = 'not_found';
+              } else {
+                // Treat all errors (including NOT_CONFIGURED) as terminal error state
+                kybLookupStatus = 'error';
+              }
+            } catch (smileErr: any) {
+              console.warn('[CompanyPeople] Path C Smile ID error:', smileErr?.message);
               kybLookupStatus = 'error';
             }
-          } catch (smileErr: any) {
-            console.warn('[CompanyPeople] Path C Smile ID error:', smileErr?.message);
-            kybLookupStatus = 'error';
           }
         }
       }

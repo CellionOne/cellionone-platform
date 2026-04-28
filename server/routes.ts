@@ -8901,10 +8901,13 @@ Important guidelines:
         });
       }
 
-      // ── Auto-verify cascade for corporate directors (Path A + Path B only) ──────
-      // Path C (live Smile ID) is intentionally excluded: the parent company already
-      // underwent authoritative KYB above, so Smile ID credits should not be spent
-      // again for each corporate director entry.
+      // ── Auto-verify cascade for corporate directors (Path A + Path B + Path C) ──
+      // Path A: platform verified_entities registry (free, instant)
+      // Path B: authorised-rep email match for BN entities (free, instant)
+      // Path C: prior Smile ID CAC lookup reuse (free) or live lookup (gated by
+      //         ENABLE_DIRECTOR_CAC_LOOKUP env var to control costs). The parent
+      //         company KYB is a separate RC number lookup; a director's own RC
+      //         is a distinct entity and incurs no duplication charge.
       const autoVerifyResults: Map<number, { verified: boolean; verifyMethod: string }> = new Map();
 
       for (let idx = 0; idx < directorList.length; idx++) {
@@ -8941,6 +8944,65 @@ Important guidelines:
           if (repUser?.isIdentityVerified) {
             autoVerifyResults.set(idx, { verified: true, verifyMethod: "rep_match" });
             console.log(`[ExistingCo] Path B: auto-verified BN director ${rcNorm} via verified rep ${repEmail}`);
+            continue;
+          }
+        }
+
+        // PATH C: prior Smile ID CAC lookup reuse — check company_people for any
+        // existing lookup on this RC number (across all applications on the platform)
+        const [priorLookup] = await db
+          .select({ kybLookupStatus: companyPeople.kybLookupStatus })
+          .from(companyPeople)
+          .where(
+            and(
+              eq(companyPeople.corporateRcNumber, rcNorm),
+              sql`${companyPeople.kybLookupStatus} IS NOT NULL`
+            )
+          )
+          .limit(1);
+
+        if (priorLookup) {
+          // Reuse prior lookup result — do not call Smile ID again
+          console.log(`[ExistingCo] Path C (reuse): prior lookup found for ${rcNorm} (status=${priorLookup.kybLookupStatus})`);
+          if (priorLookup.kybLookupStatus === 'found') {
+            autoVerifyResults.set(idx, { verified: true, verifyMethod: "smile_id" });
+            // Ensure verified_entities entry exists so future adds use Path A
+            await upsertVerifiedCompanyDirect({
+              companyName: d.name || rcNorm,
+              rcNumber: rcNorm,
+              email: repEmail || '',
+              country: 'NG',
+            });
+          }
+          continue;
+        }
+
+        // PATH C (live): no prior lookup anywhere — optionally run a live Smile ID
+        // CAC lookup, gated by ENABLE_DIRECTOR_CAC_LOOKUP to control costs
+        if (process.env.ENABLE_DIRECTOR_CAC_LOOKUP === 'true') {
+          try {
+            const smileIdSvc = await import("./services/smileIdService");
+            const jobId = `dir-kyb-${userId}-${Date.now()}`;
+            const bizType = (d.corporateBusinessType || 'co') as string;
+            const kybResult = await smileIdSvc.verifyBusiness(rcNorm, userId, jobId, bizType);
+
+            if (kybResult.found && kybResult.status && kybResult.status.toLowerCase().includes('active')) {
+              autoVerifyResults.set(idx, { verified: true, verifyMethod: "smile_id" });
+              console.log(`[ExistingCo] Path C (live): auto-verified corporate director ${rcNorm} via Smile ID CAC lookup`);
+              // Persist to verified_entities so future adds use Path A
+              await upsertVerifiedCompanyDirect({
+                companyName: kybResult.companyName || d.name || rcNorm,
+                rcNumber: kybResult.rcNumber || rcNorm,
+                tinNumber: kybResult.tinNumber || undefined,
+                email: repEmail || '',
+                country: 'NG',
+              });
+            } else {
+              console.log(`[ExistingCo] Path C (live): Smile ID CAC lookup for ${rcNorm} — found=${kybResult.found} status=${kybResult.status} error=${kybResult.error}`);
+            }
+          } catch (smileErr: unknown) {
+            const errMsg = smileErr instanceof Error ? smileErr.message : String(smileErr);
+            console.warn(`[ExistingCo] Path C (live): Smile ID error for ${rcNorm}:`, errMsg);
           }
         }
       }

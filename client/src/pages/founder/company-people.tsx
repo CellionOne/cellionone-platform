@@ -644,7 +644,9 @@ function PeopleList() {
   };
 
   const getStatusBadge = (person: CompanyPerson, readinessInfo?: ReadinessData["people"][0]) => {
-    if (person.isVerified) {
+    // Use effective state: raw DB value OR retrospective computed value from readiness
+    const effectiveIsVerified = person.isVerified || readinessInfo?.isVerified === true;
+    if (effectiveIsVerified) {
       const isCorporateAutoVerified = person.entityType === 'corporate' && (person.autoVerifyMethod || readinessInfo?.autoVerifyMethod);
       const verifyMethod = person.autoVerifyMethod || readinessInfo?.autoVerifyMethod || null;
 

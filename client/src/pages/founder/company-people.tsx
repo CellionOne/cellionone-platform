@@ -649,6 +649,8 @@ function PeopleList() {
       case 'registry': return 'Verified via platform record';
       case 'rep_match': return 'Verified via representative';
       case 'smile_id': return 'Verified via CAC registry';
+      case 'smile_id_reuse': return 'Verified via CAC registry (prior lookup)';
+      case 'smile_id_live': return 'Verified via CAC registry (live check)';
       default: return 'Platform Verified';
     }
   };

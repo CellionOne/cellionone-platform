@@ -3347,7 +3347,7 @@ export async function registerRoutes(
             if (kybLookupStatus === 'found') {
               // Prior Smile ID confirmed this entity — auto-verify and ensure verified_entities entry exists
               autoVerified = true;
-              autoVerifyMethod = 'smile_id';
+              autoVerifyMethod = 'smile_id_reuse';
               await upsertVerifiedCompanyDirect({
                 companyName: corporateName || rcNum,
                 rcNumber: rcNum,
@@ -3364,7 +3364,7 @@ export async function registerRoutes(
 
               if (kybResult.found && kybResult.status && kybResult.status.toLowerCase().includes('active')) {
                 autoVerified = true;
-                autoVerifyMethod = 'smile_id';
+                autoVerifyMethod = 'smile_id_live';
                 kybLookupStatus = 'found';
                 console.log(`[CompanyPeople] Path C: auto-verified ${rcNum} via Smile ID CAC lookup`);
 
@@ -8965,7 +8965,7 @@ Important guidelines:
           // Reuse prior lookup result — do not call Smile ID again
           console.log(`[ExistingCo] Path C (reuse): prior lookup found for ${rcNorm} (status=${priorLookup.kybLookupStatus})`);
           if (priorLookup.kybLookupStatus === 'found') {
-            autoVerifyResults.set(idx, { verified: true, verifyMethod: "smile_id" });
+            autoVerifyResults.set(idx, { verified: true, verifyMethod: "smile_id_reuse" });
             // Ensure verified_entities entry exists so future adds use Path A
             await upsertVerifiedCompanyDirect({
               companyName: d.name || rcNorm,
@@ -8987,7 +8987,7 @@ Important guidelines:
             const kybResult = await smileIdSvc.verifyBusiness(rcNorm, userId, jobId, bizType);
 
             if (kybResult.found && kybResult.status && kybResult.status.toLowerCase().includes('active')) {
-              autoVerifyResults.set(idx, { verified: true, verifyMethod: "smile_id" });
+              autoVerifyResults.set(idx, { verified: true, verifyMethod: "smile_id_live" });
               console.log(`[ExistingCo] Path C (live): auto-verified corporate director ${rcNorm} via Smile ID CAC lookup`);
               // Persist to verified_entities so future adds use Path A
               await upsertVerifiedCompanyDirect({

@@ -741,6 +741,10 @@ export default function ApplicationDetailsPage() {
                       ? 'Verified via platform record'
                       : person.autoVerifyMethod === 'rep_match'
                       ? 'Verified via representative'
+                      : person.autoVerifyMethod === 'smile_id_reuse'
+                      ? 'Verified via CAC registry (prior lookup)'
+                      : person.autoVerifyMethod === 'smile_id_live'
+                      ? 'Verified via CAC registry (live check)'
                       : person.autoVerifyMethod === 'smile_id'
                       ? 'Verified via CAC registry'
                       : 'Platform Verified';

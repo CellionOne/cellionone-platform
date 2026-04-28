@@ -8796,6 +8796,13 @@ Important guidelines:
           email: z.string().optional(),
           bvn: z.string().optional(),
           nin: z.string().optional(),
+          entityType: z.string().optional(),
+          rcNumber: z.string().optional(),
+          classification: z.string().optional(),
+          authorisedRepName: z.string().optional(),
+          countryOfIncorporation: z.string().optional(),
+          corporateBusinessType: z.enum(["co", "bn"]).optional(),
+          authorisedRepEmail: z.string().optional(),
         })).optional(),
         shareholders: z.array(z.object({
           name: z.string(),
@@ -8894,22 +8901,73 @@ Important guidelines:
         });
       }
 
+      // ── Auto-verify cascade for corporate directors (Path A + Path B only) ──────
+      // Path C (live Smile ID) is intentionally excluded: the parent company already
+      // underwent authoritative KYB above, so Smile ID credits should not be spent
+      // again for each corporate director entry.
+      const autoVerifyResults: Map<number, { verified: boolean; verifyMethod: string }> = new Map();
+
+      for (let idx = 0; idx < directorList.length; idx++) {
+        const d = directorList[idx];
+        if (d.entityType !== "corporate" || !d.rcNumber?.trim()) continue;
+
+        // Normalise RC/BN number to match canonical verified_entities format:
+        // strip RC/BN/IT prefix + collapse whitespace — e.g. "RC 123456" → "123456"
+        const rcNorm = d.rcNumber.trim().toUpperCase()
+          .replace(/^(RC|BN|IT)\s*/i, '').replace(/\s+/g, '');
+
+        if (!rcNorm) continue;
+
+        // PATH A: platform verified_entities registry
+        const [registryMatch] = await db
+          .select()
+          .from(verifiedEntities)
+          .where(and(eq(verifiedEntities.entityType, "company"), eq(verifiedEntities.rcNumber, rcNorm)));
+
+        if (registryMatch) {
+          autoVerifyResults.set(idx, { verified: true, verifyMethod: "registry" });
+          console.log(`[ExistingCo] Path A: auto-verified corporate director ${rcNorm} via platform registry`);
+          continue;
+        }
+
+        // PATH B: rep-email match — BN only
+        const repEmail = (d.email || "").toLowerCase().trim();
+        if (repEmail && d.corporateBusinessType === "bn") {
+          const [repUser] = await db
+            .select({ isIdentityVerified: usersTable.isIdentityVerified })
+            .from(usersTable)
+            .where(eq(usersTable.email, repEmail));
+
+          if (repUser?.isIdentityVerified) {
+            autoVerifyResults.set(idx, { verified: true, verifyMethod: "rep_match" });
+            console.log(`[ExistingCo] Path B: auto-verified BN director ${rcNorm} via verified rep ${repEmail}`);
+          }
+        }
+      }
+
       // Encrypt BVN/NIN in director records before storing — PII must not be stored in plaintext
       const { encryptField } = await import('./services/encryptionService');
-      const encryptedDirectors = directorList.map((d: any) => {
+      const encryptedDirectors = directorList.map((d, idx) => {
         if (d.entityType === "corporate") {
+          const autoVerify = autoVerifyResults.get(idx);
           return {
             name: d.name,
             role: d.role,
             entityType: "corporate",
             rcNumber: d.rcNumber,
+            classification: d.classification || null,
+            corporateBusinessType: d.corporateBusinessType || "co",
             authorisedRepName: d.authorisedRepName || null,
             authorisedRepEmail: d.email || d.authorisedRepEmail || null,
+            countryOfIncorporation: d.countryOfIncorporation || null,
+            ...(autoVerify ? { verified: true, verifyMethod: autoVerify.verifyMethod } : {}),
           };
         }
         return {
           name: d.name,
           role: d.role,
+          entityType: d.entityType || "individual",
+          classification: d.classification || null,
           email: d.email,
           bvn: d.bvn ? encryptField(d.bvn) : undefined,
           nin: d.nin ? encryptField(d.nin) : undefined,

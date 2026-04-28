@@ -761,7 +761,7 @@ export const companyProfiles = pgTable("company_profiles", {
     postalCode?: string;
     country?: string;
   }>(),
-  directors: json("directors").$type<{ name: string; role?: string; email?: string; bvn?: string; nin?: string; entityType?: string; rcNumber?: string; authorisedRepName?: string; authorisedRepEmail?: string; corporateKybPassed?: boolean; corporateKybResultText?: string }[]>(),
+  directors: json("directors").$type<{ name: string; role?: string; email?: string; bvn?: string; nin?: string; entityType?: string; rcNumber?: string; authorisedRepName?: string; authorisedRepEmail?: string; classification?: string; countryOfIncorporation?: string; corporateBusinessType?: "co" | "bn"; verified?: boolean; verifyMethod?: string; corporateKybPassed?: boolean; corporateKybResultText?: string }[]>(),
   shareholders: json("shareholders").$type<{ name: string; shares?: number; percentage?: number; entityType?: string; rcNumber?: string; countryOfIncorporation?: string }[]>(),
   businessActivities: json("business_activities").$type<string[]>(),
   shareCapital: varchar("share_capital", { length: 255 }),

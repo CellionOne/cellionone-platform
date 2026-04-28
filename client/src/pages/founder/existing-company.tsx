@@ -92,6 +92,26 @@ interface DirectorEntry {
   rcNumber?: string;
   authorisedRepName?: string;
   countryOfIncorporation?: string;
+  corporateBusinessType?: "co" | "bn";
+  verified?: boolean;
+  verifyMethod?: string;
+}
+
+interface PersistedDirector {
+  name: string;
+  role?: string;
+  entityType?: string;
+  classification?: string;
+  email?: string;
+  authorisedRepEmail?: string;
+  bvn?: string;
+  nin?: string;
+  rcNumber?: string;
+  authorisedRepName?: string;
+  countryOfIncorporation?: string;
+  corporateBusinessType?: "co" | "bn";
+  verified?: boolean;
+  verifyMethod?: string;
 }
 
 interface AddressFields {
@@ -189,7 +209,7 @@ export default function ExistingCompanyPage() {
   // Step 3 directors
   const [directors, setDirectors] = useState<DirectorEntry[]>([]);
   const [newDirType, setNewDirType] = useState<"individual" | "corporate">("individual");
-  const [newDir, setNewDir] = useState<DirectorEntry>({ entityType: "individual", name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "", rcNumber: "", authorisedRepName: "", countryOfIncorporation: "Nigeria" });
+  const [newDir, setNewDir] = useState<DirectorEntry>({ entityType: "individual", name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "", rcNumber: "", authorisedRepName: "", countryOfIncorporation: "Nigeria", corporateBusinessType: "co" });
 
   // Step 4 documents
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDoc[]>([]);
@@ -306,10 +326,27 @@ export default function ExistingCompanyPage() {
         const err = await res.json().catch(() => ({ message: "Failed to create profile" }));
         throw new Error(err.message);
       }
-      return res.json() as Promise<{ id: number }>;
+      return res.json() as Promise<{ id: number; directors?: PersistedDirector[] }>;
     },
     onSuccess: (profile) => {
       setCreatedProfileId(profile.id);
+      if (profile.directors && Array.isArray(profile.directors)) {
+        setDirectors(profile.directors.map((d: PersistedDirector): DirectorEntry => ({
+          entityType: (d.entityType === "corporate" ? "corporate" : "individual"),
+          name: d.name || "",
+          role: d.role || "Director",
+          classification: (d.classification as DirectorEntry["classification"]) || "director",
+          email: d.email || d.authorisedRepEmail || "",
+          bvn: d.bvn || "",
+          nin: d.nin || "",
+          rcNumber: d.rcNumber || "",
+          authorisedRepName: d.authorisedRepName || "",
+          countryOfIncorporation: d.countryOfIncorporation || "Nigeria",
+          corporateBusinessType: d.corporateBusinessType || "co",
+          verified: d.verified || false,
+          verifyMethod: d.verifyMethod || undefined,
+        })));
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles"] });
     },
     onError: (err: Error) => {
@@ -822,6 +859,12 @@ export default function ExistingCompanyPage() {
                             <Badge variant="outline" className="text-xs">{d.role}</Badge>
                             {d.classification === "director_shareholder" && <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-0">Director & Shareholder</Badge>}
                             {d.classification === "shareholder" && <Badge className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 border-0">Shareholder only</Badge>}
+                            {isCorp && d.verified && (
+                              <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 border-0 flex items-center gap-1" data-testid={`badge-verified-director-${i}`}>
+                                <CheckCircle2 className="h-3 w-3" />
+                                Verified
+                              </Badge>
+                            )}
                             {!hasId && <Badge variant="secondary" className="text-xs text-amber-700 bg-amber-100 dark:bg-amber-900 dark:text-amber-300">{isCorp ? "RC Number required" : "BVN or NIN required"}</Badge>}
                           </div>
                           {isCorp ? (
@@ -978,8 +1021,18 @@ export default function ExistingCompanyPage() {
                     <Input value={newDir.name} onChange={e => setNewDir(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g. Acme Holdings Ltd" data-testid="input-new-director-name" />
                   </div>
                   <div>
-                    <Label>RC Number *</Label>
-                    <Input value={newDir.rcNumber || ""} onChange={e => setNewDir(prev => ({ ...prev, rcNumber: e.target.value }))} placeholder="e.g. RC123456" data-testid="input-new-director-rc" />
+                    <Label>Entity Type</Label>
+                    <Select value={newDir.corporateBusinessType || "co"} onValueChange={v => setNewDir(prev => ({ ...prev, corporateBusinessType: v as "co" | "bn" }))}>
+                      <SelectTrigger data-testid="select-new-director-biz-type"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="co">Limited Company (RC)</SelectItem>
+                        <SelectItem value="bn">Business Name (BN)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>RC / BN Number *</Label>
+                    <Input value={newDir.rcNumber || ""} onChange={e => setNewDir(prev => ({ ...prev, rcNumber: e.target.value }))} placeholder={newDir.corporateBusinessType === "bn" ? "e.g. BN123456" : "e.g. RC123456"} data-testid="input-new-director-rc" />
                   </div>
                   <div>
                     <Label>Role</Label>
@@ -1024,7 +1077,7 @@ export default function ExistingCompanyPage() {
                 onClick={() => {
                   const entry: DirectorEntry = { ...newDir, entityType: newDirType };
                   setDirectors(prev => [...prev, entry]);
-                  setNewDir({ entityType: newDirType, name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "", rcNumber: "", authorisedRepName: "", countryOfIncorporation: "Nigeria" });
+                  setNewDir({ entityType: newDirType, name: "", role: "Director", classification: "director", email: "", bvn: "", nin: "", rcNumber: "", authorisedRepName: "", countryOfIncorporation: "Nigeria", corporateBusinessType: "co" });
                 }}
                 data-testid="button-add-director"
               >

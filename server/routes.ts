@@ -8801,7 +8801,7 @@ Important guidelines:
           classification: z.string().optional(),
           authorisedRepName: z.string().optional(),
           countryOfIncorporation: z.string().optional(),
-          corporateBusinessType: z.enum(["co", "bn"]).optional(),
+          corporateBusinessType: z.enum(["co", "bn", "it"]).optional(),
           authorisedRepEmail: z.string().optional(),
         })).optional(),
         shareholders: z.array(z.object({

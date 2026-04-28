@@ -66,7 +66,7 @@ export const companyPeople = pgTable("company_people", {
   corporateRcNumber: varchar("corporate_rc_number", { length: 50 }),
   corporateCountry: varchar("corporate_country", { length: 100 }),
   corporateAuthorisedRepName: varchar("corporate_authorised_rep_name", { length: 255 }),
-  corporateBusinessType: varchar("corporate_business_type", { length: 10 }), // "co" | "bn"
+  corporateBusinessType: varchar("corporate_business_type", { length: 10 }), // "co" | "bn" | "it"
   kybLookupStatus: varchar("kyb_lookup_status", { length: 20 }), // null | "found" | "not_found" | "error"
   kybLookupAttemptedAt: timestamp("kyb_lookup_attempted_at"),
   autoVerifyMethod: varchar("auto_verify_method", { length: 30 }), // null | "registry" | "rep_match" | "smile_id"
@@ -761,7 +761,7 @@ export const companyProfiles = pgTable("company_profiles", {
     postalCode?: string;
     country?: string;
   }>(),
-  directors: json("directors").$type<{ name: string; role?: string; email?: string; bvn?: string; nin?: string; entityType?: string; rcNumber?: string; authorisedRepName?: string; authorisedRepEmail?: string; classification?: string; countryOfIncorporation?: string; corporateBusinessType?: "co" | "bn"; verified?: boolean; verifyMethod?: string; corporateKybPassed?: boolean; corporateKybResultText?: string }[]>(),
+  directors: json("directors").$type<{ name: string; role?: string; email?: string; bvn?: string; nin?: string; entityType?: string; rcNumber?: string; authorisedRepName?: string; authorisedRepEmail?: string; classification?: string; countryOfIncorporation?: string; corporateBusinessType?: "co" | "bn" | "it"; verified?: boolean; verifyMethod?: string; corporateKybPassed?: boolean; corporateKybResultText?: string }[]>(),
   shareholders: json("shareholders").$type<{ name: string; shares?: number; percentage?: number; entityType?: string; rcNumber?: string; countryOfIncorporation?: string }[]>(),
   businessActivities: json("business_activities").$type<string[]>(),
   shareCapital: varchar("share_capital", { length: 255 }),

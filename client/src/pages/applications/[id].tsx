@@ -55,6 +55,9 @@ interface ReadinessPerson {
   title: string | null;
   profileCompletion: number;
   isProfileComplete: boolean;
+  entityType?: string | null;
+  autoVerifyMethod?: string | null;
+  corporateBusinessType?: string | null;
 }
 
 interface ReadinessSummary {
@@ -733,6 +736,14 @@ export default function ApplicationDetailsPage() {
                     const isVerified = !!person.isVerified;
                     const hasProfile = person.isProfileComplete;
                     const isPending = person.inviteStatus === "pending" && !person.personUserId;
+                    const isCorporateAutoVerified = person.entityType === 'corporate' && !!person.autoVerifyMethod;
+                    const verifyMethodLabel = person.autoVerifyMethod === 'registry'
+                      ? 'Verified via platform record'
+                      : person.autoVerifyMethod === 'rep_match'
+                      ? 'Verified via representative'
+                      : person.autoVerifyMethod === 'smile_id'
+                      ? 'Verified via CAC registry'
+                      : 'Platform Verified';
 
                     return (
                       <div
@@ -763,12 +774,24 @@ export default function ApplicationDetailsPage() {
                             </p>
                           </div>
                         </div>
-                        <Badge
-                          variant={isVerified ? "default" : "secondary"}
-                          className={`text-xs shrink-0 ${isVerified ? "bg-green-600 hover:bg-green-600" : ""}`}
-                        >
-                          {isVerified ? "Verified" : isPending ? "Invited" : hasProfile ? "Profile Ready" : "Profile Incomplete"}
-                        </Badge>
+                        {isCorporateAutoVerified ? (
+                          <div className="flex items-center gap-1 flex-wrap justify-end" title={verifyMethodLabel}>
+                            <Badge variant="default" className="text-xs shrink-0 bg-green-600 hover:bg-green-600" data-testid={`badge-profile-ready-${person.id}`}>
+                              Profile Ready
+                            </Badge>
+                            <Badge variant="outline" className="text-xs shrink-0 text-green-700 dark:text-green-400 border-green-300 dark:border-green-700" data-testid={`badge-platform-verified-${person.id}`}>
+                              Platform Verified
+                            </Badge>
+                          </div>
+                        ) : (
+                          <Badge
+                            variant={isVerified ? "default" : "secondary"}
+                            className={`text-xs shrink-0 ${isVerified ? "bg-green-600 hover:bg-green-600" : ""}`}
+                            data-testid={`badge-status-${person.id}`}
+                          >
+                            {isVerified ? "Verified" : isPending ? "Invited" : hasProfile ? "Profile Ready" : "Profile Incomplete"}
+                          </Badge>
+                        )}
                       </div>
                     );
                   })}

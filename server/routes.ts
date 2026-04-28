@@ -3255,19 +3255,22 @@ export async function registerRoutes(
       const bizType = isCorporate ? (corporateBusinessType || 'co') : null;
       const rcNum = isCorporate ? normaliseRcNumber(corporateRcNumber) : null;
 
-      // ── Deduplication guard: same normalised RC/BN on same application ─────────
+      // ── Deduplication guard: same normalised RC/BN on same application (owned by this founder)
       if (isCorporate && rcNum && applicationId) {
         const [existing] = await db
           .select()
           .from(companyPeople)
           .where(
             and(
+              eq(companyPeople.founderId, userId),
               eq(companyPeople.applicationId, applicationId),
               eq(companyPeople.corporateRcNumber, rcNum)
             )
           );
         if (existing) {
-          return res.json({ ...existing, _deduplicated: true });
+          // Return a sanitised view — never expose the invite token
+          const { inviteToken: _omit, ...safeExisting } = existing;
+          return res.json({ ...safeExisting, _deduplicated: true });
         }
       }
 

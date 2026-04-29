@@ -1061,6 +1061,81 @@ export async function sendAbandonedCartReminderEmail(opts: {
   console.log(`[AbandonedCart] Reminder #${opts.reminderNumber} sent to ${opts.to}`);
 }
 
+export async function sendApplicationAssignedEmail(opts: {
+  lawyerEmail: string;
+  lawyerFirstName: string;
+  applicationId: number;
+  companyName: string;
+  isReassignment: boolean;
+  dashboardUrl: string;
+}): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+  const { lawyerEmail, lawyerFirstName, applicationId, companyName, isReassignment, dashboardUrl } = opts;
+  const year = new Date().getFullYear();
+
+  const subject = isReassignment
+    ? `Application Reassigned to You — ${companyName} (#${applicationId})`
+    : `New Application Assignment — ${companyName} (#${applicationId})`;
+
+  const bannerText = isReassignment
+    ? 'An incorporation application has been reassigned to you'
+    : 'You have been assigned a new incorporation application';
+
+  const reassignmentNote = isReassignment
+    ? `<p style="color:#92400e;font-size:13px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:12px;margin-bottom:24px;">
+        This application was previously handled by another lawyer and has now been reassigned to you. Please review all existing documents and notes before proceeding.
+       </p>`
+    : '';
+
+  const html = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
+  <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
+    <div style="max-width:600px;margin:0 auto;background:white;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+      <div style="text-align:center;margin-bottom:32px;">
+        <h1 style="color:#18181b;font-size:24px;margin:0;">Cellion One</h1>
+        <p style="color:#71717a;font-size:14px;margin:4px 0 0 0;">Application Assignment</p>
+      </div>
+
+      <div style="background:#eff6ff;border-radius:8px;padding:16px;margin-bottom:24px;">
+        <p style="color:#1e40af;font-size:16px;font-weight:600;margin:0;">${bannerText}</p>
+      </div>
+
+      <p style="color:#52525b;font-size:14px;line-height:1.6;margin-bottom:24px;">
+        Hi ${lawyerFirstName},
+      </p>
+
+      ${reassignmentNote}
+
+      <div style="margin-bottom:24px;">
+        <p style="color:#52525b;font-size:14px;margin:0 0 6px 0;"><strong>Application ID:</strong> #${applicationId}</p>
+        <p style="color:#52525b;font-size:14px;margin:0 0 6px 0;"><strong>Company Name:</strong> ${companyName}</p>
+        <p style="color:#52525b;font-size:14px;margin:0;"><strong>Status:</strong> Under Review</p>
+      </div>
+
+      <p style="color:#52525b;font-size:14px;line-height:1.6;margin-bottom:28px;">
+        Please log in to your lawyer dashboard to review the application details, view the founder's documents, and begin processing.
+      </p>
+
+      <div style="text-align:center;margin-bottom:32px;">
+        <a href="${dashboardUrl}" style="display:inline-block;background:#16a34a;color:white;font-size:14px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">
+          Open Lawyer Dashboard
+        </a>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #e4e4e7;margin:32px 0;">
+      <p style="color:#a1a1aa;font-size:12px;text-align:center;">&copy; ${year} Cellion Platforms Nigeria Limited. All rights reserved.</p>
+    </div>
+  </body>
+</html>`;
+
+  await client.emails.send({ from: fromEmail, to: lawyerEmail, subject, html });
+  console.log(`[Email] Application assignment email sent to ${lawyerEmail} — app #${applicationId} (reassignment: ${isReassignment})`);
+}
+
 export async function sendLawyerPayoutConfirmationEmail(opts: {
   to: string;
   firstName: string;

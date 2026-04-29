@@ -7500,6 +7500,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       
       const { lawyerId } = parsed.data;
       const adminId = getUserId(req);
+
+      // Read current application to detect reassignment before overwriting
+      const currentApp = await storage.getApplication(applicationId);
+      const isReassignment = !!(currentApp?.assignedLawyerUserId && currentApp.assignedLawyerUserId !== lawyerId);
       
       const updated = await storage.updateApplication(applicationId, {
         assignedLawyerUserId: lawyerId,
@@ -7511,9 +7515,29 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         action: "admin_override",
         entityType: "company_application",
         entityId: applicationId.toString(),
-        details: { assignedLawyerId: lawyerId },
+        details: { assignedLawyerId: lawyerId, isReassignment },
         ipAddress: req.ip,
       });
+
+      // Notify the newly assigned lawyer — fire and forget, never blocks the response
+      try {
+        const lawyer = await storage.getUser(lawyerId);
+        if (lawyer?.email) {
+          const emailSvc = await import("./services/emailService");
+          const baseUrl = emailSvc.getSiteBaseUrl(req);
+          const companyName = currentApp?.companyName1 || `Application #${applicationId}`;
+          await emailSvc.sendApplicationAssignedEmail({
+            lawyerEmail: lawyer.email,
+            lawyerFirstName: lawyer.firstName || "Lawyer",
+            applicationId,
+            companyName,
+            isReassignment,
+            dashboardUrl: `${baseUrl}/lawyer/dashboard`,
+          });
+        }
+      } catch (emailError) {
+        console.error(`[Email] Failed to send assignment notification for app #${applicationId}:`, emailError);
+      }
       
       res.json(updated);
     } catch (error) {

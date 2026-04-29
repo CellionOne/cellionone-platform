@@ -1060,3 +1060,56 @@ export async function sendAbandonedCartReminderEmail(opts: {
   await client.emails.send({ from: fromEmail, to: opts.to, subject, html });
   console.log(`[AbandonedCart] Reminder #${opts.reminderNumber} sent to ${opts.to}`);
 }
+
+export async function sendLawyerPayoutConfirmationEmail(opts: {
+  to: string;
+  firstName: string;
+  amountKobo: number;
+  providerRef: string;
+}): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+  const { to, firstName, amountKobo, providerRef } = opts;
+  const amountNaira = (amountKobo / 100).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const year = new Date().getFullYear();
+  const subject = `Payout of ₦${amountNaira} confirmed — Cellion One`;
+  const html = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
+  <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
+    <div style="max-width:600px;margin:0 auto;background:white;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+      <div style="text-align:center;margin-bottom:32px;">
+        <div style="display:inline-block;background:#16a34a;padding:12px;border-radius:8px;margin-bottom:16px;">
+          <span style="color:white;font-size:24px;font-weight:bold;">C</span>
+        </div>
+        <h1 style="color:#18181b;font-size:24px;margin:0;">Cellion One</h1>
+      </div>
+      <h2 style="color:#18181b;font-size:20px;margin-bottom:16px;">Payout Confirmed</h2>
+      <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:24px;">
+        Hi ${firstName},
+      </p>
+      <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:24px;">
+        Your payout of <strong>₦${amountNaira}</strong> has been confirmed and sent to your bank account.
+      </p>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:20px;margin-bottom:24px;">
+        <p style="color:#15803d;font-size:14px;margin:0 0 8px 0;font-weight:600;">Transfer Reference</p>
+        <p style="color:#166534;font-size:14px;font-family:monospace;margin:0;">${providerRef}</p>
+      </div>
+      <p style="color:#71717a;font-size:14px;line-height:1.6;">
+        Please allow up to 24 hours for the funds to appear in your account, depending on your bank's processing time.
+      </p>
+      <p style="color:#71717a;font-size:14px;line-height:1.6;margin-top:16px;">
+        If you have any questions, contact us at <a href="mailto:service@cellionone.com" style="color:#16a34a;">service@cellionone.com</a>.
+      </p>
+      <hr style="border:none;border-top:1px solid #e4e4e7;margin:32px 0;">
+      <p style="color:#a1a1aa;font-size:12px;text-align:center;line-height:1.6;">
+        &copy; ${year} Cellion Platforms Nigeria Limited. All rights reserved.
+      </p>
+    </div>
+  </body>
+</html>`;
+  await client.emails.send({ from: fromEmail, to, subject, html });
+  console.log(`[PayoutEmail] Confirmation sent to ${to} for ref ${providerRef}`);
+}

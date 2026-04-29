@@ -4,7 +4,7 @@ import { orderPayments, orders, orderItems, serviceRequests, companyApplications
 import { eq, and } from 'drizzle-orm';
 import { invalidateCieOrgTierCache } from '../routes/cieApiRoutes';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
-import { sendNewOrderNotificationEmail, ADMIN_NOTIFICATION_EMAIL } from './emailService';
+import { sendNewOrderNotificationEmail, sendLawyerPayoutConfirmationEmail, ADMIN_NOTIFICATION_EMAIL } from './emailService';
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
 import { createCandidate, submitBusinessAddressVerification } from './youverifyService';
 import { upsertVerifiedIndividualByUserId } from './verifiedEntityService';
@@ -195,8 +195,31 @@ async function handleLawyerPayoutSuccess(reference: string): Promise<void> {
     console.error(`[Paystack Webhook] transfer.success — no payout ledger entry for ref: ${reference}`);
     return;
   }
+
+  const alreadyCompleted = payout.status === 'completed';
   await storage.updatePayout(payout.id, { status: 'completed' });
   console.log(`[Paystack Webhook] Lawyer payout ${reference} confirmed — ledger #${payout.id} marked completed`);
+
+  if (alreadyCompleted) {
+    console.log(`[Paystack Webhook] Payout ${reference} already completed on a prior webhook delivery — skipping confirmation email`);
+    return;
+  }
+
+  try {
+    const lawyer = await storage.getUser(payout.lawyerUserId);
+    if (lawyer?.email) {
+      await sendLawyerPayoutConfirmationEmail({
+        to: lawyer.email,
+        firstName: lawyer.firstName || 'Counsel',
+        amountKobo: payout.amountKobo,
+        providerRef: reference,
+      });
+    } else {
+      console.warn(`[Paystack Webhook] Could not send payout email — no user/email found for lawyerUserId: ${payout.lawyerUserId}`);
+    }
+  } catch (emailErr) {
+    console.error(`[Paystack Webhook] Failed to send payout confirmation email for ref ${reference}:`, emailErr);
+  }
 }
 
 async function handleLawyerPayoutFailed(reference: string): Promise<void> {

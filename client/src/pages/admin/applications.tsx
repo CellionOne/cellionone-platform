@@ -193,11 +193,7 @@ export default function AdminApplications() {
   const paymentTransitionMutation = useMutation({
     mutationFn: async ({ applicationId, targetState, reason, lawyerIdToAssign }: { applicationId: number; targetState: string; reason: string; lawyerIdToAssign?: string }) => {
       if (lawyerIdToAssign) {
-        const assignRes = await apiRequest("POST", `/api/admin/applications/${applicationId}/assign`, { lawyerId: lawyerIdToAssign });
-        if (!assignRes.ok) {
-          const err = await assignRes.json().catch(() => ({}));
-          throw new Error(err.message || "Failed to assign lawyer");
-        }
+        await apiRequest("POST", `/api/admin/applications/${applicationId}/assign`, { lawyerId: lawyerIdToAssign });
       }
       return apiRequest("POST", `/api/admin/applications/${applicationId}/payment-state`, { targetState, reason });
     },
@@ -210,8 +206,8 @@ export default function AdminApplications() {
       setPaymentReason("");
       setInlineLawyerId("");
     },
-    onError: (e: any) => {
-      toast({ title: "Failed to complete payment transition", description: e?.message, variant: "destructive" });
+    onError: () => {
+      toast({ title: "Failed to complete payment transition", variant: "destructive" });
     },
   });
 

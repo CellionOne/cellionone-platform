@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne, inArray, sql } from "drizzle-orm";
 import * as services from "./services";
@@ -6416,6 +6416,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         if (person.entityType === "corporate") {
           let corporateInfo: Record<string, unknown> | null = null;
           if (person.corporateRcNumber) {
+            // Priority 1: verified_entities (platform registry match)
             const [ve] = await db.select()
               .from(verifiedEntities)
               .where(and(eq(verifiedEntities.entityType, "company"), eq(verifiedEntities.rcNumber, person.corporateRcNumber)));
@@ -6432,6 +6433,29 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
                 country: ve.country,
               };
             }
+
+            // Priority 2: kybLookups (live CAC lookup result — has directors, registrationDate, etc.)
+            if (!corporateInfo) {
+              const [kl] = await db.select()
+                .from(kybLookups)
+                .where(and(eq(kybLookups.rcNumber, person.corporateRcNumber), eq(kybLookups.status, "found")));
+              if (kl) {
+                corporateInfo = {
+                  source: "kyb_lookup",
+                  companyName: kl.companyName,
+                  rcNumber: kl.rcNumber,
+                  tinNumber: kl.tinNumber,
+                  registrationDate: kl.registrationDate,
+                  companyStatus: kl.companyStatus,
+                  companyType: kl.companyType,
+                  address: kl.address,
+                  shareCapital: kl.shareCapital,
+                  directors: kl.directors,
+                };
+              }
+            }
+
+            // Priority 3: kyc_supplier_profiles (KYC org onboarding data)
             if (!corporateInfo) {
               const [ksp] = await db.select()
                 .from(kycSupplierProfiles)
@@ -6522,6 +6546,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
               bvnNinVerified: iv.bvnNinVerified,
               docSubmitted: iv.idDocFileId != null,
               biometricSubmitted: iv.smileJobId != null || iv.livenessScore != null,
+              livenessScore: iv.livenessScore,
+              hasSelfie: iv.selfieFileId != null || !!iv.selfieUrl,
+              selfieIsExternal: iv.selfieFileId == null && !!iv.selfieUrl,
+              selfieUrl: iv.selfieFileId == null ? iv.selfieUrl : null,
               verifiedAt: iv.verifiedAt,
             };
           }
@@ -6579,7 +6607,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "Invalid ID" });
       }
 
-      const validTypes = ["signature", "passport_photo", "id_document"];
+      const validTypes = ["signature", "passport_photo", "id_document", "selfie"];
       if (!validTypes.includes(type)) {
         return res.status(400).json({ message: "Invalid document type" });
       }
@@ -6604,6 +6632,50 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       if (!resolvedUserId) return res.status(404).json({ message: "Person has not registered yet" });
 
+      // Log both sensitive-data access and audit trail (done before fetch so it's always recorded)
+      await Promise.all([
+        storage.logSensitiveDataAccess({
+          accessorUserId: lawyerId,
+          targetUserId: resolvedUserId,
+          dataType: type,
+          action: "view",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"] as string,
+        }),
+        storage.createAuditLog({
+          actorUserId: lawyerId,
+          action: "sensitive_data_access",
+          entityType: "application",
+          entityId: applicationId.toString(),
+          details: {
+            applicationId,
+            maskedPersonEmail: maskEmail(person.inviteEmail),
+            documentType: type,
+            lawyerId,
+          },
+          ipAddress: req.ip,
+        }),
+      ]);
+
+      const objectStorage = new ObjectStorageService();
+
+      // Selfie: served from identity_verifications (selfieFileId → documentFiles, or selfieUrl)
+      if (type === "selfie") {
+        const iv = await storage.getIdentityVerification(resolvedUserId);
+        if (!iv) return res.status(404).json({ message: "No identity verification record found" });
+        if (iv.selfieFileId) {
+          const [docFile] = await db.select().from(documentFiles).where(eq(documentFiles.id, iv.selfieFileId));
+          if (!docFile) return res.status(404).json({ message: "Selfie file not found" });
+          const downloadURL = await objectStorage.getObjectEntityDownloadURL(docFile.storagePath, 900);
+          return res.json({ downloadURL });
+        }
+        if (iv.selfieUrl) {
+          return res.json({ downloadURL: iv.selfieUrl });
+        }
+        return res.status(404).json({ message: "No selfie on file" });
+      }
+
+      // Standard profile documents
       const profile = await storage.getFounderProfile(resolvedUserId);
       if (!profile) return res.status(404).json({ message: "Profile not found" });
 
@@ -6613,29 +6685,6 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       if (!filePath) return res.status(404).json({ message: "Document not uploaded" });
 
-      // Log both sensitive-data access and audit trail
-      await storage.logSensitiveDataAccess({
-        accessorUserId: lawyerId,
-        targetUserId: resolvedUserId,
-        dataType: type,
-        action: "view",
-        ipAddress: req.ip,
-        userAgent: req.headers["user-agent"] as string,
-      });
-      await storage.createAuditLog({
-        actorUserId: lawyerId,
-        action: "sensitive_data_access",
-        entityType: "application",
-        entityId: applicationId.toString(),
-        details: {
-          applicationId,
-          maskedPersonEmail: maskEmail(person.inviteEmail),
-          documentType: type,
-        },
-        ipAddress: req.ip,
-      });
-
-      const objectStorage = new ObjectStorageService();
       const downloadURL = await objectStorage.getObjectEntityDownloadURL(filePath, 900);
       res.json({ downloadURL });
     } catch (error) {

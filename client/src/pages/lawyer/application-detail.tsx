@@ -778,6 +778,10 @@ interface DossierIndividual {
     bvnNinVerified: boolean | null;
     docSubmitted: boolean;
     biometricSubmitted: boolean;
+    livenessScore: number | null;
+    hasSelfie: boolean;
+    selfieIsExternal: boolean;
+    selfieUrl: string | null;
     verifiedAt: string | null;
   } | null;
 }
@@ -847,19 +851,22 @@ function PersonDocumentPreview({
   personId,
   docType,
   label,
+  prefetchedUrl,
 }: {
   applicationId: number;
   personId: number;
-  docType: "signature" | "passport_photo" | "id_document";
+  docType: "signature" | "passport_photo" | "id_document" | "selfie";
   label: string;
+  prefetchedUrl?: string | null;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [url, setUrl] = useState<string | null>(prefetchedUrl ?? null);
+  const [loading, setLoading] = useState(!prefetchedUrl);
   const [failed, setFailed] = useState(false);
 
-  const isImageType = docType === "passport_photo" || docType === "signature";
+  const isImageType = docType === "passport_photo" || docType === "signature" || docType === "selfie";
 
   useEffect(() => {
+    if (prefetchedUrl) return;
     let cancelled = false;
     (async () => {
       try {
@@ -876,7 +883,18 @@ function PersonDocumentPreview({
       }
     })();
     return () => { cancelled = true; };
-  }, [applicationId, personId, docType]);
+  }, [applicationId, personId, docType, prefetchedUrl]);
+
+  const handleDownload = () => {
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${docType}-${personId}`;
+    a.target = "_blank";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
 
   return (
     <div className="space-y-1.5" data-testid={`preview-${docType}-${personId}`}>
@@ -890,24 +908,55 @@ function PersonDocumentPreview({
           <AlertCircle className="h-4 w-4 text-muted-foreground" />
         </div>
       ) : isImageType ? (
-        <a href={url} target="_blank" rel="noopener noreferrer" data-testid={`link-preview-${docType}-${personId}`}>
-          <img
-            src={url}
-            alt={label}
-            className="max-w-[120px] max-h-[80px] rounded border object-contain hover:opacity-80 transition-opacity cursor-pointer"
-          />
-        </a>
+        <>
+          <a href={url} target="_blank" rel="noopener noreferrer" data-testid={`link-view-${docType}-${personId}`}>
+            <img
+              src={url}
+              alt={label}
+              className="max-w-[120px] max-h-[80px] rounded border object-contain hover:opacity-80 transition-opacity cursor-pointer"
+            />
+          </a>
+          <div className="flex gap-2">
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-primary hover:underline"
+              data-testid={`btn-view-${docType}-${personId}`}
+            >
+              View
+            </a>
+            <span className="text-xs text-muted-foreground">·</span>
+            <button
+              onClick={handleDownload}
+              className="text-xs text-primary hover:underline"
+              data-testid={`btn-download-${docType}-${personId}`}
+            >
+              Download
+            </button>
+          </div>
+        </>
       ) : (
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-xs text-primary hover:underline"
-          data-testid={`link-preview-${docType}-${personId}`}
-        >
-          <FileImage className="h-3.5 w-3.5" />
-          View {label}
-        </a>
+        <>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+            data-testid={`link-view-${docType}-${personId}`}
+          >
+            <FileImage className="h-3.5 w-3.5" />
+            View {label}
+          </a>
+          <button
+            onClick={handleDownload}
+            className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+            data-testid={`btn-download-${docType}-${personId}`}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download
+          </button>
+        </>
       )}
     </div>
   );
@@ -1194,7 +1243,7 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                                   ))}
                                 </div>
                               )}
-                              {(dossierItem.profile.hasPassportPhoto || dossierItem.profile.hasSignature || dossierItem.profile.hasIdDocument) ? (
+                              {(dossierItem.profile.hasPassportPhoto || dossierItem.profile.hasSignature || dossierItem.profile.hasIdDocument || dossierItem.verificationStatus?.hasSelfie) ? (
                                 <div className="pt-1 space-y-2">
                                   <p className="text-xs font-medium text-muted-foreground">Identity Documents</p>
                                   <div className="flex flex-wrap gap-4">
@@ -1211,7 +1260,16 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                                         applicationId={applicationId}
                                         personId={person.id!}
                                         docType="signature"
-                                        label="Signature"
+                                        label="Signature Specimen"
+                                      />
+                                    )}
+                                    {dossierItem.verificationStatus?.hasSelfie && (
+                                      <PersonDocumentPreview
+                                        applicationId={applicationId}
+                                        personId={person.id!}
+                                        docType="selfie"
+                                        label="Biometric Selfie"
+                                        prefetchedUrl={dossierItem.verificationStatus.selfieIsExternal ? dossierItem.verificationStatus.selfieUrl : null}
                                       />
                                     )}
                                     {dossierItem.profile.hasIdDocument && (
@@ -1223,6 +1281,11 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                                       />
                                     )}
                                   </div>
+                                  {dossierItem.verificationStatus?.livenessScore != null && (
+                                    <p className="text-xs text-muted-foreground">
+                                      Liveness score: <span className="font-medium text-foreground">{dossierItem.verificationStatus.livenessScore}%</span>
+                                    </p>
+                                  )}
                                 </div>
                               ) : (
                                 <p className="text-xs text-muted-foreground italic">No identity documents uploaded yet.</p>
@@ -1294,6 +1357,30 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                                   <p className="font-medium capitalize">{dossierItem.corporateInfo.riskScore as string}</p>
                                 </div>
                               )}
+                              {dossierItem.corporateInfo.registrationDate && (
+                                <div>
+                                  <p className="text-muted-foreground">Registration Date</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.registrationDate as string}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.companyStatus && (
+                                <div>
+                                  <p className="text-muted-foreground">Company Status</p>
+                                  <p className="font-medium capitalize">{dossierItem.corporateInfo.companyStatus as string}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.companyType && (
+                                <div>
+                                  <p className="text-muted-foreground">Company Type</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.companyType as string}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.shareCapital && (
+                                <div>
+                                  <p className="text-muted-foreground">Share Capital</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.shareCapital as string}</p>
+                                </div>
+                              )}
                               {dossierItem.corporateInfo.lastVerifiedAt && (
                                 <div>
                                   <p className="text-muted-foreground">Last Verified</p>
@@ -1306,10 +1393,10 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                                   <p className="font-medium">{new Date(dossierItem.corporateInfo.firstVerifiedAt as string).toLocaleDateString()}</p>
                                 </div>
                               )}
-                              {dossierItem.corporateInfo.headOfficeAddress && (
+                              {(dossierItem.corporateInfo.headOfficeAddress || dossierItem.corporateInfo.address) && (
                                 <div className="col-span-2">
-                                  <p className="text-muted-foreground">Head Office</p>
-                                  <p className="font-medium">{dossierItem.corporateInfo.headOfficeAddress as string}</p>
+                                  <p className="text-muted-foreground">Registered Address</p>
+                                  <p className="font-medium">{(dossierItem.corporateInfo.headOfficeAddress || dossierItem.corporateInfo.address) as string}</p>
                                 </div>
                               )}
                               {dossierItem.corporateInfo.contactPersonName && (
@@ -1341,6 +1428,19 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                             <p className="text-muted-foreground italic" data-testid={`text-not-verified-corporate-${person.id}`}>
                               Not yet verified — no data available.
                             </p>
+                          )}
+                          {dossierItem.corporateInfo?.directors && Array.isArray(dossierItem.corporateInfo.directors) && (dossierItem.corporateInfo.directors as {name: string; role?: string}[]).length > 0 && (
+                            <div className="pt-2 space-y-1.5" data-testid={`directors-list-${person.id}`}>
+                              <p className="text-xs font-medium text-muted-foreground">CAC Directors</p>
+                              <div className="space-y-1">
+                                {(dossierItem.corporateInfo.directors as {name: string; role?: string}[]).map((director, idx) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-muted/50">
+                                    <span className="font-medium">{director.name}</span>
+                                    {director.role && <span className="text-muted-foreground">{director.role}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           )}
                         </div>
                       )}

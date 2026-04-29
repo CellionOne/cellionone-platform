@@ -141,7 +141,7 @@ export default function AdminApplications() {
     enabled: bankDetailsOpen,
   });
 
-  const { data: payouts = [] } = useQuery<(PayoutLedger & { lawyerName: string; lawyerEmail?: string })[]>({
+  const { data: payouts = [] } = useQuery<(PayoutLedger & { lawyerName: string; lawyerEmail?: string; applicationId?: number | null; companyName?: string | null })[]>({
     queryKey: ["/api/admin/payouts"],
     enabled: payoutsExpanded,
   });
@@ -227,8 +227,26 @@ export default function AdminApplications() {
       setPaymentReason("");
       setInlineLawyerId("");
     },
-    onError: () => {
-      toast({ title: "Failed to complete payment transition", variant: "destructive" });
+    onError: (e: Error) => {
+      const isBankDetailsMissing = e.message?.toLowerCase().includes("bank details");
+      if (isBankDetailsMissing) {
+        const lawyerId = selectedApp?.assignedLawyerUserId;
+        toast({
+          title: "Bank details not configured",
+          description: "This lawyer has no bank account set up. Opening bank details setup…",
+          variant: "destructive",
+        });
+        if (lawyerId) {
+          setBankDetailsLawyerId(lawyerId);
+          setBankAcctName("");
+          setBankAcctNumber("");
+          setBankCode("");
+          setPaymentDialogOpen(false);
+          setBankDetailsOpen(true);
+        }
+      } else {
+        toast({ title: "Payment transition failed", description: e.message || "An unexpected error occurred.", variant: "destructive" });
+      }
     },
   });
 
@@ -565,6 +583,7 @@ export default function AdminApplications() {
                     <thead>
                       <tr className="border-b bg-muted/40">
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">Lawyer</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden md:table-cell">Application</th>
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">Amount</th>
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">Status</th>
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden md:table-cell">Date</th>
@@ -577,6 +596,16 @@ export default function AdminApplications() {
                           <td className="px-3 py-2.5">
                             <p className="font-medium">{p.lawyerName}</p>
                             {p.lawyerEmail && <p className="text-xs text-muted-foreground">{p.lawyerEmail}</p>}
+                          </td>
+                          <td className="px-3 py-2.5 hidden md:table-cell">
+                            {p.companyName ? (
+                              <div>
+                                <p className="font-medium truncate max-w-[160px]" data-testid={`text-payout-company-${p.id}`}>{p.companyName}</p>
+                                <p className="text-xs text-muted-foreground">App #{p.applicationId}</p>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </td>
                           <td className="px-3 py-2.5 font-mono">
                             ₦{(p.amountKobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}

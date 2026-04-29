@@ -7160,10 +7160,22 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const enriched = await Promise.all(
         payouts.map(async (p) => {
           const user = await storage.getUser(p.lawyerUserId);
+          let applicationId: number | null = null;
+          let companyName: string | null = null;
+          if (p.paymentId) {
+            const payment = await storage.getPayment(p.paymentId);
+            if (payment?.applicationId) {
+              applicationId = payment.applicationId;
+              const app = await storage.getApplication(payment.applicationId);
+              companyName = app?.companyName1 || null;
+            }
+          }
           return {
             ...p,
             lawyerName: user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : p.lawyerUserId,
             lawyerEmail: user?.email,
+            applicationId,
+            companyName,
           };
         })
       );

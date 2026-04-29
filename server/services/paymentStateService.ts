@@ -167,33 +167,33 @@ export async function releaseToLawyer(
     };
   }
 
+  // Initiate the transfer FIRST — only transition state if it succeeds
+  const payoutRef = `co_lp_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
+
+  try {
+    const { initiateTransfer } = await import("./paystackPaymentService");
+    const transfer = await initiateTransfer(
+      lawyerProfile.payoutSubaccountId,
+      lawyerFeeKobo,
+      `Lawyer payout — application #${applicationId}`,
+      payoutRef
+    );
+    console.log(`[PaymentState] Transfer initiated for application ${applicationId}: ${transfer.transferCode} (${transfer.status})`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[PaymentState] Transfer initiation failed for application ${applicationId}:`, msg);
+    return { success: false, error: `Transfer initiation failed: ${msg}` };
+  }
+
+  // Transfer successfully queued — now commit the state transition
   const result = await transitionPaymentState(payment.id, "released_to_lawyer", "admin");
 
   if (result.success && result.payment) {
-    const payoutRef = `co_lp_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
-    let payoutStatus = "pending";
-
-    try {
-      const { initiateTransfer } = await import("./paystackPaymentService");
-      const transfer = await initiateTransfer(
-        lawyerProfile.payoutSubaccountId,
-        lawyerFeeKobo,
-        `Lawyer payout — application #${applicationId}`,
-        payoutRef
-      );
-      payoutStatus = "sent";
-      console.log(`[PaymentState] Transfer initiated for application ${applicationId}: ${transfer.transferCode} (${transfer.status})`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[PaymentState] Transfer failed for application ${applicationId}:`, msg);
-      payoutStatus = "failed";
-    }
-
     await db.insert(payoutLedger).values({
       paymentId: result.payment.id,
       lawyerUserId,
       amountKobo: lawyerFeeKobo,
-      status: payoutStatus,
+      status: "sent",
       providerRef: payoutRef,
     });
 

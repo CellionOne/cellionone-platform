@@ -1676,7 +1676,7 @@ export function registerBankPortalRoutes(app: Express): void {
       // If no emails array but has legacy contactEmail, use that
       const emailsToSend = emails.length > 0 ? emails : (partner.contactEmail ? [{ label: "Contact", address: partner.contactEmail }] : []);
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl);
 
       const dispatch = await storage.createBankCompanyDispatch({
@@ -1854,7 +1854,7 @@ export function registerBankPortalRoutes(app: Express): void {
       const profileWithChecklist = { ...profile, checklistItems: checklistRows, founderIdentityVerifiedAt, founderIdentitySource, founderSelfieUrl };
       const emailsToSend = emails.length > 0 ? emails : (partner.contactEmail ? [{ label: "Contact", address: partner.contactEmail }] : []);
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl);
 
       const dispatch = await storage.createBankCompanyDispatch({

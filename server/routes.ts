@@ -866,7 +866,7 @@ export async function registerRoutes(
   app.get("/api/test-email", async (req, res) => {
     try {
       const testEmail = req.query.email as string || "test@example.com";
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       
       console.log(`[Test] Attempting to send test email to: ${testEmail}`);
       const result = await emailService.sendVerificationEmail(testEmail, "test-token-123", baseUrl);
@@ -1901,7 +1901,7 @@ export async function registerRoutes(
                   const emailSvc = await import("./services/emailService");
                   const { client: resendClient, fromEmail } = await emailSvc.getResendClient();
                   const roleLabel = invitation.role.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-                  const appUrl = `${req.protocol}://${req.get("host")}`;
+                  const appUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
                   await resendClient.emails.send({
                     from: fromEmail,
                     to: founder.email,
@@ -2785,7 +2785,8 @@ export async function registerRoutes(
         const smileIdentityCore = require('smile-identity-core');
         const SID_SERVER_BIO = process.env.SMILE_ID_SERVER || '0';
         const WebApi = smileIdentityCore.WebApi;
-        const connection = new WebApi(PARTNER_ID_BIO, `${req.protocol}://${req.get('host')}/api/smile-id/biometric-callback`, API_KEY_BIO, SID_SERVER_BIO);
+        const bioBioCallbackUrl = (process.env.SITE_URL || `${req.protocol}://${req.get('host')}`) + '/api/smile-id/biometric-callback';
+        const connection = new WebApi(PARTNER_ID_BIO, bioBioCallbackUrl, API_KEY_BIO, SID_SERVER_BIO);
         const smileJobId = `bio-${invite.companyProfileId}-${invite.directorIndex}-${Date.now()}`;
         const partnerParams = { job_id: smileJobId, user_id: founderId, job_type: 4 };
         const idInfo = { country: 'NG', entered: true };
@@ -3030,7 +3031,7 @@ export async function registerRoutes(
         const smileIdentityCore = require('smile-identity-core');
         const SID_SERVER = process.env.SMILE_ID_SERVER || '0';
         const WebApi = smileIdentityCore.WebApi;
-        const callbackUrl = `${req.protocol}://${req.get('host')}/api/smile-id/biometric-callback`;
+        const callbackUrl = (process.env.SITE_URL || `${req.protocol}://${req.get('host')}`) + '/api/smile-id/biometric-callback';
         const connection = new WebApi(PARTNER_ID, callbackUrl, API_KEY, SID_SERVER);
         const smileJobId = `founder-bio-${userId}-${Date.now()}`;
         const partnerParams = { job_id: smileJobId, user_id: userId, job_type: 4 };
@@ -3563,9 +3564,7 @@ export async function registerRoutes(
         try {
           const emailSvc = await import("./services/emailService");
           const { client: resend, fromEmail } = await emailSvc.getResendClient();
-          const appUrl = process.env.REPLIT_DEV_DOMAIN
-            ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-            : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+          const appUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
 
           const roleLabel = role === 'director_shareholder' ? 'Director & Shareholder' : role.charAt(0).toUpperCase() + role.slice(1);
           const user = await storage.getUser(userId);
@@ -3759,9 +3758,7 @@ export async function registerRoutes(
       try {
         const emailSvc = await import("./services/emailService");
         const { client: resend, fromEmail } = await emailSvc.getResendClient();
-        const appUrl = process.env.REPLIT_DEV_DOMAIN
-          ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-          : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+        const appUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
 
         const roleLabel = person.role === 'director_shareholder' ? 'Director & Shareholder' : person.role.charAt(0).toUpperCase() + person.role.slice(1);
         const user = await storage.getUser(userId);
@@ -7420,7 +7417,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
             password: tempPassword,
             firstName: application.firstName,
             lastName: application.lastName,
-          }, `${req.protocol}://${req.get("host")}`);
+          }, process.env.SITE_URL || `${req.protocol}://${req.get("host")}`);
 
           if (!registerResult.success || !registerResult.user) {
             console.error("[Lawyer Approval] Registration failed:", registerResult.message);
@@ -9944,7 +9941,7 @@ Important guidelines:
         updatedAt: new Date(),
       }).where(eq(directorBiometricInvites.id, inviteId));
 
-      const appUrl = process.env.REPLIT_DEV_DOMAIN || process.env.APP_URL || 'https://cellionone.com';
+      const appUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       const biometricUrl = `${appUrl}/director-biometric?token=${newToken}`;
       const biometricEmailSvc = await import('./services/emailService');
       const { client: biometricResend, fromEmail: biometricFrom } = await biometricEmailSvc.getResendClient();
@@ -10655,7 +10652,7 @@ Important guidelines:
         ipAddress: req.ip,
       });
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       const shareableLink = `${baseUrl}/consent/${consentToken}`;
 
       res.json({
@@ -10926,7 +10923,7 @@ Important guidelines:
         }
       }
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       const { generateVerificationCertificateHTML } = await import("./templates/verification-certificate");
 
       const certData = {
@@ -11125,7 +11122,7 @@ CONTENTS
 VERIFICATION
 ------------
 To verify the authenticity of this package, visit:
-${req.protocol}://${req.get("host")}/consent/${consent.consentToken}
+${process.env.SITE_URL || (req.protocol + '://' + req.get("host"))}/consent/${consent.consentToken}
 
 This data was shared with the explicit consent of the data subject.
 Consent was granted on ${consent.createdAt ? new Date(consent.createdAt).toLocaleDateString("en-GB") : "N/A"}

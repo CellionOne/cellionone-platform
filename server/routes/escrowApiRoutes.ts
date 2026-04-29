@@ -1119,7 +1119,7 @@ export function registerEscrowApiRoutes(app: Express): void {
       });
 
       if (body.contactEmail) {
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
         try {
           await createBankPortalUserAndSendInvite(body.contactEmail, partner.id, partner.name, baseUrl);
         } catch (inviteErr) {

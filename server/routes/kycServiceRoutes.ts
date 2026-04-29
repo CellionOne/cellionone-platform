@@ -440,7 +440,7 @@ export function registerKycServiceRoutes(app: Express) {
       }).returning();
 
       const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       await sendKycEmail(data.email, `You've been invited to ${org?.name || "an organisation"} on Cellion One`,
         `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
           <h2 style="color:#0d9668;">You've Been Invited</h2>
@@ -756,7 +756,7 @@ export function registerKycServiceRoutes(app: Express) {
       }).returning();
 
       const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       const typeLabel = data.type === "individual" ? "employee identity verification" : "supplier due diligence verification";
 
       await sendKycEmail(data.subjectEmail, `${org?.name || "An organisation"} has requested you to complete verification via Cellion One`,
@@ -797,7 +797,7 @@ export function registerKycServiceRoutes(app: Express) {
       const expiresAt = new Date(Date.now() + data.expiresInDays * 24 * 60 * 60 * 1000);
       const paymentStatus = data.paymentResponsibility === "organisation" ? "not_required" : "pending";
       const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
 
       const created: KycVerificationRequest[] = [];
 
@@ -1252,7 +1252,7 @@ export function registerKycServiceRoutes(app: Express) {
       if (!request) return res.status(404).json({ message: "Request not found" });
 
       const [org] = await db.select().from(kycOrganisations).where(eq(kycOrganisations.id, orgId));
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
 
       await sendKycEmail(request.subjectEmail, `Reminder: ${org?.name || "An organisation"} needs you to complete verification`,
         `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
@@ -1765,7 +1765,7 @@ export function registerKycServiceRoutes(app: Express) {
         })
         .where(eq(kycSupplierPeople.id, personId));
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       await sendKycEmail(person.email,
         `${org?.name || "An organisation"} requires you to verify your identity`,
         `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
@@ -1848,12 +1848,13 @@ export function registerKycServiceRoutes(app: Express) {
         expiresAt,
       }).returning();
 
+      const selfRegBaseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       await sendKycEmail(data.email,
         `Your verification request for ${org.name} has been received`,
         `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
           <h2 style="color:#0d9668;">Verification Request Received</h2>
           <p>Your verification request for <strong>${org.name}</strong> has been received. Please click below to begin.</p>
-          <a href="${req.protocol}://${req.get("host")}/kyc/verify/${inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Begin Verification</a>
+          <a href="${selfRegBaseUrl}/kyc/verify/${inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Begin Verification</a>
         </div>`
       );
 
@@ -1929,12 +1930,13 @@ export function registerKycServiceRoutes(app: Express) {
         expiresAt,
       }).returning();
 
+      const supplierRegBaseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       await sendKycEmail(data.contactEmail,
         `Your verification request for ${org.name} has been received`,
         `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
           <h2 style="color:#0d9668;">Supplier Verification Request Received</h2>
           <p>Your supplier verification request for <strong>${org.name}</strong> has been received. Please click below to begin.</p>
-          <a href="${req.protocol}://${req.get("host")}/kyc/verify/${inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Begin Verification</a>
+          <a href="${supplierRegBaseUrl}/kyc/verify/${inviteToken}" style="display:inline-block;padding:12px 24px;background:#0d9668;color:white;text-decoration:none;border-radius:6px;margin:16px 0;">Begin Verification</a>
         </div>`
       );
 
@@ -1969,7 +1971,7 @@ export function registerKycServiceRoutes(app: Express) {
       if (!paystackSecret) return res.status(500).json({ message: "Payment not configured" });
 
       const reference = `kyc_${request.id}_${Date.now()}`;
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
 
       const response = await fetch("https://api.paystack.co/transaction/initialize", {
         method: "POST",
@@ -2047,7 +2049,7 @@ export function registerKycServiceRoutes(app: Express) {
       }
 
       const certificateNumber = `KYC-${org.slug.toUpperCase().slice(0, 8)}-${reqId.toString().padStart(6, "0")}`;
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       const verificationUrl = `${baseUrl}/kyc/org/${orgId}/requests/${reqId}`;
 
       const verificationDate = request.reviewedAt

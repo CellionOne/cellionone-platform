@@ -2524,6 +2524,9 @@ type PreviewTier = "free" | "subscriber" | "pro";
 
 function UserPreviewTab() {
   const [previewTier, setPreviewTier] = useState<PreviewTier>("free");
+  const [search, setSearch] = useState("");
+  const [sectorFilter, setSectorFilter] = useState("all");
+  const [recFilter, setRecFilter] = useState("all");
 
   const { data: pulseData, isLoading: pulseLoading } = useQuery<PulseData>({
     queryKey: ["/api/cie-portal/pulse"],
@@ -2651,61 +2654,125 @@ function UserPreviewTab() {
             <BarChart3 className="h-4 w-4 text-primary" />
             <h3 className="text-sm font-semibold">NGX Securities</h3>
             <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 px-1.5 py-0.5 rounded font-medium">Subscriber</span>
-            {!securitiesLoading && securitiesData && (
-              <span className="text-xs text-muted-foreground ml-auto">{securitiesData.securities.length} securities</span>
-            )}
           </div>
 
-          {securitiesLoading ? (
-            <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
-          ) : (
-            <Card data-testid="card-preview-securities">
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Ticker</TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Sector</TableHead>
-                        <TableHead title="RS trend: Daily/Weekly/Monthly">D/W/M</TableHead>
-                        <TableHead className="text-center">IAS</TableHead>
-                        <TableHead className="text-center">RS</TableHead>
-                        <TableHead className="text-center">CS</TableHead>
-                        <TableHead>Rating</TableHead>
-                        <TableHead>Recommendation</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(securitiesData?.securities ?? []).map(s => (
-                        <TableRow key={s.ticker} data-testid={`row-preview-security-${s.ticker}`}>
-                          <TableCell className="font-mono font-bold text-primary">{s.ticker}</TableCell>
-                          <TableCell className="text-sm max-w-[120px] truncate">{s.name}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{s.sector}</TableCell>
-                          <TableCell><PreviewMomentumDots m={s.momentum} /></TableCell>
-                          <TableCell className={`text-center text-sm font-medium ${previewIasColor(s.ias)}`}>
-                            {s.ias?.toFixed(1) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-center text-sm text-muted-foreground">
-                            {s.rs?.toFixed(1) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-center text-sm text-muted-foreground">
-                            {s.cs?.toFixed(1) ?? "—"}
-                          </TableCell>
-                          <TableCell>{previewStarRating(s.ias)}</TableCell>
-                          <TableCell>{previewRecoBadge(s.recommendation)}</TableCell>
-                        </TableRow>
-                      ))}
-                      {(securitiesData?.securities ?? []).length === 0 && !securitiesLoading && (
-                        <TableRow>
-                          <TableCell colSpan={9} className="text-center text-muted-foreground py-8 text-sm">
-                            No securities scored yet. Run a score cycle after uploading price data.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
+          {!securitiesLoading && securitiesData && (() => {
+            const sectors = ["all", ...(securitiesData.sectors ?? [])];
+            const recs = ["all", "Strong Buy", "Accumulate", "Hold", "Reduce", "Sell"];
+            const ms = search.toLowerCase();
+            const filtered = securitiesData.securities.filter(s =>
+              (search === "" || s.ticker.toLowerCase().includes(ms) || s.name.toLowerCase().includes(ms)) &&
+              (sectorFilter === "all" || s.sector === sectorFilter) &&
+              (recFilter === "all" || s.recommendation === recFilter)
+            );
+
+            return (
+              <>
+                <div className="flex flex-wrap items-start gap-3">
+                  <Input
+                    placeholder="Search ticker or name…"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="max-w-xs h-8 text-sm"
+                    data-testid="input-preview-search-securities"
+                  />
+                  <div className="flex gap-1 flex-wrap">
+                    {sectors.map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setSectorFilter(s)}
+                        className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                          sectorFilter === s ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
+                        }`}
+                        data-testid={`filter-preview-sector-${s}`}
+                      >
+                        {s === "all" ? "All Sectors" : s}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-1 flex-wrap">
+                    {recs.map(r => (
+                      <button
+                        key={r}
+                        onClick={() => setRecFilter(r)}
+                        className={`px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+                          recFilter === r ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-primary/50"
+                        }`}
+                        data-testid={`filter-preview-rec-${r}`}
+                      >
+                        {r === "all" ? "All Ratings" : r}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-xs text-muted-foreground self-center ml-auto" data-testid="text-preview-securities-count">
+                    {filtered.length} of {securitiesData.securities.length} securities
+                  </span>
                 </div>
+
+                <Card data-testid="card-preview-securities">
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Ticker</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Sector</TableHead>
+                            <TableHead title="RS trend: Daily/Weekly/Monthly">D/W/M</TableHead>
+                            <TableHead className="text-center">IAS</TableHead>
+                            <TableHead className="text-center">RS</TableHead>
+                            <TableHead className="text-center">CS</TableHead>
+                            <TableHead>Rating</TableHead>
+                            <TableHead>Recommendation</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filtered.map(s => (
+                            <TableRow key={s.ticker} data-testid={`row-preview-security-${s.ticker}`}>
+                              <TableCell className="font-mono font-bold text-primary">{s.ticker}</TableCell>
+                              <TableCell className="text-sm max-w-[120px] truncate">{s.name}</TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{s.sector}</TableCell>
+                              <TableCell><PreviewMomentumDots m={s.momentum} /></TableCell>
+                              <TableCell className={`text-center text-sm font-medium ${previewIasColor(s.ias)}`}>
+                                {s.ias?.toFixed(1) ?? "—"}
+                              </TableCell>
+                              <TableCell className="text-center text-sm text-muted-foreground">
+                                {s.rs?.toFixed(1) ?? "—"}
+                              </TableCell>
+                              <TableCell className="text-center text-sm text-muted-foreground">
+                                {s.cs?.toFixed(1) ?? "—"}
+                              </TableCell>
+                              <TableCell>{previewStarRating(s.ias)}</TableCell>
+                              <TableCell>{previewRecoBadge(s.recommendation)}</TableCell>
+                            </TableRow>
+                          ))}
+                          {filtered.length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={9} className="text-center text-muted-foreground py-8 text-sm">
+                                {securitiesData.securities.length === 0
+                                  ? "No securities scored yet. Run a score cycle after uploading price data."
+                                  : "No securities match your filters."}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            );
+          })()}
+
+          {securitiesLoading && (
+            <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
+          )}
+
+          {!securitiesLoading && !securitiesData && (
+            <Card>
+              <CardContent className="py-10 text-center">
+                <BarChart3 className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                <p className="text-muted-foreground text-sm">Could not load securities data. Please refresh and try again.</p>
               </CardContent>
             </Card>
           )}

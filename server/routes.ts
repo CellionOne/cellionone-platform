@@ -108,6 +108,7 @@ const paymentTransitionSchema = z.object({
   targetState: z.enum(["released_to_lawyer", "refunded_partial", "refunded_full", "chargeback"]),
   refundAmountKobo: z.number().optional(),
   reason: z.string().optional(),
+  overrideLawyerFeeKobo: z.number().int().positive().optional(),
 });
 
 const receiptIssueSchema = z.object({
@@ -5847,18 +5848,44 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       let payment = await storage.getPaymentByApplication(applicationId);
       
       if (!payment) {
-        // Create new payment (₦150,000 = 15,000,000 kobo for company incorporation)
+        // Determine correct amounts from product catalog using the application's share capital tier.
+        // Columns are in kobo despite the "_ngn" naming convention.
+        let amountTotalKobo = 15000000; // default ₦150,000 (CAC_5M price)
+        let lawyerFeeKobo = 12000000;   // default ₦120,000 (CAC_5M lawyer net)
+
+        try {
+          const catalogService = await import("./services/productCatalogService");
+          // Map share capital string (e.g. "5,000,000" or "5000000") to a SKU tier
+          const shareCapitalNum = parseInt(
+            String(application.shareCapital ?? "").replace(/,/g, ""),
+            10,
+          );
+          let sku = "CAC_5M";
+          if (!isNaN(shareCapitalNum)) {
+            if (shareCapitalNum >= 100_000_000) sku = "CAC_100M";
+            else if (shareCapitalNum >= 20_000_000) sku = "CAC_20M";
+            else if (shareCapitalNum >= 10_000_000) sku = "CAC_10M";
+            else if (shareCapitalNum >= 5_000_000) sku = "CAC_5M";
+            else sku = "CAC_1M";
+          }
+          const product = await catalogService.getBySku(sku);
+          if (product && !product.requiresManualPricing) {
+            const amounts = catalogService.computeItemAmounts(product);
+            amountTotalKobo = amounts.priceNgn;
+            lawyerFeeKobo = amounts.lawyerNetNgn;
+          }
+        } catch (catalogErr) {
+          console.warn("[PaymentInitiate] Product catalog lookup failed; using default amounts:", catalogErr);
+        }
+
         payment = await storage.createPayment({
           applicationId,
-          amountTotalKobo: 15000000,
+          amountTotalKobo,
           currency: "NGN",
           provider: "paystack",
           status: "initialized",
           breakdownJson: {
-            platformFee: 5000000,
-            lawyerFee: 7500000,
-            governmentFee: 2000000,
-            courierFee: 500000,
+            lawyerFee: lawyerFeeKobo,
           },
         });
       }
@@ -7237,6 +7264,39 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // Return payment details for a specific application (used by the Release dialog for fee pre-fill)
+  app.get("/api/admin/applications/:id/payment", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const applicationId = parseInt(req.params.id);
+      const payment = await storage.getPaymentByApplication(applicationId);
+      if (payment) {
+        const lawyerFeeKobo = (payment.breakdownJson as any)?.lawyerFee ?? null;
+        return res.json({
+          amountTotalKobo: payment.amountTotalKobo,
+          lawyerFeeKobo,
+          source: "payment",
+        });
+      }
+      // Fall back to the most recent paid order for this application
+      const [order] = await db
+        .select()
+        .from(ordersTable)
+        .where(and(eq(ordersTable.applicationId, applicationId), eq(ordersTable.status, "paid")))
+        .orderBy(desc(ordersTable.updatedAt));
+      if (order) {
+        return res.json({
+          amountTotalKobo: order.totalAmount,
+          lawyerFeeKobo: order.totalLawyerNet ?? null,
+          source: "order",
+        });
+      }
+      return res.json(null);
+    } catch (error) {
+      console.error("Error fetching application payment details:", error);
+      res.status(500).json({ message: "Failed to fetch payment details" });
+    }
+  });
+
   // ============== ADMIN PAYMENT STATE ROUTES ==============
   app.post("/api/admin/applications/:id/payment-state", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
@@ -7248,7 +7308,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
       }
       
-      const { targetState, refundAmountKobo, reason } = parsed.data;
+      const { targetState, refundAmountKobo, reason, overrideLawyerFeeKobo } = parsed.data;
       
       const payment = await storage.getPaymentByApplication(applicationId);
       if (!payment) {
@@ -7292,7 +7352,14 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           if (!app?.assignedLawyerUserId) {
             return res.status(400).json({ message: "No lawyer assigned to release payment to" });
           }
-          const lawyerFeeKobo = (payment.breakdownJson as any)?.lawyerFee || Math.floor(payment.amountTotalKobo * 0.5);
+          // Use admin override if supplied; fall back to product-catalog-derived lawyerFee stored at payment time;
+          // last resort: 50% of total (keeps backward compat with very old records that predate the catalog).
+          const lawyerFeeKobo = overrideLawyerFeeKobo
+            ?? (payment.breakdownJson as any)?.lawyerFee
+            ?? Math.floor(payment.amountTotalKobo * 0.5);
+          if (overrideLawyerFeeKobo && overrideLawyerFeeKobo > payment.amountTotalKobo) {
+            return res.status(400).json({ message: "Override fee cannot exceed the total payment amount" });
+          }
           result = await services.releaseToLawyer(applicationId, app.assignedLawyerUserId, lawyerFeeKobo);
           break;
         case "refunded_partial":

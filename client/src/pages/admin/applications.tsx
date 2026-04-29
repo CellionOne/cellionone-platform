@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { DashboardLayout } from "@/components/dashboard-layout";
@@ -123,6 +123,7 @@ export default function AdminApplications() {
   const [bankCode, setBankCode] = useState("");
   const [lawyersExpanded, setLawyersExpanded] = useState(false);
   const [payoutsExpanded, setPayoutsExpanded] = useState(false);
+  const [lawyerFeeNaira, setLawyerFeeNaira] = useState<string>("");
 
   const { data: applications, isLoading } = useQuery<ApplicationWithLawyer[]>({
     queryKey: ["/api/admin/applications"],
@@ -148,6 +149,21 @@ export default function AdminApplications() {
 
   const { data: abandonedCarts } = useQuery<AbandonedCartsData>({
     queryKey: ["/api/admin/abandoned-carts"],
+  });
+
+  const { data: appPaymentDetails } = useQuery<{
+    amountTotalKobo: number;
+    lawyerFeeKobo: number | null;
+    source: string;
+  } | null>({
+    queryKey: ["/api/admin/applications", selectedApp?.id, "payment"],
+    queryFn: async () => {
+      if (!selectedApp?.id) return null;
+      const res = await fetch(`/api/admin/applications/${selectedApp.id}/payment`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: paymentDialogOpen && !!selectedApp?.id && selectedPaymentState === "released_to_lawyer",
   });
 
   const { data: appCompanyProfile } = useQuery<{ id: number; companyName: string; existingCompanyStatus?: string } | null>({
@@ -177,6 +193,20 @@ export default function AdminApplications() {
     },
     enabled: bankDispatchOpen && !!appCompanyProfile?.id,
   });
+
+  // Pre-populate the lawyer fee input when payment data loads or the action changes
+  useEffect(() => {
+    if (selectedPaymentState === "released_to_lawyer" && appPaymentDetails?.lawyerFeeKobo != null) {
+      setLawyerFeeNaira(String(Math.round(appPaymentDetails.lawyerFeeKobo / 100)));
+    }
+  }, [appPaymentDetails, selectedPaymentState]);
+
+  // Reset fee field when dialog closes or app changes
+  useEffect(() => {
+    if (!paymentDialogOpen) {
+      setLawyerFeeNaira("");
+    }
+  }, [paymentDialogOpen]);
 
   const dispatchMutation = useMutation({
     mutationFn: async ({ companyProfileId, bankPartnerId }: { companyProfileId: number; bankPartnerId: number }) => {
@@ -212,11 +242,11 @@ export default function AdminApplications() {
   });
 
   const paymentTransitionMutation = useMutation({
-    mutationFn: async ({ applicationId, targetState, reason, lawyerIdToAssign }: { applicationId: number; targetState: string; reason: string; lawyerIdToAssign?: string }) => {
+    mutationFn: async ({ applicationId, targetState, reason, lawyerIdToAssign, overrideLawyerFeeKobo }: { applicationId: number; targetState: string; reason: string; lawyerIdToAssign?: string; overrideLawyerFeeKobo?: number }) => {
       if (lawyerIdToAssign) {
         await apiRequest("POST", `/api/admin/applications/${applicationId}/assign`, { lawyerId: lawyerIdToAssign });
       }
-      return apiRequest("POST", `/api/admin/applications/${applicationId}/payment-state`, { targetState, reason });
+      return apiRequest("POST", `/api/admin/applications/${applicationId}/payment-state`, { targetState, reason, overrideLawyerFeeKobo });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/applications"] });
@@ -896,6 +926,34 @@ export default function AdminApplications() {
                 );
               })()}
             </div>
+            {selectedPaymentState === "released_to_lawyer" && (
+              <div className="space-y-1">
+                <Label htmlFor="lawyer-fee-amount">Lawyer payout amount (₦)</Label>
+                <Input
+                  id="lawyer-fee-amount"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="e.g. 75000"
+                  value={lawyerFeeNaira}
+                  onChange={(e) => setLawyerFeeNaira(e.target.value)}
+                  data-testid="input-lawyer-fee"
+                />
+                {appPaymentDetails && (
+                  <p className="text-xs text-muted-foreground">
+                    Total paid: ₦{(appPaymentDetails.amountTotalKobo / 100).toLocaleString()}&nbsp;·&nbsp;
+                    Cellion cut: ₦{(
+                      (appPaymentDetails.amountTotalKobo - Math.round(parseFloat(lawyerFeeNaira || "0") * 100)) / 100
+                    ).toLocaleString()}
+                  </p>
+                )}
+                {!appPaymentDetails && (
+                  <p className="text-xs text-muted-foreground">
+                    Enter the amount to pay the lawyer. Leave blank to use the stored catalog amount.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="payment-reason">Reason (optional)</Label>
               <Input
@@ -918,11 +976,16 @@ export default function AdminApplications() {
                     selectedPaymentState === "released_to_lawyer" &&
                     !selectedApp.assignedLawyerUserId &&
                     !!inlineLawyerId;
+                  const parsedFeeKobo =
+                    selectedPaymentState === "released_to_lawyer" && lawyerFeeNaira.trim()
+                      ? Math.round(parseFloat(lawyerFeeNaira) * 100)
+                      : undefined;
                   paymentTransitionMutation.mutate({
                     applicationId: selectedApp.id,
                     targetState: selectedPaymentState,
                     reason: paymentReason,
                     lawyerIdToAssign: needsInlineAssign ? inlineLawyerId : undefined,
+                    overrideLawyerFeeKobo: parsedFeeKobo && parsedFeeKobo > 0 ? parsedFeeKobo : undefined,
                   });
                 }
               }}

@@ -1,6 +1,6 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles, directorBiometricInvites, founderProfiles, identityVerifications, type InsertFounderProfile, type InsertIdentityVerification } from '@shared/schema';
+import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles, directorBiometricInvites, founderProfiles, identityVerifications, payments, type InsertFounderProfile, type InsertIdentityVerification } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { invalidateCieOrgTierCache } from '../routes/cieApiRoutes';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
@@ -425,6 +425,43 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
           lawyerNet: order.totalLawyerNet,
         },
       });
+
+      // Sync lawyerFee into the payments table so the admin Release dialog has the correct amount.
+      // The order already has the precise lawyerNet computed from the product catalog.
+      try {
+        const [existingPayment] = await db.select().from(payments)
+          .where(eq(payments.applicationId, order.applicationId!));
+
+        const lawyerFeeKobo = order.totalLawyerNet ?? 0;
+        const paidAt = data.paid_at ? new Date(data.paid_at) : new Date();
+
+        if (existingPayment) {
+          const updatedBreakdown = {
+            ...((existingPayment.breakdownJson as object) || {}),
+            lawyerFee: lawyerFeeKobo,
+          };
+          await db.update(payments).set({
+            breakdownJson: updatedBreakdown,
+            amountTotalKobo: order.totalAmount,
+            status: 'paid',
+            paidAt,
+          }).where(eq(payments.id, existingPayment.id));
+        } else {
+          await db.insert(payments).values({
+            applicationId: order.applicationId!,
+            amountTotalKobo: order.totalAmount,
+            currency: 'NGN',
+            provider: 'paystack',
+            status: 'paid',
+            paidAt,
+            paystackReference: reference,
+            breakdownJson: { lawyerFee: lawyerFeeKobo },
+          });
+        }
+        console.log(`[Paystack Webhook] payments record synced for application ${order.applicationId}: lawyerFee=${lawyerFeeKobo} kobo`);
+      } catch (paymentSyncErr) {
+        console.error(`[Paystack Webhook] Failed to sync payments record for application ${order.applicationId}:`, paymentSyncErr);
+      }
 
       // Dispatch deferred invitations for draft company people linked to this application
       try {

@@ -1746,12 +1746,40 @@ interface CieSignalDraft {
   suggestedTags: string[];
 }
 
+interface PortalSignal {
+  id: number; symbol: string | null; type: string; sentiment: string | null;
+  credibility: number | null; content: string; publishedAt: string | null;
+}
+
+function credLabel(n: number | null): string {
+  if (n === null) return "unrated";
+  if (n >= 5) return "very high";
+  if (n >= 4) return "high";
+  if (n >= 3) return "medium";
+  if (n >= 2) return "low";
+  return "very low";
+}
+
+function credClass(n: number | null): string {
+  if (n === null) return "text-muted-foreground";
+  if (n >= 4) return "text-green-600 dark:text-green-400";
+  if (n >= 3) return "text-amber-600 dark:text-amber-400";
+  return "text-muted-foreground";
+}
+
+function sentimentIcon(s: string | null) {
+  if (s === "bullish") return <TrendingUp className="h-4 w-4 text-green-500" />;
+  if (s === "bearish") return <Activity className="h-4 w-4 text-red-500" />;
+  return <Activity className="h-4 w-4 text-muted-foreground" />;
+}
+
 function SignalsTab() {
   const { toast } = useToast();
   const [type, setType] = useState("trade_call");
   const [sentiment, setSentiment] = useState("bullish");
   const [credibility, setCredibility] = useState("3");
   const [content, setContent] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
 
   // AI draft state
   const [showAiPanel, setShowAiPanel] = useState(false);
@@ -1770,6 +1798,11 @@ function SignalsTab() {
     queryKey: ["/api/admin/cie/signals"],
   });
 
+  const { data: portalSignalsData, isLoading: isPreviewLoading } = useQuery<{ signals: PortalSignal[]; count: number }>({
+    queryKey: ["/api/cie-portal/signals"],
+    enabled: showPreview,
+  });
+
   const createMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/admin/cie/signals", {
       type, sentiment, credibility: parseInt(credibility, 10),
@@ -1777,6 +1810,7 @@ function SignalsTab() {
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/signals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cie-portal/signals"] });
       toast({ title: "Signal published" });
       setContent("");
     },
@@ -1785,7 +1819,11 @@ function SignalsTab() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/admin/cie/signals/${id}`, undefined),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/signals"] }); toast({ title: "Signal deleted" }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/signals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/cie-portal/signals"] });
+      toast({ title: "Signal deleted" });
+    },
     onError: () => toast({ title: "Failed to delete", variant: "destructive" }),
   });
 
@@ -1973,9 +2011,64 @@ function SignalsTab() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-sm">Published Signals</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm">Published Signals</CardTitle>
+            <Button
+              size="sm"
+              variant={showPreview ? "default" : "outline"}
+              onClick={() => setShowPreview(v => !v)}
+              className="gap-1.5 text-xs h-7"
+              data-testid="button-toggle-signal-preview"
+            >
+              <Eye className="h-3 w-3" />
+              {showPreview ? "Hide Preview" : "Pro Preview"}
+            </Button>
+          </div>
+        </CardHeader>
         <CardContent className="p-0">
-          {isLoading ? (
+          {showPreview ? (
+            <div className="p-4 space-y-3" data-testid="panel-signal-preview">
+              <p className="text-xs text-muted-foreground border-b pb-2 mb-1">
+                Read-only view as a Pro subscriber would see it
+              </p>
+              {isPreviewLoading ? (
+                <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
+              ) : (portalSignalsData?.signals ?? []).length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center text-muted-foreground text-sm">
+                    No signals published yet.
+                  </CardContent>
+                </Card>
+              ) : (
+                (portalSignalsData?.signals ?? []).map(s => (
+                  <Card key={s.id} className="border-border/60 hover:border-primary/20 transition-colors" data-testid={`card-preview-signal-${s.id}`}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5">{sentimentIcon(s.sentiment)}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            {s.symbol && <span className="font-mono text-primary font-semibold text-sm">{s.symbol}</span>}
+                            <span className="text-xs capitalize bg-muted rounded px-1.5 py-0.5">{s.type.replace(/_/g, " ")}</span>
+                            {s.sentiment && (
+                              <span className={`text-xs font-medium capitalize ${s.sentiment === "bullish" ? "text-green-600" : s.sentiment === "bearish" ? "text-red-500" : "text-muted-foreground"}`}>
+                                {s.sentiment}
+                              </span>
+                            )}
+                            <span className={`text-xs font-medium ${credClass(s.credibility)}`}>
+                              ● {credLabel(s.credibility)} credibility
+                            </span>
+                          </div>
+                          <p className="text-sm leading-relaxed">{s.content}</p>
+                          <p className="text-xs text-muted-foreground mt-2">{formatDate(s.publishedAt)}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          ) : isLoading ? (
             <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
           ) : (
             <Table>

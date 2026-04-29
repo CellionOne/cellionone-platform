@@ -221,26 +221,28 @@ export default function CheckoutPage() {
         <p className="text-muted-foreground mt-1">Select the services you need and proceed to payment.</p>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
-        <Button
-          variant={mode === "new_company" ? "default" : "outline"}
-          onClick={() => switchMode("new_company")}
-          data-testid="button-mode-new-company"
-          className="toggle-elevate"
-        >
-          <Building2 className="h-4 w-4 mr-2" />
-          New Company Registration
-        </Button>
-        <Button
-          variant={mode === "existing_company" ? "default" : "outline"}
-          onClick={() => switchMode("existing_company")}
-          data-testid="button-mode-existing-company"
-          className="toggle-elevate"
-        >
-          <FileText className="h-4 w-4 mr-2" />
-          I Already Have a Company
-        </Button>
-      </div>
+      {!applicationId && (
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            variant={mode === "new_company" ? "default" : "outline"}
+            onClick={() => switchMode("new_company")}
+            data-testid="button-mode-new-company"
+            className="toggle-elevate"
+          >
+            <Building2 className="h-4 w-4 mr-2" />
+            New Company Registration
+          </Button>
+          <Button
+            variant={mode === "existing_company" ? "default" : "outline"}
+            onClick={() => switchMode("existing_company")}
+            data-testid="button-mode-existing-company"
+            className="toggle-elevate"
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            I Already Have a Company
+          </Button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">

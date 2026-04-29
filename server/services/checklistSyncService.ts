@@ -1,7 +1,7 @@
 import { storage } from '../storage';
 import { db } from '../db';
 import { eq, inArray } from 'drizzle-orm';
-import { verifiedEntities, identityVerifications, companyPeople } from '@shared/schema';
+import { verifiedEntities, identityVerifications, companyPeople, users } from '@shared/schema';
 
 /**
  * Auto-resolve checklist items for a given application based on current verification state.
@@ -155,16 +155,40 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
     }
 
     // ── Authoritative lookup: batch-fetch identityVerifications for individual users ──
+    // Primary: by personUserId (already linked)
     const personUserIds = people
       .filter(p => p.entityType !== "corporate" && p.personUserId)
       .map(p => p.personUserId as string);
 
+    // Secondary: for invite-only persons (inviteEmail but no personUserId), resolve email → userId
+    const inviteEmails = people
+      .filter(p => p.entityType !== "corporate" && !p.personUserId && p.inviteEmail)
+      .map(p => p.inviteEmail as string);
+
+    // Map inviteEmail → userId for email-based resolution
+    const emailToUserId = new Map<string, string>();
+    if (inviteEmails.length > 0) {
+      const emailRows = await db
+        .select({ id: users.id, email: users.email })
+        .from(users)
+        .where(inArray(users.email, inviteEmails));
+      for (const row of emailRows) {
+        if (row.email) emailToUserId.set(row.email, row.id);
+      }
+    }
+
+    // Union all user IDs: directly linked + email-resolved
+    const allIndividualUserIds = [
+      ...personUserIds,
+      ...Array.from(emailToUserId.values()),
+    ];
+
     const verifiedIndividualSet = new Set<string>();
-    if (personUserIds.length > 0) {
+    if (allIndividualUserIds.length > 0) {
       const rows = await db
         .select({ founderUserId: identityVerifications.founderUserId, bvnNinVerified: identityVerifications.bvnNinVerified })
         .from(identityVerifications)
-        .where(inArray(identityVerifications.founderUserId, personUserIds));
+        .where(inArray(identityVerifications.founderUserId, allIndividualUserIds));
       for (const row of rows) {
         if (row.bvnNinVerified) verifiedIndividualSet.add(row.founderUserId);
       }
@@ -194,7 +218,10 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
         const rcVerified = !!(person.corporateRcNumber && verifiedRcSet.has(person.corporateRcNumber));
         verified = rcVerified || !!person.autoVerifyMethod || person.kybLookupStatus === "found";
       } else {
-        const idxVerified = !!(person.personUserId && verifiedIndividualSet.has(person.personUserId));
+        // Check by linked userId first; fallback to email-resolved userId for invite-only persons
+        const linkedUserId = person.personUserId
+          ?? (person.inviteEmail ? emailToUserId.get(person.inviteEmail) : undefined);
+        const idxVerified = !!(linkedUserId && verifiedIndividualSet.has(linkedUserId));
         verified = idxVerified || person.isVerified === true;
       }
 

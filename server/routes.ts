@@ -5706,14 +5706,16 @@ export async function registerRoutes(
         const parsedChecklistId = parseInt(checklistItemId);
         // Verify this checklist item belongs to the current application (prevent IDOR)
         const appChecklistItems = await storage.getChecklistItems(applicationId);
-        const itemBelongsToApp = appChecklistItems.some(i => i.id === parsedChecklistId);
-        if (!itemBelongsToApp) {
+        const existingChecklistItem = appChecklistItems.find(i => i.id === parsedChecklistId);
+        if (!existingChecklistItem) {
           return res.status(400).json({ message: "Checklist item does not belong to this application" });
         }
+        // Preserve 'people_requirement' source so grouping logic continues to work after upload
+        const uploadSource = existingChecklistItem.source === "people_requirement" ? "people_requirement" : "manual_upload";
         await storage.updateChecklistItem(parsedChecklistId, {
           status: "provided",
           isAutoResolved: false,
-          source: "manual_upload",
+          source: uploadSource,
         });
       }
       
@@ -5821,13 +5823,14 @@ export async function registerRoutes(
         const parsedChecklistId = parseInt(checklistItemId);
         // Verify this checklist item belongs to the current application (prevent IDOR)
         const appChecklistItems = await storage.getChecklistItems(applicationId);
-        const itemBelongsToApp = appChecklistItems.some(i => i.id === parsedChecklistId);
-        if (!itemBelongsToApp) {
+        const existingChecklistItem2 = appChecklistItems.find(i => i.id === parsedChecklistId);
+        if (!existingChecklistItem2) {
           return res.status(400).json({ message: "Checklist item does not belong to this application" });
         }
+        // Preserve 'people_requirement' source so grouping logic continues to work after upload.
         // Resetting isAutoResolved to false marks this as a manual upload.
-        // The "Verified — on file" badge will no longer show for this item.
-        await storage.updateChecklistItem(parsedChecklistId, { status: "provided", isAutoResolved: false, source: "manual_upload" });
+        const uploadSource2 = existingChecklistItem2.source === "people_requirement" ? "people_requirement" : "manual_upload";
+        await storage.updateChecklistItem(parsedChecklistId, { status: "provided", isAutoResolved: false, source: uploadSource2 });
       }
 
       const document = await storage.createDocument({

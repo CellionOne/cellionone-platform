@@ -139,7 +139,10 @@ export interface IStorage {
 
   // Payouts
   getPayoutsByLawyer(lawyerUserId: string): Promise<PayoutLedger[]>;
+  getAllPayouts(): Promise<PayoutLedger[]>;
+  getPayoutByProviderRef(providerRef: string): Promise<PayoutLedger | undefined>;
   createPayout(data: InsertPayoutLedger): Promise<PayoutLedger>;
+  updatePayout(id: number, data: Partial<InsertPayoutLedger>): Promise<PayoutLedger | undefined>;
 
   // Clarification Requests
   getClarificationsByApplication(applicationId: number): Promise<ClarificationRequest[]>;
@@ -767,6 +770,23 @@ export class DatabaseStorage implements IStorage {
   async createPayout(data: InsertPayoutLedger): Promise<PayoutLedger> {
     const [payout] = await db.insert(payoutLedger).values(data).returning();
     return payout;
+  }
+
+  async getAllPayouts(): Promise<PayoutLedger[]> {
+    return db.select().from(payoutLedger).orderBy(desc(payoutLedger.createdAt));
+  }
+
+  async getPayoutByProviderRef(providerRef: string): Promise<PayoutLedger | undefined> {
+    const [entry] = await db.select().from(payoutLedger).where(eq(payoutLedger.providerRef, providerRef));
+    return entry;
+  }
+
+  async updatePayout(id: number, data: Partial<InsertPayoutLedger>): Promise<PayoutLedger | undefined> {
+    const [entry] = await db.update(payoutLedger)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(payoutLedger.id, id))
+      .returning();
+    return entry;
   }
 
   // Clarification Requests

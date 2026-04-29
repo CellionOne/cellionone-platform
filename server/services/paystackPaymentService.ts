@@ -259,10 +259,51 @@ export function isPaystackConfigured(): boolean {
   }
 }
 
+export interface PaystackBank {
+  id: number;
+  name: string;
+  code: string;
+  type: string;
+}
+
+export async function getAvailableBanks(): Promise<PaystackBank[]> {
+  return paystackRequest<PaystackBank[]>('/bank?currency=NGN&perPage=200');
+}
+
+export async function createTransferRecipient(name: string, accountNumber: string, bankCode: string): Promise<string> {
+  const result = await paystackRequest<{ recipient_code: string }>('/transferrecipient', 'POST', {
+    type: 'nuban',
+    name,
+    account_number: accountNumber,
+    bank_code: bankCode,
+    currency: 'NGN',
+  });
+  return result.recipient_code;
+}
+
+export async function initiateTransfer(
+  recipientCode: string,
+  amountKobo: number,
+  reason: string,
+  reference: string
+): Promise<{ transferCode: string; status: string }> {
+  const result = await paystackRequest<{ transfer_code: string; status: string }>('/transfer', 'POST', {
+    source: 'balance',
+    amount: amountKobo,
+    recipient: recipientCode,
+    reason,
+    reference,
+  });
+  return { transferCode: result.transfer_code, status: result.status };
+}
+
 export default {
   initializeTransaction,
   initializeSplitTransaction,
   verifyTransaction,
   verifyWebhookSignature,
   isPaystackConfigured,
+  getAvailableBanks,
+  createTransferRecipient,
+  initiateTransfer,
 };

@@ -26,6 +26,10 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  Banknote,
+  Wallet,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import {
   Dialog,
@@ -36,7 +40,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import type { CompanyApplication, LawyerProfile } from "@shared/schema";
+import type { CompanyApplication, LawyerProfile, PayoutLedger } from "@shared/schema";
 
 interface BankPartnerBasic { id: number; name: string; }
 
@@ -112,6 +116,13 @@ export default function AdminApplications() {
   const [abandonedCartSearch, setAbandonedCartSearch] = useState("");
   const [showLegacy, setShowLegacy] = useState(false);
   const [inlineLawyerId, setInlineLawyerId] = useState<string>("");
+  const [bankDetailsOpen, setBankDetailsOpen] = useState(false);
+  const [bankDetailsLawyerId, setBankDetailsLawyerId] = useState<string>("");
+  const [bankAcctName, setBankAcctName] = useState("");
+  const [bankAcctNumber, setBankAcctNumber] = useState("");
+  const [bankCode, setBankCode] = useState("");
+  const [lawyersExpanded, setLawyersExpanded] = useState(false);
+  const [payoutsExpanded, setPayoutsExpanded] = useState(false);
 
   const { data: applications, isLoading } = useQuery<ApplicationWithLawyer[]>({
     queryKey: ["/api/admin/applications"],
@@ -123,6 +134,16 @@ export default function AdminApplications() {
 
   const { data: bankPartners = [] } = useQuery<BankPartnerBasic[]>({
     queryKey: ["/api/admin/banking-partners"],
+  });
+
+  const { data: paystackBanks = [] } = useQuery<{ id: number; name: string; code: string }[]>({
+    queryKey: ["/api/admin/banks"],
+    enabled: bankDetailsOpen,
+  });
+
+  const { data: payouts = [] } = useQuery<(PayoutLedger & { lawyerName: string; lawyerEmail?: string })[]>({
+    queryKey: ["/api/admin/payouts"],
+    enabled: payoutsExpanded,
   });
 
   const { data: abandonedCarts } = useQuery<AbandonedCartsData>({
@@ -208,6 +229,24 @@ export default function AdminApplications() {
     },
     onError: () => {
       toast({ title: "Failed to complete payment transition", variant: "destructive" });
+    },
+  });
+
+  const bankDetailsMutation = useMutation({
+    mutationFn: async ({ lawyerId, accountName, accountNumber, bankCode: code }: { lawyerId: string; accountName: string; accountNumber: string; bankCode: string }) => {
+      return apiRequest("PUT", `/api/admin/lawyers/${lawyerId}/bank-details`, { accountName, accountNumber, bankCode: code });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/lawyers"] });
+      toast({ title: "Bank details saved", description: "Paystack transfer recipient created successfully." });
+      setBankDetailsOpen(false);
+      setBankDetailsLawyerId("");
+      setBankAcctName("");
+      setBankAcctNumber("");
+      setBankCode("");
+    },
+    onError: (e: Error) => {
+      toast({ title: "Failed to save bank details", description: e.message, variant: "destructive" });
     },
   });
 
@@ -411,6 +450,162 @@ export default function AdminApplications() {
             )}
           </Card>
         )}
+
+        {/* ── Lawyer Profiles Panel ── */}
+        {lawyers && lawyers.length > 0 && (
+          <Card data-testid="card-lawyer-profiles">
+            <CardHeader
+              className="cursor-pointer select-none pb-3"
+              onClick={() => setLawyersExpanded((v) => !v)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <Wallet className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">Lawyer Profiles</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-0.5">Bank details and payout configuration</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="hidden sm:flex items-center gap-4 text-sm">
+                    <span className="text-muted-foreground">{lawyers.filter(l => l.payoutSubaccountId).length}/{lawyers.length} configured</span>
+                  </div>
+                  {lawyersExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                </div>
+              </div>
+            </CardHeader>
+            {lawyersExpanded && (
+              <CardContent className="pt-0">
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Lawyer</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden md:table-cell">Firm</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Bank Status</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lawyers.map((lawyer) => (
+                        <tr key={lawyer.userId} className="border-b last:border-0 hover:bg-muted/20 transition-colors" data-testid={`lawyer-row-${lawyer.userId}`}>
+                          <td className="px-3 py-2.5">
+                            <p className="font-medium">{lawyer.name || "—"}</p>
+                            <p className="text-xs text-muted-foreground">{lawyer.email}</p>
+                          </td>
+                          <td className="px-3 py-2.5 hidden md:table-cell text-muted-foreground">
+                            {lawyer.firmName || "—"}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {lawyer.payoutSubaccountId ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400" data-testid={`badge-bank-configured-${lawyer.userId}`}>
+                                <CheckCircle2 className="h-3.5 w-3.5" /> Configured
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400" data-testid={`badge-bank-missing-${lawyer.userId}`}>
+                                <XCircle className="h-3.5 w-3.5" /> Not set
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setBankDetailsLawyerId(lawyer.userId);
+                                setBankAcctName("");
+                                setBankAcctNumber("");
+                                setBankCode("");
+                                setBankDetailsOpen(true);
+                              }}
+                              data-testid={`button-bank-details-${lawyer.userId}`}
+                            >
+                              <Banknote className="h-3.5 w-3.5 mr-1.5" />
+                              {lawyer.payoutSubaccountId ? "Update" : "Set Up"}
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        )}
+
+        {/* ── Payout Ledger Panel ── */}
+        <Card data-testid="card-payout-ledger">
+          <CardHeader
+            className="cursor-pointer select-none pb-3"
+            onClick={() => setPayoutsExpanded((v) => !v)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-lg bg-green-100 dark:bg-green-950 flex items-center justify-center">
+                  <Banknote className="h-5 w-5 text-green-600 dark:text-green-400" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Payout Ledger</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-0.5">History of all lawyer payouts</p>
+                </div>
+              </div>
+              {payoutsExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+            </div>
+          </CardHeader>
+          {payoutsExpanded && (
+            <CardContent className="pt-0">
+              {payouts.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No payouts recorded yet.</p>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40">
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Lawyer</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Amount</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Status</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden md:table-cell">Date</th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden lg:table-cell">Reference</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {payouts.map((p) => (
+                        <tr key={p.id} className="border-b last:border-0 hover:bg-muted/20 transition-colors" data-testid={`payout-row-${p.id}`}>
+                          <td className="px-3 py-2.5">
+                            <p className="font-medium">{p.lawyerName}</p>
+                            {p.lawyerEmail && <p className="text-xs text-muted-foreground">{p.lawyerEmail}</p>}
+                          </td>
+                          <td className="px-3 py-2.5 font-mono">
+                            ₦{(p.amountKobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                              p.status === "completed" ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300" :
+                              p.status === "sent" ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300" :
+                              p.status === "failed" ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300" :
+                              "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                            }`} data-testid={`status-payout-${p.id}`}>
+                              {p.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 hidden md:table-cell text-muted-foreground text-xs">
+                            {p.createdAt ? new Date(p.createdAt).toLocaleDateString("en-NG") : "—"}
+                          </td>
+                          <td className="px-3 py-2.5 hidden lg:table-cell text-muted-foreground font-mono text-xs truncate max-w-[160px]">
+                            {p.providerRef || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
 
         {/* ── All Applications ── */}
         <div className="flex flex-col sm:flex-row gap-4">
@@ -763,6 +958,69 @@ export default function AdminApplications() {
             >
               {dispatchMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-1.5" />}
               Dispatch Dossier
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Bank Details Dialog */}
+      <Dialog open={bankDetailsOpen} onOpenChange={(open) => { setBankDetailsOpen(open); if (!open) { setBankAcctName(""); setBankAcctNumber(""); setBankCode(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Lawyer Bank Details</DialogTitle>
+            <DialogDescription>
+              Enter bank account details to create a Paystack transfer recipient. This is required before payments can be released.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Bank</Label>
+              <Select value={bankCode} onValueChange={setBankCode}>
+                <SelectTrigger data-testid="select-bank-code">
+                  <SelectValue placeholder="Select bank…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {paystackBanks.length === 0 ? (
+                    <SelectItem value="__loading__" disabled>Loading banks…</SelectItem>
+                  ) : paystackBanks.map((b) => (
+                    <SelectItem key={b.code} value={b.code}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bank-acct-number">Account Number (10 digits)</Label>
+              <Input
+                id="bank-acct-number"
+                placeholder="0123456789"
+                maxLength={10}
+                value={bankAcctNumber}
+                onChange={(e) => setBankAcctNumber(e.target.value.replace(/\D/g, ""))}
+                data-testid="input-bank-acct-number"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bank-acct-name">Account Name</Label>
+              <Input
+                id="bank-acct-name"
+                placeholder="As it appears on the bank account"
+                value={bankAcctName}
+                onChange={(e) => setBankAcctName(e.target.value)}
+                data-testid="input-bank-acct-name"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBankDetailsOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (bankDetailsLawyerId && bankAcctName && bankAcctNumber.length === 10 && bankCode) {
+                  bankDetailsMutation.mutate({ lawyerId: bankDetailsLawyerId, accountName: bankAcctName, accountNumber: bankAcctNumber, bankCode });
+                }
+              }}
+              disabled={bankDetailsMutation.isPending || !bankAcctName || bankAcctNumber.length !== 10 || !bankCode}
+              data-testid="button-save-bank-details"
+            >
+              {bankDetailsMutation.isPending ? <LoadingSpinner size="sm" /> : "Save & Create Recipient"}
             </Button>
           </DialogFooter>
         </DialogContent>

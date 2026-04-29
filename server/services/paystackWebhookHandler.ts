@@ -159,9 +159,12 @@ async function handleTransferSuccess(data: any): Promise<void> {
     console.error('[Paystack Webhook] transfer.success missing reference');
     return;
   }
-  // Only handle escrow transfers (co_esc_ prefix)
+  if (transferRef.startsWith('co_lp_')) {
+    await handleLawyerPayoutSuccess(transferRef);
+    return;
+  }
   if (!transferRef.startsWith('co_esc_')) {
-    console.log(`[Paystack Webhook] transfer.success ref ${transferRef} — not an escrow transfer, skipping`);
+    console.log(`[Paystack Webhook] transfer.success ref ${transferRef} — unrecognised prefix, skipping`);
     return;
   }
   const { handleEscrowTransferSuccess } = await import('../routes/escrowApiRoutes');
@@ -174,12 +177,36 @@ async function handleTransferFailed(data: any): Promise<void> {
     console.error('[Paystack Webhook] transfer.failed/reversed missing reference');
     return;
   }
+  if (transferRef.startsWith('co_lp_')) {
+    await handleLawyerPayoutFailed(transferRef);
+    return;
+  }
   if (!transferRef.startsWith('co_esc_')) {
-    console.log(`[Paystack Webhook] transfer.failed ref ${transferRef} — not an escrow transfer, skipping`);
+    console.log(`[Paystack Webhook] transfer.failed ref ${transferRef} — unrecognised prefix, skipping`);
     return;
   }
   const { handleEscrowTransferFailed } = await import('../routes/escrowApiRoutes');
   await handleEscrowTransferFailed(transferRef);
+}
+
+async function handleLawyerPayoutSuccess(reference: string): Promise<void> {
+  const payout = await storage.getPayoutByProviderRef(reference);
+  if (!payout) {
+    console.error(`[Paystack Webhook] transfer.success — no payout ledger entry for ref: ${reference}`);
+    return;
+  }
+  await storage.updatePayout(payout.id, { status: 'completed' });
+  console.log(`[Paystack Webhook] Lawyer payout ${reference} confirmed — ledger #${payout.id} marked completed`);
+}
+
+async function handleLawyerPayoutFailed(reference: string): Promise<void> {
+  const payout = await storage.getPayoutByProviderRef(reference);
+  if (!payout) {
+    console.error(`[Paystack Webhook] transfer.failed — no payout ledger entry for ref: ${reference}`);
+    return;
+  }
+  await storage.updatePayout(payout.id, { status: 'failed' });
+  console.log(`[Paystack Webhook] Lawyer payout ${reference} failed — ledger #${payout.id} marked failed`);
 }
 
 async function handleTitanInboundApproval(data: any): Promise<{ processed: boolean; event: string; approvalResponse?: any }> {

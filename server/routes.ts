@@ -7078,6 +7078,102 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // ============== LAWYER BANK DETAILS & PAYOUT LEDGER ==============
+
+  const bankDetailsSchema = z.object({
+    accountName: z.string().min(1, "Account name is required"),
+    accountNumber: z.string().length(10, "Account number must be 10 digits"),
+    bankCode: z.string().min(1, "Bank code is required"),
+  });
+
+  app.get("/api/admin/banks", isAuthenticated, requireRole("admin"), async (_req: any, res) => {
+    try {
+      const { getAvailableBanks } = await import("./services/paystackPaymentService");
+      const banks = await getAvailableBanks();
+      res.json(banks);
+    } catch (error) {
+      console.error("Error fetching bank list:", error);
+      res.status(500).json({ message: "Failed to fetch bank list from Paystack" });
+    }
+  });
+
+  app.get("/api/admin/lawyers/:userId/profile", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      const profile = await storage.getLawyerProfile(userId);
+      if (!profile) {
+        return res.status(404).json({ message: "Lawyer profile not found" });
+      }
+      const user = await storage.getUser(userId);
+      res.json({
+        ...profile,
+        email: user?.email,
+        name: user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : null,
+        hasRecipientCode: !!profile.payoutSubaccountId,
+      });
+    } catch (error) {
+      console.error("Error fetching lawyer profile:", error);
+      res.status(500).json({ message: "Failed to fetch lawyer profile" });
+    }
+  });
+
+  app.put("/api/admin/lawyers/:userId/bank-details", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const { userId } = req.params;
+
+      const parsed = bankDetailsSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+      const { accountName, accountNumber, bankCode } = parsed.data;
+
+      const profile = await storage.getLawyerProfile(userId);
+      if (!profile) {
+        return res.status(404).json({ message: "Lawyer profile not found" });
+      }
+
+      const { createTransferRecipient } = await import("./services/paystackPaymentService");
+      const recipientCode = await createTransferRecipient(accountName, accountNumber, bankCode);
+
+      await storage.upsertLawyerProfile({ ...profile, payoutSubaccountId: recipientCode });
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_override",
+        entityType: "lawyer_profile",
+        entityId: userId,
+        details: { action: "bank_details_updated", bankCode, accountNumberSuffix: accountNumber.slice(-4) },
+        ipAddress: req.ip,
+      });
+
+      res.json({ recipientCode, message: "Bank details saved and Paystack recipient created" });
+    } catch (error: any) {
+      console.error("Error saving lawyer bank details:", error);
+      res.status(500).json({ message: error?.message || "Failed to save bank details" });
+    }
+  });
+
+  app.get("/api/admin/payouts", isAuthenticated, requireRole("admin"), async (_req: any, res) => {
+    try {
+      const payouts = await storage.getAllPayouts();
+      const enriched = await Promise.all(
+        payouts.map(async (p) => {
+          const user = await storage.getUser(p.lawyerUserId);
+          return {
+            ...p,
+            lawyerName: user ? `${user.firstName || ""} ${user.lastName || ""}`.trim() : p.lawyerUserId,
+            lawyerEmail: user?.email,
+          };
+        })
+      );
+      res.json(enriched);
+    } catch (error) {
+      console.error("Error fetching payout ledger:", error);
+      res.status(500).json({ message: "Failed to fetch payout ledger" });
+    }
+  });
+
   app.get("/api/admin/feature-flags", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const flags = await storage.getFeatureFlags();

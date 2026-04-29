@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { db } from "../db";
 import { eq } from "drizzle-orm";
 import { 
@@ -6,6 +7,7 @@ import {
   payoutLedger,
   type Payment
 } from "@shared/schema";
+import { storage } from "../storage";
 
 export type PaymentState = 
   | "unpaid" 
@@ -151,23 +153,52 @@ export async function releaseToLawyer(
 ): Promise<TransitionResult> {
   const [payment] = await db.select().from(payments)
     .where(eq(payments.applicationId, applicationId));
-    
+
   if (!payment) {
     return { success: false, error: "No payment found for this application" };
   }
 
+  // Require bank details before releasing
+  const lawyerProfile = await storage.getLawyerProfile(lawyerUserId);
+  if (!lawyerProfile?.payoutSubaccountId) {
+    return {
+      success: false,
+      error: "Lawyer bank details not configured. Set up the lawyer's Paystack recipient before releasing payment.",
+    };
+  }
+
   const result = await transitionPaymentState(payment.id, "released_to_lawyer", "admin");
-  
+
   if (result.success && result.payment) {
+    const payoutRef = `co_lp_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
+    let payoutStatus = "pending";
+
+    try {
+      const { initiateTransfer } = await import("./paystackPaymentService");
+      const transfer = await initiateTransfer(
+        lawyerProfile.payoutSubaccountId,
+        lawyerFeeKobo,
+        `Lawyer payout — application #${applicationId}`,
+        payoutRef
+      );
+      payoutStatus = "sent";
+      console.log(`[PaymentState] Transfer initiated for application ${applicationId}: ${transfer.transferCode} (${transfer.status})`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[PaymentState] Transfer failed for application ${applicationId}:`, msg);
+      payoutStatus = "failed";
+    }
+
     await db.insert(payoutLedger).values({
       paymentId: result.payment.id,
       lawyerUserId,
       amountKobo: lawyerFeeKobo,
-      status: "pending",
+      status: payoutStatus,
+      providerRef: payoutRef,
     });
 
     await db.update(companyApplications)
-      .set({ 
+      .set({
         paymentState: "released_to_lawyer",
         paymentStateUpdatedAt: new Date(),
       })

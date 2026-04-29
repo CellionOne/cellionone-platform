@@ -2927,11 +2927,38 @@ export async function registerRoutes(
         // Director (not founder) biometric completed — mark their companyPeople record verified
         // and sync checklists for all linked applications
         const directorEmail = invite.directorEmail.toLowerCase().trim();
-        const linkedPeople = await db.select().from(companyPeople)
+
+        // Primary lookup: match by inviteEmail (case-insensitive)
+        const emailMatches = await db.select().from(companyPeople)
           .where(and(
             eq(companyPeople.companyProfileId, invite.companyProfileId),
             sql`lower(${companyPeople.inviteEmail}) = ${directorEmail}`,
           ));
+
+        // Secondary lookup: if the director has already accepted the invite and their
+        // platform user is linked via personUserId, match by that instead. This handles
+        // cases where email casing differences prevent the primary lookup from finding
+        // the record even though the director's account is properly linked.
+        let userIdMatches: typeof emailMatches = [];
+        const directorUser = await storage.getUserByEmail(directorEmail);
+        if (directorUser) {
+          userIdMatches = await db.select().from(companyPeople)
+            .where(and(
+              eq(companyPeople.companyProfileId, invite.companyProfileId),
+              eq(companyPeople.personUserId, directorUser.id),
+            ));
+        }
+
+        // Merge and deduplicate by record ID so we never double-process the same row
+        const seenIds = new Set<number>();
+        const linkedPeople: typeof emailMatches = [];
+        for (const row of [...emailMatches, ...userIdMatches]) {
+          if (!seenIds.has(row.id)) {
+            seenIds.add(row.id);
+            linkedPeople.push(row);
+          }
+        }
+
         for (const dp of linkedPeople) {
           if (!dp.isVerified) {
             await db.update(companyPeople)

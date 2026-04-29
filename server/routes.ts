@@ -5456,7 +5456,7 @@ export async function registerRoutes(
       let founderKyc: any = null;
       if (isAssignedLawyer || isAdmin) {
         const [companyPeopleList, founderIdVerification] = await Promise.all([
-          storage.getCompanyPeopleByApplication(applicationId),
+          storage.getCompanyPeople(applicationId),
           application.founderUserId ? storage.getIdentityVerification(application.founderUserId) : Promise.resolve(undefined),
         ]);
         people = companyPeopleList;

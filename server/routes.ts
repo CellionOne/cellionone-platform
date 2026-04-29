@@ -260,14 +260,16 @@ async function syncChecklistFromVerifications(applicationId: number, founderId: 
       storage.getCompanyPeople(applicationId),
     ]);
 
-    // Helper: only update if the item exists and is not already admin-reviewed (accepted)
-    async function autoProvide(key: string, reviewerNotes: string): Promise<void> {
+    // Helper: only auto-provide when the item is currently "missing".
+    // Any other status — "accepted", "rejected", or already "provided" — is left
+    // untouched so that admin overrides remain authoritative and are never silently
+    // reverted by the sync. This makes the resolver strictly additive.
+    async function autoProvide(key: string, autoNotes: string): Promise<void> {
       const item = checklistItems.find((i) => i.key === key);
-      if (!item || item.status === "accepted") return;
-      if (item.status === "provided") return; // already resolved — no-op
+      if (!item || item.status !== "missing") return;
       await storage.updateChecklistItem(item.id, {
         status: "provided",
-        reviewerNotes: item.reviewerNotes ? item.reviewerNotes : reviewerNotes,
+        reviewerNotes: autoNotes,
       });
     }
 

@@ -5488,8 +5488,18 @@ export async function registerRoutes(
           .map(p => p.personUserId as string);
 
         const [personVerifications, personProfiles] = await Promise.all([
-          Promise.all(personUserIds.map(uid => storage.getIdentityVerification(uid).catch(() => undefined))),
-          Promise.all(personUserIds.map(uid => storage.getFounderProfile(uid).catch(() => undefined))),
+          Promise.all(personUserIds.map(uid =>
+            storage.getIdentityVerification(uid).catch((err) => {
+              console.warn(`[LawyerDetail] Failed to fetch identity verification for person ${uid}:`, err?.message ?? err);
+              return undefined;
+            })
+          )),
+          Promise.all(personUserIds.map(uid =>
+            storage.getFounderProfile(uid).catch((err) => {
+              console.warn(`[LawyerDetail] Failed to fetch founder profile for person ${uid}:`, err?.message ?? err);
+              return undefined;
+            })
+          )),
         ]);
         const verificationByUserId = new Map<string, PersonVerificationStep>();
         const displayNameByUserId = new Map<string, string | null>();

@@ -912,7 +912,7 @@ export async function registerRoutes(
   // Register a new user with email/password
   app.post("/api/auth/register", async (req: any, res) => {
     try {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       const result = await authService.registerUser(req.body, baseUrl);
       
       if (!result.success) {
@@ -1189,7 +1189,7 @@ export async function registerRoutes(
   app.post("/api/auth/resend-verification", async (req: any, res) => {
     try {
       const { email } = req.body;
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       const result = await authService.resendVerificationEmail(email, baseUrl);
       
       res.json({ message: result.message });
@@ -3876,7 +3876,7 @@ export async function registerRoutes(
         return res.status(503).json({ message: "Paystack payments are currently disabled" });
       }
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
 
       const result = await paystackPaymentService.initializeTransaction(
         userId,
@@ -4134,7 +4134,7 @@ export async function registerRoutes(
       const orderItemRecords = subtotalOrder.items;
       const paystackAmount = order.totalAmount + adminFeeAmount;
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
 
       const result = await paystackPaymentService.initializeSplitTransaction({
         orderId: order.id,
@@ -4519,7 +4519,7 @@ export async function registerRoutes(
             .set({ directorInviteToken: inviteToken, directorInvitedAt: new Date(), directorVerificationStatus: 'invited', updatedAt: new Date() })
             .where(eq(addDirectorRequestsTable.id, adrRecord.id));
 
-          const baseUrl = `${req.protocol}://${req.get("host")}`;
+          const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
           directorInviteUrl = `${baseUrl}/register?invite_type=director&token=${inviteToken}&email=${encodeURIComponent(parsed.data.newDirectorEmail)}`;
 
           await client.emails.send({
@@ -4599,7 +4599,7 @@ export async function registerRoutes(
         .where(eq(addDirectorRequestsTable.id, adr.id));
 
       const founder = await storage.getUser(userId);
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
       const registerUrl = `${baseUrl}/register?invite_type=director&token=${inviteToken}&email=${encodeURIComponent(adr.newDirectorEmail)}`;
 
       const { getResendClient } = await import('./services/emailService');
@@ -5659,12 +5659,19 @@ export async function registerRoutes(
 
       const allowedMime = [
         "application/pdf",
+        "application/x-pdf",
         "application/msword",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-office",
         "image/jpeg",
+        "image/jpg",
         "image/png",
       ];
-      if (!allowedMime.includes(file.mimetype)) {
+      // Some browsers (particularly on Windows) report .docx files as application/zip
+      // or application/octet-stream — fall back to checking the file extension.
+      const allowedExtensions = [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"];
+      const fileExt = path.extname(file.originalname || "").toLowerCase();
+      if (!allowedMime.includes(file.mimetype) && !allowedExtensions.includes(fileExt)) {
         return res.status(400).json({ message: "File type not allowed. Upload PDF, JPEG, PNG, DOC or DOCX." });
       }
 

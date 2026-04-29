@@ -27,15 +27,17 @@ export async function getCsrfToken(): Promise<string> {
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
-    if (res.status === 403) {
-      const text = await res.text();
-      if (text.includes("CSRF")) {
-        csrfToken = null;
-      }
-      throw new Error(`${res.status}: ${text}`);
-    }
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    if (res.status === 403 && text.includes("CSRF")) {
+      csrfToken = null;
+    }
+    let message = `${res.status}: ${text}`;
+    try {
+      const json = JSON.parse(text);
+      if (json.message) message = json.message;
+      else if (json.error) message = json.error;
+    } catch { /* not JSON, use raw text */ }
+    throw new Error(message);
   }
 }
 

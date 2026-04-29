@@ -1464,7 +1464,7 @@ export function registerBankPortalRoutes(app: Express): void {
         });
       }
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = getSiteBaseUrl(req);
       await sendBankInviteEmail(address, partner.name, token, baseUrl);
 
       res.status(201).json({ ok: true, emails: newEmails });
@@ -1532,7 +1532,7 @@ export function registerBankPortalRoutes(app: Express): void {
         });
       }
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = getSiteBaseUrl(req);
       await sendBankInviteEmail(emailAddr, partner.name, token, baseUrl);
 
       res.json({ ok: true });

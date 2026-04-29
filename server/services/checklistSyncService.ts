@@ -1,7 +1,7 @@
 import { storage } from '../storage';
 import { db } from '../db';
-import { eq, inArray } from 'drizzle-orm';
-import { verifiedEntities, identityVerifications, companyPeople, users } from '@shared/schema';
+import { eq, inArray, and } from 'drizzle-orm';
+import { verifiedEntities, identityVerifications, companyPeople, users, kycSupplierProfiles, kycVerificationRequests } from '@shared/schema';
 
 /**
  * Auto-resolve checklist items for a given application based on current verification state.
@@ -145,11 +145,31 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
 
     const verifiedRcSet = new Set<string>();
     if (rcNumbers.length > 0) {
-      const rows = await db
+      // Path 1: verified_entities registry (set via Smile ID CAC lookup)
+      const veRows = await db
         .select({ rcNumber: verifiedEntities.rcNumber })
         .from(verifiedEntities)
         .where(inArray(verifiedEntities.rcNumber, rcNumbers));
-      for (const row of rows) {
+      for (const row of veRows) {
+        if (row.rcNumber) verifiedRcSet.add(row.rcNumber);
+      }
+
+      // Path 2: kyc_supplier_profiles — corporate entity with a "verified" KYC request
+      // (subject of a completed KYC-as-a-Service review whose status is "verified")
+      const kycRows = await db
+        .select({ rcNumber: kycSupplierProfiles.rcNumber })
+        .from(kycSupplierProfiles)
+        .innerJoin(
+          kycVerificationRequests,
+          eq(kycSupplierProfiles.verificationRequestId, kycVerificationRequests.id)
+        )
+        .where(
+          and(
+            inArray(kycSupplierProfiles.rcNumber, rcNumbers),
+            eq(kycVerificationRequests.status, "verified")
+          )
+        );
+      for (const row of kycRows) {
         if (row.rcNumber) verifiedRcSet.add(row.rcNumber);
       }
     }

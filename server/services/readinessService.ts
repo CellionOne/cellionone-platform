@@ -170,14 +170,27 @@ export async function updateApplicationReadiness(applicationId: number): Promise
     .flatMap(b => b.items.filter(i => i.status === "incomplete").map(i => `${b.category}: ${i.name}`));
   const warnings = readiness.breakdown
     .flatMap(b => b.items.filter(i => i.note).map(i => `${i.name}: ${i.note}`));
-  
+
+  // Explicit blockers: list outstanding people/entity doc requirements individually
+  // (they carry " — " in the label), plus generic blocker if many standard items are missing.
+  const peopleDocBlockers = readiness.breakdown
+    .find(b => b.category === "Required Documents")
+    ?.items.filter(i => i.status === "incomplete" && i.name.includes(" — "))
+    .map(i => i.name) ?? [];
+
+  const standardMissingCount = missingItems.filter(m => !m.includes(" — ")).length;
+  const blockers: string[] = [
+    ...peopleDocBlockers,
+    ...(standardMissingCount > 3 ? ["Multiple required items missing"] : []),
+  ];
+
   await db.update(companyApplications)
     .set({
       readinessScore: readiness.overallScore,
       readinessBreakdown: {
         missingItems,
         warnings,
-        blockers: missingItems.length > 3 ? ["Multiple required items missing"] : [],
+        blockers,
         nextActions: readiness.nextSteps,
       },
       updatedAt: new Date(),

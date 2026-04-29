@@ -8,7 +8,7 @@ import { sendNewOrderNotificationEmail, sendLawyerPayoutConfirmationEmail, ADMIN
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
 import { createCandidate, submitBusinessAddressVerification } from './youverifyService';
 import { upsertVerifiedIndividualByUserId } from './verifiedEntityService';
-import { syncChecklistFromVerifications } from './checklistSyncService';
+import { syncChecklistFromVerifications, syncAllApplicationsForVerifiedUser } from './checklistSyncService';
 
 export interface PaystackWebhookEvent {
   event: string;
@@ -1246,6 +1246,11 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                       console.error(`[Webhook] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
                     );
 
+                    // Sync per-person document requirements for all applications this user is linked to
+                    syncAllApplicationsForVerifiedUser(order.founderId).catch((e: Error) =>
+                      console.error(`[Webhook] People doc sync error (non-fatal): ${e.message}`)
+                    );
+
                     console.log(`[Webhook] Founder ${order.founderId} identity auto-verified via KYB pipeline — fields: ${lockedFields.join(', ')}`);
                   } else {
                     // Pre-fill only — AML pending or flagged; record in_progress unless already verified.
@@ -2314,6 +2319,11 @@ export async function runExistingCompanyVerificationPipeline(profileId: number):
 
       await upsertVerifiedIndividualByUserId(profile.founderId).catch((e: Error) =>
         console.error(`[ExistingCoVerify] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
+      );
+
+      // Sync per-person document requirements for all applications this user is linked to
+      syncAllApplicationsForVerifiedUser(profile.founderId).catch((e: Error) =>
+        console.error(`[ExistingCoVerify] People doc sync error (non-fatal): ${e.message}`)
       );
 
       await storage.createAuditLog({

@@ -13,6 +13,7 @@ import { companyApplications, identityVerifications, addDirectorRequests, servic
 import { eq, and } from "drizzle-orm";
 import * as verificationService from "./verificationService";
 import { upsertVerifiedIndividualByUserId } from "./verifiedEntityService";
+import { syncAllApplicationsForVerifiedUser } from "./checklistSyncService";
 import { getResendClient } from "./emailService";
 import { storage } from "../storage";
 import type { IncomingHttpHeaders } from "http";
@@ -199,7 +200,12 @@ async function handleVerificationApproved(
 
     // Auto-populate verified entities registry for the individual
     await upsertVerifiedIndividualByUserId(userId);
-    
+
+    // Sync per-person document requirements for all applications this user is linked to as a director/shareholder
+    syncAllApplicationsForVerifiedUser(userId).catch((e: Error) =>
+      console.error(`[VerificationWebhook] People doc sync error (non-fatal): ${e.message}`)
+    );
+
     await storage.createAuditLog({
       actorUserId: userId,
       action: "identity_verified",

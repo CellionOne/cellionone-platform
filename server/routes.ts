@@ -28,7 +28,7 @@ import { registerCieApiRoutes } from "./routes/cieApiRoutes";
 import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
 import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
-import { syncChecklistFromVerifications, syncPeopleDocumentRequirements } from "./services/checklistSyncService";
+import { syncChecklistFromVerifications, syncPeopleDocumentRequirements, syncAllApplicationsForVerifiedUser } from "./services/checklistSyncService";
 
 // Maximum number of Smile ID error results for a given RC number before we
 // stop retrying live lookups. Configurable via SMILE_ID_MAX_ERROR_RETRIES env
@@ -259,28 +259,7 @@ async function createDefaultChecklist(applicationId: number, operatingAddress?: 
  * all applications they are linked to.
  */
 async function syncDirectorVerification(personUserId: string): Promise<void> {
-  try {
-    const people = await storage.getCompanyPeopleByPersonUserId(personUserId);
-    const appIds = new Set<number>();
-    for (const person of people) {
-      if (person.entityType === 'corporate') continue;
-      if (!person.isVerified) {
-        await db.update(companyPeople)
-          .set({ isVerified: true, updatedAt: new Date() })
-          .where(eq(companyPeople.id, person.id));
-      }
-      if (person.applicationId && person.founderId) {
-        await syncChecklistFromVerifications(person.applicationId, person.founderId);
-        appIds.add(person.applicationId);
-      }
-    }
-    // Also sync per-person document requirements for all affected applications
-    for (const appId of appIds) {
-      await syncPeopleDocumentRequirements(appId);
-    }
-  } catch (err) {
-    console.error(`[ChecklistSync] syncDirectorVerification failed for user ${personUserId}:`, err);
-  }
+  await syncAllApplicationsForVerifiedUser(personUserId);
 }
 
 // Seed default feature flags

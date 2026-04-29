@@ -1,7 +1,7 @@
 import { storage } from '../storage';
 import { db } from '../db';
 import { eq, inArray } from 'drizzle-orm';
-import { verifiedEntities, identityVerifications } from '@shared/schema';
+import { verifiedEntities, identityVerifications, companyPeople } from '@shared/schema';
 
 /**
  * Auto-resolve checklist items for a given application based on current verification state.
@@ -112,12 +112,16 @@ function getDocSlugsForPerson(
   ];
 }
 
+// Any status that should be converted to auto-resolved when verification is confirmed
+const UNRESOLVED_STATUSES = new Set(["missing", "rejected"]);
+
 /**
  * Idempotently create/update/delete per-person document checklist items
  * (source = 'people_requirement') for every director/shareholder in the application.
  *
  * - Creates items for unverified parties that don't have them yet.
- * - Auto-resolves items for parties that are already verified.
+ * - Auto-resolves items (status → accepted) for parties that are verified,
+ *   including items that are 'missing' or 'rejected'.
  * - Deletes items whose person has been removed from the application.
  * - Performs authoritative verification lookups against verified_entities (for
  *   corporate RC numbers) and identityVerifications (for individual users) so
@@ -158,11 +162,11 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
     const verifiedIndividualSet = new Set<string>();
     if (personUserIds.length > 0) {
       const rows = await db
-        .select({ userId: identityVerifications.userId, bvnNinVerified: identityVerifications.bvnNinVerified })
+        .select({ founderUserId: identityVerifications.founderUserId, bvnNinVerified: identityVerifications.bvnNinVerified })
         .from(identityVerifications)
-        .where(inArray(identityVerifications.userId, personUserIds));
+        .where(inArray(identityVerifications.founderUserId, personUserIds));
       for (const row of rows) {
-        if (row.bvnNinVerified) verifiedIndividualSet.add(row.userId);
+        if (row.bvnNinVerified) verifiedIndividualSet.add(row.founderUserId);
       }
     }
 
@@ -227,7 +231,8 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
           // Item exists — update label if name changed, auto-resolve if newly verified
           const updates: Record<string, unknown> = {};
           if (existing.label !== label) updates.label = label;
-          if (verified && existing.status === "missing") {
+          // Resolve both 'missing' and 'rejected' statuses when the party is now verified
+          if (verified && existing.status !== null && UNRESOLVED_STATUSES.has(existing.status)) {
             updates.status = "accepted";
             updates.isAutoResolved = true;
             updates.reviewerNotes = "Auto-resolved: identity/entity verified on the platform";
@@ -247,5 +252,39 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
     }
   } catch (err) {
     console.error(`[PeopleDocSync] Failed for application ${applicationId}:`, err);
+  }
+}
+
+/**
+ * When an individual user's identity is verified, mark their company_people
+ * records as isVerified and sync checklist items for all their linked applications.
+ *
+ * Exported so webhook handlers (verificationWebhookHandler, paystackWebhookHandler)
+ * can call it as well as the inline API routes.
+ */
+export async function syncAllApplicationsForVerifiedUser(userId: string): Promise<void> {
+  try {
+    const people = await storage.getCompanyPeopleByPersonUserId(userId);
+    const appIds = new Set<number>();
+
+    for (const person of people) {
+      if (person.entityType === 'corporate') continue;
+      // Mark person as verified if not already
+      if (!person.isVerified) {
+        await db.update(companyPeople)
+          .set({ isVerified: true, updatedAt: new Date() })
+          .where(eq(companyPeople.id, person.id));
+      }
+      if (person.applicationId && person.founderId) {
+        await syncChecklistFromVerifications(person.applicationId, person.founderId);
+        appIds.add(person.applicationId);
+      }
+    }
+
+    for (const appId of appIds) {
+      await syncPeopleDocumentRequirements(appId);
+    }
+  } catch (err) {
+    console.error(`[ChecklistSync] syncAllApplicationsForVerifiedUser failed for user ${userId}:`, err);
   }
 }

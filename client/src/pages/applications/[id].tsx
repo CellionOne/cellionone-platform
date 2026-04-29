@@ -38,6 +38,7 @@ import {
   XCircle,
   Navigation,
   AlertTriangle,
+  Send,
   type LucideIcon,
 } from "lucide-react";
 import type { CompanyApplication, ApplicationChecklistItem, Payment, ClarificationRequest } from "@shared/schema";
@@ -221,6 +222,37 @@ export default function ApplicationDetailsPage() {
   const addOnsTotalKobo = selectedAddOnProducts.reduce((sum, p) => sum + p.priceNgn, 0);
 
   const [isFileUploading, setIsFileUploading] = useState(false);
+  const [inviteSentTo, setInviteSentTo] = useState<Set<number>>(new Set());
+
+  const directors = teamPeople.filter(
+    (p) =>
+      (p.role === "director" || p.role === "director_shareholder") &&
+      p.applicationId === parseInt(applicationId || "0", 10) &&
+      p.inviteEmail &&
+      p.entityType !== "corporate"
+  );
+
+  const directorInviteMutation = useMutation({
+    mutationFn: async (personId: number) => {
+      return apiRequest("POST", `/api/applications/${applicationId}/director-upload-invite/${personId}`);
+    },
+    onSuccess: (data: any, personId) => {
+      setInviteSentTo((prev) => new Set([...prev, personId]));
+      if (data?.emailSent === false && data?.uploadLink) {
+        toast({
+          title: "Email delivery failed",
+          description: `The email could not be sent. Share this link manually: ${data.uploadLink}`,
+          variant: "destructive",
+          duration: 15000,
+        });
+      } else {
+        toast({ title: "Upload link sent", description: "The director will receive an email with the upload link." });
+      }
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to send link", description: error.message, variant: "destructive" });
+    },
+  });
 
   const uploadMutation = useMutation({
     mutationFn: async ({ checklistId, file }: { checklistId: number; file: File }) => {
@@ -417,6 +449,14 @@ export default function ApplicationDetailsPage() {
                       item.status === "provided" &&
                       item.isAutoResolved === true;
 
+                    const isProvided = item.status === "provided" || item.status === "accepted";
+                    const sourceLabel =
+                      isProvided && item.source === "kyc_auto_resolved"
+                        ? "Auto-verified via KYC"
+                        : isProvided && item.source === "manual_upload"
+                        ? "Manually uploaded"
+                        : null;
+
                     return (
                     <div key={item.id} className="py-3" data-testid={`checklist-${item.key}`}>
                       <div className="flex items-center justify-between">
@@ -434,13 +474,18 @@ export default function ApplicationDetailsPage() {
                           </div>
                           <div>
                             <p className="text-sm font-medium">{item.label}</p>
-                            {item.required && !isAutoResolved && (
+                            {item.required && !isAutoResolved && !sourceLabel && (
                               <span className="text-xs text-muted-foreground">Required</span>
                             )}
-                            {isAutoResolved && (
+                            {isAutoResolved && !sourceLabel && (
                               <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400">
                                 <ShieldCheck className="h-3 w-3" />
                                 Verified — on file
+                              </span>
+                            )}
+                            {sourceLabel && (
+                              <span className="text-xs text-muted-foreground" data-testid={`source-label-${item.key}`}>
+                                {sourceLabel}
                               </span>
                             )}
                           </div>
@@ -480,6 +525,42 @@ export default function ApplicationDetailsPage() {
                           )}
                         </div>
                       </div>
+                      {item.key === "director_id" &&
+                        (item.status === "missing" || (item.status === "provided" && item.source === "manual_upload")) &&
+                        directors.length > 0 && (
+                        <div className="mt-2 ml-11 space-y-1" data-testid="director-upload-invite-section">
+                          {directors.map((director) => {
+                            const personId = typeof director.id === "number" ? director.id : parseInt(String(director.id), 10);
+                            const sent = inviteSentTo.has(personId);
+                            const name = director.firstName && director.lastName
+                              ? `${director.firstName} ${director.lastName}`
+                              : director.title || director.inviteEmail || "Director";
+                            return (
+                              <div key={String(director.id)} className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs text-muted-foreground">{name}</span>
+                                {sent ? (
+                                  <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400" data-testid={`invite-sent-${personId}`}>
+                                    <CheckCircle2 className="h-3 w-3" />
+                                    Link sent
+                                  </span>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-xs"
+                                    onClick={() => directorInviteMutation.mutate(personId)}
+                                    disabled={directorInviteMutation.isPending}
+                                    data-testid={`btn-send-upload-link-${personId}`}
+                                  >
+                                    <Send className="h-3 w-3 mr-1" />
+                                    Send upload link
+                                  </Button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       {item.key === "address_proof" && application.operatingAddress && (
                         <div className="mt-2 ml-11 flex items-start gap-1.5 rounded-md bg-muted/50 px-3 py-2" data-testid="operating-address-hint">
                           <MapPin className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />

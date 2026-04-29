@@ -702,7 +702,15 @@ function DocumentsTab({
       </CardHeader>
       <CardContent>
         <div className="divide-y">
-          {checklist.map((item) => (
+          {checklist.map((item) => {
+            const isProvided = item.status === "provided" || item.status === "accepted";
+            const sourceLabel =
+              isProvided && item.source === "kyc_auto_resolved"
+                ? "Auto-verified via KYC"
+                : isProvided && item.source === "manual_upload"
+                ? "Manually uploaded"
+                : null;
+            return (
             <div key={item.id} className="py-4 flex items-center justify-between gap-4" data-testid={`doc-row-${item.id}`}>
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <div className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${
@@ -715,9 +723,12 @@ function DocumentsTab({
                 </div>
                 <div className="min-w-0">
                   <p className="font-medium truncate">{item.label}</p>
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <StatusBadge status={item.status || "missing"} />
                     {item.required && <Badge variant="outline" className="text-xs">Required</Badge>}
+                    {sourceLabel && (
+                      <span className="text-xs text-muted-foreground" data-testid={`source-label-lawyer-${item.id}`}>{sourceLabel}</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -749,6 +760,16 @@ function DocumentsTab({
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
+                        {sourceLabel && (
+                          <div className="flex items-center gap-2 p-2.5 rounded-md bg-muted/50 border" data-testid={`review-dialog-source-${item.id}`}>
+                            {item.source === "kyc_auto_resolved" ? (
+                              <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
+                            ) : (
+                              <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                            )}
+                            <span className="text-sm text-muted-foreground">{sourceLabel}</span>
+                          </div>
+                        )}
                         {item.key === "address_proof" && operatingAddress && (
                           <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800" data-testid="review-dialog-operating-address">
                             <MapPin className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
@@ -894,7 +915,8 @@ function DocumentsTab({
                 )}
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       </CardContent>
     </Card>

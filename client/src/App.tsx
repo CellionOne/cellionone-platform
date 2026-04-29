@@ -90,6 +90,7 @@ const VerifyPage = lazy(() => import("@/pages/verify"));
 const VerifyIdentityPage = lazy(() => import("@/pages/verify-identity"));
 const InviteAcceptPage = lazy(() => import("@/pages/invite-accept"));
 const DirectorBiometricPage = lazy(() => import("@/pages/director-biometric"));
+const DirectorUploadPage = lazy(() => import("@/pages/director-upload"));
 const NotificationsPage = lazy(() => import("@/pages/notifications"));
 const PaymentCheckoutPage = lazy(() => import("@/pages/payment/checkout"));
 const PaymentSuccessPage = lazy(() => import("@/pages/payment/success"));
@@ -498,6 +499,7 @@ function Router() {
         </Route>
         <Route path="/invite/:token" component={InviteAcceptPage} />
         <Route path="/director-biometric" component={DirectorBiometricPage} />
+        <Route path="/director-upload/:token" component={DirectorUploadPage} />
         <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route path="/reset-password" component={ResetPasswordPage} />
         <Route path="/verify-email" component={VerifyEmailPage} />

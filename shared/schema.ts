@@ -232,6 +232,7 @@ export const applicationChecklistItems = pgTable("application_checklist_items", 
   status: varchar("status", { length: 50 }).default("missing"), // missing, provided, accepted, rejected
   reviewerNotes: text("reviewer_notes"),
   isAutoResolved: boolean("is_auto_resolved").default(false), // true once auto-provided by syncChecklistFromVerifications
+  source: varchar("source", { length: 50 }), // kyc_auto_resolved | manual_upload — null for legacy items
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -2662,4 +2663,24 @@ export const kycRescreeningBatchItems = pgTable("kyc_rescreening_batch_items", {
 export const insertKycRescreeningBatchItemSchema = createInsertSchema(kycRescreeningBatchItems).omit({ id: true, createdAt: true });
 export type KycRescreeningBatchItem = typeof kycRescreeningBatchItems.$inferSelect;
 export type InsertKycRescreeningBatchItem = z.infer<typeof insertKycRescreeningBatchItemSchema>;
+
+// ============== DIRECTOR UPLOAD TOKENS ==============
+export const directorUploadTokens = pgTable("director_upload_tokens", {
+  id: serial("id").primaryKey(),
+  token: varchar("token", { length: 128 }).notNull().unique(),
+  applicationId: integer("application_id").notNull(),
+  personId: integer("person_id").notNull(), // company_people.id
+  directorName: varchar("director_name", { length: 255 }),
+  directorEmail: varchar("director_email", { length: 255 }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_director_upload_tokens_token").on(table.token),
+  index("idx_director_upload_tokens_application").on(table.applicationId),
+]);
+
+export const insertDirectorUploadTokenSchema = createInsertSchema(directorUploadTokens).omit({ id: true, createdAt: true });
+export type DirectorUploadToken = typeof directorUploadTokens.$inferSelect;
+export type InsertDirectorUploadToken = z.infer<typeof insertDirectorUploadTokenSchema>;
 

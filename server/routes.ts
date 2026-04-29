@@ -5593,9 +5593,17 @@ export async function registerRoutes(
       // Update checklist item status if provided.
       // Reset isAutoResolved to false so manual uploads are not shown as "Verified — on file".
       if (checklistItemId) {
-        await storage.updateChecklistItem(parseInt(checklistItemId), {
+        const parsedChecklistId = parseInt(checklistItemId);
+        // Verify this checklist item belongs to the current application (prevent IDOR)
+        const appChecklistItems = await storage.getChecklistItems(applicationId);
+        const itemBelongsToApp = appChecklistItems.some(i => i.id === parsedChecklistId);
+        if (!itemBelongsToApp) {
+          return res.status(400).json({ message: "Checklist item does not belong to this application" });
+        }
+        await storage.updateChecklistItem(parsedChecklistId, {
           status: "provided",
           isAutoResolved: false,
+          source: "manual_upload",
         });
       }
       
@@ -5709,7 +5717,7 @@ export async function registerRoutes(
         }
         // Resetting isAutoResolved to false marks this as a manual upload.
         // The "Verified — on file" badge will no longer show for this item.
-        await storage.updateChecklistItem(parsedChecklistId, { status: "provided", isAutoResolved: false });
+        await storage.updateChecklistItem(parsedChecklistId, { status: "provided", isAutoResolved: false, source: "manual_upload" });
       }
 
       const document = await storage.createDocument({
@@ -5734,6 +5742,270 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error uploading application document:", error);
       res.status(500).json({ message: "Failed to upload document. Please try again." });
+    }
+  });
+
+  // ============== DIRECTOR UPLOAD INVITE ROUTES ==============
+
+  // POST /api/applications/:id/director-upload-invite/:personId
+  // Founder sends a short-lived upload link to a director by email
+  app.post("/api/applications/:id/director-upload-invite/:personId", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      const personId = parseInt(req.params.personId);
+
+      if (isNaN(applicationId) || isNaN(personId)) {
+        return res.status(400).json({ message: "Invalid application or person ID" });
+      }
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const roles = await storage.getUserRoles(userId);
+      const isAdmin = roles.includes("admin");
+      const isOwner = application.founderUserId === userId;
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const people = await storage.getCompanyPeople(applicationId);
+      const person = people.find(p => p.id === personId);
+      if (!person) return res.status(404).json({ message: "Director not found for this application" });
+      if (person.role !== "director" && person.role !== "director_shareholder") {
+        return res.status(400).json({ message: "This person is not a director on this application" });
+      }
+      if (!person.inviteEmail) return res.status(400).json({ message: "Director has no email address on file" });
+
+      // Only allow sending upload links when the director_id item is missing or manually-provided (not KYC-resolved)
+      const checklistItems = await storage.getChecklistItems(applicationId);
+      const directorIdItem = checklistItems.find(i => i.key === "director_id");
+      if (directorIdItem && directorIdItem.status !== "missing") {
+        const isManualProvided = directorIdItem.status === "provided" && directorIdItem.source === "manual_upload";
+        if (!isManualProvided) {
+          return res.status(400).json({
+            message: "An upload link cannot be sent because the director ID document has already been verified or accepted",
+          });
+        }
+      }
+
+      const cryptoMod = await import("crypto");
+      const token = cryptoMod.randomBytes(48).toString("hex");
+      const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 hours
+
+      const directorName = person.title || [person.inviteEmail].filter(Boolean).join(" ");
+      await storage.createDirectorUploadToken({
+        token,
+        applicationId,
+        personId,
+        directorName: directorName || null,
+        directorEmail: person.inviteEmail,
+        expiresAt,
+      });
+
+      const { getSiteBaseUrl, getResendClient } = await import("./services/emailService");
+      const baseUrl = getSiteBaseUrl(req);
+      const uploadLink = `${baseUrl}/director-upload/${token}`;
+
+      let emailSent = false;
+      try {
+        const { client, fromEmail } = await getResendClient();
+        const founderProfile = await storage.getFounderProfile(userId);
+        const founderName = founderProfile?.fullName?.trim() || "The founder";
+        const companyName = application.companyName1 || "the company";
+
+        await client.emails.send({
+          from: fromEmail,
+          to: person.inviteEmail,
+          subject: `Upload your ID documents for ${companyName} incorporation`,
+          html: `
+            <!DOCTYPE html>
+            <html>
+              <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+              <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+                <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                  <div style="text-align: center; margin-bottom: 32px;">
+                    <div style="display: inline-block; background: #16a34a; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                      <span style="color: white; font-size: 24px; font-weight: bold;">C</span>
+                    </div>
+                    <h1 style="color: #111827; font-size: 24px; font-weight: 700; margin: 0;">Cellion One</h1>
+                  </div>
+                  <h2 style="color: #111827; font-size: 20px; font-weight: 600; margin-bottom: 16px;">Director document upload request</h2>
+                  <p style="color: #374151; margin-bottom: 16px;">
+                    ${founderName} has requested that you upload your identification documents for the incorporation of <strong>${companyName}</strong>.
+                  </p>
+                  <p style="color: #374151; margin-bottom: 24px;">
+                    Please use the secure link below to upload your passport photograph and government-issued ID. No account creation is required.
+                  </p>
+                  <div style="text-align: center; margin-bottom: 24px;">
+                    <a href="${uploadLink}" style="display: inline-block; background: #16a34a; color: white; text-decoration: none; padding: 14px 28px; border-radius: 6px; font-weight: 600; font-size: 16px;">
+                      Upload my documents
+                    </a>
+                  </div>
+                  <p style="color: #6b7280; font-size: 14px; margin-bottom: 8px;">
+                    This link expires in 72 hours. If you did not expect this email, you can safely ignore it.
+                  </p>
+                  <p style="color: #6b7280; font-size: 12px;">
+                    Or copy this link: <a href="${uploadLink}" style="color: #16a34a;">${uploadLink}</a>
+                  </p>
+                </div>
+              </body>
+            </html>
+          `,
+        });
+        emailSent = true;
+      } catch (emailErr) {
+        console.error("[DirectorUploadInvite] Email failed:", emailErr);
+      }
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "send_director_upload_invite",
+        entityType: "company_person",
+        entityId: personId.toString(),
+        ipAddress: req.ip,
+      });
+
+      if (emailSent) {
+        res.json({ success: true, message: "Upload link sent to director" });
+      } else {
+        res.json({
+          success: true,
+          emailSent: false,
+          uploadLink,
+          message: "Upload link created but the email could not be delivered. Share the link manually with the director.",
+        });
+      }
+    } catch (error) {
+      console.error("[DirectorUploadInvite] Error:", error);
+      res.status(500).json({ message: "Failed to send director upload invite" });
+    }
+  });
+
+  // GET /api/director-upload/:token
+  // Public: validate token and return director info & required document slots
+  app.get("/api/director-upload/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const record = await storage.getDirectorUploadToken(token);
+      if (!record) return res.status(404).json({ message: "Invalid or expired upload link" });
+      if (record.usedAt) return res.status(410).json({ message: "This upload link has already been used" });
+      if (new Date() > record.expiresAt) return res.status(410).json({ message: "This upload link has expired" });
+
+      const application = await storage.getApplication(record.applicationId);
+      const companyName = application?.companyName1 || "the company";
+
+      res.json({
+        directorName: record.directorName,
+        companyName,
+        expiresAt: record.expiresAt,
+        personId: record.personId,
+        applicationId: record.applicationId,
+        requiredDocSlots: [
+          { key: "passportPhoto", label: "Passport Photograph" },
+          { key: "govId", label: "Government-issued ID (NIN slip, International Passport, Driver's Licence)" },
+        ],
+      });
+    } catch (error) {
+      console.error("[DirectorUpload] GET error:", error);
+      res.status(500).json({ message: "Failed to validate upload link" });
+    }
+  });
+
+  // POST /api/director-upload/:token
+  // Public (token-authenticated): accept passport photo and gov ID, update checklist item
+  const directorDocUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+  });
+
+  app.post("/api/director-upload/:token", directorDocUpload.fields([
+    { name: "passportPhoto", maxCount: 1 },
+    { name: "govId", maxCount: 1 },
+  ]), async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      const record = await storage.getDirectorUploadToken(token);
+      if (!record) return res.status(404).json({ message: "Invalid or expired upload link" });
+      if (record.usedAt) return res.status(410).json({ message: "This upload link has already been used" });
+      if (new Date() > record.expiresAt) return res.status(410).json({ message: "This upload link has expired" });
+
+      const files = req.files as Record<string, Express.Multer.File[]>;
+      const passportFile = files?.passportPhoto?.[0];
+      const govIdFile = files?.govId?.[0];
+
+      if (!passportFile || !govIdFile) {
+        return res.status(400).json({ message: "Both passport photograph and government ID are required" });
+      }
+
+      const allowedMime = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
+      const allowedExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
+      const { default: pathMod } = await import("path");
+
+      const objectStorage = new ObjectStorageService();
+
+      async function uploadFile(file: Express.Multer.File, docType: string): Promise<string> {
+        const fileExt = pathMod.extname(file.originalname || "").toLowerCase();
+        if (!allowedMime.includes(file.mimetype) && !allowedExtensions.includes(fileExt)) {
+          throw new Error("File type not allowed");
+        }
+        const uploadURL = await objectStorage.getObjectEntityUploadURL();
+        const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+        const uploadResponse = await fetch(uploadURL, {
+          method: "PUT",
+          body: file.buffer,
+          headers: { "Content-Type": file.mimetype, "Content-Length": String(file.buffer.length) },
+        });
+        if (!uploadResponse.ok) throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
+
+        // Create document record with a system owner placeholder
+        await storage.createDocument({
+          ownerUserId: `director_upload_${record.personId}`,
+          applicationId: record.applicationId,
+          category: "company",
+          docType,
+          filename: file.originalname || "uploaded_file",
+          storagePath: objectPath,
+          isSensitive: true,
+        });
+
+        return objectPath;
+      }
+
+      if (passportFile) {
+        await uploadFile(passportFile, "passport_photo");
+      }
+      if (govIdFile) {
+        await uploadFile(govIdFile, "director_id");
+      }
+
+      // Mark the director_id checklist item as provided with source: manual_upload
+      const checklistItems = await storage.getChecklistItems(record.applicationId);
+      const directorIdItem = checklistItems.find(i => i.key === "director_id" && i.status !== "accepted");
+      if (directorIdItem) {
+        await storage.updateChecklistItem(directorIdItem.id, {
+          status: "provided",
+          isAutoResolved: false,
+          source: "manual_upload",
+          reviewerNotes: `Uploaded by director (${record.directorEmail}) via upload link`,
+        });
+      }
+
+      // Mark token as used
+      await storage.markDirectorUploadTokenUsed(record.id);
+
+      await storage.createAuditLog({
+        actorUserId: `director_upload_${record.personId}`,
+        action: "director_document_upload",
+        entityType: "company_person",
+        entityId: record.personId.toString(),
+        ipAddress: req.ip,
+      });
+
+      res.json({ success: true, message: "Documents uploaded successfully" });
+    } catch (error) {
+      console.error("[DirectorUpload] POST error:", error);
+      res.status(500).json({ message: "Failed to upload documents. Please try again." });
     }
   });
 

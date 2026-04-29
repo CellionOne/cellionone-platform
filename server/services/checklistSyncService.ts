@@ -21,6 +21,7 @@ export async function syncChecklistFromVerifications(applicationId: number, foun
         status: "provided",
         reviewerNotes: autoNotes,
         isAutoResolved: true,
+        source: "kyc_auto_resolved",
       });
     }
 

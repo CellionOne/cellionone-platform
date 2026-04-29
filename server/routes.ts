@@ -80,6 +80,7 @@ const statusUpdateSchema = z.object({
     "draft", "pending_verification", "submitted", "under_review", "clarification_requested",
     "filed", "pending_originals", "courier_in_transit", "completed", "rejected"
   ]),
+  rcNumber: z.string().trim().min(1).optional(),
 });
 
 const aiSuggestSchema = z.object({
@@ -5449,6 +5450,28 @@ export async function registerRoutes(
       if (registeredOfficeSubscription && (registeredOfficeSubscription.status === "active" || registeredOfficeSubscription.status === "beta_activated")) {
         registeredOfficeAddress = await storage.getServiceAddressById(registeredOfficeSubscription.serviceAddressId);
       }
+
+      // For assigned lawyers and admins, also provide the people list and founder KYC status
+      let people: any[] = [];
+      let founderKyc: any = null;
+      if (isAssignedLawyer || isAdmin) {
+        const [companyPeopleList, founderIdVerification] = await Promise.all([
+          storage.getCompanyPeopleByApplication(applicationId),
+          application.founderUserId ? storage.getIdentityVerification(application.founderUserId) : Promise.resolve(undefined),
+        ]);
+        people = companyPeopleList;
+        if (founderIdVerification) {
+          // Return only the safe status fields, no biometric data
+          founderKyc = {
+            status: founderIdVerification.status,
+            bvnNinVerified: founderIdVerification.bvnNinVerified,
+            verifiedAt: founderIdVerification.verifiedAt,
+            expiresAt: founderIdVerification.expiresAt,
+            method: founderIdVerification.method,
+            externalProvider: founderIdVerification.externalProvider,
+          };
+        }
+      }
       
       res.json({ 
         application, 
@@ -5459,7 +5482,9 @@ export async function registerRoutes(
         registeredOffice: registeredOfficeSubscription ? {
           subscription: registeredOfficeSubscription,
           address: registeredOfficeAddress,
-        } : null
+        } : null,
+        people,
+        founderKyc,
       });
     } catch (error) {
       console.error("Error fetching application:", error);
@@ -6324,27 +6349,38 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
       }
       
-      const { status } = parsed.data;
+      const { status, rcNumber } = parsed.data;
       
       const application = await storage.getApplication(applicationId);
       if (!application || application.assignedLawyerUserId !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
-      const updated = await storage.updateApplication(applicationId, { status });
+
+      // RC number is required when filing or completing
+      const effectiveRcNumber = rcNumber || application.rcNumber;
+      if ((status === "filed" || status === "completed") && !effectiveRcNumber) {
+        return res.status(400).json({ message: "RC Number is required when marking an application as filed or completed." });
+      }
+
+      const updateData: Record<string, any> = { status };
+      if (rcNumber) updateData.rcNumber = rcNumber;
+      if (status === "completed") updateData.completedAt = new Date();
+
+      const updated = await storage.updateApplication(applicationId, updateData);
       
       await storage.createAuditLog({
         actorUserId: userId,
         action: "change_status",
         entityType: "company_application",
         entityId: applicationId.toString(),
-        details: { newStatus: status },
+        details: { newStatus: status, rcNumber: effectiveRcNumber },
         ipAddress: req.ip,
       });
 
       // When a company application reaches "completed", auto-populate the Verified Entities Registry
       if (status === "completed") {
-        addCompanyToVerifiedRegistry(application).catch((err) =>
+        const appWithRc = { ...application, ...updateData };
+        addCompanyToVerifiedRegistry(appWithRc).catch((err) =>
           console.error("[Routes] Failed to add company to verified registry:", err)
         );
       }

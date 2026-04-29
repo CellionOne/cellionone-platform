@@ -41,6 +41,11 @@ import {
   Download,
   ShieldCheck,
   Loader2,
+  Users,
+  XCircle,
+  TrendingUp,
+  ChevronRight,
+  Hash,
 } from "lucide-react";
 import type { 
   CompanyApplication, 
@@ -49,6 +54,7 @@ import type {
   ClarificationRequest,
   ExecutionDeclaration,
   DocumentFile,
+  CompanyPerson,
 } from "@shared/schema";
 import { insertClarificationRequestSchema } from "@shared/schema";
 
@@ -75,6 +81,15 @@ interface RegisteredOfficeInfo {
   } | null;
 }
 
+interface FounderKyc {
+  status: string;
+  bvnNinVerified: boolean | null;
+  verifiedAt: string | null;
+  expiresAt: string | null;
+  method: string | null;
+  externalProvider: string | null;
+}
+
 interface ApplicationDetailData {
   application: CompanyApplication;
   checklist: ApplicationChecklistItem[];
@@ -82,6 +97,8 @@ interface ApplicationDetailData {
   clarifications: ClarificationRequest[];
   documents: DocumentFile[];
   registeredOffice: RegisteredOfficeInfo | null;
+  people: CompanyPerson[];
+  founderKyc: FounderKyc | null;
 }
 
 export default function LawyerApplicationDetail() {
@@ -130,7 +147,7 @@ export default function LawyerApplicationDetail() {
     );
   }
 
-  const { application, checklist, payment, clarifications, documents, registeredOffice } = data;
+  const { application, checklist, payment, clarifications, documents, registeredOffice, people, founderKyc } = data;
 
   return (
     <DashboardLayout 
@@ -159,6 +176,9 @@ export default function LawyerApplicationDetail() {
                   {application.applicationType === "incorporation" ? "Company Incorporation" : "Post-Incorporation"} 
                   {" "}&bull;{" "}
                   Application #{application.id}
+                  {application.rcNumber && (
+                    <> &bull; <span className="font-medium text-primary">RC {application.rcNumber}</span></>
+                  )}
                 </p>
               </div>
             </div>
@@ -171,6 +191,13 @@ export default function LawyerApplicationDetail() {
             <TabsTrigger value="overview" data-testid="tab-overview">
               <Eye className="h-4 w-4 mr-2" />
               Overview
+            </TabsTrigger>
+            <TabsTrigger value="people" data-testid="tab-people">
+              <Users className="h-4 w-4 mr-2" />
+              People
+              {people && people.length > 0 && (
+                <Badge variant="secondary" className="ml-2">{people.length}</Badge>
+              )}
             </TabsTrigger>
             <TabsTrigger value="documents" data-testid="tab-documents">
               <FileText className="h-4 w-4 mr-2" />
@@ -197,7 +224,13 @@ export default function LawyerApplicationDetail() {
               checklist={checklist} 
               payment={payment}
               registeredOffice={registeredOffice}
+              people={people || []}
+              founderKyc={founderKyc || null}
             />
+          </TabsContent>
+
+          <TabsContent value="people" className="space-y-6 mt-6">
+            <PeopleTab people={people || []} />
           </TabsContent>
 
           <TabsContent value="documents" className="space-y-6 mt-6">
@@ -234,12 +267,16 @@ function OverviewTab({
   application, 
   checklist, 
   payment,
-  registeredOffice
+  registeredOffice,
+  people,
+  founderKyc,
 }: { 
   application: CompanyApplication; 
   checklist: ApplicationChecklistItem[];
   payment: Payment | null;
   registeredOffice: RegisteredOfficeInfo | null;
+  people: CompanyPerson[];
+  founderKyc: FounderKyc | null;
 }) {
   const { toast } = useToast();
   const completedDocs = checklist.filter(item => item.status === "provided" || item.status === "accepted").length;
@@ -318,6 +355,54 @@ function OverviewTab({
                 </div>
               </div>
             )}
+            {(() => {
+              const shareholders = people.filter(p => p.role === "shareholder" || p.role === "director_shareholder");
+              const fallbackShareholders = (application.shareholdersData || []) as Array<{ name: string; shares?: number; percentage?: number }>;
+              const hasPeople = shareholders.length > 0;
+              const hasFallback = fallbackShareholders.length > 0;
+              if (!hasPeople && !hasFallback && !application.shareCapital) return null;
+              return (
+                <div className="mt-1 pt-3 border-t" data-testid="shareholding-summary">
+                  <Label className="text-muted-foreground text-sm flex items-center gap-1 mb-2">
+                    <TrendingUp className="h-3 w-3" />
+                    Share Capital & Shareholding
+                  </Label>
+                  {application.shareCapital && (
+                    <p className="text-sm font-medium mb-2">
+                      Authorised Capital: ₦{Number(application.shareCapital).toLocaleString()}
+                    </p>
+                  )}
+                  {hasPeople ? (
+                    <div className="text-xs space-y-1">
+                      {shareholders.map((p) => (
+                        <div key={p.id} className="flex items-center justify-between gap-2 py-0.5">
+                          <span className="text-foreground truncate">
+                            {p.entityType === "corporate" ? p.corporateName : (p.title || p.inviteEmail || "—")}
+                          </span>
+                          <div className="flex items-center gap-2 shrink-0 text-muted-foreground">
+                            {p.shareClass && <span>{p.shareClass}</span>}
+                            {p.sharesAllocated && <span>{p.sharesAllocated.toLocaleString()} shares</span>}
+                            {p.sharePercentage && <span className="font-medium text-foreground">{p.sharePercentage}%</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : hasFallback ? (
+                    <div className="text-xs space-y-1">
+                      {fallbackShareholders.map((s, i) => (
+                        <div key={i} className="flex items-center justify-between gap-2 py-0.5">
+                          <span className="text-foreground truncate">{s.name}</span>
+                          <div className="flex items-center gap-2 shrink-0 text-muted-foreground">
+                            {s.shares && <span>{s.shares.toLocaleString()} shares</span>}
+                            {s.percentage && <span className="font-medium text-foreground">{s.percentage}%</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })()}
             {registeredOffice?.address && (registeredOffice.subscription.status === "active" || registeredOffice.subscription.status === "beta_activated") ? (
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-4" data-testid="registered-office-section">
                 <div className="flex items-start justify-between mb-2">
@@ -526,6 +611,201 @@ function OverviewTab({
             )}
           </CardContent>
         </Card>
+
+        <Card data-testid="card-founder-kyc">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5" />
+              Founder Identity (KYC)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {founderKyc ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground text-sm">Overall Status</span>
+                  <Badge
+                    variant={founderKyc.status === "verified" ? "default" : founderKyc.status === "rejected" ? "destructive" : "secondary"}
+                    className={founderKyc.status === "verified" ? "bg-green-600" : ""}
+                    data-testid="badge-kyc-overall"
+                  >
+                    {founderKyc.status === "verified" ? "Verified" :
+                     founderKyc.status === "rejected" ? "Rejected" :
+                     founderKyc.status === "in_progress" ? "In Progress" :
+                     founderKyc.status === "pending" ? "Pending" : "Not Started"}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground text-sm">BVN / NIN</span>
+                  {founderKyc.bvnNinVerified ? (
+                    <span className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400">
+                      <CheckCircle2 className="h-3 w-3" /> Verified
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" /> Pending
+                    </span>
+                  )}
+                </div>
+                {founderKyc.verifiedAt && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground text-sm">Verified On</span>
+                    <span className="text-sm">{new Date(founderKyc.verifiedAt).toLocaleDateString()}</span>
+                  </div>
+                )}
+                {founderKyc.externalProvider && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground text-sm">Provider</span>
+                    <span className="text-sm capitalize">{founderKyc.externalProvider.replace("_", " ")}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>No identity verification record found for this founder.</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function PeopleTab({ people }: { people: CompanyPerson[] }) {
+  const getVerificationBadge = (person: CompanyPerson) => {
+    if (person.entityType === "corporate") {
+      switch (person.kybLookupStatus) {
+        case "found":
+          return <Badge className="bg-green-600 text-xs gap-1"><CheckCircle2 className="h-3 w-3" />KYB Verified</Badge>;
+        case "not_found":
+          return <Badge variant="destructive" className="text-xs gap-1"><XCircle className="h-3 w-3" />KYB Failed</Badge>;
+        case "error":
+          return <Badge variant="destructive" className="text-xs gap-1"><AlertCircle className="h-3 w-3" />KYB Error</Badge>;
+        default:
+          return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />KYB Pending</Badge>;
+      }
+    }
+    if (person.isVerified) {
+      return <Badge className="bg-green-600 text-xs gap-1"><CheckCircle2 className="h-3 w-3" />Verified</Badge>;
+    }
+    switch (person.inviteStatus) {
+      case "accepted":
+        return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />Pending Verification</Badge>;
+      case "pending":
+        return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />Not Accepted</Badge>;
+      case "not_invited":
+        return <Badge variant="outline" className="text-xs">Not Invited</Badge>;
+      default:
+        return <Badge variant="outline" className="text-xs capitalize">{person.inviteStatus || "Unknown"}</Badge>;
+    }
+  };
+
+  const getRoleLabel = (role: string) => {
+    switch (role) {
+      case "director": return "Director";
+      case "shareholder": return "Shareholder";
+      case "director_shareholder": return "Director & Shareholder";
+      default: return role;
+    }
+  };
+
+  if (people.length === 0) {
+    return (
+      <Card data-testid="people-empty-state">
+        <CardContent className="py-12 text-center">
+          <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+          <h3 className="font-semibold mb-1">No People Records Yet</h3>
+          <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+            Directors and shareholders have not been added to this application. 
+            Use the Clarifications channel to request this information from the founder.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const directors = people.filter(p => p.role === "director" || p.role === "director_shareholder");
+  const shareholders = people.filter(p => p.role === "shareholder" || p.role === "director_shareholder");
+
+  return (
+    <div className="space-y-6" data-testid="people-tab">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold">Directors & Shareholders</h3>
+          <p className="text-sm text-muted-foreground">
+            {directors.length} director{directors.length !== 1 ? "s" : ""} · {shareholders.length} shareholder{shareholders.length !== 1 ? "s" : ""}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {people.map((person) => (
+          <Card key={person.id} data-testid={`person-card-${person.id}`}>
+            <CardContent className="pt-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="h-9 w-9 rounded-full bg-muted flex items-center justify-center shrink-0">
+                    {person.entityType === "corporate" ? (
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <Users className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-medium truncate" data-testid={`text-person-name-${person.id}`}>
+                        {person.entityType === "corporate"
+                          ? person.corporateName || "Corporate Entity"
+                          : person.title || person.inviteEmail || "—"}
+                      </p>
+                      {person.entityType === "corporate" && (
+                        <Badge variant="outline" className="text-xs shrink-0">Corporate</Badge>
+                      )}
+                      {person.autoVerifyMethod && (
+                        <Badge variant="secondary" className="text-xs shrink-0 gap-1">
+                          <ShieldCheck className="h-3 w-3" />
+                          Auto-verified
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground">{getRoleLabel(person.role)}</p>
+
+                    {person.entityType === "corporate" ? (
+                      <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
+                        {person.corporateRcNumber && (
+                          <p className="flex items-center gap-1">
+                            <Hash className="h-3 w-3" />RC: {person.corporateRcNumber}
+                          </p>
+                        )}
+                        {person.corporateCountry && <p>Country: {person.corporateCountry}</p>}
+                        {person.corporateAuthorisedRepName && (
+                          <p>Authorised Rep: {person.corporateAuthorisedRepName}</p>
+                        )}
+                        {person.inviteEmail && (
+                          <p>Rep Email: {person.inviteEmail}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
+                        {person.inviteEmail && <p>{person.inviteEmail}</p>}
+                        <div className="flex items-center gap-3 flex-wrap mt-1">
+                          {person.sharesAllocated != null && (
+                            <span>{person.sharesAllocated.toLocaleString()} shares</span>
+                          )}
+                          {person.shareClass && <span>Class: {person.shareClass}</span>}
+                          {person.sharePercentage && <span>{person.sharePercentage}%</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0">{getVerificationBadge(person)}</div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
     </div>
   );
@@ -1239,6 +1519,16 @@ function ClarificationsTab({
   );
 }
 
+const STATUS_TRANSITIONS: Record<string, { value: string; label: string }[]> = {
+  submitted: [{ value: "under_review", label: "Under Review" }],
+  under_review: [{ value: "filed", label: "Filed with CAC" }],
+  filed: [{ value: "pending_originals", label: "Pending Originals" }],
+  pending_originals: [{ value: "courier_in_transit", label: "Courier In Transit" }],
+  courier_in_transit: [{ value: "completed", label: "Completed" }],
+};
+
+const STATUS_REQUIRES_RC = new Set(["filed", "completed"]);
+
 function ExecutionTab({ 
   applicationId,
   declarations,
@@ -1251,6 +1541,8 @@ function ExecutionTab({
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [declarationType, setDeclarationType] = useState<string>("");
+  const [nextStatus, setNextStatus] = useState<string>("");
+  const [rcNumberInput, setRcNumberInput] = useState<string>(application.rcNumber || "");
 
   const createDeclaration = useMutation({
     mutationFn: async () => {
@@ -1269,7 +1561,24 @@ function ExecutionTab({
     },
   });
 
+  const advanceStatus = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, string> = { status: nextStatus };
+      if (rcNumberInput.trim()) body.rcNumber = rcNumberInput.trim();
+      return apiRequest("POST", `/api/lawyer/applications/${applicationId}/status`, body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId.toString()] });
+      toast({ title: "Application status updated" });
+      setNextStatus("");
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to update status", description: error.message, variant: "destructive" });
+    },
+  });
+
   const canSign = application.status === "under_review" || application.status === "submitted";
+  const allowedNextStatuses = STATUS_TRANSITIONS[application.status || ""] || [];
 
   const declarationLabels: Record<string, string> = {
     document_verified: "I have verified all submitted documents are authentic and complete.",
@@ -1416,6 +1725,89 @@ function ExecutionTab({
           ))
         )}
       </div>
+
+      {allowedNextStatuses.length > 0 && (
+        <Card data-testid="card-advance-status">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <ChevronRight className="h-5 w-5" />
+              Advance Application Status
+            </CardTitle>
+            <CardDescription>
+              Move this application to the next stage in the incorporation process.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {application.rcNumber && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20 text-sm">
+                <Hash className="h-4 w-4 text-primary shrink-0" />
+                <span>RC Number on file: <span className="font-semibold">{application.rcNumber}</span></span>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="select-next-status">Next Status</Label>
+              <Select value={nextStatus} onValueChange={setNextStatus}>
+                <SelectTrigger id="select-next-status" data-testid="select-next-status">
+                  <SelectValue placeholder="Select next stage" />
+                </SelectTrigger>
+                <SelectContent>
+                  {allowedNextStatuses.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {nextStatus && STATUS_REQUIRES_RC.has(nextStatus) && (
+              <div className="space-y-2">
+                <Label htmlFor="input-rc-number">
+                  CAC RC Number <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="input-rc-number"
+                  placeholder="e.g. RC1234567"
+                  value={rcNumberInput}
+                  onChange={(e) => setRcNumberInput(e.target.value)}
+                  data-testid="input-rc-number"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Required when marking as filed or completed. This will be recorded on the application.
+                </p>
+              </div>
+            )}
+
+            <Button
+              onClick={() => advanceStatus.mutate()}
+              disabled={!nextStatus || advanceStatus.isPending || (STATUS_REQUIRES_RC.has(nextStatus) && !application.rcNumber && !rcNumberInput.trim())}
+              data-testid="btn-advance-status"
+            >
+              {advanceStatus.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <ChevronRight className="h-4 w-4 mr-2" />
+              )}
+              Confirm Status Change
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {allowedNextStatuses.length === 0 && application.status !== "draft" && (
+        <Card className="border-muted" data-testid="card-status-terminal">
+          <CardContent className="py-4">
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+              <span>
+                {application.status === "completed"
+                  ? "This application is complete. No further status changes are available."
+                  : application.status === "rejected"
+                  ? "This application has been rejected. No further status changes are available."
+                  : "Status advancement is not available at the current stage."}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

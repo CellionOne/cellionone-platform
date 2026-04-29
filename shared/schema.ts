@@ -209,6 +209,7 @@ export const companyApplications = pgTable("company_applications", {
   aiLastSuggestedAt: timestamp("ai_last_suggested_at"),
   abandonedCartReminderCount: integer("abandoned_cart_reminder_count").default(0),
   abandonedCartLastReminderAt: timestamp("abandoned_cart_last_reminder_at"),
+  rcNumber: varchar("rc_number", { length: 50 }), // CAC-assigned RC number, recorded by lawyer after filing
   isLegacyDraft: boolean("is_legacy_draft").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

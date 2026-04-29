@@ -8,6 +8,7 @@ import { sendNewOrderNotificationEmail, ADMIN_NOTIFICATION_EMAIL } from './email
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
 import { createCandidate, submitBusinessAddressVerification } from './youverifyService';
 import { upsertVerifiedIndividualByUserId } from './verifiedEntityService';
+import { syncChecklistFromVerifications } from './checklistSyncService';
 
 export interface PaystackWebhookEvent {
   event: string;
@@ -1351,6 +1352,12 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
               entityId: String(person.id),
               details: { orderId: order.id, personUserId: person.personUserId, role: person.role },
             });
+
+            if (person.applicationId) {
+              await syncChecklistFromVerifications(person.applicationId, order.founderId).catch((e: Error) =>
+                console.error(`[Paystack Webhook] syncChecklistFromVerifications error (non-fatal): ${e.message}`)
+              );
+            }
           }
 
           console.log(`[Paystack Webhook] User ${order.founderId} and ${unverifiedPeople.length} company people marked as verified`);

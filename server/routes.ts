@@ -28,6 +28,7 @@ import { registerCieApiRoutes } from "./routes/cieApiRoutes";
 import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
 import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
+import { syncChecklistFromVerifications } from "./services/checklistSyncService";
 
 // Maximum number of Smile ID error results for a given RC number before we
 // stop retrying live lookups. Configurable via SMILE_ID_MAX_ERROR_RETRIES env
@@ -248,80 +249,29 @@ async function createDefaultChecklist(applicationId: number, operatingAddress?: 
   }
 }
 
-// Auto-resolve checklist items for a verified founder/team.
-// Called at creation time, on every fetch, and after biometric verification completes.
-// Never downgrades items already set to "accepted" by an admin.
-async function syncChecklistFromVerifications(applicationId: number, founderId: string): Promise<void> {
+// syncChecklistFromVerifications is imported from ./services/checklistSyncService
+
+/**
+ * When a user (director/shareholder) completes identity verification,
+ * mark their companyPeople records as verified and sync checklists for
+ * all applications they are linked to.
+ */
+async function syncDirectorVerification(personUserId: string): Promise<void> {
   try {
-    const [checklistItems, founderProfile, idVerification, teamMembers] = await Promise.all([
-      storage.getChecklistItems(applicationId),
-      storage.getFounderProfile(founderId),
-      storage.getIdentityVerification(founderId),
-      storage.getCompanyPeople(applicationId),
-    ]);
-
-    // Helper: auto-provide an item ONLY if it is currently "missing" AND has never
-    // been auto-resolved before (isAutoResolved === false/null).
-    // Once isAutoResolved is set to true, this guard ensures the sync never re-fires
-    // for that item again — even if an admin deliberately resets the status to "missing".
-    // This keeps admin overrides permanently authoritative.
-    async function autoProvide(key: string, autoNotes: string): Promise<void> {
-      const item = checklistItems.find((i) => i.key === key);
-      if (!item || item.status !== "missing" || item.isAutoResolved === true) return;
-      await storage.updateChecklistItem(item.id, {
-        status: "provided",
-        reviewerNotes: autoNotes,
-        isAutoResolved: true,
-      });
-    }
-
-    // ── passport_photo ────────────────────────────────────────────────────────
-    if (founderProfile?.passportPhotoPath) {
-      await autoProvide("passport_photo", "Auto-resolved: verified passport photo on file from identity verification");
-    }
-
-    // ── id_document ───────────────────────────────────────────────────────────
-    const idVerified = idVerification?.bvnNinVerified === true;
-    const hasIdDoc = !!founderProfile?.idDocumentPath;
-    if (idVerified || hasIdDoc) {
-      await autoProvide("id_document", "Auto-resolved: government ID confirmed via BVN/NIN verification");
-    }
-
-    // ── director_id & shareholder_details ─────────────────────────────────────
-    // Match exact roles AND the combined "director_shareholder" role.
-    // "secretary" and any other administrative roles are excluded from the check.
-    const directors = teamMembers.filter((p) => p.role === "director" || p.role === "director_shareholder");
-    const shareholders = teamMembers.filter((p) => p.role === "shareholder" || p.role === "director_shareholder");
-
-    function isPersonVerified(person: typeof teamMembers[number]): boolean {
-      if (person.entityType === "corporate") {
-        return person.autoVerifyMethod !== null || person.kybLookupStatus === "found";
+    const people = await storage.getCompanyPeopleByPersonUserId(personUserId);
+    for (const person of people) {
+      if (person.entityType === 'corporate') continue;
+      if (!person.isVerified) {
+        await db.update(companyPeople)
+          .set({ isVerified: true, updatedAt: new Date() })
+          .where(eq(companyPeople.id, person.id));
       }
-      return person.isVerified === true;
-    }
-
-    // director_id: auto-provide when every director is verified (or sole-founder application)
-    const directorCheckReady =
-      directors.length === 0
-        ? idVerified || hasIdDoc   // sole-founder: covered by founder's own verification
-        : directors.every(isPersonVerified);
-
-    if (directorCheckReady) {
-      await autoProvide("director_id", "Auto-resolved: all directors are identity-verified on the platform");
-    }
-
-    // shareholder_details: auto-provide when every shareholder is verified (or sole-founder application)
-    const shareholderCheckReady =
-      shareholders.length === 0
-        ? idVerified || hasIdDoc   // sole-founder: is the implicit 100% shareholder
-        : shareholders.every(isPersonVerified);
-
-    if (shareholderCheckReady) {
-      await autoProvide("shareholder_details", "Auto-resolved: all shareholders are identity-verified on the platform");
+      if (person.applicationId && person.founderId) {
+        await syncChecklistFromVerifications(person.applicationId, person.founderId);
+      }
     }
   } catch (err) {
-    // Non-fatal: checklist sync errors should not block the main request
-    console.error(`[ChecklistSync] Failed for application ${applicationId}:`, err);
+    console.error(`[ChecklistSync] syncDirectorVerification failed for user ${personUserId}:`, err);
   }
 }
 
@@ -2254,6 +2204,9 @@ export async function registerRoutes(
         await upsertVerifiedIndividualByUserId(userId).catch((e: Error) =>
           console.error(`[BVN Verify] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
         );
+        syncDirectorVerification(userId).catch((e: Error) =>
+          console.error(`[BVN Verify] syncDirectorVerification error (non-fatal): ${e.message}`)
+        );
       }
 
       res.json(result);
@@ -2303,6 +2256,9 @@ export async function registerRoutes(
           .where(eq(usersTable.id, userId));
         await upsertVerifiedIndividualByUserId(userId).catch((e: Error) =>
           console.error(`[NIN Verify] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
+        );
+        syncDirectorVerification(userId).catch((e: Error) =>
+          console.error(`[NIN Verify] syncDirectorVerification error (non-fatal): ${e.message}`)
         );
       }
 
@@ -2469,6 +2425,9 @@ export async function registerRoutes(
       upsertVerifiedIndividualByUserId(userId).catch((e: Error) =>
         console.error(`[VerifyIdentity] upsertVerifiedIndividual error: ${e.message}`)
       );
+      syncDirectorVerification(userId).catch((e: Error) =>
+        console.error(`[VerifyIdentity] syncDirectorVerification error (non-fatal): ${e.message}`)
+      );
 
       // Build founder profile update using proper typed fields
       const existingProfile = await storage.getFounderProfile(userId);
@@ -2616,6 +2575,9 @@ export async function registerRoutes(
         await db.update(usersTable)
           .set({ isIdentityVerified: true, identityVerifiedAt: now, updatedAt: now })
           .where(eq(usersTable.id, userId));
+        syncDirectorVerification(userId).catch((e: Error) =>
+          console.error(`[Selfie] syncDirectorVerification error (non-fatal): ${e.message}`)
+        );
       }
 
       await storage.logSensitiveDataAccess({
@@ -2960,6 +2922,28 @@ export async function registerRoutes(
               updatedAt: new Date(),
             }).where(eq(identityVerifications.id, idVRec.id));
           }
+        }
+      } else if (passed && invite.directorEmail) {
+        // Director (not founder) biometric completed — mark their companyPeople record verified
+        // and sync checklists for all linked applications
+        const directorEmail = invite.directorEmail.toLowerCase().trim();
+        const linkedPeople = await db.select().from(companyPeople)
+          .where(and(
+            eq(companyPeople.companyProfileId, invite.companyProfileId),
+            sql`lower(${companyPeople.inviteEmail}) = ${directorEmail}`,
+          ));
+        for (const dp of linkedPeople) {
+          if (!dp.isVerified) {
+            await db.update(companyPeople)
+              .set({ isVerified: true, updatedAt: new Date() })
+              .where(eq(companyPeople.id, dp.id));
+          }
+          if (dp.applicationId && dp.founderId) {
+            await syncChecklistFromVerifications(dp.applicationId, dp.founderId);
+          }
+        }
+        if (linkedPeople.length > 0) {
+          console.log(`[BiometricCallback] Director "${invite.directorName}" verified — synced ${linkedPeople.length} companyPeople record(s)`);
         }
       }
 

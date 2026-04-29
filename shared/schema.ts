@@ -207,6 +207,9 @@ export const companyApplications = pgTable("company_applications", {
   addressVerificationStatus: varchar("address_verification_status", { length: 50 }).default("none"), // none, submitted, agent_assigned, verified, not_verified, failed
   aiSuggestionVersion: varchar("ai_suggestion_version", { length: 50 }),
   aiLastSuggestedAt: timestamp("ai_last_suggested_at"),
+  abandonedCartReminderCount: integer("abandoned_cart_reminder_count").default(0),
+  abandonedCartLastReminderAt: timestamp("abandoned_cart_last_reminder_at"),
+  isLegacyDraft: boolean("is_legacy_draft").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

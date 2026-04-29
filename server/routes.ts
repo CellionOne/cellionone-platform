@@ -6802,6 +6802,75 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // Abandoned carts summary + list for admin panel
+  app.get("/api/admin/abandoned-carts", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const now = new Date();
+      const ONE_DAY = 24 * 60 * 60 * 1000;
+
+      const rows = await db
+        .select({
+          app: companyApplicationsTable,
+          userEmail: usersTable.email,
+          userFirstName: usersTable.firstName,
+          userLastName: usersTable.lastName,
+        })
+        .from(companyApplicationsTable)
+        .innerJoin(usersTable, eq(companyApplicationsTable.founderUserId, usersTable.id))
+        .where(
+          and(
+            eq(companyApplicationsTable.status, "draft"),
+            eq(companyApplicationsTable.paymentState, "unpaid"),
+          ),
+        )
+        .orderBy(desc(companyApplicationsTable.createdAt));
+
+      const list = rows.map(({ app, userEmail, userFirstName, userLastName }) => {
+        const ageMs = now.getTime() - new Date(app.createdAt!).getTime();
+        const ageDays = Math.floor(ageMs / ONE_DAY);
+        const ageBucket =
+          ageDays < 1 ? "lt_24h"
+          : ageDays < 3 ? "1_3d"
+          : ageDays < 7 ? "3_7d"
+          : "gt_7d";
+
+        return {
+          id: app.id,
+          companyName: app.companyName1 || "Untitled",
+          companyType: app.companyType || "LTD",
+          applicationType: app.applicationType,
+          founderEmail: userEmail,
+          founderName: [userFirstName, userLastName].filter(Boolean).join(" ") || null,
+          createdAt: app.createdAt,
+          ageDays,
+          ageBucket,
+          remindersCount: app.abandonedCartReminderCount ?? 0,
+          lastReminderAt: app.abandonedCartLastReminderAt,
+          isLegacyDraft: app.isLegacyDraft ?? false,
+        };
+      });
+
+      const actionable = list.filter((r) => !r.isLegacyDraft);
+      const legacy = list.filter((r) => r.isLegacyDraft);
+
+      const summary = {
+        total: actionable.length,
+        legacy: legacy.length,
+        byBucket: {
+          lt_24h: actionable.filter((r) => r.ageBucket === "lt_24h").length,
+          "1_3d": actionable.filter((r) => r.ageBucket === "1_3d").length,
+          "3_7d": actionable.filter((r) => r.ageBucket === "3_7d").length,
+          gt_7d: actionable.filter((r) => r.ageBucket === "gt_7d").length,
+        },
+      };
+
+      res.json({ summary, list });
+    } catch (error) {
+      console.error("[Admin] Failed to fetch abandoned carts:", error);
+      res.status(500).json({ message: "Failed to fetch abandoned carts" });
+    }
+  });
+
   app.get("/api/admin/lawyers", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const lawyers = await storage.getActiveLawyers();

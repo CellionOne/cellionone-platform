@@ -5,6 +5,7 @@ import { createServer } from "http";
 import { seedDatabase } from "./seed";
 import { startSubscriptionScheduler } from "./services/subscriptionScheduler";
 import { runComplianceDeadlineCheck } from "./services/complianceScheduler";
+import { runLegacyDraftCleanup, runAbandonedCartCheck } from "./services/abandonedCartScheduler";
 import { runKycExpiryCheck, runSanctionsMonitoring, runIndividualExpiryCheck, runDocumentFilesExpiryCheck } from "./services/kycSchedulerService";
 import { startCieScheduler } from "./services/cieScheduler";
 import { runEscrowExpiry } from "./routes/escrowApiRoutes";
@@ -296,6 +297,11 @@ httpServer.listen(
     setInterval(() => {
       runSanctionsMonitoring().catch(console.error);
     }, ONE_DAY_MS);
+
+    // Run one-time legacy draft cleanup then daily abandoned cart reminders
+    runLegacyDraftCleanup().catch(console.error);
+    runAbandonedCartCheck().catch(console.error);
+    setInterval(() => runAbandonedCartCheck().catch(console.error), ONE_DAY_MS);
 
     // Auto-expire stale escrow API transactions every 30 minutes
     const THIRTY_MIN_MS = 30 * 60 * 1000;

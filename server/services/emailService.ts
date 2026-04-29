@@ -953,3 +953,107 @@ export async function sendCieDataAlert(
     }
   }
 }
+
+// ============== ABANDONED CART REMINDER EMAILS ==============
+
+function buildAbandonedCartEmail(opts: {
+  firstName: string;
+  companyName: string;
+  companyType: string;
+  resumeUrl: string;
+  reminderNumber: 1 | 2 | 3;
+}): { subject: string; html: string } {
+  const { firstName, companyName, companyType, resumeUrl, reminderNumber } = opts;
+  const name = firstName || "there";
+  const typeLabel = companyType === "LTD" ? "Private Limited Company"
+    : companyType === "PLC" ? "Public Limited Company"
+    : companyType === "LLP" ? "Limited Liability Partnership"
+    : companyType || "company";
+
+  const configs = {
+    1: {
+      subject: `Your ${companyName || typeLabel} registration is waiting`,
+      headingColor: "#16a34a",
+      heading: "Your registration is saved and waiting",
+      intro: `You started a registration for <strong>${companyName || "your company"}</strong> (${typeLabel}) but didn't complete the payment. The good news: all your details are saved — completing your registration takes just one more step.`,
+      urgencyNote: "",
+      ctaLabel: "Continue my registration",
+      footerNote: "Your draft will remain saved. You can resume at any time.",
+    },
+    2: {
+      subject: `Don't lose your spot — complete your ${companyName || typeLabel} filing`,
+      headingColor: "#f59e0b",
+      heading: "Your registration draft is still waiting",
+      intro: `A reminder that your registration for <strong>${companyName || "your company"}</strong> (${typeLabel}) is still in draft. Company name reservations can be time-sensitive — complete your payment to secure your preferred name with the CAC.`,
+      urgencyNote: `<div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:14px 16px;border-radius:0 8px 8px 0;margin-bottom:24px;"><p style="color:#92400e;font-size:14px;margin:0;line-height:1.5;">Your chosen company name(s) are not reserved until payment and filing is complete. Another applicant could claim the same name in the meantime.</p></div>`,
+      ctaLabel: "Complete my registration",
+      footerNote: "Your saved details are still there — no need to start over.",
+    },
+    3: {
+      subject: `Last reminder: your ${companyName || typeLabel} registration draft`,
+      headingColor: "#dc2626",
+      heading: "Final reminder — your draft registration",
+      intro: `This is our last reminder about your unfinished registration for <strong>${companyName || "your company"}</strong> (${typeLabel}). Your draft details remain saved. If you no longer wish to proceed, you can simply ignore this email.`,
+      urgencyNote: `<div style="background:#fef2f2;border-left:4px solid #dc2626;padding:14px 16px;border-radius:0 8px 8px 0;margin-bottom:24px;"><p style="color:#991b1b;font-size:14px;margin:0;line-height:1.5;">This is our final automated reminder. Your saved draft will remain on file if you decide to return.</p></div>`,
+      ctaLabel: "Finish my registration",
+      footerNote: "We won't send further automated reminders after this email.",
+    },
+  } as const;
+
+  const cfg = configs[reminderNumber];
+  const year = new Date().getFullYear();
+
+  const html = `<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+  <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f4f4f5;margin:0;padding:20px;">
+    <div style="max-width:600px;margin:0 auto;background:white;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+      <div style="text-align:center;margin-bottom:32px;">
+        <div style="display:inline-block;background:#16a34a;padding:12px;border-radius:8px;margin-bottom:16px;">
+          <span style="color:white;font-size:24px;font-weight:bold;">C</span>
+        </div>
+        <h1 style="color:#18181b;font-size:24px;margin:0;">Cellion One</h1>
+      </div>
+      <h2 style="color:${cfg.headingColor};font-size:20px;margin-bottom:16px;">${cfg.heading}</h2>
+      <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:8px;">Dear ${name},</p>
+      <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:24px;">${cfg.intro}</p>
+      ${cfg.urgencyNote}
+      <div style="background:#f0fdf4;border-radius:8px;padding:20px;margin-bottom:24px;">
+        <h3 style="color:#166534;font-size:15px;margin:0 0 10px 0;">What happens when you complete payment:</h3>
+        <ul style="color:#15803d;font-size:14px;line-height:1.8;margin:0;padding-left:20px;">
+          <li>Your application is formally submitted to the CAC</li>
+          <li>A qualified lawyer is assigned to handle your filing</li>
+          <li>You'll receive regular status updates by email</li>
+          <li>Your Certificate of Incorporation is issued upon approval</li>
+        </ul>
+      </div>
+      <div style="text-align:center;margin-bottom:24px;">
+        <a href="${resumeUrl}" style="display:inline-block;background:#16a34a;color:white;padding:14px 36px;border-radius:6px;text-decoration:none;font-weight:600;font-size:16px;">${cfg.ctaLabel}</a>
+      </div>
+      <p style="color:#71717a;font-size:13px;line-height:1.6;text-align:center;">${cfg.footerNote}</p>
+      <p style="color:#71717a;font-size:13px;line-height:1.6;margin-top:16px;">If you have questions, email us at <a href="mailto:service@cellionone.com" style="color:#16a34a;">service@cellionone.com</a>.</p>
+      <hr style="border:none;border-top:1px solid #e4e4e7;margin:32px 0;">
+      <p style="color:#a1a1aa;font-size:12px;text-align:center;">
+        &copy; ${year} Cellion Platforms Nigeria Limited. All rights reserved.<br>
+        <span style="font-size:11px;">You're receiving this because you started a company registration on Cellion One.</span>
+      </p>
+    </div>
+  </body>
+</html>`;
+
+  return { subject: cfg.subject, html };
+}
+
+export async function sendAbandonedCartReminderEmail(opts: {
+  to: string;
+  firstName: string;
+  companyName: string;
+  companyType: string;
+  resumeUrl: string;
+  reminderNumber: 1 | 2 | 3;
+}): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+  const { subject, html } = buildAbandonedCartEmail(opts);
+  await client.emails.send({ from: fromEmail, to: opts.to, subject, html });
+  console.log(`[AbandonedCart] Reminder #${opts.reminderNumber} sent to ${opts.to}`);
+}

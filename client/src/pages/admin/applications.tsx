@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { DashboardLayout } from "@/components/dashboard-layout";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
@@ -18,6 +20,12 @@ import {
   CreditCard,
   Send,
   Loader2,
+  ShoppingCart,
+  Clock,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
 } from "lucide-react";
 import {
   Dialog,
@@ -36,12 +44,56 @@ interface ApplicationWithLawyer extends CompanyApplication {
   lawyerName?: string;
 }
 
+interface AbandonedCartItem {
+  id: number;
+  companyName: string;
+  companyType: string;
+  applicationType: string | null;
+  founderEmail: string | null;
+  founderName: string | null;
+  createdAt: string | null;
+  ageDays: number;
+  ageBucket: "lt_24h" | "1_3d" | "3_7d" | "gt_7d";
+  remindersCount: number;
+  lastReminderAt: string | null;
+  isLegacyDraft: boolean;
+}
+
+interface AbandonedCartsData {
+  summary: {
+    total: number;
+    legacy: number;
+    byBucket: { lt_24h: number; "1_3d": number; "3_7d": number; gt_7d: number };
+  };
+  list: AbandonedCartItem[];
+}
+
 const paymentTransitionOptions = [
   { value: "released_to_lawyer", label: "Release to Lawyer", description: "Release escrowed funds to assigned lawyer" },
   { value: "refunded_partial", label: "Partial Refund", description: "Process a partial refund to the founder" },
   { value: "refunded_full", label: "Full Refund", description: "Process a full refund to the founder" },
   { value: "chargeback", label: "Chargeback", description: "Record a payment chargeback" },
 ];
+
+const bucketLabels: Record<string, string> = {
+  lt_24h: "< 24 hours",
+  "1_3d": "1 – 3 days",
+  "3_7d": "3 – 7 days",
+  gt_7d: "> 7 days",
+};
+
+const bucketColors: Record<string, string> = {
+  lt_24h: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
+  "1_3d": "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+  "3_7d": "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300",
+  gt_7d: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
+};
+
+function formatAge(ageDays: number): string {
+  if (ageDays < 1) return "< 1 day";
+  if (ageDays === 1) return "1 day";
+  return `${ageDays} days`;
+}
 
 export default function AdminApplications() {
   const { toast } = useToast();
@@ -56,6 +108,9 @@ export default function AdminApplications() {
   const [bankDispatchOpen, setBankDispatchOpen] = useState(false);
   const [bankDispatchAppId, setBankDispatchAppId] = useState<number | null>(null);
   const [selectedBankId, setSelectedBankId] = useState<string>("");
+  const [abandonedCartsExpanded, setAbandonedCartsExpanded] = useState(false);
+  const [abandonedCartSearch, setAbandonedCartSearch] = useState("");
+  const [showLegacy, setShowLegacy] = useState(false);
 
   const { data: applications, isLoading } = useQuery<ApplicationWithLawyer[]>({
     queryKey: ["/api/admin/applications"],
@@ -67,6 +122,10 @@ export default function AdminApplications() {
 
   const { data: bankPartners = [] } = useQuery<BankPartnerBasic[]>({
     queryKey: ["/api/admin/banking-partners"],
+  });
+
+  const { data: abandonedCarts } = useQuery<AbandonedCartsData>({
+    queryKey: ["/api/admin/abandoned-carts"],
   });
 
   const { data: appCompanyProfile } = useQuery<{ id: number; companyName: string; existingCompanyStatus?: string } | null>({
@@ -149,25 +208,199 @@ export default function AdminApplications() {
 
   const filteredApplications = applications?.filter((app) => {
     const matchesStatus = statusFilter === "all" || app.status === statusFilter;
-    const matchesSearch = !searchQuery || 
+    const matchesSearch = !searchQuery ||
       app.companyName1?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       app.id.toString().includes(searchQuery);
     return matchesStatus && matchesSearch;
   });
 
+  const filteredAbandonedCarts = abandonedCarts?.list.filter((item) => {
+    if (!showLegacy && item.isLegacyDraft) return false;
+    if (showLegacy && !item.isLegacyDraft) return false;
+    if (!abandonedCartSearch) return true;
+    const q = abandonedCartSearch.toLowerCase();
+    return (
+      item.companyName.toLowerCase().includes(q) ||
+      (item.founderEmail?.toLowerCase().includes(q) ?? false) ||
+      (item.founderName?.toLowerCase().includes(q) ?? false)
+    );
+  });
+
   return (
-    <DashboardLayout 
-      role="admin" 
+    <DashboardLayout
+      role="admin"
       breadcrumbs={[{ label: "Dashboard", href: "/admin/dashboard" }, { label: "Applications" }]}
     >
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold">All Applications</h1>
-          <p className="text-muted-foreground">
-            View and manage all platform applications
-          </p>
+          <p className="text-muted-foreground">View and manage all platform applications</p>
         </div>
 
+        {/* ── Abandoned Carts Panel ── */}
+        {abandonedCarts && (
+          <Card className="border-amber-200 dark:border-amber-800" data-testid="card-abandoned-carts">
+            <CardHeader
+              className="cursor-pointer select-none pb-3"
+              onClick={() => setAbandonedCartsExpanded((v) => !v)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-lg bg-amber-100 dark:bg-amber-950 flex items-center justify-center">
+                    <ShoppingCart className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">Abandoned Carts</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      Draft registrations that never reached payment
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="hidden sm:flex items-center gap-6 text-sm">
+                    <div className="text-center">
+                      <p className="font-semibold text-lg leading-none">{abandonedCarts.summary.total}</p>
+                      <p className="text-muted-foreground text-xs mt-0.5">Actionable</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="font-semibold text-lg leading-none text-amber-600">{abandonedCarts.summary.byBucket["1_3d"] + abandonedCarts.summary.byBucket["3_7d"] + abandonedCarts.summary.byBucket.gt_7d}</p>
+                      <p className="text-muted-foreground text-xs mt-0.5">Waiting &gt; 1d</p>
+                    </div>
+                    {abandonedCarts.summary.legacy > 0 && (
+                      <div className="text-center">
+                        <p className="font-semibold text-lg leading-none text-muted-foreground">{abandonedCarts.summary.legacy}</p>
+                        <p className="text-muted-foreground text-xs mt-0.5">Legacy</p>
+                      </div>
+                    )}
+                  </div>
+                  {abandonedCartsExpanded ? (
+                    <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+
+            {abandonedCartsExpanded && (
+              <CardContent className="pt-0">
+                {/* Age bucket breakdown */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                  {(["lt_24h", "1_3d", "3_7d", "gt_7d"] as const).map((bucket) => (
+                    <div
+                      key={bucket}
+                      className="rounded-lg border bg-muted/30 p-3 text-center"
+                      data-testid={`bucket-${bucket}`}
+                    >
+                      <p className="text-xl font-bold">{abandonedCarts.summary.byBucket[bucket]}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{bucketLabels[bucket]}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Toggle: actionable / legacy */}
+                <div className="flex items-center gap-2 mb-3">
+                  <Button
+                    variant={!showLegacy ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setShowLegacy(false)}
+                    data-testid="button-show-actionable"
+                  >
+                    Actionable ({abandonedCarts.summary.total})
+                  </Button>
+                  <Button
+                    variant={showLegacy ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setShowLegacy(true)}
+                    data-testid="button-show-legacy"
+                  >
+                    Legacy ({abandonedCarts.summary.legacy})
+                  </Button>
+                  <div className="relative flex-1 max-w-xs ml-auto">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Search carts…"
+                      value={abandonedCartSearch}
+                      onChange={(e) => setAbandonedCartSearch(e.target.value)}
+                      className="pl-8 h-8 text-sm"
+                      data-testid="input-abandoned-search"
+                    />
+                  </div>
+                </div>
+
+                {showLegacy && (
+                  <div className="flex items-start gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 mb-3">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                    <p className="text-sm text-amber-800 dark:text-amber-300">
+                      These drafts were created with an older version of the registration wizard and are missing required fields. They cannot be resumed and are excluded from automated reminder emails.
+                    </p>
+                  </div>
+                )}
+
+                {!filteredAbandonedCarts?.length ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">No {showLegacy ? "legacy" : "actionable"} abandoned carts found.</p>
+                ) : (
+                  <div className="rounded-lg border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/40">
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">Company</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden md:table-cell">Founder</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden sm:table-cell">Age</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden lg:table-cell">Reminders</th>
+                          <th className="px-3 py-2" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredAbandonedCarts.map((item) => (
+                          <tr
+                            key={item.id}
+                            className="border-b last:border-0 hover:bg-muted/20 transition-colors"
+                            data-testid={`cart-row-${item.id}`}
+                          >
+                            <td className="px-3 py-2.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium truncate max-w-[140px]">{item.companyName}</span>
+                                <span className="text-xs text-muted-foreground shrink-0">{item.companyType}</span>
+                                {item.isLegacyDraft && (
+                                  <Badge variant="outline" className="text-xs shrink-0">Legacy</Badge>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5 hidden md:table-cell">
+                              <div>
+                                {item.founderName && <p className="truncate max-w-[140px]">{item.founderName}</p>}
+                                <p className="text-xs text-muted-foreground truncate max-w-[140px]">{item.founderEmail || "—"}</p>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5 hidden sm:table-cell">
+                              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${bucketColors[item.ageBucket]}`}>
+                                <Clock className="h-3 w-3" />
+                                {formatAge(item.ageDays)}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 hidden lg:table-cell">
+                              <span className="text-muted-foreground">{item.remindersCount} / 3 sent</span>
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <Button variant="ghost" size="sm" asChild data-testid={`button-view-cart-${item.id}`}>
+                                <Link href={`/applications/${item.id}`}>
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                </Link>
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            )}
+          </Card>
+        )}
+
+        {/* ── All Applications ── */}
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -233,8 +466,8 @@ export default function AdminApplications() {
                     </div>
                     <div className="flex items-center gap-4 sm:shrink-0 flex-wrap">
                       <StatusBadge status={app.status || "draft"} />
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         size="sm"
                         onClick={() => {
                           setSelectedApp(app);
@@ -247,8 +480,8 @@ export default function AdminApplications() {
                         {app.paymentState || "unpaid"}
                       </Button>
                       {!app.assignedLawyerUserId && app.status !== "draft" && (
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           onClick={() => {
                             setSelectedApp(app);
@@ -310,12 +543,12 @@ export default function AdminApplications() {
             <Button variant="outline" onClick={() => setAssignDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 if (selectedApp && selectedLawyer) {
-                  assignMutation.mutate({ 
-                    applicationId: selectedApp.id, 
-                    lawyerId: selectedLawyer 
+                  assignMutation.mutate({
+                    applicationId: selectedApp.id,
+                    lawyerId: selectedLawyer,
                   });
                 }
               }}
@@ -376,13 +609,13 @@ export default function AdminApplications() {
             <Button variant="outline" onClick={() => setPaymentDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 if (selectedApp && selectedPaymentState) {
-                  paymentTransitionMutation.mutate({ 
-                    applicationId: selectedApp.id, 
+                  paymentTransitionMutation.mutate({
+                    applicationId: selectedApp.id,
                     targetState: selectedPaymentState,
-                    reason: paymentReason 
+                    reason: paymentReason,
                   });
                 }
               }}

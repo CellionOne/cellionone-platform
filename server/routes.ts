@@ -5461,10 +5461,13 @@ export async function registerRoutes(
         ]);
         people = companyPeopleList;
         if (founderIdVerification) {
-          // Return only the safe status fields, no biometric data
+          // Return only the safe status fields, no biometric data or raw file paths
           founderKyc = {
             status: founderIdVerification.status,
             bvnNinVerified: founderIdVerification.bvnNinVerified,
+            // Derived step booleans (no raw IDs exposed)
+            docSubmitted: founderIdVerification.idDocFileId != null,
+            biometricSubmitted: founderIdVerification.smileJobId != null || founderIdVerification.livenessScore != null,
             verifiedAt: founderIdVerification.verifiedAt,
             expiresAt: founderIdVerification.expiresAt,
             method: founderIdVerification.method,

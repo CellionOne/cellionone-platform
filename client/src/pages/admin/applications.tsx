@@ -728,6 +728,12 @@ export default function AdminApplications() {
                               <span>Assigned: {app.lawyerName}</span>
                             </>
                           )}
+                          {app.rcNumber && (
+                            <>
+                              <span>&bull;</span>
+                              <span className="font-medium text-primary" data-testid={`text-rc-number-${app.id}`}>RC: {app.rcNumber}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>

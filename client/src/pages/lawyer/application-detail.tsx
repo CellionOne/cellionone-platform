@@ -84,6 +84,8 @@ interface RegisteredOfficeInfo {
 interface FounderKyc {
   status: string;
   bvnNinVerified: boolean | null;
+  docSubmitted: boolean;
+  biometricSubmitted: boolean;
   verifiedAt: string | null;
   expiresAt: string | null;
   method: string | null;
@@ -621,9 +623,9 @@ function OverviewTab({
           </CardHeader>
           <CardContent>
             {founderKyc ? (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground text-sm">Overall Status</span>
+                  <span className="text-muted-foreground text-sm font-medium">Overall Status</span>
                   <Badge
                     variant={founderKyc.status === "verified" ? "default" : founderKyc.status === "rejected" ? "destructive" : "secondary"}
                     className={founderKyc.status === "verified" ? "bg-green-600" : ""}
@@ -635,30 +637,74 @@ function OverviewTab({
                      founderKyc.status === "pending" ? "Pending" : "Not Started"}
                   </Badge>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground text-sm">BVN / NIN</span>
-                  {founderKyc.bvnNinVerified ? (
-                    <span className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400">
-                      <CheckCircle2 className="h-3 w-3" /> Verified
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" /> Pending
-                    </span>
+
+                <div className="grid grid-cols-2 gap-2" data-testid="kyc-steps">
+                  {[
+                    {
+                      label: "BVN / NIN",
+                      done: !!founderKyc.bvnNinVerified,
+                      testId: "kyc-step-bvnnin",
+                    },
+                    {
+                      label: "Document",
+                      done: founderKyc.docSubmitted,
+                      testId: "kyc-step-document",
+                    },
+                    {
+                      label: "Biometric",
+                      done: founderKyc.biometricSubmitted,
+                      testId: "kyc-step-biometric",
+                    },
+                    {
+                      label: "AML / Sanctions",
+                      done: founderKyc.status === "verified",
+                      failed: founderKyc.status === "rejected",
+                      testId: "kyc-step-aml",
+                    },
+                  ].map((step) => (
+                    <div
+                      key={step.label}
+                      data-testid={step.testId}
+                      className={`flex items-center gap-2 p-2 rounded-lg text-xs border ${
+                        step.failed
+                          ? "border-destructive/30 bg-destructive/5 text-destructive"
+                          : step.done
+                          ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30 text-green-800 dark:text-green-300"
+                          : "border-muted bg-muted/30 text-muted-foreground"
+                      }`}
+                    >
+                      {step.failed ? (
+                        <XCircle className="h-3.5 w-3.5 shrink-0" />
+                      ) : step.done ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                      ) : (
+                        <Clock className="h-3.5 w-3.5 shrink-0" />
+                      )}
+                      <span className="font-medium">{step.label}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-2 text-xs text-muted-foreground">
+                  {founderKyc.verifiedAt && (
+                    <div className="flex items-center justify-between">
+                      <span>Verified On</span>
+                      <span className="text-foreground font-medium">{new Date(founderKyc.verifiedAt).toLocaleDateString()}</span>
+                    </div>
+                  )}
+                  {founderKyc.expiresAt && (
+                    <div className="flex items-center justify-between">
+                      <span>Expires</span>
+                      <span className="text-foreground font-medium">{new Date(founderKyc.expiresAt).toLocaleDateString()}</span>
+                    </div>
+                  )}
+                  {founderKyc.externalProvider && (
+                    <div className="flex items-center justify-between">
+                      <span>Provider</span>
+                      <span className="text-foreground font-medium capitalize">{founderKyc.externalProvider.replace(/_/g, " ")}</span>
+                    </div>
                   )}
                 </div>
-                {founderKyc.verifiedAt && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground text-sm">Verified On</span>
-                    <span className="text-sm">{new Date(founderKyc.verifiedAt).toLocaleDateString()}</span>
-                  </div>
-                )}
-                {founderKyc.externalProvider && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground text-sm">Provider</span>
-                    <span className="text-sm capitalize">{founderKyc.externalProvider.replace("_", " ")}</span>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -694,9 +740,11 @@ function PeopleTab({ people }: { people: CompanyPerson[] }) {
       case "accepted":
         return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />Pending Verification</Badge>;
       case "pending":
-        return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />Not Accepted</Badge>;
+        return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />Invite Sent</Badge>;
       case "not_invited":
-        return <Badge variant="outline" className="text-xs">Not Invited</Badge>;
+        return <Badge variant="outline" className="text-xs gap-1"><AlertCircle className="h-3 w-3" />Not Invited</Badge>;
+      case "rejected":
+        return <Badge variant="destructive" className="text-xs gap-1"><XCircle className="h-3 w-3" />Failed / Rejected</Badge>;
       default:
         return <Badge variant="outline" className="text-xs capitalize">{person.inviteStatus || "Unknown"}</Badge>;
     }
@@ -780,11 +828,31 @@ function PeopleTab({ people }: { people: CompanyPerson[] }) {
                           </p>
                         )}
                         {person.corporateCountry && <p>Country: {person.corporateCountry}</p>}
-                        {person.corporateAuthorisedRepName && (
-                          <p>Authorised Rep: {person.corporateAuthorisedRepName}</p>
-                        )}
-                        {person.inviteEmail && (
-                          <p>Rep Email: {person.inviteEmail}</p>
+                        {(person.corporateAuthorisedRepName || person.inviteEmail) && (
+                          <div className="mt-1.5 pt-1.5 border-t border-dashed border-muted-foreground/20">
+                            <p className="font-medium text-foreground/70 mb-0.5">Authorised Representative</p>
+                            {person.corporateAuthorisedRepName && <p>{person.corporateAuthorisedRepName}</p>}
+                            {person.inviteEmail && <p>{person.inviteEmail}</p>}
+                            <div className="flex items-center gap-1 mt-1">
+                              {person.inviteStatus === "accepted" ? (
+                                <span className="flex items-center gap-1 text-green-700 dark:text-green-400">
+                                  <CheckCircle2 className="h-3 w-3" />Rep invite accepted
+                                </span>
+                              ) : person.inviteStatus === "pending" ? (
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />Rep invite sent, awaiting response
+                                </span>
+                              ) : person.inviteStatus === "not_invited" ? (
+                                <span className="flex items-center gap-1">
+                                  <AlertCircle className="h-3 w-3" />Rep not yet invited
+                                </span>
+                              ) : person.inviteStatus === "rejected" ? (
+                                <span className="flex items-center gap-1 text-destructive">
+                                  <XCircle className="h-3 w-3" />Rep invite rejected
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
                         )}
                       </div>
                     ) : (

@@ -369,6 +369,11 @@ export default function ApplicationDetailsPage() {
                 {" "}&bull;{" "}
                 {application.companyType || "LTD"}
               </p>
+              {application.rcNumber && (
+                <p className="text-sm font-medium text-primary mt-0.5" data-testid="text-rc-number">
+                  RC Number: {application.rcNumber}
+                </p>
+              )}
             </div>
           </div>
           <StatusBadge status={application.status || "draft"} className="text-sm" />

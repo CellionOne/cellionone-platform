@@ -7519,25 +7519,23 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         ipAddress: req.ip,
       });
 
-      // Notify the newly assigned lawyer — fire and forget, never blocks the response
-      try {
-        const lawyer = await storage.getUser(lawyerId);
-        if (lawyer?.email) {
-          const emailSvc = await import("./services/emailService");
-          const baseUrl = emailSvc.getSiteBaseUrl(req);
-          const companyName = currentApp?.companyName1 || `Application #${applicationId}`;
-          await emailSvc.sendApplicationAssignedEmail({
-            lawyerEmail: lawyer.email,
-            lawyerFirstName: lawyer.firstName || "Lawyer",
-            applicationId,
-            companyName,
-            isReassignment,
-            dashboardUrl: `${baseUrl}/lawyer/dashboard`,
-          });
-        }
-      } catch (emailError) {
+      // Notify the newly assigned lawyer — truly non-blocking: does not delay the HTTP response
+      storage.getUser(lawyerId).then(async (lawyer) => {
+        if (!lawyer?.email) return;
+        const emailSvc = await import("./services/emailService");
+        const baseUrl = emailSvc.getSiteBaseUrl(req);
+        const companyName = currentApp?.companyName1 || `Application #${applicationId}`;
+        return emailSvc.sendApplicationAssignedEmail({
+          lawyerEmail: lawyer.email,
+          lawyerFirstName: lawyer.firstName || "Lawyer",
+          applicationId,
+          companyName,
+          isReassignment,
+          dashboardUrl: `${baseUrl}/lawyer/dashboard`,
+        });
+      }).catch((emailError) => {
         console.error(`[Email] Failed to send assignment notification for app #${applicationId}:`, emailError);
-      }
+      });
       
       res.json(updated);
     } catch (error) {

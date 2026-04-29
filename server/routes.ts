@@ -6487,8 +6487,8 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
             details: {
               applicationId,
               personType: "corporate",
-              corporateName: person.corporateName,
-              corporateRcNumber: person.corporateRcNumber,
+              maskedPersonIdentifier: person.corporateRcNumber ? `RC:${person.corporateRcNumber}` : (person.corporateName ?? "unknown"),
+              documentType: "corporate_dossier",
               kybLookupStatus: person.kybLookupStatus,
             },
             ipAddress: req.ip,
@@ -6571,7 +6571,8 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           details: {
             applicationId,
             personType: "individual",
-            maskedPersonEmail: maskEmail(person.inviteEmail),
+            maskedPersonIdentifier: maskEmail(person.inviteEmail),
+            documentType: "individual_dossier",
             resolvedUserId: resolvedUserId ? "present" : "absent",
             hasProfile: profile !== null,
           },

@@ -437,6 +437,11 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
         const lawyerFeeKobo = order.totalLawyerNet ?? 0;
         const paidAt = data.paid_at ? new Date(data.paid_at) : new Date();
 
+        // Determine split flag at write-time based on reference prefix:
+        // celion_split_ = legacy Paystack subaccount split (wasSplitAtCheckout=true)
+        // celion_order_ = new non-split checkout (wasSplitAtCheckout=false)
+        const wasSplitAtCheckout = reference.startsWith('celion_split_');
+
         if (existingPayment) {
           const updatedBreakdown = {
             ...((existingPayment.breakdownJson as object) || {}),
@@ -447,6 +452,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             amountTotalKobo: order.totalAmount,
             status: 'paid',
             paidAt,
+            wasSplitAtCheckout,
           }).where(eq(payments.id, existingPayment.id));
         } else {
           await db.insert(payments).values({
@@ -458,6 +464,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             paidAt,
             paystackReference: reference,
             breakdownJson: { lawyerFee: lawyerFeeKobo },
+            wasSplitAtCheckout,
           });
         }
         console.log(`[Paystack Webhook] payments record synced for application ${order.applicationId}: lawyerFee=${lawyerFeeKobo} kobo`);

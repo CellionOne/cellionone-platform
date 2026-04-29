@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { eq, and, sql } from "drizzle-orm";
-import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts, cieSecurities, cieModelVersions, cieMarketPulse, ciePartners, kycApiKeys, bankPartners, bankPortalUsers } from "@shared/schema";
+import { eq, and, sql, like } from "drizzle-orm";
+import { featureFlags, users, userRoles, companyApplications, auditLogs, serviceAddresses, productCatalog, kycDocumentRequirements, rfqCategories, loginAttempts, cieSecurities, cieModelVersions, cieMarketPulse, ciePartners, kycApiKeys, bankPartners, bankPortalUsers, payments } from "@shared/schema";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { storage } from "./storage";
@@ -539,6 +539,17 @@ export async function seedDatabase() {
       }
     } catch (bankSeedErr: any) {
       console.warn("[Seed] Bank portal user seeding skipped:", bankSeedErr.message);
+    }
+
+    // One-off backfill: flag historical checkout-split payments
+    // Idempotent — safe to run on every startup; only updates rows not already flagged
+    try {
+      const backfilled = await db.update(payments)
+        .set({ wasSplitAtCheckout: true })
+        .where(like(payments.paystackReference, 'celion_split_%'));
+      console.log("[Seed] wasSplitAtCheckout backfill complete (celion_split_ references)");
+    } catch (backfillErr: any) {
+      console.warn("[Seed] wasSplitAtCheckout backfill skipped:", backfillErr.message);
     }
 
     console.log("Database seeding complete");

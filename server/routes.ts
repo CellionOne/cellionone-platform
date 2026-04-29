@@ -7630,10 +7630,12 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  const RETIRED_FEATURE_FLAGS = new Set(["enable_paystack_split_settlement"]);
+
   app.get("/api/admin/feature-flags", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const flags = await storage.getFeatureFlags();
-      res.json(flags);
+      res.json(flags.filter(f => !RETIRED_FEATURE_FLAGS.has(f.key)));
     } catch (error) {
       console.error("Error fetching feature flags:", error);
       res.status(500).json({ message: "Failed to fetch feature flags" });
@@ -7760,6 +7762,14 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       if (targetState === "released_to_lawyer" && currentState !== "paid") {
         return res.status(400).json({ 
           message: `Payment must be in 'paid' status before releasing to lawyer. Current status: ${currentState}`,
+        });
+      }
+
+      // Block release when payment was split at checkout — lawyer was already paid via Paystack subaccount
+      if (targetState === "released_to_lawyer" && payment.wasSplitAtCheckout) {
+        return res.status(409).json({
+          message: "This payment was split at checkout — the lawyer subaccount already received their share. A manual 'Release to Lawyer' transfer would result in a double payment.",
+          code: "ALREADY_SPLIT_AT_CHECKOUT",
         });
       }
       

@@ -260,16 +260,18 @@ async function syncChecklistFromVerifications(applicationId: number, founderId: 
       storage.getCompanyPeople(applicationId),
     ]);
 
-    // Helper: only auto-provide when the item is currently "missing".
-    // Any other status — "accepted", "rejected", or already "provided" — is left
-    // untouched so that admin overrides remain authoritative and are never silently
-    // reverted by the sync. This makes the resolver strictly additive.
+    // Helper: auto-provide an item ONLY if it is currently "missing" AND has never
+    // been auto-resolved before (isAutoResolved === false/null).
+    // Once isAutoResolved is set to true, this guard ensures the sync never re-fires
+    // for that item again — even if an admin deliberately resets the status to "missing".
+    // This keeps admin overrides permanently authoritative.
     async function autoProvide(key: string, autoNotes: string): Promise<void> {
       const item = checklistItems.find((i) => i.key === key);
-      if (!item || item.status !== "missing") return;
+      if (!item || item.status !== "missing" || item.isAutoResolved === true) return;
       await storage.updateChecklistItem(item.id, {
         status: "provided",
         reviewerNotes: autoNotes,
+        isAutoResolved: true,
       });
     }
 
@@ -286,28 +288,36 @@ async function syncChecklistFromVerifications(applicationId: number, founderId: 
     }
 
     // ── director_id & shareholder_details ─────────────────────────────────────
-    // Both are auto-provided when every person in the team is either:
-    //   • an individually verified user (isVerified=true), OR
-    //   • a corporate entity that passed CAC auto-verification (autoVerifyMethod non-null
-    //     OR kybLookupStatus='found')
-    // If the team is empty the founder is the sole director — already covered by id_document.
-    if (teamMembers.length === 0) {
-      // Sole-founder application: treat founder verification as director coverage
-      if (idVerified || hasIdDoc) {
-        await autoProvide("director_id", "Auto-resolved: founder is the sole director and is identity-verified");
-        await autoProvide("shareholder_details", "Auto-resolved: founder is the sole shareholder and is identity-verified");
+    // Only evaluate team members with the "director" or "shareholder" role.
+    // Other roles (e.g. secretary) are not relevant to these checklist items.
+    const directors = teamMembers.filter((p) => p.role === "director");
+    const shareholders = teamMembers.filter((p) => p.role === "shareholder");
+
+    function isPersonVerified(person: typeof teamMembers[number]): boolean {
+      if (person.entityType === "corporate") {
+        return person.autoVerifyMethod !== null || person.kybLookupStatus === "found";
       }
-    } else {
-      const allVerified = teamMembers.every((person) => {
-        if (person.entityType === "corporate") {
-          return person.autoVerifyMethod !== null || person.kybLookupStatus === "found";
-        }
-        return person.isVerified === true;
-      });
-      if (allVerified) {
-        await autoProvide("director_id", "Auto-resolved: all directors are individually or corporately verified on the platform");
-        await autoProvide("shareholder_details", "Auto-resolved: all shareholders are individually or corporately verified on the platform");
-      }
+      return person.isVerified === true;
+    }
+
+    // director_id: auto-provide when every director is verified (or sole-founder application)
+    const directorCheckReady =
+      directors.length === 0
+        ? idVerified || hasIdDoc   // sole-founder: covered by founder's own verification
+        : directors.every(isPersonVerified);
+
+    if (directorCheckReady) {
+      await autoProvide("director_id", "Auto-resolved: all directors are identity-verified on the platform");
+    }
+
+    // shareholder_details: auto-provide when every shareholder is verified (or sole-founder application)
+    const shareholderCheckReady =
+      shareholders.length === 0
+        ? idVerified || hasIdDoc   // sole-founder: is the implicit 100% shareholder
+        : shareholders.every(isPersonVerified);
+
+    if (shareholderCheckReady) {
+      await autoProvide("shareholder_details", "Auto-resolved: all shareholders are identity-verified on the platform");
     }
   } catch (err) {
     // Non-fatal: checklist sync errors should not block the main request

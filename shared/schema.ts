@@ -231,6 +231,7 @@ export const applicationChecklistItems = pgTable("application_checklist_items", 
   required: boolean("required").default(true),
   status: varchar("status", { length: 50 }).default("missing"), // missing, provided, accepted, rejected
   reviewerNotes: text("reviewer_notes"),
+  isAutoResolved: boolean("is_auto_resolved").default(false), // true once auto-provided by syncChecklistFromVerifications
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

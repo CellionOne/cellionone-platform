@@ -372,8 +372,7 @@ export default function ApplicationDetailsPage() {
                   {checklist.map((item) => {
                     const isAutoResolved =
                       item.status === "provided" &&
-                      typeof item.reviewerNotes === "string" &&
-                      item.reviewerNotes.startsWith("Auto-resolved:");
+                      item.isAutoResolved === true;
 
                     return (
                     <div key={item.id} className="py-3" data-testid={`checklist-${item.key}`}>

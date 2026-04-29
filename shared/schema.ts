@@ -233,10 +233,12 @@ export const applicationChecklistItems = pgTable("application_checklist_items", 
   status: varchar("status", { length: 50 }).default("missing"), // missing, provided, accepted, rejected
   reviewerNotes: text("reviewer_notes"),
   isAutoResolved: boolean("is_auto_resolved").default(false), // true once auto-provided by syncChecklistFromVerifications
-  source: varchar("source", { length: 50 }), // kyc_auto_resolved | manual_upload — null for legacy items
+  source: varchar("source", { length: 50 }), // kyc_auto_resolved | manual_upload | people_requirement — null for legacy items
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => ({
+  uniqueAppKey: uniqueIndex("application_checklist_items_app_key_idx").on(table.applicationId, table.key),
+}));
 
 export const insertChecklistItemSchema = createInsertSchema(applicationChecklistItems).omit({ id: true, createdAt: true, updatedAt: true });
 export type ApplicationChecklistItem = typeof applicationChecklistItems.$inferSelect;

@@ -6,6 +6,7 @@ import {
   kycSubmittedDocuments,
   founderProfiles,
   users,
+  companyPeople,
   type KycVerificationRequest,
 } from "@shared/schema";
 import crypto from "crypto";
@@ -136,6 +137,29 @@ export async function upsertVerifiedCompanyDirect(data: UpsertVerifiedCompanyDir
         lastVerifiedAt: now,
         firstVerifiedAt: now,
       });
+    }
+
+    // After verifying a corporate entity, auto-resolve its per-person document
+    // requirements for every application that has a company_people row with this RC number.
+    if (rcNumber) {
+      const affectedPeople = await db
+        .select({ applicationId: companyPeople.applicationId })
+        .from(companyPeople)
+        .where(eq(companyPeople.corporateRcNumber, rcNumber));
+
+      const uniqueAppIds = [...new Set(
+        affectedPeople.map(r => r.applicationId).filter((id): id is number => id !== null)
+      )];
+
+      if (uniqueAppIds.length > 0) {
+        // Dynamic import avoids circular dependency (checklistSyncService imports storage, not verifiedEntityService)
+        const { syncPeopleDocumentRequirements } = await import('./checklistSyncService');
+        for (const appId of uniqueAppIds) {
+          syncPeopleDocumentRequirements(appId).catch((e: Error) =>
+            console.error(`[VerifiedEntityService] Failed to sync people docs for app ${appId}:`, e.message)
+          );
+        }
+      }
     }
   } catch (error) {
     console.error("[VerifiedEntityService] Error upserting company from application:", error);

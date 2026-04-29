@@ -1,4 +1,7 @@
 import { storage } from '../storage';
+import { db } from '../db';
+import { eq, inArray } from 'drizzle-orm';
+import { verifiedEntities, identityVerifications } from '@shared/schema';
 
 /**
  * Auto-resolve checklist items for a given application based on current verification state.
@@ -109,18 +112,6 @@ function getDocSlugsForPerson(
   ];
 }
 
-function isCompanyPersonVerified(person: {
-  entityType: string | null;
-  isVerified: boolean | null;
-  autoVerifyMethod: string | null;
-  kybLookupStatus: string | null;
-}): boolean {
-  if (person.entityType === "corporate") {
-    return !!person.autoVerifyMethod || person.kybLookupStatus === "found";
-  }
-  return person.isVerified === true;
-}
-
 /**
  * Idempotently create/update/delete per-person document checklist items
  * (source = 'people_requirement') for every director/shareholder in the application.
@@ -128,8 +119,11 @@ function isCompanyPersonVerified(person: {
  * - Creates items for unverified parties that don't have them yet.
  * - Auto-resolves items for parties that are already verified.
  * - Deletes items whose person has been removed from the application.
+ * - Performs authoritative verification lookups against verified_entities (for
+ *   corporate RC numbers) and identityVerifications (for individual users) so
+ *   that items are resolved even if company_people flags are stale.
  *
- * Safe to call multiple times — fully idempotent.
+ * Safe to call multiple times — fully idempotent (unique constraint on applicationId+key).
  */
 export async function syncPeopleDocumentRequirements(applicationId: number): Promise<void> {
   try {
@@ -139,6 +133,38 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
     ]);
 
     const existingPeopleReqItems = allItems.filter(i => i.source === "people_requirement");
+
+    // ── Authoritative lookup: batch-fetch verified_entities for corporate RC numbers ──
+    const rcNumbers = people
+      .filter(p => p.entityType === "corporate" && p.corporateRcNumber)
+      .map(p => p.corporateRcNumber as string);
+
+    const verifiedRcSet = new Set<string>();
+    if (rcNumbers.length > 0) {
+      const rows = await db
+        .select({ rcNumber: verifiedEntities.rcNumber })
+        .from(verifiedEntities)
+        .where(inArray(verifiedEntities.rcNumber, rcNumbers));
+      for (const row of rows) {
+        if (row.rcNumber) verifiedRcSet.add(row.rcNumber);
+      }
+    }
+
+    // ── Authoritative lookup: batch-fetch identityVerifications for individual users ──
+    const personUserIds = people
+      .filter(p => p.entityType !== "corporate" && p.personUserId)
+      .map(p => p.personUserId as string);
+
+    const verifiedIndividualSet = new Set<string>();
+    if (personUserIds.length > 0) {
+      const rows = await db
+        .select({ userId: identityVerifications.userId, bvnNinVerified: identityVerifications.bvnNinVerified })
+        .from(identityVerifications)
+        .where(inArray(identityVerifications.userId, personUserIds));
+      for (const row of rows) {
+        if (row.bvnNinVerified) verifiedIndividualSet.add(row.userId);
+      }
+    }
 
     // Build the full set of expected item keys for current people
     const expectedKeys = new Set<string>();
@@ -156,7 +182,17 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
         person.corporateBusinessType,
       );
 
-      const verified = isCompanyPersonVerified(person);
+      // Authoritative verification check:
+      // Corporate: check verified_entities by RC number (in addition to stale company_people flags)
+      // Individual: check identityVerifications by userId (in addition to stale isVerified flag)
+      let verified: boolean;
+      if (person.entityType === "corporate") {
+        const rcVerified = !!(person.corporateRcNumber && verifiedRcSet.has(person.corporateRcNumber));
+        verified = rcVerified || !!person.autoVerifyMethod || person.kybLookupStatus === "found";
+      } else {
+        const idxVerified = !!(person.personUserId && verifiedIndividualSet.has(person.personUserId));
+        verified = idxVerified || person.isVerified === true;
+      }
 
       for (const { slug, label } of docSlugs) {
         const key = `people_req_${person.id}_${slug}`;
@@ -165,7 +201,7 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
         const existing = existingPeopleReqItems.find(i => i.key === key);
 
         if (!existing) {
-          // Create new item
+          // onConflictDoNothing prevents duplicates under concurrent calls
           if (verified) {
             await storage.createChecklistItem({
               applicationId,

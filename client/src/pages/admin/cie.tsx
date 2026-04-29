@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, ReactNode } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { DashboardLayout } from "@/components/dashboard-layout";
@@ -2620,6 +2620,8 @@ function UserPreviewTab() {
   const [search, setSearch] = useState("");
   const [sectorFilter, setSectorFilter] = useState("all");
   const [recFilter, setRecFilter] = useState("all");
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const { data: pulseData, isLoading: pulseLoading } = useQuery<PulseData>({
     queryKey: ["/api/cie-portal/pulse"],
@@ -2759,6 +2761,74 @@ function UserPreviewTab() {
               (recFilter === "all" || s.recommendation === recFilter)
             );
 
+            const REC_ORDER: Record<string, number> = {
+              "Strong Buy": 5, "Accumulate": 4, "Hold": 3, "Reduce": 2, "Sell": 1,
+            };
+
+            const toggleSort = (col: string) => {
+              if (sortCol === col) {
+                setSortDir(d => d === "asc" ? "desc" : "asc");
+              } else {
+                setSortCol(col);
+                setSortDir("asc");
+              }
+            };
+
+            const sorted = sortCol
+              ? [...filtered].sort((a, b) => {
+                  let av: string | number | null = null;
+                  let bv: string | number | null = null;
+                  if (sortCol === "ticker") { av = a.ticker; bv = b.ticker; }
+                  else if (sortCol === "name") { av = a.name; bv = b.name; }
+                  else if (sortCol === "sector") { av = a.sector; bv = b.sector; }
+                  else if (sortCol === "ias") { av = a.ias; bv = b.ias; }
+                  else if (sortCol === "rs") { av = a.rs; bv = b.rs; }
+                  else if (sortCol === "cs") { av = a.cs; bv = b.cs; }
+                  else if (sortCol === "recommendation") {
+                    av = REC_ORDER[a.recommendation ?? ""] ?? 0;
+                    bv = REC_ORDER[b.recommendation ?? ""] ?? 0;
+                  } else if (sortCol === "ias-rating") {
+                    av = a.ias;
+                    bv = b.ias;
+                  } else if (sortCol === "momentum") {
+                    const score = (m: PreviewMomentum) => (m.daily === "up" ? 1 : m.daily === "down" ? -1 : 0) + (m.weekly === "up" ? 1 : m.weekly === "down" ? -1 : 0) + (m.monthly === "up" ? 1 : m.monthly === "down" ? -1 : 0);
+                    av = score(a.momentum);
+                    bv = score(b.momentum);
+                  }
+                  if (av === null && bv === null) return 0;
+                  if (av === null) return 1;
+                  if (bv === null) return -1;
+                  const cmp = typeof av === "string" && typeof bv === "string"
+                    ? av.localeCompare(bv)
+                    : (av as number) - (bv as number);
+                  return sortDir === "asc" ? cmp : -cmp;
+                })
+              : filtered;
+
+            const SortIcon = ({ col }: { col: string }) => {
+              if (sortCol !== col) return <span className="ml-0.5 text-muted-foreground opacity-40">↕</span>;
+              return <span className="ml-0.5">{sortDir === "asc" ? "↑" : "↓"}</span>;
+            };
+
+            const SortableHead = ({ col, className, title, children }: { col: string; className?: string; title?: string; children: ReactNode }) => {
+              const ariaSort: "ascending" | "descending" | "none" =
+                sortCol === col ? (sortDir === "asc" ? "ascending" : "descending") : "none";
+              return (
+                <TableHead
+                  title={title}
+                  aria-sort={ariaSort}
+                  className={`cursor-pointer select-none hover:bg-muted/50 transition-colors ${className ?? ""}`}
+                  onClick={() => toggleSort(col)}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(col); } }}
+                  tabIndex={0}
+                  role="columnheader"
+                  data-testid={`th-preview-sort-${col}`}
+                >
+                  <span className="inline-flex items-center gap-0.5">{children}<SortIcon col={col} /></span>
+                </TableHead>
+              );
+            };
+
             return (
               <>
                 <div className="flex flex-wrap items-start gap-3">
@@ -2808,19 +2878,19 @@ function UserPreviewTab() {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Ticker</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Sector</TableHead>
-                            <TableHead title="RS trend: Daily/Weekly/Monthly">D/W/M</TableHead>
-                            <TableHead className="text-center">IAS</TableHead>
-                            <TableHead className="text-center">RS</TableHead>
-                            <TableHead className="text-center">CS</TableHead>
-                            <TableHead>Rating</TableHead>
-                            <TableHead>Recommendation</TableHead>
+                            <SortableHead col="ticker">Ticker</SortableHead>
+                            <SortableHead col="name">Name</SortableHead>
+                            <SortableHead col="sector">Sector</SortableHead>
+                            <SortableHead col="momentum" title="RS trend: Daily/Weekly/Monthly">D/W/M</SortableHead>
+                            <SortableHead col="ias" className="text-center">IAS</SortableHead>
+                            <SortableHead col="rs" className="text-center">RS</SortableHead>
+                            <SortableHead col="cs" className="text-center">CS</SortableHead>
+                            <SortableHead col="ias-rating">Rating</SortableHead>
+                            <SortableHead col="recommendation">Recommendation</SortableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {filtered.map(s => (
+                          {sorted.map(s => (
                             <TableRow key={s.ticker} data-testid={`row-preview-security-${s.ticker}`}>
                               <TableCell className="font-mono font-bold text-primary">{s.ticker}</TableCell>
                               <TableCell className="text-sm max-w-[120px] truncate">{s.name}</TableCell>

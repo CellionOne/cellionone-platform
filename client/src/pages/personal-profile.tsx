@@ -339,6 +339,10 @@ function ProfileForm() {
   const [idDocUploading, setIdDocUploading] = useState(false);
 
   async function handleIdDocUpload(file: File) {
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Please upload a compressed image or PDF under 5 MB.", variant: "destructive" });
+      return;
+    }
     setIdDocUploading(true);
     try {
       const formData = new FormData();
@@ -1178,6 +1182,10 @@ function DocumentsSection() {
   });
 
   const handleUpload = async (docType: string, file: File) => {
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Please upload a compressed image or PDF under 5 MB.", variant: "destructive" });
+      return;
+    }
     setUploading(docType);
     try {
       const formData = new FormData();

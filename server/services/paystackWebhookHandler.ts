@@ -2175,6 +2175,63 @@ export async function runExistingCompanyVerificationPipeline(profileId: number):
       return idOk && amlOk;
     });
 
+    // ── Founder identity auto-verify (free pipeline) ──────────────────────────
+    // Mirrors the paid pipeline (lines 1109–1153). If the founder is listed as a
+    // director, their BVN/NIN passed, and AML is explicitly clean — mark them
+    // identity-verified immediately so they don't have to re-enter BVN/NIN manually.
+    const freeVerifyDir = founderEmail
+      ? individualPipelineDirs.find(d =>
+          d.email?.toLowerCase() === founderEmail &&
+          (d.bvnVerified === true || d.ninVerified === true) &&
+          d.amlChecked === true && d.amlIsHit === false
+        )
+      : undefined;
+
+    if (freeVerifyDir) {
+      const now = new Date();
+      const idVPatch: Partial<InsertIdentityVerification> = {
+        status: 'verified',
+        method: 'automated',
+        externalProvider: 'smile_id',
+        identitySource: 'kyb_pipeline',
+        bvnNinVerified: true,
+        verifiedAt: now,
+      };
+      const [existingIdV] = await db.select({ id: identityVerifications.id })
+        .from(identityVerifications).where(eq(identityVerifications.founderUserId, profile.founderId));
+      if (existingIdV) {
+        await db.update(identityVerifications).set(idVPatch).where(eq(identityVerifications.id, existingIdV.id));
+      } else {
+        await db.insert(identityVerifications).values({ founderUserId: profile.founderId, ...idVPatch });
+      }
+
+      await db.update(users)
+        .set({ isIdentityVerified: true, identityVerifiedAt: now, updatedAt: now })
+        .where(eq(users.id, profile.founderId));
+
+      await db.update(directorBiometricInvites)
+        .set({ status: 'completed', updatedAt: now })
+        .where(and(
+          eq(directorBiometricInvites.companyProfileId, profile.id),
+          eq(directorBiometricInvites.founderUserId, profile.founderId),
+        ));
+
+      await upsertVerifiedIndividualByUserId(profile.founderId).catch((e: Error) =>
+        console.error(`[ExistingCoVerify] upsertVerifiedIndividual error (non-fatal): ${e.message}`)
+      );
+
+      await storage.createAuditLog({
+        actorUserId: profile.founderId,
+        action: 'founder_auto_verified_via_free_kyb_pipeline',
+        entityType: 'company_profile',
+        entityId: String(profile.id),
+        details: { directorName: freeVerifyDir.name, bvnVerified: freeVerifyDir.bvnVerified, ninVerified: freeVerifyDir.ninVerified },
+      });
+
+      console.log(`[ExistingCoVerify] Founder ${profile.founderId} identity auto-verified via free KYB pipeline (director: ${freeVerifyDir.name})`);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const directorsReport = updatedDirectors.map(d => {
       if (d.entityType === 'corporate') {
         return {

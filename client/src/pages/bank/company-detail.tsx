@@ -314,7 +314,14 @@ export default function BankCompanyDetailPage() {
   const statusColors: Record<string, string> = {
     verified: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
     pending: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
+    under_review: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
     rejected: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
+  };
+  const statusLabels: Record<string, string> = {
+    verified: "Verified",
+    pending: "Pending",
+    under_review: "Under Review",
+    rejected: "Rejected",
   };
 
   return (
@@ -368,8 +375,8 @@ export default function BankCompanyDetailPage() {
             <h1 className="text-2xl font-bold">{company.companyName || "—"}</h1>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               {company.existingCompanyStatus && (
-                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColors[company.existingCompanyStatus] || "bg-gray-100 text-gray-700"}`}>
-                  {company.existingCompanyStatus.replace(/_/g, " ").toUpperCase()}
+                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColors[company.existingCompanyStatus] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"}`}>
+                  {statusLabels[company.existingCompanyStatus] || company.existingCompanyStatus.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
                 </span>
               )}
               {company.dispatchedAt && (

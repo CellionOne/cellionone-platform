@@ -30,10 +30,18 @@ function statusBadge(status?: string) {
   const map: Record<string, string> = {
     verified: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
     pending: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
+    under_review: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
     rejected: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
   };
+  const labels: Record<string, string> = {
+    verified: "Verified",
+    pending: "Pending",
+    under_review: "Under Review",
+    rejected: "Rejected",
+  };
   const cls = map[status] || "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
-  return <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>{status.replace(/_/g, " ").toUpperCase()}</span>;
+  const label = labels[status] || status.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  return <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>{label}</span>;
 }
 
 export default function BankCompaniesPage() {

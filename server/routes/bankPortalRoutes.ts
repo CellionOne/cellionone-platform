@@ -909,10 +909,16 @@ export function registerBankPortalRoutes(app: Express): void {
         }
 
         if (!match) return { ...dir, bvn, nin };
-        // Support both ninPassed/bvnPassed (actual) and ninKyc/bvnKyc (alternate) naming
-        const ninVerified = match.ninPassed === true || match.ninKyc === true;
-        const bvnVerified = match.bvnPassed === true || match.bvnKyc === true;
-        const amlIsHit = match.amlClear === true ? false : match.amlClear === false ? true : undefined;
+        // Support all field naming variants across pipeline versions:
+        // - ninVerified/bvnVerified: free pipeline (paystackWebhookHandler directorsReport)
+        // - ninPassed/bvnPassed: legacy paid pipeline
+        // - ninKyc/bvnKyc: alternate historic shape
+        const ninVerified = match.ninVerified === true || match.ninPassed === true || match.ninKyc === true;
+        const bvnVerified = match.bvnVerified === true || match.bvnPassed === true || match.bvnKyc === true;
+        // amlIsHit: free pipeline uses this directly; legacy used amlClear (inverted boolean)
+        const amlIsHit = match.amlIsHit !== undefined
+          ? Boolean(match.amlIsHit)
+          : (match.amlClear === true ? false : match.amlClear === false ? true : undefined);
         // biometricStatus: prefer report value, fall back to raw director value
         const biometricStatus = match.biometricStatus !== undefined ? match.biometricStatus : dir.biometricStatus;
         return {

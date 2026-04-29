@@ -1956,7 +1956,16 @@ export async function registerRoutes(
 
   // Server-side upload: receives file via multipart, uploads to object storage, saves path to profile
   const profileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
-  app.post("/api/profile/personal/upload", isAuthenticated, profileUpload.single("file"), async (req: any, res) => {
+  const profileUploadMiddleware = (req: any, res: any, next: any) => {
+    profileUpload.single("file")(req, res, (err: any) => {
+      if (err?.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ message: "File too large — please upload a file under 5 MB." });
+      }
+      if (err) return next(err);
+      next();
+    });
+  };
+  app.post("/api/profile/personal/upload", isAuthenticated, profileUploadMiddleware, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       const docType = req.body?.docType;

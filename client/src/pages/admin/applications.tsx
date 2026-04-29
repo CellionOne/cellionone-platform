@@ -30,6 +30,7 @@ import {
   Wallet,
   CheckCircle2,
   XCircle,
+  ArrowLeftRight,
 } from "lucide-react";
 import {
   Dialog,
@@ -116,6 +117,7 @@ export default function AdminApplications() {
   const [abandonedCartSearch, setAbandonedCartSearch] = useState("");
   const [showLegacy, setShowLegacy] = useState(false);
   const [inlineLawyerId, setInlineLawyerId] = useState<string>("");
+  const [isReassignment, setIsReassignment] = useState(false);
   const [bankDetailsOpen, setBankDetailsOpen] = useState(false);
   const [bankDetailsLawyerId, setBankDetailsLawyerId] = useState<string>("");
   const [bankAcctName, setBankAcctName] = useState("");
@@ -164,7 +166,7 @@ export default function AdminApplications() {
       if (!res.ok) return null;
       return res.json();
     },
-    enabled: paymentDialogOpen && !!selectedApp?.id,
+    enabled: (paymentDialogOpen || (assignDialogOpen && isReassignment)) && !!selectedApp?.id,
   });
 
   const { data: appCompanyProfile } = useQuery<{ id: number; companyName: string; existingCompanyStatus?: string } | null>({
@@ -232,10 +234,11 @@ export default function AdminApplications() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/applications"] });
-      toast({ title: "Lawyer assigned successfully" });
+      toast({ title: isReassignment ? "Lawyer reassigned successfully" : "Lawyer assigned successfully" });
       setAssignDialogOpen(false);
       setSelectedApp(null);
       setSelectedLawyer("");
+      setIsReassignment(false);
     },
     onError: () => {
       toast({ title: "Failed to assign lawyer", variant: "destructive" });
@@ -753,18 +756,36 @@ export default function AdminApplications() {
                         <CreditCard className="h-4 w-4 mr-1" />
                         {app.paymentState || "unpaid"}
                       </Button>
-                      {!app.assignedLawyerUserId && (
+                      {!app.assignedLawyerUserId ? (
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => {
                             setSelectedApp(app);
+                            setIsReassignment(false);
+                            setSelectedLawyer("");
                             setAssignDialogOpen(true);
                           }}
                           data-testid={`button-assign-${app.id}`}
                         >
                           <UserPlus className="h-4 w-4 mr-1" />
                           Assign
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedApp(app);
+                            setIsReassignment(true);
+                            setSelectedLawyer(app.assignedLawyerUserId ?? "");
+                            setAssignDialogOpen(true);
+                          }}
+                          data-testid={`button-reassign-${app.id}`}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <ArrowLeftRight className="h-4 w-4 mr-1" />
+                          Reassign
                         </Button>
                       )}
                       {app.status === "completed" && bankPartners.length > 0 && (
@@ -791,18 +812,46 @@ export default function AdminApplications() {
         )}
       </div>
 
-      <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
+      <Dialog open={assignDialogOpen} onOpenChange={(open) => { setAssignDialogOpen(open); if (!open) { setIsReassignment(false); setSelectedLawyer(""); } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Assign Lawyer</DialogTitle>
+            <DialogTitle>{isReassignment ? "Reassign Lawyer" : "Assign Lawyer"}</DialogTitle>
             <DialogDescription>
-              Select a lawyer to handle "{selectedApp?.companyName1 || 'this application'}"
+              {isReassignment
+                ? `Change the assigned lawyer for "${selectedApp?.companyName1 || 'this application'}"`
+                : `Select a lawyer to handle "${selectedApp?.companyName1 || 'this application'}"`}
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
+          <div className="space-y-4 py-4">
+            {isReassignment && selectedApp?.assignedLawyerUserId && (
+              <div className="text-sm text-muted-foreground">
+                <span className="font-medium">Currently assigned: </span>
+                {(() => {
+                  const current = lawyers?.find(l => l.userId === selectedApp.assignedLawyerUserId);
+                  return current ? `${current.name || current.email}${current.firmName ? ` — ${current.firmName}` : ""}` : selectedApp.lawyerName || "Unknown";
+                })()}
+              </div>
+            )}
+            {isReassignment && appPaymentDetails?.wasSplitAtCheckout && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-sm" data-testid="warn-reassign-split">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium text-amber-800 dark:text-amber-300">Payment already settled at checkout</p>
+                    <p className="text-amber-700 dark:text-amber-400 text-xs mt-0.5">
+                      {(() => {
+                        const current = lawyers?.find(l => l.userId === selectedApp?.assignedLawyerUserId);
+                        const name = current ? (current.name || current.email) : (selectedApp?.lawyerName || "The original lawyer");
+                        return `${name} has already received payment via the Paystack checkout split. This reassignment only changes who handles the case — no new payment will be triggered.`;
+                      })()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             <Select value={selectedLawyer} onValueChange={setSelectedLawyer}>
               <SelectTrigger data-testid="select-lawyer">
-                <SelectValue placeholder="Select a lawyer" />
+                <SelectValue placeholder={isReassignment ? "Select a different lawyer" : "Select a lawyer"} />
               </SelectTrigger>
               <SelectContent>
                 {lawyers?.map((lawyer) => (
@@ -814,7 +863,7 @@ export default function AdminApplications() {
             </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAssignDialogOpen(false)}>
+            <Button variant="outline" onClick={() => { setAssignDialogOpen(false); setIsReassignment(false); setSelectedLawyer(""); }}>
               Cancel
             </Button>
             <Button
@@ -826,10 +875,10 @@ export default function AdminApplications() {
                   });
                 }
               }}
-              disabled={!selectedLawyer || assignMutation.isPending}
+              disabled={!selectedLawyer || assignMutation.isPending || (isReassignment && selectedLawyer === selectedApp?.assignedLawyerUserId)}
               data-testid="button-confirm-assign"
             >
-              {assignMutation.isPending ? <LoadingSpinner size="sm" /> : "Assign"}
+              {assignMutation.isPending ? <LoadingSpinner size="sm" /> : isReassignment ? "Reassign" : "Assign"}
             </Button>
           </DialogFooter>
         </DialogContent>

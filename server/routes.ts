@@ -5572,10 +5572,12 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Access denied" });
       }
       
-      // Update checklist item status if provided
+      // Update checklist item status if provided.
+      // Reset isAutoResolved to false so manual uploads are not shown as "Verified — on file".
       if (checklistItemId) {
         await storage.updateChecklistItem(parseInt(checklistItemId), {
           status: "provided",
+          isAutoResolved: false,
         });
       }
       

@@ -2674,29 +2674,35 @@ function UserPreviewTab() {
                         <TableHead>Sector</TableHead>
                         <TableHead title="RS trend: Daily/Weekly/Monthly">D/W/M</TableHead>
                         <TableHead className="text-center">IAS</TableHead>
+                        <TableHead className="text-center">RS</TableHead>
+                        <TableHead className="text-center">CS</TableHead>
                         <TableHead>Rating</TableHead>
                         <TableHead>Recommendation</TableHead>
-                        <TableHead />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {(securitiesData?.securities ?? []).map(s => (
                         <TableRow key={s.ticker} data-testid={`row-preview-security-${s.ticker}`}>
                           <TableCell className="font-mono font-bold text-primary">{s.ticker}</TableCell>
-                          <TableCell className="text-sm max-w-[130px] truncate">{s.name}</TableCell>
+                          <TableCell className="text-sm max-w-[120px] truncate">{s.name}</TableCell>
                           <TableCell className="text-xs text-muted-foreground">{s.sector}</TableCell>
                           <TableCell><PreviewMomentumDots m={s.momentum} /></TableCell>
                           <TableCell className={`text-center text-sm font-medium ${previewIasColor(s.ias)}`}>
                             {s.ias?.toFixed(1) ?? "—"}
                           </TableCell>
+                          <TableCell className="text-center text-sm text-muted-foreground">
+                            {s.rs?.toFixed(1) ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-center text-sm text-muted-foreground">
+                            {s.cs?.toFixed(1) ?? "—"}
+                          </TableCell>
                           <TableCell>{previewStarRating(s.ias)}</TableCell>
                           <TableCell>{previewRecoBadge(s.recommendation)}</TableCell>
-                          <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" /></TableCell>
                         </TableRow>
                       ))}
                       {(securitiesData?.securities ?? []).length === 0 && !securitiesLoading && (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center text-muted-foreground py-8 text-sm">
+                          <TableCell colSpan={9} className="text-center text-muted-foreground py-8 text-sm">
                             No securities scored yet. Run a score cycle after uploading price data.
                           </TableCell>
                         </TableRow>

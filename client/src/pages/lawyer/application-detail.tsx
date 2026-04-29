@@ -100,7 +100,10 @@ interface PersonVerificationStep {
   verifiedAt: string | null;
 }
 
-type EnrichedPerson = Omit<CompanyPerson, "inviteToken"> & { verificationStep: PersonVerificationStep | null };
+type EnrichedPerson = Omit<CompanyPerson, "inviteToken"> & {
+  verificationStep: PersonVerificationStep | null;
+  displayName: string | null;
+};
 
 interface ApplicationDetailData {
   application: CompanyApplication;
@@ -401,7 +404,7 @@ function OverviewTab({
                       {shareholders.map((p) => (
                         <div key={p.id} className="flex items-center justify-between gap-2 py-0.5">
                           <span className="text-foreground truncate">
-                            {p.entityType === "corporate" ? p.corporateName : (p.title || p.inviteEmail || "—")}
+                            {p.entityType === "corporate" ? p.corporateName : (p.displayName || p.inviteEmail || "—")}
                           </span>
                           <div className="flex items-center gap-2 shrink-0 text-muted-foreground">
                             {p.shareClass && <span>{p.shareClass}</span>}
@@ -848,7 +851,7 @@ function PeopleTab({ people }: { people: EnrichedPerson[] }) {
                       <p className="font-medium truncate" data-testid={`text-person-name-${person.id}`}>
                         {person.entityType === "corporate"
                           ? person.corporateName || "Corporate Entity"
-                          : person.title || person.inviteEmail || "—"}
+                          : person.displayName || person.inviteEmail || "—"}
                       </p>
                       {person.entityType === "corporate" && (
                         <Badge variant="outline" className="text-xs shrink-0">Corporate</Badge>

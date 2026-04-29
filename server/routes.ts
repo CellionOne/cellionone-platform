@@ -5459,7 +5459,10 @@ export async function registerRoutes(
         biometricSubmitted: boolean;
         verifiedAt: Date | null;
       };
-      type EnrichedPerson = Omit<CompanyPerson, "inviteToken"> & { verificationStep: PersonVerificationStep | null };
+      type EnrichedPerson = Omit<CompanyPerson, "inviteToken"> & {
+        verificationStep: PersonVerificationStep | null;
+        displayName: string | null;
+      };
       type FounderKycDto = {
         status: string | null;
         bvnNinVerified: boolean | null;
@@ -5479,15 +5482,17 @@ export async function registerRoutes(
           application.founderUserId ? storage.getIdentityVerification(application.founderUserId) : Promise.resolve(undefined),
         ]);
 
-        // Enrich each individual person with their identity verification step progress
+        // Enrich each individual person with identity verification progress and display name
         const personUserIds = companyPeopleList
           .filter(p => p.entityType !== "corporate" && p.personUserId)
           .map(p => p.personUserId as string);
 
-        const personVerifications = await Promise.all(
-          personUserIds.map(uid => storage.getIdentityVerification(uid).catch(() => undefined))
-        );
+        const [personVerifications, personProfiles] = await Promise.all([
+          Promise.all(personUserIds.map(uid => storage.getIdentityVerification(uid).catch(() => undefined))),
+          Promise.all(personUserIds.map(uid => storage.getFounderProfile(uid).catch(() => undefined))),
+        ]);
         const verificationByUserId = new Map<string, PersonVerificationStep>();
+        const displayNameByUserId = new Map<string, string | null>();
         personUserIds.forEach((uid, idx) => {
           const iv = personVerifications[idx];
           if (iv) {
@@ -5499,10 +5504,15 @@ export async function registerRoutes(
               verifiedAt: iv.verifiedAt,
             });
           }
+          const fp = personProfiles[idx];
+          displayNameByUserId.set(uid, fp?.fullName ?? null);
         });
 
         people = companyPeopleList.map(({ inviteToken: _tok, ...person }) => ({
           ...person,
+          displayName: person.personUserId
+            ? (displayNameByUserId.get(person.personUserId) ?? null)
+            : null,
           verificationStep: person.personUserId
             ? (verificationByUserId.get(person.personUserId) ?? null)
             : null,

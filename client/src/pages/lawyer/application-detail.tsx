@@ -1594,7 +1594,10 @@ function DocumentsTab({
   });
 
   const individualDossierItems = (dossier || []).filter((d): d is DossierIndividual =>
-    d.entityType === "individual" && d.profile !== null && (d.profile.hasSignature || d.profile.hasPassportPhoto || d.profile.hasIdDocument)
+    d.entityType === "individual" && (
+      d.profile !== null && (d.profile.hasSignature || d.profile.hasPassportPhoto || d.profile.hasIdDocument)
+      || d.verificationStatus?.hasSelfie === true
+    )
   );
 
   const getDocumentFile = (checklistItem: ApplicationChecklistItem): DocumentFile | undefined => {
@@ -1659,35 +1662,41 @@ function DocumentsTab({
               <div className="divide-y">
                 {individualDossierItems.map((item) => (
                   <div key={item.personId} className="py-3" data-testid={`kyc-docs-row-${item.personId}`}>
-                    <p className="text-sm font-medium mb-2">
+                    <p className="text-sm font-medium mb-3">
                       {item.profile?.fullName || item.inviteEmail || `Person #${item.personId}`}
                     </p>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-5">
                       {item.profile?.hasPassportPhoto && (
-                        <PersonDocumentButton
+                        <PersonDocumentPreview
                           applicationId={applicationId}
                           personId={item.personId}
                           docType="passport_photo"
                           label="Passport Photo"
-                          icon={<ImageIcon className="h-3 w-3" />}
                         />
                       )}
                       {item.profile?.hasSignature && (
-                        <PersonDocumentButton
+                        <PersonDocumentPreview
                           applicationId={applicationId}
                           personId={item.personId}
                           docType="signature"
-                          label="Signature"
-                          icon={<PenLine className="h-3 w-3" />}
+                          label="Signature Specimen"
+                        />
+                      )}
+                      {item.verificationStatus?.hasSelfie && (
+                        <PersonDocumentPreview
+                          applicationId={applicationId}
+                          personId={item.personId}
+                          docType="selfie"
+                          label="Biometric Selfie"
+                          prefetchedUrl={item.verificationStatus.selfieIsExternal ? item.verificationStatus.selfieUrl : null}
                         />
                       )}
                       {item.profile?.hasIdDocument && (
-                        <PersonDocumentButton
+                        <PersonDocumentPreview
                           applicationId={applicationId}
                           personId={item.personId}
                           docType="id_document"
                           label="ID Document"
-                          icon={<FileImage className="h-3 w-3" />}
                         />
                       )}
                     </div>

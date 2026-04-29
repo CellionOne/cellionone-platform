@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useRoute, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
@@ -788,6 +788,7 @@ interface DossierCorporate {
   corporateName: string | null;
   corporateRcNumber: string | null;
   corporateCountry: string | null;
+  corporateBusinessType: string | null;
   kybLookupStatus: string | null;
   autoVerifyMethod: string | null;
   corporateInfo: Record<string, unknown> | null;
@@ -838,6 +839,77 @@ function PersonDocumentButton({
       {fetchMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : icon}
       {label}
     </Button>
+  );
+}
+
+function PersonDocumentPreview({
+  applicationId,
+  personId,
+  docType,
+  label,
+}: {
+  applicationId: number;
+  personId: number;
+  docType: "signature" | "passport_photo" | "id_document";
+  label: string;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  const isImageType = docType === "passport_photo" || docType === "signature";
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiRequest("GET", `/api/lawyer/applications/${applicationId}/people/${personId}/document/${docType}`);
+        const data = await res.json() as { downloadURL?: string };
+        if (!cancelled) {
+          if (data.downloadURL) setUrl(data.downloadURL);
+          else setFailed(true);
+        }
+      } catch {
+        if (!cancelled) setFailed(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [applicationId, personId, docType]);
+
+  return (
+    <div className="space-y-1.5" data-testid={`preview-${docType}-${personId}`}>
+      <p className="text-xs text-muted-foreground font-medium">{label}</p>
+      {loading && !url && !failed ? (
+        <div className="w-24 h-16 rounded border bg-muted flex items-center justify-center">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : failed || !url ? (
+        <div className="w-24 h-16 rounded border bg-muted flex items-center justify-center">
+          <AlertCircle className="h-4 w-4 text-muted-foreground" />
+        </div>
+      ) : isImageType ? (
+        <a href={url} target="_blank" rel="noopener noreferrer" data-testid={`link-preview-${docType}-${personId}`}>
+          <img
+            src={url}
+            alt={label}
+            className="max-w-[120px] max-h-[80px] rounded border object-contain hover:opacity-80 transition-opacity cursor-pointer"
+          />
+        </a>
+      ) : (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+          data-testid={`link-preview-${docType}-${personId}`}
+        >
+          <FileImage className="h-3.5 w-3.5" />
+          View {label}
+        </a>
+      )}
+    </div>
   );
 }
 
@@ -1122,47 +1194,60 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                                   ))}
                                 </div>
                               )}
-                              <div className="flex flex-wrap gap-2 pt-1">
-                                {dossierItem.profile.hasPassportPhoto && (
-                                  <PersonDocumentButton
-                                    applicationId={applicationId}
-                                    personId={person.id!}
-                                    docType="passport_photo"
-                                    label="Passport Photo"
-                                    icon={<ImageIcon className="h-3 w-3" />}
-                                  />
-                                )}
-                                {dossierItem.profile.hasSignature && (
-                                  <PersonDocumentButton
-                                    applicationId={applicationId}
-                                    personId={person.id!}
-                                    docType="signature"
-                                    label="Signature"
-                                    icon={<PenLine className="h-3 w-3" />}
-                                  />
-                                )}
-                                {dossierItem.profile.hasIdDocument && (
-                                  <PersonDocumentButton
-                                    applicationId={applicationId}
-                                    personId={person.id!}
-                                    docType="id_document"
-                                    label="ID Document"
-                                    icon={<FileImage className="h-3 w-3" />}
-                                  />
-                                )}
-                                {!dossierItem.profile.hasPassportPhoto && !dossierItem.profile.hasSignature && !dossierItem.profile.hasIdDocument && (
-                                  <p className="text-xs text-muted-foreground italic">No identity documents uploaded yet.</p>
-                                )}
-                              </div>
+                              {(dossierItem.profile.hasPassportPhoto || dossierItem.profile.hasSignature || dossierItem.profile.hasIdDocument) ? (
+                                <div className="pt-1 space-y-2">
+                                  <p className="text-xs font-medium text-muted-foreground">Identity Documents</p>
+                                  <div className="flex flex-wrap gap-4">
+                                    {dossierItem.profile.hasPassportPhoto && (
+                                      <PersonDocumentPreview
+                                        applicationId={applicationId}
+                                        personId={person.id!}
+                                        docType="passport_photo"
+                                        label="Passport Photo"
+                                      />
+                                    )}
+                                    {dossierItem.profile.hasSignature && (
+                                      <PersonDocumentPreview
+                                        applicationId={applicationId}
+                                        personId={person.id!}
+                                        docType="signature"
+                                        label="Signature"
+                                      />
+                                    )}
+                                    {dossierItem.profile.hasIdDocument && (
+                                      <PersonDocumentPreview
+                                        applicationId={applicationId}
+                                        personId={person.id!}
+                                        docType="id_document"
+                                        label="ID Document"
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-muted-foreground italic">No identity documents uploaded yet.</p>
+                              )}
                             </>
                           ) : (
-                            <p className="text-xs text-muted-foreground italic">No profile data on file. Person may not have completed registration.</p>
+                            <p className="text-xs text-muted-foreground italic" data-testid={`text-not-verified-${person.id}`}>
+                              Not yet verified — no data available.
+                            </p>
                           )}
                         </div>
                       )}
 
                       {isExpanded && dossierItem && dossierItem.entityType === "corporate" && (
                         <div className="mt-3 pt-3 border-t space-y-2 text-xs" data-testid={`dossier-corporate-${person.id}`}>
+                          {dossierItem.corporateBusinessType && (
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                              <Badge variant="outline" className="text-xs capitalize">
+                                {dossierItem.corporateBusinessType === "co" ? "Limited Company (RC)"
+                                  : dossierItem.corporateBusinessType === "bn" ? "Business Name (BN)"
+                                  : dossierItem.corporateBusinessType === "it" ? "Incorporated Trustee (IT)"
+                                  : dossierItem.corporateBusinessType}
+                              </Badge>
+                            </div>
+                          )}
                           {dossierItem.corporateInfo ? (
                             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                               {(dossierItem.corporateInfo.fullName || dossierItem.corporateInfo.companyName) && (
@@ -1173,7 +1258,7 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                               )}
                               {dossierItem.corporateInfo.rcNumber && (
                                 <div>
-                                  <p className="text-muted-foreground">RC Number</p>
+                                  <p className="text-muted-foreground">RC / BN Number</p>
                                   <p className="font-medium">{dossierItem.corporateInfo.rcNumber as string}</p>
                                 </div>
                               )}
@@ -1183,10 +1268,42 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                                   <p className="font-medium">{dossierItem.corporateInfo.tinNumber as string}</p>
                                 </div>
                               )}
+                              {dossierItem.corporateInfo.yearEstablished && (
+                                <div>
+                                  <p className="text-muted-foreground">Year Established</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.yearEstablished as number}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.industryCategory && (
+                                <div>
+                                  <p className="text-muted-foreground">Industry</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.industryCategory as string}</p>
+                                </div>
+                              )}
                               {dossierItem.corporateInfo.amlScreeningStatus && (
                                 <div>
                                   <p className="text-muted-foreground">AML Status</p>
-                                  <p className="font-medium capitalize">{(dossierItem.corporateInfo.amlScreeningStatus as string).replace(/_/g, " ")}</p>
+                                  <p className={`font-medium capitalize ${(dossierItem.corporateInfo.amlScreeningStatus as string) === "clear" ? "text-green-700 dark:text-green-400" : "text-yellow-700 dark:text-yellow-400"}`}>
+                                    {(dossierItem.corporateInfo.amlScreeningStatus as string).replace(/_/g, " ")}
+                                  </p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.riskScore && (
+                                <div>
+                                  <p className="text-muted-foreground">Risk Score</p>
+                                  <p className="font-medium capitalize">{dossierItem.corporateInfo.riskScore as string}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.lastVerifiedAt && (
+                                <div>
+                                  <p className="text-muted-foreground">Last Verified</p>
+                                  <p className="font-medium">{new Date(dossierItem.corporateInfo.lastVerifiedAt as string).toLocaleDateString()}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.firstVerifiedAt && (
+                                <div>
+                                  <p className="text-muted-foreground">First Verified</p>
+                                  <p className="font-medium">{new Date(dossierItem.corporateInfo.firstVerifiedAt as string).toLocaleDateString()}</p>
                                 </div>
                               )}
                               {dossierItem.corporateInfo.headOfficeAddress && (
@@ -1201,15 +1318,29 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                                   <p className="font-medium">{dossierItem.corporateInfo.contactPersonName as string}</p>
                                 </div>
                               )}
+                              {dossierItem.corporateInfo.contactPersonRole && (
+                                <div>
+                                  <p className="text-muted-foreground">Role</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.contactPersonRole as string}</p>
+                                </div>
+                              )}
                               {dossierItem.corporateInfo.contactPersonEmail && (
                                 <div>
                                   <p className="text-muted-foreground">Contact Email</p>
                                   <p className="font-medium">{dossierItem.corporateInfo.contactPersonEmail as string}</p>
                                 </div>
                               )}
+                              {dossierItem.corporateInfo.contactPersonPhone && (
+                                <div>
+                                  <p className="text-muted-foreground">Contact Phone</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.contactPersonPhone as string}</p>
+                                </div>
+                              )}
                             </div>
                           ) : (
-                            <p className="text-muted-foreground italic">No registry or KYC data found for this corporate entity.</p>
+                            <p className="text-muted-foreground italic" data-testid={`text-not-verified-corporate-${person.id}`}>
+                              Not yet verified — no data available.
+                            </p>
                           )}
                         </div>
                       )}

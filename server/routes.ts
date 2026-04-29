@@ -6390,6 +6390,13 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // Helper: mask email for audit logs (e.g. "john.doe@example.com" → "j***@example.com")
+  const maskEmail = (email: string | null | undefined): string => {
+    if (!email) return "unknown";
+    const [local, domain] = email.split("@");
+    return `${local[0] || "?"}***@${domain || "?"}`;
+  };
+
   // ============== LAWYER: PEOPLE IDENTITY DOSSIER ==============
   app.get("/api/lawyer/applications/:id/people-dossier", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
     try {
@@ -6402,18 +6409,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(403).json({ message: "Access denied" });
       }
 
-      await storage.logSensitiveDataAccess({
-        accessorUserId: lawyerId,
-        targetUserId: application.founderUserId || lawyerId,
-        dataType: "people_dossier",
-        action: "view",
-        ipAddress: req.ip,
-        userAgent: req.headers["user-agent"] as string,
-      });
-
       const people = await storage.getCompanyPeople(applicationId);
 
       const dossierItems = await Promise.all(people.map(async (person) => {
+        // === CORPORATE entity ===
         if (person.entityType === "corporate") {
           let corporateInfo: Record<string, unknown> | null = null;
           if (person.corporateRcNumber) {
@@ -6427,8 +6426,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
                 rcNumber: ve.rcNumber,
                 tinNumber: ve.tinNumber,
                 lastVerifiedAt: ve.lastVerifiedAt,
+                firstVerifiedAt: ve.firstVerifiedAt,
                 amlScreeningStatus: ve.amlScreeningStatus,
                 riskScore: ve.riskScore,
+                country: ve.country,
               };
             }
             if (!corporateInfo) {
@@ -6441,34 +6442,61 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
                   companyName: ksp.companyName,
                   rcNumber: ksp.rcNumber,
                   tinNumber: ksp.tinNumber,
+                  vatRegistered: ksp.vatRegistered,
+                  yearEstablished: ksp.yearEstablished,
+                  industryCategory: ksp.industryCategory,
                   headOfficeAddress: ksp.headOfficeAddress,
                   contactPersonName: ksp.contactPersonName,
                   contactPersonEmail: ksp.contactPersonEmail,
                   contactPersonPhone: ksp.contactPersonPhone,
-                  industryCategory: ksp.industryCategory,
-                  yearEstablished: ksp.yearEstablished,
+                  contactPersonRole: ksp.contactPersonRole,
                 };
               }
             }
           }
+
+          await storage.createAuditLog({
+            actorUserId: lawyerId,
+            action: "sensitive_data_access",
+            entityType: "application",
+            entityId: applicationId.toString(),
+            details: {
+              applicationId,
+              personType: "corporate",
+              corporateName: person.corporateName,
+              corporateRcNumber: person.corporateRcNumber,
+              kybLookupStatus: person.kybLookupStatus,
+            },
+            ipAddress: req.ip,
+          });
+
           return {
             personId: person.id,
             entityType: "corporate",
             corporateName: person.corporateName,
             corporateRcNumber: person.corporateRcNumber,
             corporateCountry: person.corporateCountry,
+            corporateBusinessType: person.corporateBusinessType,
             kybLookupStatus: person.kybLookupStatus,
             autoVerifyMethod: person.autoVerifyMethod,
             corporateInfo,
           };
         }
 
+        // === INDIVIDUAL entity ===
+        // Resolve personUserId: prefer stored value, else look up via invite email
+        let resolvedUserId: string | null = person.personUserId || null;
+        if (!resolvedUserId && person.inviteEmail) {
+          const linkedUser = await storage.getUserByEmail(person.inviteEmail).catch(() => undefined);
+          if (linkedUser) resolvedUserId = linkedUser.id;
+        }
+
         let profile: Record<string, unknown> | null = null;
         let verificationStatus: Record<string, unknown> | null = null;
-        if (person.personUserId) {
+        if (resolvedUserId) {
           const [fp, iv] = await Promise.all([
-            storage.getFounderProfile(person.personUserId).catch(() => undefined),
-            storage.getIdentityVerification(person.personUserId).catch(() => undefined),
+            storage.getFounderProfile(resolvedUserId).catch(() => undefined),
+            storage.getIdentityVerification(resolvedUserId).catch(() => undefined),
           ]);
           if (fp) {
             profile = {
@@ -6498,11 +6526,35 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
             };
           }
         }
+
+        await storage.logSensitiveDataAccess({
+          accessorUserId: lawyerId,
+          targetUserId: resolvedUserId || lawyerId,
+          dataType: "people_dossier",
+          action: "view",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"] as string,
+        });
+        await storage.createAuditLog({
+          actorUserId: lawyerId,
+          action: "sensitive_data_access",
+          entityType: "application",
+          entityId: applicationId.toString(),
+          details: {
+            applicationId,
+            personType: "individual",
+            maskedPersonEmail: maskEmail(person.inviteEmail),
+            resolvedUserId: resolvedUserId ? "present" : "absent",
+            hasProfile: profile !== null,
+          },
+          ipAddress: req.ip,
+        });
+
         return {
           personId: person.id,
           entityType: "individual",
           inviteEmail: person.inviteEmail,
-          personUserId: person.personUserId,
+          personUserId: resolvedUserId,
           profile,
           verificationStatus,
         };
@@ -6541,11 +6593,18 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         .from(companyPeople)
         .where(and(eq(companyPeople.id, personId), eq(companyPeople.applicationId, applicationId)));
 
-      if (!person || !person.personUserId) {
-        return res.status(404).json({ message: "Person not found" });
+      if (!person) return res.status(404).json({ message: "Person not found" });
+
+      // Resolve userId: stored value or email-based lookup
+      let resolvedUserId: string | null = person.personUserId || null;
+      if (!resolvedUserId && person.inviteEmail) {
+        const linkedUser = await storage.getUserByEmail(person.inviteEmail).catch(() => undefined);
+        if (linkedUser) resolvedUserId = linkedUser.id;
       }
 
-      const profile = await storage.getFounderProfile(person.personUserId);
+      if (!resolvedUserId) return res.status(404).json({ message: "Person has not registered yet" });
+
+      const profile = await storage.getFounderProfile(resolvedUserId);
       if (!profile) return res.status(404).json({ message: "Profile not found" });
 
       const filePath = type === "passport_photo" ? profile.passportPhotoPath
@@ -6554,13 +6613,26 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       if (!filePath) return res.status(404).json({ message: "Document not uploaded" });
 
+      // Log both sensitive-data access and audit trail
       await storage.logSensitiveDataAccess({
         accessorUserId: lawyerId,
-        targetUserId: person.personUserId,
+        targetUserId: resolvedUserId,
         dataType: type,
         action: "view",
         ipAddress: req.ip,
         userAgent: req.headers["user-agent"] as string,
+      });
+      await storage.createAuditLog({
+        actorUserId: lawyerId,
+        action: "sensitive_data_access",
+        entityType: "application",
+        entityId: applicationId.toString(),
+        details: {
+          applicationId,
+          maskedPersonEmail: maskEmail(person.inviteEmail),
+          documentType: type,
+        },
+        ipAddress: req.ip,
       });
 
       const objectStorage = new ObjectStorageService();

@@ -473,6 +473,11 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
   const [whatChanged, setWhatChanged] = useState<WhatChangedItem[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Trade date override for price uploads (defaults to today)
+  const [uploadTradeDate, setUploadTradeDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // The trade date that was actually sent with the current preview (immutable until next preview)
+  const [previewTradeDate, setPreviewTradeDate] = useState<string | null>(null);
+
   // Price input mode: file upload vs paste text
   const [priceInputMode, setPriceInputMode] = useState<"file" | "paste">("file");
   const [pasteText, setPasteText] = useState("");
@@ -502,17 +507,18 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-        body: JSON.stringify({ text: pasteText }),
+        body: JSON.stringify({ text: pasteText, tradeDate: uploadTradeDate }),
       });
       const data: PreviewResult & { error?: string } = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Preview failed");
       setPreview(data);
+      setPreviewTradeDate(uploadTradeDate);
     } catch (err: unknown) {
       toast({ title: toErrorMessage(err, "Preview failed"), variant: "destructive" });
     } finally {
       setIsPasting(false);
     }
-  }, [pasteText, toast]);
+  }, [pasteText, uploadTradeDate, toast]);
 
   // Handle CSV dividend upload (legacy fast path)
   const handleDivCsvFile = useCallback(async (file: File) => {
@@ -716,6 +722,7 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
     try {
       const form = new FormData();
       form.append("file", file);
+      form.append("tradeDate", uploadTradeDate);
       const csrfToken = await getCsrfToken();
       const res = await fetch("/api/admin/cie/ingest/preview", {
         method: "POST",
@@ -726,13 +733,14 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
       const data: PreviewResult & { error?: string } = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
       setPreview(data);
+      setPreviewTradeDate(uploadTradeDate);
     } catch (err: unknown) {
       toast({ title: toErrorMessage(err, "Upload failed"), variant: "destructive" });
     } finally {
       setIsUploading(false);
       if (fileRef.current) fileRef.current.value = "";
     }
-  }, [toast]);
+  }, [uploadTradeDate, toast]);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -767,6 +775,7 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
       setWhatChanged(data?.whatChanged ?? []);
       setIsConfirmed(true);
       setPreview(null);
+      setPreviewTradeDate(null);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/cie/ingest/logs"] });
     },
     onError: (err: unknown) => toast({ title: toErrorMessage(err, "Failed to confirm"), variant: "destructive" }),
@@ -854,16 +863,30 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Trade date override */}
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-medium text-foreground whitespace-nowrap" htmlFor="upload-trade-date">Trade date</label>
+            <input
+              id="upload-trade-date"
+              type="date"
+              value={uploadTradeDate}
+              onChange={e => { setUploadTradeDate(e.target.value); setPreview(null); setPreviewTradeDate(null); }}
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+              data-testid="input-upload-trade-date"
+            />
+            <span className="text-xs text-muted-foreground">Used as the trade date for all extracted rows (overrides any date in the filename)</span>
+          </div>
+
           {/* Price input mode tabs */}
           <div className="flex gap-1 border-b border-border mb-3">
             <button
               className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${priceInputMode === "file" ? "bg-primary/10 text-primary border border-b-0 border-border" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => { setPriceInputMode("file"); setPreview(null); }}
+              onClick={() => { setPriceInputMode("file"); setPreview(null); setPreviewTradeDate(null); }}
               data-testid="tab-price-file"
             ><Upload className="inline h-3 w-3 mr-1" />Upload File</button>
             <button
               className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${priceInputMode === "paste" ? "bg-primary/10 text-primary border border-b-0 border-border" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => { setPriceInputMode("paste"); setPreview(null); }}
+              onClick={() => { setPriceInputMode("paste"); setPreview(null); setPreviewTradeDate(null); }}
               data-testid="tab-price-paste"
             ><Sparkles className="inline h-3 w-3 mr-1" />Paste Text</button>
           </div>
@@ -1180,8 +1203,7 @@ function PriceUploadTab({ logsData }: { logsData?: { logs: IngestionLog[] } }) {
             <div className="flex items-center justify-between gap-2">
               <div>
                 <CardTitle className="text-sm">
-                  Preview — {preview.rowsExtracted} rows
-                  <span className="ml-2 text-xs font-normal text-green-600 dark:text-green-400">{preview.rowsAccepted} accepted</span>
+                  Preview — {preview.rowsAccepted} rows for {previewTradeDate ?? uploadTradeDate}
                   {preview.rowsRejected > 0 && (
                     <span className="ml-1 text-xs font-normal text-red-600 dark:text-red-400">{preview.rowsRejected} rejected</span>
                   )}

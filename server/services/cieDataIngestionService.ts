@@ -456,17 +456,17 @@ function parseSheetRows(sheet: XLSX.WorkSheet, source: "csv" | "xlsx", fallbackD
   return rows;
 }
 
-export function parseCsvBuffer(buffer: Buffer, filename?: string): PriceRow[] {
+export function parseCsvBuffer(buffer: Buffer, filename?: string, overrideDate?: string | null): PriceRow[] {
   const wb = XLSX.read(buffer, { type: "buffer", raw: false, cellDates: false });
   const sheet = wb.Sheets[wb.SheetNames[0]];
-  const fallbackDate = filename ? parseDateFromFilename(filename) : null;
+  const fallbackDate = overrideDate ?? (filename ? parseDateFromFilename(filename) : null);
   return parseSheetRows(sheet, "csv", fallbackDate);
 }
 
-export function parseXlsxBuffer(buffer: Buffer, filename?: string): PriceRow[] {
+export function parseXlsxBuffer(buffer: Buffer, filename?: string, overrideDate?: string | null): PriceRow[] {
   const wb = XLSX.read(buffer, { type: "buffer", raw: false, cellDates: false });
   const sheet = detectPriceSheet(wb); // smart sheet detection by header scoring
-  const fallbackDate = filename ? parseDateFromFilename(filename) : null;
+  const fallbackDate = overrideDate ?? (filename ? parseDateFromFilename(filename) : null);
   return parseSheetRows(sheet, "xlsx", fallbackDate);
 }
 
@@ -793,9 +793,9 @@ Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.${k
   }
 }
 
-export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise<PriceRow[]> {
-  // Extract trade date from filename up front — needed by all code paths including vision.
-  const tradeDate = filename ? parseDateFromFilename(filename) : null;
+export async function parsePdfBuffer(buffer: Buffer, filename?: string, overrideDate?: string | null): Promise<PriceRow[]> {
+  // Prefer explicit override date; fall back to filename-derived date.
+  const tradeDate = overrideDate ?? (filename ? parseDateFromFilename(filename) : null);
 
   // Step 1: Extract raw text from the PDF using pdf-parse
   let rawText = "";
@@ -910,7 +910,7 @@ async function gptExtractPriceRows(text: string, source: IngestFormat, knownDate
 // DOCX extraction via mammoth → GPT-4o
 // ============================================================
 
-export async function parseDocxBuffer(buffer: Buffer, filename?: string): Promise<PriceRow[]> {
+export async function parseDocxBuffer(buffer: Buffer, filename?: string, overrideDate?: string | null): Promise<PriceRow[]> {
   let rawText = "";
   try {
     const mammoth = await import("mammoth");
@@ -930,7 +930,7 @@ export async function parseDocxBuffer(buffer: Buffer, filename?: string): Promis
   console.info(`[CIEIngest] DOCX text extracted (${rawText.length} chars) — sending to GPT-4o${filename ? ` (${filename})` : ""}`);
 
   // Try deterministic NGX parser first (it handles NGX-format text from any source)
-  const tradeDate = filename ? parseDateFromFilename(filename) : null;
+  const tradeDate = overrideDate ?? (filename ? parseDateFromFilename(filename) : null);
   const ngxRows = parseNgxPriceText(rawText, tradeDate);
   if (ngxRows.length > 0) {
     console.info(`[CIEIngest] NGX deterministic parser extracted ${ngxRows.length} rows from DOCX`);
@@ -944,18 +944,18 @@ export async function parseDocxBuffer(buffer: Buffer, filename?: string): Promis
 // Paste-text extraction — raw string → GPT-4o
 // ============================================================
 
-export async function parseTextContent(text: string): Promise<PriceRow[]> {
+export async function parseTextContent(text: string, overrideDate?: string | null): Promise<PriceRow[]> {
   if (!text || text.trim().length < 10) return [];
   console.info(`[CIEIngest] Paste-text extraction (${text.length} chars) — sending to GPT-4o`);
 
   // Try deterministic NGX parser on pasted text too
-  const ngxRows = parseNgxPriceText(text, null);
+  const ngxRows = parseNgxPriceText(text, overrideDate ?? null);
   if (ngxRows.length > 0) {
     console.info(`[CIEIngest] NGX deterministic parser extracted ${ngxRows.length} rows from pasted text`);
     return ngxRows.map(r => ({ ...r, source: "text" as IngestFormat }));
   }
 
-  return gptExtractPriceRows(text, "text");
+  return gptExtractPriceRows(text, "text", overrideDate ?? undefined);
 }
 
 // ============================================================

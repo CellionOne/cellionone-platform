@@ -251,6 +251,10 @@ export function registerCieAdminRoutes(app: Express): void {
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
 
+      // Optional analyst-supplied trade date override (YYYY-MM-DD)
+      const overrideDateRaw = typeof req.body?.tradeDate === "string" ? req.body.tradeDate.trim() : null;
+      const overrideDate = overrideDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(overrideDateRaw) ? overrideDateRaw : null;
+
       const mime = file.mimetype.toLowerCase();
       const filename = file.originalname.toLowerCase();
       let format: "csv" | "xlsx" | "pdf" | "docx";
@@ -258,16 +262,16 @@ export function registerCieAdminRoutes(app: Express): void {
 
       if (filename.endsWith(".csv") || mime.includes("csv")) {
         format = "csv";
-        rows = parseCsvBuffer(file.buffer, file.originalname);
+        rows = parseCsvBuffer(file.buffer, file.originalname, overrideDate);
       } else if (filename.endsWith(".xlsx") || filename.endsWith(".xls") || mime.includes("spreadsheet") || mime.includes("excel")) {
         format = "xlsx";
-        rows = parseXlsxBuffer(file.buffer, file.originalname);
+        rows = parseXlsxBuffer(file.buffer, file.originalname, overrideDate);
       } else if (filename.endsWith(".pdf") || mime.includes("pdf")) {
         format = "pdf";
-        rows = await parsePdfBuffer(file.buffer, file.originalname);
+        rows = await parsePdfBuffer(file.buffer, file.originalname, overrideDate);
       } else if (filename.endsWith(".docx") || mime.includes("wordprocessingml") || mime.includes("msword")) {
         format = "docx";
-        rows = await parseDocxBuffer(file.buffer, file.originalname);
+        rows = await parseDocxBuffer(file.buffer, file.originalname, overrideDate);
       } else {
         return res.status(400).json({ error: "Unsupported file type. Upload CSV, XLSX, PDF, or DOCX." });
       }
@@ -459,10 +463,13 @@ export function registerCieAdminRoutes(app: Express): void {
     try {
       if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
-      const schema = z.object({ text: z.string().min(10, "Paste at least 10 characters of text") });
-      const { text } = schema.parse(req.body);
+      const schema = z.object({
+        text: z.string().min(10, "Paste at least 10 characters of text"),
+        tradeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      });
+      const { text, tradeDate } = schema.parse(req.body);
 
-      const rows = await parseTextContent(text);
+      const rows = await parseTextContent(text, tradeDate ?? null);
       const preview = await buildPreview("text", rows, "pasted-text");
 
       res.json({

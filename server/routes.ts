@@ -5848,27 +5848,50 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       let payment = await storage.getPaymentByApplication(applicationId);
       
       if (!payment) {
-        // Determine correct amounts from product catalog using the application's share capital tier.
+        // Determine correct amounts from product catalog.
         // Columns are in kobo despite the "_ngn" naming convention.
         let amountTotalKobo = 15000000; // default ₦150,000 (CAC_5M price)
         let lawyerFeeKobo = 12000000;   // default ₦120,000 (CAC_5M lawyer net)
 
         try {
           const catalogService = await import("./services/productCatalogService");
-          // Map share capital string (e.g. "5,000,000" or "5000000") to a SKU tier
-          const shareCapitalNum = parseInt(
-            String(application.shareCapital ?? "").replace(/,/g, ""),
-            10,
-          );
-          let sku = "CAC_5M";
-          if (!isNaN(shareCapitalNum)) {
-            if (shareCapitalNum >= 100_000_000) sku = "CAC_100M";
-            else if (shareCapitalNum >= 20_000_000) sku = "CAC_20M";
-            else if (shareCapitalNum >= 10_000_000) sku = "CAC_10M";
-            else if (shareCapitalNum >= 5_000_000) sku = "CAC_5M";
-            else sku = "CAC_1M";
+          const CAC_SKUS = ["CAC_1M", "CAC_5M", "CAC_10M", "CAC_20M", "CAC_100M"];
+
+          // Priority 1: look up the actual SKU from any existing order for this application
+          // (order items carry the exact product chosen at checkout).
+          let resolvedSku: string | null = null;
+          const [existingOrder] = await db
+            .select({ id: ordersTable.id })
+            .from(ordersTable)
+            .where(eq(ordersTable.applicationId, applicationId))
+            .orderBy(desc(ordersTable.createdAt));
+          if (existingOrder) {
+            const items = await db
+              .select({ sku: orderItemsTable.sku })
+              .from(orderItemsTable)
+              .where(eq(orderItemsTable.orderId, existingOrder.id));
+            const cacItem = items.find((i) => CAC_SKUS.includes(i.sku));
+            if (cacItem) resolvedSku = cacItem.sku;
           }
-          const product = await catalogService.getBySku(sku);
+
+          // Priority 2: fall back to share capital string → tier mapping
+          if (!resolvedSku) {
+            const shareCapitalNum = parseInt(
+              String(application.shareCapital ?? "").replace(/,/g, ""),
+              10,
+            );
+            if (!isNaN(shareCapitalNum)) {
+              if (shareCapitalNum >= 100_000_000) resolvedSku = "CAC_100M";
+              else if (shareCapitalNum >= 20_000_000) resolvedSku = "CAC_20M";
+              else if (shareCapitalNum >= 10_000_000) resolvedSku = "CAC_10M";
+              else if (shareCapitalNum >= 5_000_000) resolvedSku = "CAC_5M";
+              else resolvedSku = "CAC_1M";
+            } else {
+              resolvedSku = "CAC_5M"; // safe default
+            }
+          }
+
+          const product = await catalogService.getBySku(resolvedSku);
           if (product && !product.requiresManualPricing) {
             const amounts = catalogService.computeItemAmounts(product);
             amountTotalKobo = amounts.priceNgn;

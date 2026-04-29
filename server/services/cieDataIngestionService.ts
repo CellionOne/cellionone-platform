@@ -706,7 +706,7 @@ async function pdfToBase64Images(buffer: Buffer): Promise<string[]> {
   }
 }
 
-async function parsePdfViaVision(buffer: Buffer): Promise<PriceRow[]> {
+async function parsePdfViaVision(buffer: Buffer, knownDate?: string | null): Promise<PriceRow[]> {
   let images: string[];
   try {
     images = await pdfToBase64Images(buffer);
@@ -735,7 +735,7 @@ You will be shown images of pages from a Nigerian financial document — this ma
 Extract ALL stock price rows visible in the images regardless of layout.
 Return ONLY a JSON object with a "rows" array. Each item must have:
   symbol    (string, NGX ticker code e.g. DANGCEM GTCO ZENITHBANK MTNN, required — do NOT use the full company name)
-  date      (string, YYYY-MM-DD, required — infer from document headers, page titles, or captions if not in each row)
+  date      (string, YYYY-MM-DD, required${knownDate ? ` — use "${knownDate}" for all rows` : " — infer from document headers, page titles, or captions if not in each row"})
   open      (number, Naira, optional)
   high      (number, Naira, optional)
   low       (number, Naira, optional)
@@ -750,7 +750,7 @@ Common mappings: "Dangote Cement"→DANGCEM, "Guaranty Trust"→GTCO, "Zenith Ba
 "Seplat"→SEPLAT, "Okomu Oil"→OKOMUOIL, "Presco"→PRESCO, "Fidelity Bank"→FIDELITYBK,
 "Ecobank"→ETI, "Flour Mills"→FLOURMILL, "Cadbury"→CADBURY, "Nigerian Breweries"→NB.
 If you cannot determine the ticker, include the company name as-is (the system will flag it).
-Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
+Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.${knownDate ? `\n\nCRITICAL DATE OVERRIDE: Every row MUST use date "${knownDate}" (YYYY-MM-DD). Do NOT infer or guess a different date — use this value exactly for all rows.` : ""}`;
 
   const imageContent = images.map(url => ({
     type: "image_url" as const,
@@ -785,7 +785,7 @@ Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
       return [];
     }
 
-    return gptRowsToPriceRows(parsed);
+    return gptRowsToPriceRows(parsed, knownDate ?? undefined);
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error("[CIEIngest] GPT-4o Vision extraction failed:", errMsg);
@@ -794,6 +794,9 @@ Return {"rows":[]} if no price data is found. Pure JSON only — no markdown.`;
 }
 
 export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise<PriceRow[]> {
+  // Extract trade date from filename up front — needed by all code paths including vision.
+  const tradeDate = filename ? parseDateFromFilename(filename) : null;
+
   // Step 1: Extract raw text from the PDF using pdf-parse
   let rawText = "";
   try {
@@ -807,13 +810,13 @@ export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise
   }
 
   // Step 2: Detect scanned (image-based) PDFs — fall back to GPT-4o Vision
+  // Pass the known trade date so the vision prompt can use it as a hard override.
   if (rawText.trim().length < PDF_SCANNED_THRESHOLD) {
     console.warn("[CIEIngest] Scanned PDF detected (text < 50 chars) — falling back to vision extraction");
-    return parsePdfViaVision(buffer);
+    return parsePdfViaVision(buffer, tradeDate);
   }
 
   // Step 3: Try deterministic NGX price list parser (fast, no AI, handles Zenith/NGX daily format)
-  const tradeDate = filename ? parseDateFromFilename(filename) : null;
   const ngxRows = parseNgxPriceText(rawText, tradeDate);
   if (ngxRows.length > 0) {
     console.info(`[CIEIngest] NGX deterministic parser extracted ${ngxRows.length} rows (date: ${tradeDate ?? "unknown"})`);

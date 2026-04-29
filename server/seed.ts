@@ -38,7 +38,7 @@ export async function seedDatabase() {
     
     // Upsert feature flags — keep existing isEnabled values unless flag is new,
     // EXCEPT for flags we want to force-enable on startup (controlled list below)
-    const forceEnabled = new Set<string>([]);
+    const forceEnabled = new Set<string>(["enable_paystack_payments", "enable_paystack_split_settlement"]);
     for (const flag of allFlags) {
       if (forceEnabled.has(flag.key)) {
         await db.insert(featureFlags).values(flag).onConflictDoUpdate({

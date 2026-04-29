@@ -493,6 +493,9 @@ function Router() {
         <Route path="/verify-identity">
           <ProtectedRoute component={VerifyIdentityPage} roles={["founder"]} />
         </Route>
+        <Route path="/founder/identity">
+          <ProtectedRoute component={VerifyIdentityPage} roles={["founder"]} />
+        </Route>
         <Route path="/invite/:token" component={InviteAcceptPage} />
         <Route path="/director-biometric" component={DirectorBiometricPage} />
         <Route path="/forgot-password" component={ForgotPasswordPage} />

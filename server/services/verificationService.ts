@@ -38,7 +38,27 @@ export async function getVerificationStatus(userId: string): Promise<Verificatio
   }
 
   const record = verification[0];
-  
+
+  // KYB pipeline founders: BVN/NIN was verified as part of company onboarding.
+  // Their record has identitySource = 'kyb_pipeline' and bvnNinVerified = true
+  // but status may remain 'in_progress' / 'pending'. Treat them as fully verified.
+  if (record.identitySource === 'kyb_pipeline' && record.bvnNinVerified === true) {
+    const verifiedAt = record.verifiedAt ?? record.createdAt ?? now;
+    const expiresAt = new Date(new Date(verifiedAt).getTime() + VERIFICATION_VALIDITY_DAYS * 24 * 60 * 60 * 1000);
+    if (expiresAt > now) {
+      const daysUntilExpiry = Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      return {
+        isVerified: true,
+        status: "verified",
+        verifiedAt: record.verifiedAt ?? record.createdAt,
+        expiresAt,
+        daysUntilExpiry,
+        requiresVerification: false,
+        verificationId: record.id,
+      };
+    }
+  }
+
   if (record.status === "verified" && record.expiresAt) {
     const expiresAt = new Date(record.expiresAt);
     if (expiresAt > now) {

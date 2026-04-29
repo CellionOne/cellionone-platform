@@ -111,6 +111,7 @@ export default function AdminApplications() {
   const [abandonedCartsExpanded, setAbandonedCartsExpanded] = useState(false);
   const [abandonedCartSearch, setAbandonedCartSearch] = useState("");
   const [showLegacy, setShowLegacy] = useState(false);
+  const [inlineLawyerId, setInlineLawyerId] = useState<string>("");
 
   const { data: applications, isLoading } = useQuery<ApplicationWithLawyer[]>({
     queryKey: ["/api/admin/applications"],
@@ -190,7 +191,14 @@ export default function AdminApplications() {
   });
 
   const paymentTransitionMutation = useMutation({
-    mutationFn: async ({ applicationId, targetState, reason }: { applicationId: number; targetState: string; reason: string }) => {
+    mutationFn: async ({ applicationId, targetState, reason, lawyerIdToAssign }: { applicationId: number; targetState: string; reason: string; lawyerIdToAssign?: string }) => {
+      if (lawyerIdToAssign) {
+        const assignRes = await apiRequest("POST", `/api/admin/applications/${applicationId}/assign`, { lawyerId: lawyerIdToAssign });
+        if (!assignRes.ok) {
+          const err = await assignRes.json().catch(() => ({}));
+          throw new Error(err.message || "Failed to assign lawyer");
+        }
+      }
       return apiRequest("POST", `/api/admin/applications/${applicationId}/payment-state`, { targetState, reason });
     },
     onSuccess: () => {
@@ -200,9 +208,10 @@ export default function AdminApplications() {
       setSelectedApp(null);
       setSelectedPaymentState("");
       setPaymentReason("");
+      setInlineLawyerId("");
     },
-    onError: () => {
-      toast({ title: "Failed to complete payment transition", variant: "destructive" });
+    onError: (e: any) => {
+      toast({ title: "Failed to complete payment transition", description: e?.message, variant: "destructive" });
     },
   });
 
@@ -486,7 +495,7 @@ export default function AdminApplications() {
                         <CreditCard className="h-4 w-4 mr-1" />
                         {app.paymentState || "unpaid"}
                       </Button>
-                      {!app.assignedLawyerUserId && app.status !== "draft" && (
+                      {!app.assignedLawyerUserId && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -568,7 +577,7 @@ export default function AdminApplications() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+      <Dialog open={paymentDialogOpen} onOpenChange={(open) => { setPaymentDialogOpen(open); if (!open) setInlineLawyerId(""); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Payment Action</DialogTitle>
@@ -613,9 +622,22 @@ export default function AdminApplications() {
                     </p>
                   </div>
                 ) : (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2 text-sm" data-testid="warning-no-lawyer">
-                    <p className="font-medium text-amber-800 dark:text-amber-300">No lawyer assigned</p>
-                    <p className="text-amber-700 dark:text-amber-400">Assign a lawyer to this application before releasing funds. Use the <strong>Assign</strong> button on the application card.</p>
+                  <div className="space-y-2" data-testid="inline-lawyer-assignment">
+                    <p className="text-xs font-medium text-muted-foreground">No lawyer assigned — select one to assign and release in one step</p>
+                    <Select value={inlineLawyerId} onValueChange={setInlineLawyerId}>
+                      <SelectTrigger data-testid="select-inline-lawyer">
+                        <SelectValue placeholder="Select a lawyer to assign" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {lawyers && lawyers.length > 0 ? lawyers.map((l) => (
+                          <SelectItem key={l.userId} value={l.userId}>
+                            {l.name || l.email}{l.firmName ? ` — ${l.firmName}` : ""}
+                          </SelectItem>
+                        )) : (
+                          <SelectItem value="__none__" disabled>No active lawyers available</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                 )
               )}
@@ -638,17 +660,24 @@ export default function AdminApplications() {
             <Button
               onClick={() => {
                 if (selectedApp && selectedPaymentState) {
+                  const needsInlineAssign =
+                    selectedPaymentState === "released_to_lawyer" &&
+                    !selectedApp.assignedLawyerUserId &&
+                    !!inlineLawyerId;
                   paymentTransitionMutation.mutate({
                     applicationId: selectedApp.id,
                     targetState: selectedPaymentState,
                     reason: paymentReason,
+                    lawyerIdToAssign: needsInlineAssign ? inlineLawyerId : undefined,
                   });
                 }
               }}
               disabled={
                 !selectedPaymentState ||
                 paymentTransitionMutation.isPending ||
-                (selectedPaymentState === "released_to_lawyer" && !selectedApp?.assignedLawyerUserId)
+                (selectedPaymentState === "released_to_lawyer" &&
+                  !selectedApp?.assignedLawyerUserId &&
+                  !inlineLawyerId)
               }
               data-testid="button-confirm-payment"
             >

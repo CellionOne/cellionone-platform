@@ -6878,6 +6878,38 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         // Create lawyer profile if adding lawyer role
         if (role === "lawyer") {
           await storage.upsertLawyerProfile({ userId, isActive: true });
+
+          // Sync to lawyer_applications so the promoted lawyer appears in the
+          // Lawyer Applications list alongside formally-applied lawyers.
+          const targetUser = await storage.getUser(userId);
+          if (targetUser) {
+            const now = new Date();
+            const existingApp = await storage.getLawyerApplicationByEmail(targetUser.email);
+            if (existingApp) {
+              if (existingApp.status !== "approved") {
+                await storage.updateLawyerApplication(existingApp.id, {
+                  status: "approved",
+                  reviewedBy: adminId,
+                  reviewedAt: now,
+                  createdUserId: userId,
+                });
+              }
+            } else {
+              const newApp = await storage.createLawyerApplication({
+                email: targetUser.email,
+                firstName: targetUser.firstName || "N/A",
+                lastName: targetUser.lastName || "N/A",
+                phone: "N/A",
+                barId: "N/A",
+              });
+              await storage.updateLawyerApplication(newApp.id, {
+                status: "approved",
+                reviewedBy: adminId,
+                reviewedAt: now,
+                createdUserId: userId,
+              });
+            }
+          }
         }
       } else if (action === "remove") {
         await storage.removeUserRole(userId, role);

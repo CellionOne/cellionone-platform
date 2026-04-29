@@ -22,7 +22,7 @@ import {
   RefreshCw, Plus, Trash2, CheckCircle2,
   Users, DollarSign, Activity, Star, ArrowUpDown,
   Save, Send, Power, Handshake, Copy, Check, KeyRound, Edit2, Sparkles, Download,
-  AlertTriangle, Eye, ChevronRight,
+  AlertTriangle, Eye,
 } from "lucide-react";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2576,21 +2576,17 @@ function UserPreviewTab() {
       {/* Tier toggle */}
       <div className="flex flex-wrap gap-2" data-testid="preview-tier-toggle">
         {PREVIEW_TIERS.map(t => (
-          <button
+          <Button
             key={t.value}
+            variant={previewTier === t.value ? "default" : "outline"}
+            size="sm"
             onClick={() => setPreviewTier(t.value)}
             data-testid={`button-preview-tier-${t.value}`}
-            className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-              previewTier === t.value
-                ? "bg-primary text-primary-foreground border-primary"
-                : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
-            }`}
+            className="h-auto py-2 px-4"
           >
             <span>{t.label}</span>
-            <span className={`ml-2 text-xs font-normal ${previewTier === t.value ? "opacity-80" : "opacity-60"}`}>
-              {t.desc}
-            </span>
-          </button>
+            <span className="ml-2 text-xs font-normal opacity-70">{t.desc}</span>
+          </Button>
         ))}
       </div>
 

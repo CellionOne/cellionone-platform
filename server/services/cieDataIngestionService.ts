@@ -496,14 +496,15 @@ interface GptResponsePayload {
 // ============================================================
 // Shared helper: map raw GPT rows → validated PriceRow[]
 // ============================================================
-function gptRowsToPriceRows(raw: GptResponsePayload | GptPriceRow[]): PriceRow[] {
+function gptRowsToPriceRows(raw: GptResponsePayload | GptPriceRow[], fallbackDate?: string): PriceRow[] {
   const arr: GptPriceRow[] = Array.isArray(raw)
     ? (raw as GptPriceRow[])
     : ((raw as GptResponsePayload).rows ?? (raw as GptResponsePayload).data ?? (raw as GptResponsePayload).prices ?? []);
 
   return arr.filter(Boolean).map((r: GptPriceRow): PriceRow => {
     const symbol = String(r.symbol ?? "").trim().toUpperCase();
-    const date = normaliseDate(r.date ?? "") ?? "";
+    // Use GPT-provided date; fall back to the known trade date from the filename when absent.
+    const date = normaliseDate(r.date ?? "") ?? (fallbackDate ?? "");
     const close = parseNumber(r.close);
     const rawConfidence = typeof r.confidence === "number" ? Math.min(1, Math.max(0, r.confidence)) : 0.7;
 
@@ -561,18 +562,26 @@ function parseNgxPriceText(rawText: string, tradeDate: string | null): PriceRow[
   const lines = rawText.split(/\r?\n/);
   const rows: PriceRow[] = [];
   let headerFound = false;
+  let hasPClose = false; // true when format has PClose (previous close) column before Open
+  let prevLine = "";     // rolling 1-line buffer for 2-line header detection
 
   for (const line of lines) {
     const lc = line.toLowerCase();
 
-    // Detect the header line: must contain ALL six required column signals
-    // (symbol, open, high, low, close, volume) — tight match to avoid false positives
     if (!headerFound) {
-      const hits = NGX_HEADER_SIGNALS.filter(s => lc.includes(s)).length;
+      // Support both single-line headers (all 6 signals on one line) AND
+      // 2-line headers (e.g. Atlass Portfolios format where OHLCV column names appear
+      // on line 1 and "S/N Symbol" appears on line 2).
+      // Combine the current line with the previous line to detect split headers.
+      const combined = prevLine.toLowerCase() + " " + lc;
+      const hits = NGX_HEADER_SIGNALS.filter(s => combined.includes(s)).length;
       if (hits === NGX_HEADER_SIGNALS.length) {
         headerFound = true;
+        // Detect PClose (previous-close) column — shifts all subsequent column indices by 1.
+        hasPClose = combined.includes("pclose") || combined.includes("p.close") || combined.includes("prev close") || combined.includes("previous close");
       }
-      continue; // skip header row itself (and all pre-header lines)
+      prevLine = line;
+      continue; // skip header rows (and all pre-header lines)
     }
 
     // Skip blank / whitespace-only lines
@@ -600,14 +609,26 @@ function parseNgxPriceText(rawText: string, tradeDate: string | null): PriceRow[
       .map(t => ({ raw: t, value: pn(t) }))
       .filter(t => t.value !== undefined);
 
-    if (numericTokens.length < 4) continue;
+    // PClose format needs 5+ tokens; standard format needs 4+
+    const minTokens = hasPClose ? 5 : 4;
+    if (numericTokens.length < minTokens) continue;
 
-    const open = numericTokens[0]?.value;
-    const high = numericTokens[1]?.value;
-    const low = numericTokens[2]?.value;
-    const close = numericTokens[3]?.value;
-    const volumeCandidate = numericTokens.find(t => (t.value ?? 0) >= 1_000);
-    const rawVol = volumeCandidate?.value ?? numericTokens[4]?.value;
+    // Column mapping depends on whether PClose is present:
+    //   Standard:  [0]=Open [1]=High [2]=Low [3]=Close  …
+    //   PClose:    [0]=PClose [1]=Open [2]=High [3]=Low [4]=Close  …
+    const oIdx = hasPClose ? 1 : 0;
+    const hIdx = hasPClose ? 2 : 1;
+    const lIdx = hasPClose ? 3 : 2;
+    const cIdx = hasPClose ? 4 : 3;
+
+    const open  = numericTokens[oIdx]?.value;
+    const high  = numericTokens[hIdx]?.value;
+    const low   = numericTokens[lIdx]?.value;
+    const close = numericTokens[cIdx]?.value;
+
+    // Volume: first token beyond the close column that is >= 1,000 shares
+    const volumeCandidate = numericTokens.slice(cIdx + 1).find(t => (t.value ?? 0) >= 1_000);
+    const rawVol = volumeCandidate?.value ?? numericTokens[cIdx + 1]?.value;
     const volume = rawVol !== undefined ? Math.round(rawVol) : undefined;
 
     // close must be a positive number
@@ -801,7 +822,7 @@ export async function parsePdfBuffer(buffer: Buffer, filename?: string): Promise
 
   console.info("[CIEIngest] NGX deterministic parser found 0 rows — falling back to GPT-4o text extraction");
 
-  return gptExtractPriceRows(rawText, "pdf");
+  return gptExtractPriceRows(rawText, "pdf", tradeDate);
 }
 
 // ============================================================
@@ -843,13 +864,20 @@ IMPORTANT RULES:
 - If the text contains no price data at all, return {"rows":[]}.
 Pure JSON only — no markdown, no explanation.`;
 
-async function gptExtractPriceRows(text: string, source: IngestFormat): Promise<PriceRow[]> {
+async function gptExtractPriceRows(text: string, source: IngestFormat, knownDate?: string | null): Promise<PriceRow[]> {
+  // When the trade date is already known (e.g. from the filename), inject it as a hard
+  // constraint into the system prompt so rows never fail date validation.
+  let systemPrompt = PRICE_EXTRACTION_SYSTEM_PROMPT;
+  if (knownDate) {
+    systemPrompt += `\n\nCRITICAL DATE OVERRIDE: Every row MUST use date "${knownDate}" (YYYY-MM-DD). Do NOT infer or guess a different date — use this value exactly for all rows.`;
+  }
+
   try {
     const openai = await getOpenAI();
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: PRICE_EXTRACTION_SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: text.slice(0, 48_000) },
       ],
       response_format: { type: "json_object" },
@@ -866,7 +894,8 @@ async function gptExtractPriceRows(text: string, source: IngestFormat): Promise<
       return [];
     }
 
-    return gptRowsToPriceRows(parsed).map(r => ({ ...r, source }));
+    // Pass knownDate as fallback so rows GPT omits a date on still resolve correctly.
+    return gptRowsToPriceRows(parsed, knownDate ?? undefined).map(r => ({ ...r, source }));
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[CIEIngest] GPT-4o text extraction failed (${source}):`, errMsg);
@@ -905,7 +934,7 @@ export async function parseDocxBuffer(buffer: Buffer, filename?: string): Promis
     return ngxRows.map(r => ({ ...r, source: "docx" as IngestFormat }));
   }
 
-  return gptExtractPriceRows(rawText, "docx");
+  return gptExtractPriceRows(rawText, "docx", tradeDate);
 }
 
 // ============================================================

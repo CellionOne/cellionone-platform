@@ -346,6 +346,7 @@ export default function AdminApplications() {
                         <tr className="border-b bg-muted/40">
                           <th className="text-left px-3 py-2 font-medium text-muted-foreground">Company</th>
                           <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden md:table-cell">Founder</th>
+                          <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden lg:table-cell">Type</th>
                           <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden sm:table-cell">Age</th>
                           <th className="text-left px-3 py-2 font-medium text-muted-foreground hidden lg:table-cell">Reminders</th>
                           <th className="px-3 py-2" />
@@ -355,8 +356,9 @@ export default function AdminApplications() {
                         {filteredAbandonedCarts.map((item) => (
                           <tr
                             key={item.id}
-                            className="border-b last:border-0 hover:bg-muted/20 transition-colors"
+                            className="border-b last:border-0 hover:bg-muted/20 transition-colors cursor-pointer"
                             data-testid={`cart-row-${item.id}`}
+                            onClick={() => window.location.assign(`/applications/${item.id}`)}
                           >
                             <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
@@ -373,6 +375,11 @@ export default function AdminApplications() {
                                 <p className="text-xs text-muted-foreground truncate max-w-[140px]">{item.founderEmail || "—"}</p>
                               </div>
                             </td>
+                            <td className="px-3 py-2.5 hidden lg:table-cell">
+                              <span className="text-xs text-muted-foreground capitalize">
+                                {item.applicationType === "incorporation" ? "Incorporation" : item.applicationType || "—"}
+                              </span>
+                            </td>
                             <td className="px-3 py-2.5 hidden sm:table-cell">
                               <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${bucketColors[item.ageBucket]}`}>
                                 <Clock className="h-3 w-3" />
@@ -382,7 +389,7 @@ export default function AdminApplications() {
                             <td className="px-3 py-2.5 hidden lg:table-cell">
                               <span className="text-muted-foreground">{item.remindersCount} / 3 sent</span>
                             </td>
-                            <td className="px-3 py-2.5 text-right">
+                            <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                               <Button variant="ghost" size="sm" asChild data-testid={`button-view-cart-${item.id}`}>
                                 <Link href={`/applications/${item.id}`}>
                                   <ExternalLink className="h-3.5 w-3.5" />

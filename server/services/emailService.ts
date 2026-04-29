@@ -1033,7 +1033,10 @@ function buildAbandonedCartEmail(opts: {
       <p style="color:#71717a;font-size:13px;line-height:1.6;text-align:center;">${cfg.footerNote}</p>
       <p style="color:#71717a;font-size:13px;line-height:1.6;margin-top:16px;">If you have questions, email us at <a href="mailto:service@cellionone.com" style="color:#16a34a;">service@cellionone.com</a>.</p>
       <hr style="border:none;border-top:1px solid #e4e4e7;margin:32px 0;">
-      <p style="color:#a1a1aa;font-size:12px;text-align:center;">
+      <p style="color:#a1a1aa;font-size:13px;text-align:center;line-height:1.6;">
+        If you no longer wish to receive registration reminders, you can safely ignore this email — we will not be offended. You may also log in and delete the draft at any time.
+      </p>
+      <p style="color:#a1a1aa;font-size:12px;text-align:center;margin-top:16px;">
         &copy; ${year} Cellion Platforms Nigeria Limited. All rights reserved.<br>
         <span style="font-size:11px;">You're receiving this because you started a company registration on Cellion One.</span>
       </p>

@@ -72,7 +72,7 @@ export default function FounderApplications() {
         ) : (
           <div className="grid gap-4">
             {applications.map((app) => {
-              const isLegacy = (app as any).isLegacyDraft === true;
+              const isLegacy = app.isLegacyDraft === true;
 
               return (
                 <Card

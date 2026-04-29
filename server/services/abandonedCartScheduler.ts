@@ -1,47 +1,50 @@
 import { db } from "../db";
-import { companyApplications, users } from "@shared/schema";
-import { eq, and, lt, isNull, or, sql } from "drizzle-orm";
+import { companyApplications, users, featureFlags } from "@shared/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { sendAbandonedCartReminderEmail } from "./emailService";
 
 const SITE_URL = process.env.SITE_URL || "https://cellionone.com";
 
-const ONE_DAY_MS   = 24 * 60 * 60 * 1000;
-const THREE_DAYS_MS = 3 * ONE_DAY_MS;
-const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
+const ONE_DAY_MS    = 24 * 60 * 60 * 1000;
+const TWO_DAYS_MS   = 2  * ONE_DAY_MS;
+const THREE_DAYS_MS = 3  * ONE_DAY_MS;
+const FOUR_DAYS_MS  = 4  * ONE_DAY_MS;
+const SEVEN_DAYS_MS = 7  * ONE_DAY_MS;
+
+// DB flag key used to guard the one-time legacy cleanup so it never re-runs
+// after a process restart or re-deployment.
+const LEGACY_CLEANUP_FLAG = "abandoned_cart_legacy_cleanup_done";
 
 // Minimum fields that must be present for a draft to be resumable with the
-// current wizard. Any draft missing these is flagged as a legacy draft.
-const REQUIRED_WIZARD_FIELDS: Array<keyof typeof companyApplications.$inferSelect> = [
-  "companyType",
-  "companyName1",
-  "registeredAddress",
-  "operatingAddress",
-];
-
+// current wizard. Any draft missing one of these is flagged as a legacy draft.
 function isDraftResumable(app: typeof companyApplications.$inferSelect): boolean {
-  return REQUIRED_WIZARD_FIELDS.every((field) => {
-    const val = app[field as keyof typeof app];
-    if (val === null || val === undefined) return false;
-    if (typeof val === "object" && !Array.isArray(val)) {
-      // For address JSON objects, require at least line1 and city
-      const addr = val as Record<string, unknown>;
-      return !!(addr.line1 && addr.city);
-    }
-    if (typeof val === "string") return val.trim().length > 0;
-    return true;
-  });
+  if (!app.companyType || app.companyType.trim() === "") return false;
+  if (!app.companyName1 || app.companyName1.trim() === "") return false;
+
+  const reg = app.registeredAddress as Record<string, unknown> | null | undefined;
+  if (!reg || !reg.line1 || !reg.city) return false;
+
+  const ops = app.operatingAddress as Record<string, unknown> | null | undefined;
+  if (!ops || !ops.line1 || !ops.city) return false;
+
+  return true;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // One-time legacy draft cleanup
-// Run at startup, guarded by a flag stored on the process object so it only
-// executes once even if the scheduler is invoked multiple times.
+// Guarded by a persistent DB flag so it only runs once across all deployments.
 // ──────────────────────────────────────────────────────────────────────────────
-let legacyCleanupDone = false;
-
 export async function runLegacyDraftCleanup(): Promise<void> {
-  if (legacyCleanupDone) return;
-  legacyCleanupDone = true;
+  // Persistent guard: check the DB flag first
+  const [existing] = await db
+    .select()
+    .from(featureFlags)
+    .where(eq(featureFlags.key, LEGACY_CLEANUP_FLAG));
+
+  if (existing?.isEnabled) {
+    console.log("[AbandonedCart] Legacy draft cleanup already completed — skipping");
+    return;
+  }
 
   console.log("[AbandonedCart] Running one-time legacy draft cleanup...");
 
@@ -69,6 +72,16 @@ export async function runLegacyDraftCleanup(): Promise<void> {
       }
     }
 
+    // Persist the completion flag so the cleanup never reruns after restart/deploy
+    await db.insert(featureFlags).values({
+      key: LEGACY_CLEANUP_FLAG,
+      description: "Guards the one-time legacy draft cleanup — set automatically",
+      isEnabled: true,
+    }).onConflictDoUpdate({
+      target: featureFlags.key,
+      set: { isEnabled: true, updatedAt: now },
+    });
+
     console.log(
       `[AbandonedCart] Legacy cleanup complete — inspected ${drafts.length}, flagged ${flagged} as legacy drafts`,
     );
@@ -88,7 +101,6 @@ export async function runAbandonedCartCheck(): Promise<void> {
   let skipped = 0;
 
   try {
-    // Fetch all draft, unpaid, non-legacy applications that haven't maxed out reminders
     const candidates = await db
       .select({
         app: companyApplications,
@@ -121,7 +133,6 @@ export async function runAbandonedCartCheck(): Promise<void> {
         ? now.getTime() - new Date(app.abandonedCartLastReminderAt).getTime()
         : null;
 
-      // Determine which reminder to send, if any
       let reminderNumber: 1 | 2 | 3 | null = null;
 
       if (reminderCount === 0 && ageMs >= ONE_DAY_MS) {
@@ -185,7 +196,3 @@ export async function runAbandonedCartCheck(): Promise<void> {
     console.error("[AbandonedCart] Scheduler error:", err);
   }
 }
-
-// Gap constants — how long to wait between consecutive reminders
-const TWO_DAYS_MS  = 2 * ONE_DAY_MS;
-const FOUR_DAYS_MS = 4 * ONE_DAY_MS;

@@ -166,9 +166,8 @@ export interface SplitCheckoutInput {
 export async function initializeSplitTransaction(input: SplitCheckoutInput): Promise<InitializeTransactionResult> {
   const reference = `celion_split_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
 
-  const subaccountCode = getLawyerSubaccountCode();
-  const splitEnabled = await storage.getFeatureFlag("enable_paystack_split_settlement");
-
+  // Full amount always collected by Cellion — no checkout-time split.
+  // Lawyer payout is handled separately by admin via the "Release to Lawyer" transfer action.
   const body: Record<string, unknown> = {
     email: input.email,
     amount: input.totalAmount,
@@ -186,13 +185,6 @@ export async function initializeSplitTransaction(input: SplitCheckoutInput): Pro
       ],
     },
   };
-
-  if (subaccountCode && splitEnabled?.isEnabled) {
-    body.subaccount = subaccountCode;
-    body.transaction_charge = input.totalCellionCut;
-    body.bearer = 'account';
-    console.log(`[Paystack] Split settlement: subaccount=${subaccountCode}, transaction_charge=${input.totalCellionCut} kobo`);
-  }
 
   const result = await paystackRequest<{
     authorization_url: string;

@@ -291,6 +291,7 @@ export const payments = pgTable("payments", {
   }>(),
   status: varchar("status", { length: 50 }).default("initialized"), // initialized, success, failed, refunded
   state: varchar("state", { length: 50 }).default("unpaid"), // unpaid, paid_escrowed, released_to_lawyer, refunded_partial, refunded_full, chargeback
+  wasSplitAtCheckout: boolean("was_split_at_checkout").default(false), // true for historical payments split at checkout via global subaccount
   paystackReference: varchar("paystack_reference", { length: 255 }),
   paidAt: timestamp("paid_at"),
   escrowedAt: timestamp("escrowed_at"),

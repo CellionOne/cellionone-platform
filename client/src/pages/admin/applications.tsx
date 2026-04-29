@@ -154,6 +154,7 @@ export default function AdminApplications() {
   const { data: appPaymentDetails } = useQuery<{
     amountTotalKobo: number;
     lawyerFeeKobo: number | null;
+    wasSplitAtCheckout: boolean;
     source: string;
   } | null>({
     queryKey: ["/api/admin/applications", selectedApp?.id, "payment"],
@@ -163,7 +164,7 @@ export default function AdminApplications() {
       if (!res.ok) return null;
       return res.json();
     },
-    enabled: paymentDialogOpen && !!selectedApp?.id && selectedPaymentState === "released_to_lawyer",
+    enabled: paymentDialogOpen && !!selectedApp?.id,
   });
 
   const { data: appCompanyProfile } = useQuery<{ id: number; companyName: string; existingCompanyStatus?: string } | null>({
@@ -845,20 +846,42 @@ export default function AdminApplications() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            {appPaymentDetails?.wasSplitAtCheckout && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2.5 text-sm" data-testid="warn-split-at-checkout">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium text-amber-800 dark:text-amber-300">Payment already split at checkout</p>
+                    <p className="text-amber-700 dark:text-amber-400 text-xs mt-0.5">
+                      This payment was automatically split and settled to the lawyer's Paystack subaccount when the founder paid. Releasing again will create a duplicate payment to the lawyer.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="payment-transition">Action</Label>
-              <Select value={selectedPaymentState} onValueChange={setSelectedPaymentState}>
+              <Select
+                value={selectedPaymentState}
+                onValueChange={(v) => {
+                  if (v === "released_to_lawyer" && appPaymentDetails?.wasSplitAtCheckout) return;
+                  setSelectedPaymentState(v);
+                }}
+              >
                 <SelectTrigger data-testid="select-payment-state">
                   <SelectValue placeholder="Select payment action" />
                 </SelectTrigger>
                 <SelectContent>
-                  {paymentTransitionOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      <div className="flex flex-col">
-                        <span>{option.label}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
+                  {paymentTransitionOptions.map((option) => {
+                    const isBlocked = option.value === "released_to_lawyer" && !!appPaymentDetails?.wasSplitAtCheckout;
+                    return (
+                      <SelectItem key={option.value} value={option.value} disabled={isBlocked}>
+                        <div className="flex flex-col">
+                          <span>{option.label}{isBlocked ? " (already paid)" : ""}</span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
               {selectedPaymentState && (
@@ -998,6 +1021,7 @@ export default function AdminApplications() {
               disabled={
                 !selectedPaymentState ||
                 paymentTransitionMutation.isPending ||
+                (selectedPaymentState === "released_to_lawyer" && !!appPaymentDetails?.wasSplitAtCheckout) ||
                 (selectedPaymentState === "released_to_lawyer" &&
                   !selectedApp?.assignedLawyerUserId &&
                   !inlineLawyerId) ||

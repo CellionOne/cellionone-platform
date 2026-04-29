@@ -27,7 +27,6 @@ export async function seedDatabase() {
       { key: "enable_registered_office_payment_required", isEnabled: false, description: "Require payment for registered office (beta: false)" },
       { key: "enable_verification_required_for_registered_office", isEnabled: true, description: "Require identity verification for standalone registered office" },
       { key: "enable_paystack_payments", isEnabled: true, description: "Enable Paystack payment processing (NGN)" },
-      { key: "enable_paystack_split_settlement", isEnabled: true, description: "Enable Paystack split settlement to lawyer subaccount" },
       { key: "enable_verification_payment_required", isEnabled: false, description: "Require payment for identity verification (beta: false)" },
       { key: "enable_incorporation_payment_required", isEnabled: false, description: "Require payment for incorporation (beta: false)" },
       { key: "enable_escrow_payments", isEnabled: true, description: "Enable escrow payment system for procurement contracts and Escrow-as-a-Service API" },
@@ -38,7 +37,7 @@ export async function seedDatabase() {
     
     // Upsert feature flags — keep existing isEnabled values unless flag is new,
     // EXCEPT for flags we want to force-enable on startup (controlled list below)
-    const forceEnabled = new Set<string>(["enable_paystack_payments", "enable_paystack_split_settlement"]);
+    const forceEnabled = new Set<string>(["enable_paystack_payments"]);
     for (const flag of allFlags) {
       if (forceEnabled.has(flag.key)) {
         await db.insert(featureFlags).values(flag).onConflictDoUpdate({

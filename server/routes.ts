@@ -7691,6 +7691,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.json({
           amountTotalKobo: payment.amountTotalKobo,
           lawyerFeeKobo,
+          wasSplitAtCheckout: payment.wasSplitAtCheckout ?? false,
           source: "payment",
         });
       }

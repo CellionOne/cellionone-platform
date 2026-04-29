@@ -146,7 +146,9 @@ async function handleChargeSuccess(data: PaystackWebhookEvent['data'], rawPayloa
     await handleKycCreditPurchaseSuccess(data);
   } else if (reference.startsWith('kyc_')) {
     await handleKycPaymentSuccess(data);
-  } else if (reference.startsWith('celion_split_')) {
+  } else if (reference.startsWith('celion_split_') || reference.startsWith('celion_order_')) {
+    // celion_split_ = legacy checkout with Paystack subaccount split (wasSplitAtCheckout=true)
+    // celion_order_ = new non-split checkout (full amount to Cellion)
     await handleSplitOrderSuccess(data, rawPayload);
   } else {
     await handleLegacyPaymentSuccess(data);
@@ -1581,7 +1583,7 @@ async function handleLegacyPaymentSuccess(data: PaystackWebhookEvent['data']): P
 
 async function handleChargeFailed(data: PaystackWebhookEvent['data'], rawPayload: string): Promise<void> {
   const reference = data.reference;
-  const isSplitOrder = reference.startsWith('celion_split_');
+  const isSplitOrder = reference.startsWith('celion_split_') || reference.startsWith('celion_order_');
 
   if (isSplitOrder) {
     const [payment] = await db.select().from(orderPayments)

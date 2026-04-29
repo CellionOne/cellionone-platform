@@ -164,7 +164,9 @@ export interface SplitCheckoutInput {
 }
 
 export async function initializeSplitTransaction(input: SplitCheckoutInput): Promise<InitializeTransactionResult> {
-  const reference = `celion_split_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+  // Use celion_order_ prefix for new non-split payments.
+  // Legacy split payments used celion_split_ prefix (retained for backfill/webhook routing).
+  const reference = `celion_order_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
 
   // Full amount always collected by Cellion — no checkout-time split.
   // Lawyer payout is handled separately by admin via the "Release to Lawyer" transfer action.

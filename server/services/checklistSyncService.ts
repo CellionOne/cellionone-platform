@@ -234,6 +234,10 @@ export async function syncPeopleDocumentRequirements(applicationId: number): Pro
         if (!existing) {
           // onConflictDoNothing prevents duplicates under concurrent calls
           if (verified) {
+            // source stays "people_requirement" (not "kyc_auto_resolved") so the
+            // UI can keep the item in the "People & Entity Documents" group even
+            // after auto-resolution. isAutoResolved=true + status="accepted" are
+            // the authoritative auto-resolution markers for these items.
             await storage.createChecklistItem({
               applicationId,
               key,

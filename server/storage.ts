@@ -715,10 +715,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createChecklistItem(data: InsertChecklistItem): Promise<ApplicationChecklistItem | undefined> {
+    // onConflictDoNothing (no explicit target) silently ignores any unique-constraint
+    // violation — safe whether or not the caller knows the exact constraint name.
+    // The schema declares uniqueIndex("application_checklist_items_app_key_idx") on
+    // (applicationId, key), so concurrent inserts of the same key are idempotent.
     const [item] = await db
       .insert(applicationChecklistItems)
       .values(data)
-      .onConflictDoNothing({ target: [applicationChecklistItems.applicationId, applicationChecklistItems.key] })
+      .onConflictDoNothing()
       .returning();
     return item;
   }

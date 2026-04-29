@@ -22,7 +22,7 @@ import {
   RefreshCw, Plus, Trash2, CheckCircle2,
   Users, DollarSign, Activity, Star, ArrowUpDown,
   Save, Send, Power, Handshake, Copy, Check, KeyRound, Edit2, Sparkles, Download,
-  AlertTriangle,
+  AlertTriangle, Eye, ChevronRight,
 } from "lucide-react";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2418,6 +2418,354 @@ function RevenueTab() {
   );
 }
 
+// ─── User Preview Tab ─────────────────────────────────────────────────────────
+
+interface PulseData {
+  available: boolean; message?: string;
+  asiIndex?: number | null; asiDailyChangePct?: number | null;
+  brentCrudeUsd?: number | null; ngnPerUsd?: number | null;
+  source?: string; updatedAt?: string; commentary?: string | null;
+}
+
+interface PreviewMomentum { daily: string | null; weekly: string | null; monthly: string | null }
+interface PreviewSecurity {
+  ticker: string; name: string; sector: string;
+  ias: number | null; rs: number | null; cs: number | null;
+  recommendation: string | null; scoreDate: string | null;
+  momentum: PreviewMomentum;
+}
+
+interface PreviewSignal {
+  id: number; symbol: string | null; type: string; sentiment: string | null;
+  credibility: number | null; content: string; publishedAt: string | null;
+}
+
+function previewFormatDate(d?: string | null) {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function previewIasColor(v: number | null) {
+  if (v == null) return "text-muted-foreground";
+  if (v >= 70) return "text-green-600 dark:text-green-400 font-semibold";
+  if (v >= 50) return "text-amber-600 dark:text-amber-400";
+  return "text-red-500 dark:text-red-400";
+}
+
+function previewRecoBadge(rec: string | null) {
+  if (!rec) return <span className="text-muted-foreground text-xs">—</span>;
+  const map: Record<string, string> = {
+    "Strong Buy": "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+    "Accumulate": "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
+    "Hold": "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+    "Reduce": "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+    "Sell": "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  };
+  return <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${map[rec] ?? "bg-muted text-muted-foreground"}`}>{rec}</span>;
+}
+
+function previewStarRating(ias: number | null) {
+  if (ias == null) return null;
+  const stars = ias >= 80 ? 5 : ias >= 65 ? 4 : ias >= 50 ? 3 : ias >= 35 ? 2 : 1;
+  return (
+    <span className="inline-flex gap-0.5" title={`IAS ${ias.toFixed(1)}`}>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <Star key={i} className={`h-3 w-3 ${i < stars ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
+      ))}
+    </span>
+  );
+}
+
+function PreviewMomentumDots({ m }: { m: PreviewMomentum }) {
+  const color: Record<string, string> = { up: "bg-green-500", down: "bg-red-500", flat: "bg-amber-400" };
+  const labels = ["D", "W", "M"] as const;
+  const values = [m.daily, m.weekly, m.monthly];
+  return (
+    <span className="inline-flex gap-1 items-center" title="RS trend: Daily / Weekly / Monthly">
+      {labels.map((l, i) => (
+        <span key={l} className="inline-flex flex-col items-center gap-0.5">
+          <span className={`h-2 w-2 rounded-full ${values[i] ? color[values[i]!] ?? "bg-gray-300" : "bg-gray-200 dark:bg-gray-700"}`} />
+          <span className="text-[9px] text-muted-foreground leading-none">{l}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function previewCredLabel(n: number | null): string {
+  if (n === null) return "unrated";
+  if (n >= 5) return "very high";
+  if (n >= 4) return "high";
+  if (n >= 3) return "medium";
+  if (n >= 2) return "low";
+  return "very low";
+}
+
+function previewCredClass(n: number | null): string {
+  if (n === null) return "text-muted-foreground";
+  if (n >= 4) return "text-green-600 dark:text-green-400";
+  if (n >= 3) return "text-amber-600 dark:text-amber-400";
+  return "text-muted-foreground";
+}
+
+function previewSentimentIcon(s: string | null) {
+  if (s === "bullish") return <TrendingUp className="h-4 w-4 text-green-500" />;
+  if (s === "bearish") return <Activity className="h-4 w-4 text-red-500" />;
+  return <Activity className="h-4 w-4 text-muted-foreground" />;
+}
+
+const PREVIEW_TIERS = [
+  { value: "free", label: "Free", desc: "Market Pulse only" },
+  { value: "subscriber", label: "Subscriber", desc: "Pulse + Securities" },
+  { value: "pro", label: "Pro", desc: "Pulse + Securities + Signals" },
+] as const;
+
+type PreviewTier = "free" | "subscriber" | "pro";
+
+function UserPreviewTab() {
+  const [previewTier, setPreviewTier] = useState<PreviewTier>("free");
+
+  const { data: pulseData, isLoading: pulseLoading } = useQuery<PulseData>({
+    queryKey: ["/api/cie-portal/pulse"],
+  });
+
+  const { data: securitiesData, isLoading: securitiesLoading } = useQuery<{ securities: PreviewSecurity[]; sectors: string[]; total: number }>({
+    queryKey: ["/api/cie-portal/securities"],
+    enabled: previewTier === "subscriber" || previewTier === "pro",
+  });
+
+  const { data: signalsData, isLoading: signalsLoading } = useQuery<{ signals: PreviewSignal[]; count: number }>({
+    queryKey: ["/api/cie-portal/signals"],
+    enabled: previewTier === "pro",
+  });
+
+  const changeColor = (v?: number | null) =>
+    v == null ? "text-foreground" : v >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400";
+
+  const pulseMetrics = pulseData?.available
+    ? [
+        { label: "NGX ASI", value: pulseData.asiIndex?.toLocaleString() ?? "—", color: "" },
+        {
+          label: "Day Change %",
+          value: pulseData.asiDailyChangePct != null
+            ? (pulseData.asiDailyChangePct >= 0 ? "+" : "") + pulseData.asiDailyChangePct.toFixed(2) + "%"
+            : "—",
+          color: changeColor(pulseData.asiDailyChangePct),
+        },
+        { label: "Brent Crude", value: pulseData.brentCrudeUsd != null ? `$${pulseData.brentCrudeUsd.toFixed(2)}` : "—", color: "" },
+        { label: "USD / NGN", value: pulseData.ngnPerUsd != null ? `₦${pulseData.ngnPerUsd.toFixed(2)}` : "—", color: "" },
+      ]
+    : [];
+
+  return (
+    <div className="space-y-6">
+      {/* Header + admin note */}
+      <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+        <div className="flex-1">
+          <h2 className="text-base font-semibold mb-0.5" data-testid="text-preview-heading">User Preview</h2>
+          <p className="text-sm text-muted-foreground">
+            Simulate what a subscriber sees after ingestion. Select a tier below to preview live portal content.
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 text-xs text-amber-800 dark:text-amber-300 shrink-0">
+          <Eye className="h-3.5 w-3.5 shrink-0" />
+          Admin Preview — not visible to users
+        </div>
+      </div>
+
+      {/* Tier toggle */}
+      <div className="flex flex-wrap gap-2" data-testid="preview-tier-toggle">
+        {PREVIEW_TIERS.map(t => (
+          <button
+            key={t.value}
+            onClick={() => setPreviewTier(t.value)}
+            data-testid={`button-preview-tier-${t.value}`}
+            className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+              previewTier === t.value
+                ? "bg-primary text-primary-foreground border-primary"
+                : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+            }`}
+          >
+            <span>{t.label}</span>
+            <span className={`ml-2 text-xs font-normal ${previewTier === t.value ? "opacity-80" : "opacity-60"}`}>
+              {t.desc}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Market Pulse (all tiers) ─────────────────────────────────────────── */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Activity className="h-4 w-4 text-primary" />
+          <h3 className="text-sm font-semibold">Market Pulse</h3>
+          <span className="text-xs bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 px-1.5 py-0.5 rounded font-medium">Free</span>
+        </div>
+
+        {pulseLoading ? (
+          <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
+        ) : !pulseData?.available ? (
+          <Card data-testid="card-preview-pulse-unavailable">
+            <CardContent className="py-10 text-center">
+              <Activity className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+              <p className="text-muted-foreground text-sm">{pulseData?.message ?? "Market pulse data not yet available."}</p>
+              <p className="text-xs text-muted-foreground mt-1">Upload price data to populate this section.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {pulseMetrics.map((m, i) => (
+                <Card key={i} data-testid={`card-preview-metric-${i}`}>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-muted-foreground mb-1">{m.label}</p>
+                    <p className={`text-xl font-bold ${m.color}`}>{m.value}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {pulseData.commentary && (
+              <Card data-testid="card-preview-commentary">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                    <span className="text-xs font-medium text-primary">AI Market Commentary</span>
+                    <span className="ml-auto text-xs text-muted-foreground">{previewFormatDate(pulseData.updatedAt)}</span>
+                  </div>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap" data-testid="text-preview-commentary">
+                    {pulseData.commentary}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
+              Last updated: {previewFormatDate(pulseData.updatedAt)} · Source: {pulseData.source ?? "manual"}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Securities (subscriber+) ─────────────────────────────────────────── */}
+      {(previewTier === "subscriber" || previewTier === "pro") && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold">NGX Securities</h3>
+            <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 px-1.5 py-0.5 rounded font-medium">Subscriber</span>
+            {!securitiesLoading && securitiesData && (
+              <span className="text-xs text-muted-foreground ml-auto">{securitiesData.securities.length} securities</span>
+            )}
+          </div>
+
+          {securitiesLoading ? (
+            <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
+          ) : (
+            <Card data-testid="card-preview-securities">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Ticker</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Sector</TableHead>
+                        <TableHead title="RS trend: Daily/Weekly/Monthly">D/W/M</TableHead>
+                        <TableHead className="text-center">IAS</TableHead>
+                        <TableHead>Rating</TableHead>
+                        <TableHead>Recommendation</TableHead>
+                        <TableHead />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(securitiesData?.securities ?? []).map(s => (
+                        <TableRow key={s.ticker} data-testid={`row-preview-security-${s.ticker}`}>
+                          <TableCell className="font-mono font-bold text-primary">{s.ticker}</TableCell>
+                          <TableCell className="text-sm max-w-[130px] truncate">{s.name}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{s.sector}</TableCell>
+                          <TableCell><PreviewMomentumDots m={s.momentum} /></TableCell>
+                          <TableCell className={`text-center text-sm font-medium ${previewIasColor(s.ias)}`}>
+                            {s.ias?.toFixed(1) ?? "—"}
+                          </TableCell>
+                          <TableCell>{previewStarRating(s.ias)}</TableCell>
+                          <TableCell>{previewRecoBadge(s.recommendation)}</TableCell>
+                          <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" /></TableCell>
+                        </TableRow>
+                      ))}
+                      {(securitiesData?.securities ?? []).length === 0 && !securitiesLoading && (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center text-muted-foreground py-8 text-sm">
+                            No securities scored yet. Run a score cycle after uploading price data.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* ── Analyst Signals (pro only) ───────────────────────────────────────── */}
+      {previewTier === "pro" && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold">Analyst Signals</h3>
+            <span className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 px-1.5 py-0.5 rounded font-medium">Pro</span>
+            {!signalsLoading && signalsData && (
+              <span className="text-xs text-muted-foreground ml-auto">{signalsData.count} signal{signalsData.count !== 1 ? "s" : ""}</span>
+            )}
+          </div>
+
+          {signalsLoading ? (
+            <div className="flex items-center justify-center py-8"><LoadingSpinner /></div>
+          ) : (
+            <div className="space-y-2" data-testid="preview-signals-list">
+              {(signalsData?.signals ?? []).map(s => (
+                <Card key={s.id} className="border-border/60" data-testid={`card-preview-signal-${s.id}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5">{previewSentimentIcon(s.sentiment)}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                          {s.symbol && <span className="font-mono text-primary font-semibold text-sm">{s.symbol}</span>}
+                          <span className="text-xs capitalize bg-muted rounded px-1.5 py-0.5">{s.type.replace(/_/g, " ")}</span>
+                          {s.sentiment && (
+                            <span className={`text-xs font-medium capitalize ${s.sentiment === "bullish" ? "text-green-600" : s.sentiment === "bearish" ? "text-red-500" : "text-muted-foreground"}`}>
+                              {s.sentiment}
+                            </span>
+                          )}
+                          <span className={`text-xs font-medium ${previewCredClass(s.credibility)}`}>
+                            ● {previewCredLabel(s.credibility)} credibility
+                          </span>
+                        </div>
+                        <p className="text-sm leading-relaxed">{s.content}</p>
+                        <p className="text-xs text-muted-foreground mt-1.5">{previewFormatDate(s.publishedAt)}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+              {(signalsData?.signals ?? []).length === 0 && (
+                <Card>
+                  <CardContent className="py-10 text-center text-muted-foreground text-sm">
+                    No signals published yet. Publish signals from the Signals tab to see them here.
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AdminCieCockpit() {
@@ -2511,6 +2859,9 @@ export default function AdminCieCockpit() {
             {!isCieAnalyst && (
               <TabsTrigger value="revenue" className="gap-2" data-testid="tab-revenue"><TrendingUp className="h-4 w-4" />Revenue</TabsTrigger>
             )}
+            {isFullAdmin && (
+              <TabsTrigger value="preview" className="gap-2" data-testid="tab-preview"><Eye className="h-4 w-4" />User Preview</TabsTrigger>
+            )}
           </TabsList>
 
           {!isCieAnalyst && <TabsContent value="securities"><SecuritiesTab /></TabsContent>}
@@ -2520,6 +2871,7 @@ export default function AdminCieCockpit() {
           <TabsContent value="signals"><SignalsTab /></TabsContent>
           {!isCieAnalyst && <TabsContent value="partners"><PartnersTab /></TabsContent>}
           {!isCieAnalyst && <TabsContent value="revenue"><RevenueTab /></TabsContent>}
+          {isFullAdmin && <TabsContent value="preview"><UserPreviewTab /></TabsContent>}
         </Tabs>
       </div>
     </DashboardLayout>

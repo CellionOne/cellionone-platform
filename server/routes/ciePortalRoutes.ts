@@ -92,6 +92,17 @@ async function resolveUserTier(userId: string): Promise<CieTier> {
 function requireCieTierSession(minTier: CieTier) {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
     const userId = getUserId(req);
+
+    // Platform admins get full "pro" access on all portal endpoints (for User Preview).
+    // cie_analyst does NOT get this bypass — they have a separate cockpit role.
+    if (userId) {
+      const roles = await storage.getUserRoles(userId);
+      if (roles.includes("admin")) {
+        req.cieTier = "pro";
+        return next();
+      }
+    }
+
     const tier = await resolveUserTier(userId);
     req.cieTier = tier;
     if (TIER_ORDER[tier] < TIER_ORDER[minTier]) {

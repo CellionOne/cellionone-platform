@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRoute, Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
@@ -141,10 +141,53 @@ export default function ApplicationDetailsPage() {
   const applicationId = params?.id;
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
 
+  const prevChecklistRef = useRef<ApplicationChecklistItem[] | null>(null);
+
   const { data, isLoading } = useQuery<ApplicationDetails>({
     queryKey: ["/api/applications", applicationId],
     enabled: !!applicationId,
+    refetchInterval: (query) => {
+      const d = query.state.data as ApplicationDetails | undefined;
+      if (!d) return false;
+      const preSubmitStatuses = ["draft", "pending_verification"];
+      const isPreSubmit = preSubmitStatuses.includes(d.application?.status ?? "");
+      const hasMissing = d.checklist?.some(
+        (item) => item.required && item.status === "missing"
+      );
+      return isPreSubmit && hasMissing ? 5000 : false;
+    },
   });
+
+  useEffect(() => {
+    if (!data?.checklist) return;
+    const prev = prevChecklistRef.current;
+    if (prev) {
+      const autoResolved = data.checklist.filter((item) => {
+        const prevItem = prev.find((p) => p.id === item.id);
+        return (
+          prevItem?.status === "missing" &&
+          (item.status === "provided" || item.status === "accepted") &&
+          item.isAutoResolved === true
+        );
+      });
+      if (autoResolved.length > 0) {
+        const labels: Record<string, string> = {
+          director_id: "Director verification",
+          shareholder_details: "Shareholder verification",
+          id_document: "Identity document",
+          passport_photo: "Passport photo",
+        };
+        autoResolved.forEach((item) => {
+          const label = labels[item.key ?? ""] ?? "A checklist item";
+          toast({
+            title: `${label} verified`,
+            description: "Your checklist has been automatically updated.",
+          });
+        });
+      }
+    }
+    prevChecklistRef.current = data.checklist;
+  }, [data?.checklist]);
 
   const { data: teamReadiness } = useQuery<ReadinessSummary>({
     queryKey: ["/api/company-people/readiness"],

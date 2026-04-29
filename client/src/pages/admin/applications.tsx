@@ -220,6 +220,7 @@ export default function AdminApplications() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/applications"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/payouts"] });
       toast({ title: "Payment transition completed successfully" });
       setPaymentDialogOpen(false);
       setSelectedApp(null);
@@ -829,38 +830,71 @@ export default function AdminApplications() {
                   {paymentTransitionOptions.find(o => o.value === selectedPaymentState)?.description}
                 </p>
               )}
-              {selectedPaymentState === "released_to_lawyer" && (
-                selectedApp?.assignedLawyerUserId ? (
-                  <div className="rounded-md border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30 px-3 py-2 text-sm" data-testid="info-assigned-lawyer">
-                    <p className="font-medium text-green-800 dark:text-green-300">Assigned lawyer</p>
-                    <p className="text-green-700 dark:text-green-400">
-                      {selectedApp.lawyerName || lawyers?.find(l => l.userId === selectedApp.assignedLawyerUserId)?.name || "Unknown"}
-                      {(() => {
-                        const firm = lawyers?.find(l => l.userId === selectedApp?.assignedLawyerUserId)?.firmName;
-                        return firm ? ` — ${firm}` : "";
-                      })()}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-2" data-testid="inline-lawyer-assignment">
-                    <p className="text-xs font-medium text-muted-foreground">No lawyer assigned — select one to assign and release in one step</p>
-                    <Select value={inlineLawyerId} onValueChange={setInlineLawyerId}>
-                      <SelectTrigger data-testid="select-inline-lawyer">
-                        <SelectValue placeholder="Select a lawyer to assign" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {lawyers && lawyers.length > 0 ? lawyers.map((l) => (
-                          <SelectItem key={l.userId} value={l.userId}>
-                            {l.name || l.email}{l.firmName ? ` — ${l.firmName}` : ""}
-                          </SelectItem>
-                        )) : (
-                          <SelectItem value="__none__" disabled>No active lawyers available</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )
-              )}
+              {selectedPaymentState === "released_to_lawyer" && (() => {
+                const effectiveLawyerId = selectedApp?.assignedLawyerUserId || inlineLawyerId;
+                const assignedLawyer = lawyers?.find(l => l.userId === effectiveLawyerId);
+                const hasBankDetails = !!assignedLawyer?.payoutSubaccountId;
+                return (
+                  <>
+                    {selectedApp?.assignedLawyerUserId ? (
+                      <div className="rounded-md border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30 px-3 py-2 text-sm" data-testid="info-assigned-lawyer">
+                        <p className="font-medium text-green-800 dark:text-green-300">Assigned lawyer</p>
+                        <p className="text-green-700 dark:text-green-400">
+                          {selectedApp.lawyerName || assignedLawyer?.name || "Unknown"}
+                          {assignedLawyer?.firmName ? ` — ${assignedLawyer.firmName}` : ""}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2" data-testid="inline-lawyer-assignment">
+                        <p className="text-xs font-medium text-muted-foreground">No lawyer assigned — select one to assign and release in one step</p>
+                        <Select value={inlineLawyerId} onValueChange={setInlineLawyerId}>
+                          <SelectTrigger data-testid="select-inline-lawyer">
+                            <SelectValue placeholder="Select a lawyer to assign" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {lawyers && lawyers.length > 0 ? lawyers.map((l) => (
+                              <SelectItem key={l.userId} value={l.userId}>
+                                {l.name || l.email}{l.firmName ? ` — ${l.firmName}` : ""}
+                              </SelectItem>
+                            )) : (
+                              <SelectItem value="__none__" disabled>No active lawyers available</SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {effectiveLawyerId && !hasBankDetails && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2 text-sm" data-testid="warn-no-bank-details">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                          <div>
+                            <p className="font-medium text-amber-800 dark:text-amber-300">No bank details configured</p>
+                            <p className="text-amber-700 dark:text-amber-400 text-xs mt-0.5">
+                              This lawyer has no bank account set up.{" "}
+                              <button
+                                type="button"
+                                className="underline font-medium"
+                                onClick={() => {
+                                  setBankDetailsLawyerId(effectiveLawyerId);
+                                  setBankAcctName("");
+                                  setBankAcctNumber("");
+                                  setBankCode("");
+                                  setPaymentDialogOpen(false);
+                                  setBankDetailsOpen(true);
+                                }}
+                                data-testid="link-open-bank-setup"
+                              >
+                                Set up bank details
+                              </button>{" "}
+                              before releasing payment.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
             <div className="space-y-2">
               <Label htmlFor="payment-reason">Reason (optional)</Label>
@@ -897,7 +931,10 @@ export default function AdminApplications() {
                 paymentTransitionMutation.isPending ||
                 (selectedPaymentState === "released_to_lawyer" &&
                   !selectedApp?.assignedLawyerUserId &&
-                  !inlineLawyerId)
+                  !inlineLawyerId) ||
+                (selectedPaymentState === "released_to_lawyer" &&
+                  !!(selectedApp?.assignedLawyerUserId || inlineLawyerId) &&
+                  !lawyers?.find(l => l.userId === (selectedApp?.assignedLawyerUserId || inlineLawyerId))?.payoutSubaccountId)
               }
               data-testid="button-confirm-payment"
             >

@@ -167,8 +167,17 @@ export async function releaseToLawyer(
     };
   }
 
-  // Initiate the transfer FIRST — only transition state if it succeeds
   const payoutRef = `co_lp_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
+
+  // Insert placeholder ledger entry BEFORE calling Paystack to prevent webhook
+  // arriving before the ledger row exists (race condition on fast transfer webhooks)
+  const [ledgerEntry] = await db.insert(payoutLedger).values({
+    paymentId: payment.id,
+    lawyerUserId,
+    amountKobo: lawyerFeeKobo,
+    status: "pending",
+    providerRef: payoutRef,
+  }).returning();
 
   try {
     const { initiateTransfer } = await import("./paystackPaymentService");
@@ -182,21 +191,22 @@ export async function releaseToLawyer(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[PaymentState] Transfer initiation failed for application ${applicationId}:`, msg);
+    // Mark ledger entry as failed so it's visible in the admin payout view
+    await db.update(payoutLedger)
+      .set({ status: "failed", updatedAt: new Date() })
+      .where(eq(payoutLedger.id, ledgerEntry.id));
     return { success: false, error: `Transfer initiation failed: ${msg}` };
   }
+
+  // Update ledger to 'sent' now that Paystack accepted the request
+  await db.update(payoutLedger)
+    .set({ status: "sent", updatedAt: new Date() })
+    .where(eq(payoutLedger.id, ledgerEntry.id));
 
   // Transfer successfully queued — now commit the state transition
   const result = await transitionPaymentState(payment.id, "released_to_lawyer", "admin");
 
-  if (result.success && result.payment) {
-    await db.insert(payoutLedger).values({
-      paymentId: result.payment.id,
-      lawyerUserId,
-      amountKobo: lawyerFeeKobo,
-      status: "sent",
-      providerRef: payoutRef,
-    });
-
+  if (result.success) {
     await db.update(companyApplications)
       .set({
         paymentState: "released_to_lawyer",

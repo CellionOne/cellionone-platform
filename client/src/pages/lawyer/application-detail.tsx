@@ -100,7 +100,7 @@ interface PersonVerificationStep {
   verifiedAt: string | null;
 }
 
-type EnrichedPerson = CompanyPerson & { verificationStep: PersonVerificationStep | null };
+type EnrichedPerson = Omit<CompanyPerson, "inviteToken"> & { verificationStep: PersonVerificationStep | null };
 
 interface ApplicationDetailData {
   application: CompanyApplication;

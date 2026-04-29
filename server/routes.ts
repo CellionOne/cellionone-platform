@@ -5459,7 +5459,7 @@ export async function registerRoutes(
         biometricSubmitted: boolean;
         verifiedAt: Date | null;
       };
-      type EnrichedPerson = CompanyPerson & { verificationStep: PersonVerificationStep | null };
+      type EnrichedPerson = Omit<CompanyPerson, "inviteToken"> & { verificationStep: PersonVerificationStep | null };
       type FounderKycDto = {
         status: string | null;
         bvnNinVerified: boolean | null;
@@ -5501,7 +5501,7 @@ export async function registerRoutes(
           }
         });
 
-        people = companyPeopleList.map(person => ({
+        people = companyPeopleList.map(({ inviteToken: _tok, ...person }) => ({
           ...person,
           verificationStep: person.personUserId
             ? (verificationByUserId.get(person.personUserId) ?? null)
@@ -6404,6 +6404,21 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const application = await storage.getApplication(applicationId);
       if (!application || application.assignedLawyerUserId !== userId) {
         return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Server-side stage transition guard — prevents skipping or reversing stages
+      const allowedTransitions: Record<string, string[]> = {
+        submitted:         ["under_review"],
+        under_review:      ["filed"],
+        filed:             ["pending_originals"],
+        pending_originals: ["courier_in_transit"],
+        courier_in_transit:["completed"],
+      };
+      const currentStatus = application.status ?? "";
+      if (!allowedTransitions[currentStatus]?.includes(status)) {
+        return res.status(400).json({
+          message: `Cannot transition from '${currentStatus}' to '${status}'. Allowed: ${allowedTransitions[currentStatus]?.join(", ") ?? "none"}.`,
+        });
       }
 
       // RC number is required when filing or completing

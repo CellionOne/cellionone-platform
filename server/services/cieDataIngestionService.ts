@@ -541,21 +541,104 @@ function gptRowsToPriceRows(raw: GptResponsePayload | GptPriceRow[], fallbackDat
 // ============================================================
 // Deterministic NGX daily price list parser
 //
-// Handles the Zenith / NGX "Full Price List" column format:
-//   Symbol | PClose | Open | High | Low | Close | Sign | Change |
-//   Volume | Value | %Change | WeekHigh52 | WeekLow52
+// Handles multiple NGX stockbroker PDF column layouts:
 //
-// The "Sign" column (index 6) is always exactly "+" or "-", which
-// makes column positions fixed and parseable without any AI call.
+//   Standard (Zenith / NGX official):
+//     Symbol | PClose | Open | High | Low | Close | Sign | Change | Volume | …
+//   Atlass Portfolios:
+//     S/N Symbol | PClose | Open | High | Low | Close | Deals | Volume | Value | VWAP
+//   FBNQuest:
+//     Symbol | Open | High | Low | Last Price | Volume | …
+//   FSDH Merchant Bank:
+//     Symbol | Open | High | Low | Closing | Volume | …
+//   Stanbic IBTC:
+//     Symbol | Open | High | Low | Price | Volume | …
+//
+// The OHLCV column positions are consistent across layouts; only the
+// "close" column header name differs per broker.
 // Trade date is obtained from the filename via parseDateFromFilename().
 // ============================================================
 
-const NGX_HEADER_SIGNALS = ["symbol", "open", "high", "low", "close", "volume"] as const;
+// Signals that MUST all appear in the header for format detection.
+// "close" is intentionally excluded here because brokers use different names.
+const NGX_REQUIRED_SIGNALS = ["symbol", "open", "high", "low", "volume"] as const;
+
+// At least one of these must appear as the closing-price column identifier.
+// Order matters: more-specific phrases should come before shorter substrings
+// (e.g. "last price" before "last", "closing" before "close").
+const NGX_CLOSE_VARIANTS = ["last price", "closing price", "closing", "close", "last", "price"] as const;
+
+/** Human-readable label for each detected broker format (used in logs and the test utility). */
+type NgxBrokerFormat =
+  | "standard"     // NGX official / Zenith — "Close" column, no PClose
+  | "pclose"       // Atlass Portfolios — PClose column before Open
+  | "fbnquest"     // FBNQuest — "Last Price" column
+  | "fsdh"         // FSDH Merchant Bank — "Closing" column
+  | "stanbic"      // Stanbic IBTC — "Price" column
+  | "unknown";     // Matched required signals but unrecognised close variant
 
 /**
- * Attempt to parse an NGX/Zenith daily equity price list from extracted PDF text.
+ * Detect which NGX broker PDF format is present in the extracted text.
  *
- * Returns a non-empty PriceRow[] if the text matches the NGX column layout;
+ * Returns a result object so callers can validate formats without parsing
+ * all rows (useful for testing and CI-style format validation).
+ *
+ * @param rawText - Full text content extracted from a PDF file.
+ */
+export function detectNgxPdfFormat(rawText: string): {
+  detected: boolean;
+  format: NgxBrokerFormat;
+  closeVariant: string | null;
+  hasPClose: boolean;
+} {
+  const lines = rawText.split(/\r?\n/);
+  let prevLine = "";
+
+  for (const line of lines) {
+    const lc = line.toLowerCase();
+    const combined = prevLine.toLowerCase() + " " + lc;
+
+    const reqHits = NGX_REQUIRED_SIGNALS.filter(s => combined.includes(s)).length;
+    const closeVariant = NGX_CLOSE_VARIANTS.find(s => combined.includes(s)) ?? null;
+
+    if (reqHits === NGX_REQUIRED_SIGNALS.length && closeVariant !== null) {
+      const hasPClose =
+        combined.includes("pclose") ||
+        combined.includes("p.close") ||
+        combined.includes("prev close") ||
+        combined.includes("previous close");
+
+      let format: NgxBrokerFormat;
+      if (hasPClose) {
+        format = "pclose";
+      } else if (closeVariant === "last price") {
+        format = "fbnquest";
+      } else if (closeVariant === "closing" || closeVariant === "closing price") {
+        format = "fsdh";
+      } else if (closeVariant === "price") {
+        format = "stanbic";
+      } else if (closeVariant === "close" || closeVariant === "last") {
+        format = "standard";
+      } else {
+        format = "unknown";
+      }
+
+      return { detected: true, format, closeVariant, hasPClose };
+    }
+
+    prevLine = line;
+  }
+
+  return { detected: false, format: "unknown", closeVariant: null, hasPClose: false };
+}
+
+/**
+ * Attempt to parse an NGX/stockbroker daily equity price list from extracted PDF text.
+ *
+ * Supports multiple broker formats (standard Zenith/NGX, Atlass/PClose, FBNQuest,
+ * FSDH, Stanbic IBTC) by matching alternative close-column header names.
+ *
+ * Returns a non-empty PriceRow[] if the text matches a known layout;
  * returns [] if the format is not recognised (caller should fall back to GPT-4o).
  */
 function parseNgxPriceText(rawText: string, tradeDate: string | null): PriceRow[] {
@@ -569,16 +652,28 @@ function parseNgxPriceText(rawText: string, tradeDate: string | null): PriceRow[
     const lc = line.toLowerCase();
 
     if (!headerFound) {
-      // Support both single-line headers (all 6 signals on one line) AND
+      // Support both single-line headers (all signals on one line) AND
       // 2-line headers (e.g. Atlass Portfolios format where OHLCV column names appear
       // on line 1 and "S/N Symbol" appears on line 2).
       // Combine the current line with the previous line to detect split headers.
       const combined = prevLine.toLowerCase() + " " + lc;
-      const hits = NGX_HEADER_SIGNALS.filter(s => combined.includes(s)).length;
-      if (hits === NGX_HEADER_SIGNALS.length) {
+
+      const reqHits = NGX_REQUIRED_SIGNALS.filter(s => combined.includes(s)).length;
+      const hasCloseVariant = NGX_CLOSE_VARIANTS.some(s => combined.includes(s));
+
+      if (reqHits === NGX_REQUIRED_SIGNALS.length && hasCloseVariant) {
         headerFound = true;
         // Detect PClose (previous-close) column — shifts all subsequent column indices by 1.
-        hasPClose = combined.includes("pclose") || combined.includes("p.close") || combined.includes("prev close") || combined.includes("previous close");
+        hasPClose =
+          combined.includes("pclose") ||
+          combined.includes("p.close") ||
+          combined.includes("prev close") ||
+          combined.includes("previous close");
+
+        // Log detected format for observability
+        const closeVariant = NGX_CLOSE_VARIANTS.find(s => combined.includes(s)) ?? "close";
+        const formatLabel = hasPClose ? "pclose" : closeVariant;
+        console.info(`[CIEIngest] NGX deterministic parser — detected format: ${formatLabel}`);
       }
       prevLine = line;
       continue; // skip header rows (and all pre-header lines)
@@ -613,9 +708,14 @@ function parseNgxPriceText(rawText: string, tradeDate: string | null): PriceRow[
     const minTokens = hasPClose ? 5 : 4;
     if (numericTokens.length < minTokens) continue;
 
-    // Column mapping depends on whether PClose is present:
-    //   Standard:  [0]=Open [1]=High [2]=Low [3]=Close  …
-    //   PClose:    [0]=PClose [1]=Open [2]=High [3]=Low [4]=Close  …
+    // Column mapping depends on whether PClose is present.
+    // All supported formats (standard, FBNQuest, FSDH, Stanbic) share the same
+    // OHLCV column order — only the close column header name differs:
+    //
+    //   Standard / FBNQuest / FSDH / Stanbic:
+    //     [0]=Open  [1]=High  [2]=Low  [3]=Close/LastPrice/Closing/Price  …
+    //   PClose (Atlass):
+    //     [0]=PClose [1]=Open [2]=High [3]=Low [4]=Close  …
     const oIdx = hasPClose ? 1 : 0;
     const hIdx = hasPClose ? 2 : 1;
     const lIdx = hasPClose ? 3 : 2;

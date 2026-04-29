@@ -369,7 +369,13 @@ export default function ApplicationDetailsPage() {
                 <Progress value={progress} className="h-2" />
                 
                 <div className="divide-y mt-4">
-                  {checklist.map((item) => (
+                  {checklist.map((item) => {
+                    const isAutoResolved =
+                      item.status === "provided" &&
+                      typeof item.reviewerNotes === "string" &&
+                      item.reviewerNotes.startsWith("Auto-resolved:");
+
+                    return (
                     <div key={item.id} className="py-3" data-testid={`checklist-${item.key}`}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -386,7 +392,15 @@ export default function ApplicationDetailsPage() {
                           </div>
                           <div>
                             <p className="text-sm font-medium">{item.label}</p>
-                            {item.required && <span className="text-xs text-muted-foreground">Required</span>}
+                            {item.required && !isAutoResolved && (
+                              <span className="text-xs text-muted-foreground">Required</span>
+                            )}
+                            {isAutoResolved && (
+                              <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400">
+                                <ShieldCheck className="h-3 w-3" />
+                                Verified — on file
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -445,7 +459,8 @@ export default function ApplicationDetailsPage() {
                         </p>
                       )}
                     </div>
-                  ))}
+                  );
+                  })}
                 </div>
               </CardContent>
             </Card>

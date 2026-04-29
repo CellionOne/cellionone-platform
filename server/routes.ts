@@ -248,6 +248,71 @@ async function createDefaultChecklist(applicationId: number, operatingAddress?: 
   }
 }
 
+// Auto-resolve checklist items for a verified founder/team.
+// Called at creation time, on every fetch, and after biometric verification completes.
+// Never downgrades items already set to "accepted" by an admin.
+async function syncChecklistFromVerifications(applicationId: number, founderId: string): Promise<void> {
+  try {
+    const [checklistItems, founderProfile, idVerification, teamMembers] = await Promise.all([
+      storage.getChecklistItems(applicationId),
+      storage.getFounderProfile(founderId),
+      storage.getIdentityVerification(founderId),
+      storage.getCompanyPeople(applicationId),
+    ]);
+
+    // Helper: only update if the item exists and is not already admin-reviewed (accepted)
+    async function autoProvide(key: string, reviewerNotes: string): Promise<void> {
+      const item = checklistItems.find((i) => i.key === key);
+      if (!item || item.status === "accepted") return;
+      if (item.status === "provided") return; // already resolved — no-op
+      await storage.updateChecklistItem(item.id, {
+        status: "provided",
+        reviewerNotes: item.reviewerNotes ? item.reviewerNotes : reviewerNotes,
+      });
+    }
+
+    // ── passport_photo ────────────────────────────────────────────────────────
+    if (founderProfile?.passportPhotoPath) {
+      await autoProvide("passport_photo", "Auto-resolved: verified passport photo on file from identity verification");
+    }
+
+    // ── id_document ───────────────────────────────────────────────────────────
+    const idVerified = idVerification?.bvnNinVerified === true;
+    const hasIdDoc = !!founderProfile?.idDocumentPath;
+    if (idVerified || hasIdDoc) {
+      await autoProvide("id_document", "Auto-resolved: government ID confirmed via BVN/NIN verification");
+    }
+
+    // ── director_id & shareholder_details ─────────────────────────────────────
+    // Both are auto-provided when every person in the team is either:
+    //   • an individually verified user (isVerified=true), OR
+    //   • a corporate entity that passed CAC auto-verification (autoVerifyMethod non-null
+    //     OR kybLookupStatus='found')
+    // If the team is empty the founder is the sole director — already covered by id_document.
+    if (teamMembers.length === 0) {
+      // Sole-founder application: treat founder verification as director coverage
+      if (idVerified || hasIdDoc) {
+        await autoProvide("director_id", "Auto-resolved: founder is the sole director and is identity-verified");
+        await autoProvide("shareholder_details", "Auto-resolved: founder is the sole shareholder and is identity-verified");
+      }
+    } else {
+      const allVerified = teamMembers.every((person) => {
+        if (person.entityType === "corporate") {
+          return person.autoVerifyMethod !== null || person.kybLookupStatus === "found";
+        }
+        return person.isVerified === true;
+      });
+      if (allVerified) {
+        await autoProvide("director_id", "Auto-resolved: all directors are individually or corporately verified on the platform");
+        await autoProvide("shareholder_details", "Auto-resolved: all shareholders are individually or corporately verified on the platform");
+      }
+    }
+  } catch (err) {
+    // Non-fatal: checklist sync errors should not block the main request
+    console.error(`[ChecklistSync] Failed for application ${applicationId}:`, err);
+  }
+}
+
 // Seed default feature flags
 async function seedFeatureFlags() {
   const defaultFlags = [
@@ -2869,6 +2934,13 @@ export async function registerRoutes(
             const { upsertVerifiedIndividualByUserId } = await import('./services/verifiedEntityService');
             await upsertVerifiedIndividualByUserId(invite.founderUserId);
             console.log(`[BiometricCallback] Founder identity verified for user ${invite.founderUserId}`);
+            // Sync checklist for all draft applications belonging to this founder
+            const founderApps = await storage.getApplicationsByFounder(invite.founderUserId);
+            for (const fa of founderApps) {
+              if (fa.status === "draft" || fa.status === "pending_verification") {
+                await syncChecklistFromVerifications(fa.id, invite.founderUserId);
+              }
+            }
           } else {
             await db.update(identityVerifications).set({
               status: 'rejected',
@@ -5329,6 +5401,11 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Access denied" });
       }
       
+      // Sync checklist with current verification state before returning (non-blocking on error)
+      if (application.founderUserId) {
+        await syncChecklistFromVerifications(applicationId, application.founderUserId);
+      }
+
       const [checklist, payment, clarifications, documents, registeredOfficeSubscription] = await Promise.all([
         storage.getChecklistItems(applicationId),
         storage.getPaymentByApplication(applicationId),
@@ -5386,7 +5463,9 @@ export async function registerRoutes(
       });
       
       await createDefaultChecklist(application.id, operatingAddress);
-      
+      // Immediately auto-resolve any checklist items the verified founder already satisfies
+      await syncChecklistFromVerifications(application.id, userId);
+
       await storage.createAuditLog({
         actorUserId: userId,
         action: "create_application",

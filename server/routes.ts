@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne, inArray, sql } from "drizzle-orm";
 import * as services from "./services";
@@ -5452,20 +5452,67 @@ export async function registerRoutes(
       }
 
       // For assigned lawyers and admins, also provide the people list and founder KYC status
-      let people: any[] = [];
-      let founderKyc: any = null;
+      type PersonVerificationStep = {
+        status: string | null;
+        bvnNinVerified: boolean | null;
+        docSubmitted: boolean;
+        biometricSubmitted: boolean;
+        verifiedAt: Date | null;
+      };
+      type EnrichedPerson = CompanyPerson & { verificationStep: PersonVerificationStep | null };
+      type FounderKycDto = {
+        status: string | null;
+        bvnNinVerified: boolean | null;
+        docSubmitted: boolean;
+        biometricSubmitted: boolean;
+        verifiedAt: Date | null;
+        expiresAt: Date | null;
+        method: string | null;
+        externalProvider: string | null;
+      };
+
+      let people: EnrichedPerson[] = [];
+      let founderKyc: FounderKycDto | null = null;
       if (isAssignedLawyer || isAdmin) {
         const [companyPeopleList, founderIdVerification] = await Promise.all([
           storage.getCompanyPeople(applicationId),
           application.founderUserId ? storage.getIdentityVerification(application.founderUserId) : Promise.resolve(undefined),
         ]);
-        people = companyPeopleList;
+
+        // Enrich each individual person with their identity verification step progress
+        const personUserIds = companyPeopleList
+          .filter(p => p.entityType !== "corporate" && p.personUserId)
+          .map(p => p.personUserId as string);
+
+        const personVerifications = await Promise.all(
+          personUserIds.map(uid => storage.getIdentityVerification(uid).catch(() => undefined))
+        );
+        const verificationByUserId = new Map<string, PersonVerificationStep>();
+        personUserIds.forEach((uid, idx) => {
+          const iv = personVerifications[idx];
+          if (iv) {
+            verificationByUserId.set(uid, {
+              status: iv.status,
+              bvnNinVerified: iv.bvnNinVerified,
+              docSubmitted: iv.idDocFileId != null,
+              biometricSubmitted: iv.smileJobId != null || iv.livenessScore != null,
+              verifiedAt: iv.verifiedAt,
+            });
+          }
+        });
+
+        people = companyPeopleList.map(person => ({
+          ...person,
+          verificationStep: person.personUserId
+            ? (verificationByUserId.get(person.personUserId) ?? null)
+            : null,
+        }));
+
         if (founderIdVerification) {
-          // Return only the safe status fields, no biometric data or raw file paths
+          // Return only the safe status fields — no biometric data or raw file path IDs
           founderKyc = {
             status: founderIdVerification.status,
             bvnNinVerified: founderIdVerification.bvnNinVerified,
-            // Derived step booleans (no raw IDs exposed)
             docSubmitted: founderIdVerification.idDocFileId != null,
             biometricSubmitted: founderIdVerification.smileJobId != null || founderIdVerification.livenessScore != null,
             verifiedAt: founderIdVerification.verifiedAt,
@@ -6365,7 +6412,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "RC Number is required when marking an application as filed or completed." });
       }
 
-      const updateData: Record<string, any> = { status };
+      const updateData: { status: string; rcNumber?: string; completedAt?: Date } = { status };
       if (rcNumber) updateData.rcNumber = rcNumber;
       if (status === "completed") updateData.completedAt = new Date();
 

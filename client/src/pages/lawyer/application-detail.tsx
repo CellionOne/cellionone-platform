@@ -92,6 +92,16 @@ interface FounderKyc {
   externalProvider: string | null;
 }
 
+interface PersonVerificationStep {
+  status: string | null;
+  bvnNinVerified: boolean | null;
+  docSubmitted: boolean;
+  biometricSubmitted: boolean;
+  verifiedAt: string | null;
+}
+
+type EnrichedPerson = CompanyPerson & { verificationStep: PersonVerificationStep | null };
+
 interface ApplicationDetailData {
   application: CompanyApplication;
   checklist: ApplicationChecklistItem[];
@@ -99,7 +109,7 @@ interface ApplicationDetailData {
   clarifications: ClarificationRequest[];
   documents: DocumentFile[];
   registeredOffice: RegisteredOfficeInfo | null;
-  people: CompanyPerson[];
+  people: EnrichedPerson[];
   founderKyc: FounderKyc | null;
 }
 
@@ -277,7 +287,7 @@ function OverviewTab({
   checklist: ApplicationChecklistItem[];
   payment: Payment | null;
   registeredOffice: RegisteredOfficeInfo | null;
-  people: CompanyPerson[];
+  people: EnrichedPerson[];
   founderKyc: FounderKyc | null;
 }) {
   const { toast } = useToast();
@@ -363,17 +373,29 @@ function OverviewTab({
               const hasPeople = shareholders.length > 0;
               const hasFallback = fallbackShareholders.length > 0;
               if (!hasPeople && !hasFallback && !application.shareCapital) return null;
+
+              // Derive total shares from company_people when shareCapital is not set
+              const derivedTotalShares = hasPeople
+                ? shareholders.reduce((sum, p) => sum + (p.sharesAllocated || 0), 0)
+                : hasFallback
+                ? fallbackShareholders.reduce((sum, s) => sum + (s.shares || 0), 0)
+                : 0;
+
               return (
                 <div className="mt-1 pt-3 border-t" data-testid="shareholding-summary">
                   <Label className="text-muted-foreground text-sm flex items-center gap-1 mb-2">
                     <TrendingUp className="h-3 w-3" />
                     Share Capital & Shareholding
                   </Label>
-                  {application.shareCapital && (
+                  {application.shareCapital ? (
                     <p className="text-sm font-medium mb-2">
                       Authorised Capital: ₦{Number(application.shareCapital).toLocaleString()}
                     </p>
-                  )}
+                  ) : derivedTotalShares > 0 ? (
+                    <p className="text-sm font-medium mb-2 text-muted-foreground" data-testid="derived-share-total">
+                      Total Shares Allocated: {derivedTotalShares.toLocaleString()} (authorised capital not recorded)
+                    </p>
+                  ) : null}
                   {hasPeople ? (
                     <div className="text-xs space-y-1">
                       {shareholders.map((p) => (
@@ -719,8 +741,8 @@ function OverviewTab({
   );
 }
 
-function PeopleTab({ people }: { people: CompanyPerson[] }) {
-  const getVerificationBadge = (person: CompanyPerson) => {
+function PeopleTab({ people }: { people: EnrichedPerson[] }) {
+  const getVerificationBadge = (person: EnrichedPerson) => {
     if (person.entityType === "corporate") {
       switch (person.kybLookupStatus) {
         case "found":
@@ -735,6 +757,26 @@ function PeopleTab({ people }: { people: CompanyPerson[] }) {
     }
     if (person.isVerified) {
       return <Badge className="bg-green-600 text-xs gap-1"><CheckCircle2 className="h-3 w-3" />Verified</Badge>;
+    }
+    // Use identity verification step status when available
+    if (person.verificationStep) {
+      const step = person.verificationStep;
+      if (step.status === "verified") {
+        return <Badge className="bg-green-600 text-xs gap-1"><CheckCircle2 className="h-3 w-3" />KYC Verified</Badge>;
+      }
+      if (step.status === "rejected") {
+        return <Badge variant="destructive" className="text-xs gap-1"><XCircle className="h-3 w-3" />KYC Failed</Badge>;
+      }
+      if (step.biometricSubmitted) {
+        return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />Biometric Submitted</Badge>;
+      }
+      if (step.docSubmitted) {
+        return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />Doc Submitted</Badge>;
+      }
+      if (step.bvnNinVerified) {
+        return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />BVN/NIN Done</Badge>;
+      }
+      return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />KYC In Progress</Badge>;
     }
     switch (person.inviteStatus) {
       case "accepted":

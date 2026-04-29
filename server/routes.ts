@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne, inArray, sql } from "drizzle-orm";
 import * as services from "./services";
@@ -6387,6 +6387,188 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error) {
       console.error("Error fetching field verification for lawyer:", error);
       res.status(500).json({ message: "Failed to fetch field verification" });
+    }
+  });
+
+  // ============== LAWYER: PEOPLE IDENTITY DOSSIER ==============
+  app.get("/api/lawyer/applications/:id/people-dossier", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const lawyerId = getUserId(req);
+      const applicationId = parseInt(req.params.id, 10);
+      if (isNaN(applicationId)) return res.status(400).json({ message: "Invalid application ID" });
+
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== lawyerId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      await storage.logSensitiveDataAccess({
+        accessorUserId: lawyerId,
+        targetUserId: application.founderUserId || lawyerId,
+        dataType: "people_dossier",
+        action: "view",
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"] as string,
+      });
+
+      const people = await storage.getCompanyPeople(applicationId);
+
+      const dossierItems = await Promise.all(people.map(async (person) => {
+        if (person.entityType === "corporate") {
+          let corporateInfo: Record<string, unknown> | null = null;
+          if (person.corporateRcNumber) {
+            const [ve] = await db.select()
+              .from(verifiedEntities)
+              .where(and(eq(verifiedEntities.entityType, "company"), eq(verifiedEntities.rcNumber, person.corporateRcNumber)));
+            if (ve) {
+              corporateInfo = {
+                source: "verified_entities",
+                fullName: ve.fullName,
+                rcNumber: ve.rcNumber,
+                tinNumber: ve.tinNumber,
+                lastVerifiedAt: ve.lastVerifiedAt,
+                amlScreeningStatus: ve.amlScreeningStatus,
+                riskScore: ve.riskScore,
+              };
+            }
+            if (!corporateInfo) {
+              const [ksp] = await db.select()
+                .from(kycSupplierProfiles)
+                .where(eq(kycSupplierProfiles.rcNumber, person.corporateRcNumber));
+              if (ksp) {
+                corporateInfo = {
+                  source: "kyc_supplier_profiles",
+                  companyName: ksp.companyName,
+                  rcNumber: ksp.rcNumber,
+                  tinNumber: ksp.tinNumber,
+                  headOfficeAddress: ksp.headOfficeAddress,
+                  contactPersonName: ksp.contactPersonName,
+                  contactPersonEmail: ksp.contactPersonEmail,
+                  contactPersonPhone: ksp.contactPersonPhone,
+                  industryCategory: ksp.industryCategory,
+                  yearEstablished: ksp.yearEstablished,
+                };
+              }
+            }
+          }
+          return {
+            personId: person.id,
+            entityType: "corporate",
+            corporateName: person.corporateName,
+            corporateRcNumber: person.corporateRcNumber,
+            corporateCountry: person.corporateCountry,
+            kybLookupStatus: person.kybLookupStatus,
+            autoVerifyMethod: person.autoVerifyMethod,
+            corporateInfo,
+          };
+        }
+
+        let profile: Record<string, unknown> | null = null;
+        let verificationStatus: Record<string, unknown> | null = null;
+        if (person.personUserId) {
+          const [fp, iv] = await Promise.all([
+            storage.getFounderProfile(person.personUserId).catch(() => undefined),
+            storage.getIdentityVerification(person.personUserId).catch(() => undefined),
+          ]);
+          if (fp) {
+            profile = {
+              fullName: fp.fullName,
+              phone: fp.phone,
+              dateOfBirth: fp.dateOfBirth,
+              gender: fp.gender,
+              nationality: fp.nationality,
+              addressLine1: fp.addressLine1,
+              addressLine2: fp.addressLine2,
+              city: fp.city,
+              state: fp.state,
+              country: fp.country,
+              idType: fp.idType,
+              hasSignature: !!fp.signaturePath,
+              hasPassportPhoto: !!fp.passportPhotoPath,
+              hasIdDocument: !!fp.idDocumentPath,
+            };
+          }
+          if (iv) {
+            verificationStatus = {
+              status: iv.status,
+              bvnNinVerified: iv.bvnNinVerified,
+              docSubmitted: iv.idDocFileId != null,
+              biometricSubmitted: iv.smileJobId != null || iv.livenessScore != null,
+              verifiedAt: iv.verifiedAt,
+            };
+          }
+        }
+        return {
+          personId: person.id,
+          entityType: "individual",
+          inviteEmail: person.inviteEmail,
+          personUserId: person.personUserId,
+          profile,
+          verificationStatus,
+        };
+      }));
+
+      res.json(dossierItems);
+    } catch (error) {
+      console.error("Error fetching people dossier:", error);
+      res.status(500).json({ message: "Failed to fetch people dossier" });
+    }
+  });
+
+  // ============== LAWYER: SERVE PERSON IDENTITY DOCUMENT ==============
+  app.get("/api/lawyer/applications/:id/people/:personId/document/:type", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const lawyerId = getUserId(req);
+      const applicationId = parseInt(req.params.id, 10);
+      const personId = parseInt(req.params.personId, 10);
+      const { type } = req.params;
+
+      if (isNaN(applicationId) || isNaN(personId)) {
+        return res.status(400).json({ message: "Invalid ID" });
+      }
+
+      const validTypes = ["signature", "passport_photo", "id_document"];
+      if (!validTypes.includes(type)) {
+        return res.status(400).json({ message: "Invalid document type" });
+      }
+
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== lawyerId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const [person] = await db.select()
+        .from(companyPeople)
+        .where(and(eq(companyPeople.id, personId), eq(companyPeople.applicationId, applicationId)));
+
+      if (!person || !person.personUserId) {
+        return res.status(404).json({ message: "Person not found" });
+      }
+
+      const profile = await storage.getFounderProfile(person.personUserId);
+      if (!profile) return res.status(404).json({ message: "Profile not found" });
+
+      const filePath = type === "passport_photo" ? profile.passportPhotoPath
+        : type === "signature" ? profile.signaturePath
+        : profile.idDocumentPath;
+
+      if (!filePath) return res.status(404).json({ message: "Document not uploaded" });
+
+      await storage.logSensitiveDataAccess({
+        accessorUserId: lawyerId,
+        targetUserId: person.personUserId,
+        dataType: type,
+        action: "view",
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"] as string,
+      });
+
+      const objectStorage = new ObjectStorageService();
+      const downloadURL = await objectStorage.getObjectEntityDownloadURL(filePath, 900);
+      res.json({ downloadURL });
+    } catch (error) {
+      console.error("Error serving person document:", error);
+      res.status(500).json({ message: "Failed to get document" });
     }
   });
 

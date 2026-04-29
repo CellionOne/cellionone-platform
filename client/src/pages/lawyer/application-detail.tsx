@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRoute, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
@@ -46,6 +46,14 @@ import {
   TrendingUp,
   ChevronRight,
   Hash,
+  ChevronDown,
+  ChevronUp,
+  User,
+  Phone,
+  Calendar,
+  ImageIcon,
+  PenLine,
+  FileImage,
 } from "lucide-react";
 import type { 
   CompanyApplication, 
@@ -245,7 +253,7 @@ export default function LawyerApplicationDetail() {
           </TabsContent>
 
           <TabsContent value="people" className="space-y-6 mt-6">
-            <PeopleTab people={people || []} />
+            <PeopleTab people={people || []} applicationId={parseInt(applicationId!)} />
           </TabsContent>
 
           <TabsContent value="documents" className="space-y-6 mt-6">
@@ -744,7 +752,120 @@ function OverviewTab({
   );
 }
 
-function PeopleTab({ people }: { people: EnrichedPerson[] }) {
+interface DossierIndividual {
+  personId: number;
+  entityType: "individual";
+  inviteEmail: string | null;
+  personUserId: string | null;
+  profile: {
+    fullName: string | null;
+    phone: string | null;
+    dateOfBirth: string | null;
+    gender: string | null;
+    nationality: string | null;
+    addressLine1: string | null;
+    addressLine2: string | null;
+    city: string | null;
+    state: string | null;
+    country: string | null;
+    idType: string | null;
+    hasSignature: boolean;
+    hasPassportPhoto: boolean;
+    hasIdDocument: boolean;
+  } | null;
+  verificationStatus: {
+    status: string | null;
+    bvnNinVerified: boolean | null;
+    docSubmitted: boolean;
+    biometricSubmitted: boolean;
+    verifiedAt: string | null;
+  } | null;
+}
+
+interface DossierCorporate {
+  personId: number;
+  entityType: "corporate";
+  corporateName: string | null;
+  corporateRcNumber: string | null;
+  corporateCountry: string | null;
+  kybLookupStatus: string | null;
+  autoVerifyMethod: string | null;
+  corporateInfo: Record<string, unknown> | null;
+}
+
+type DossierItem = DossierIndividual | DossierCorporate;
+
+function PersonDocumentButton({
+  applicationId,
+  personId,
+  docType,
+  label,
+  icon,
+}: {
+  applicationId: number;
+  personId: number;
+  docType: "signature" | "passport_photo" | "id_document";
+  label: string;
+  icon: ReactNode;
+}) {
+  const { toast } = useToast();
+  const fetchMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("GET", `/api/lawyer/applications/${applicationId}/people/${personId}/document/${docType}`);
+      return res.json() as Promise<{ downloadURL: string }>;
+    },
+    onSuccess: (data) => {
+      if (data.downloadURL) {
+        window.open(data.downloadURL, "_blank", "noopener,noreferrer");
+      } else {
+        toast({ title: "Document unavailable", description: "No download URL returned.", variant: "destructive" });
+      }
+    },
+    onError: () => {
+      toast({ title: "Failed to open document", variant: "destructive" });
+    },
+  });
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => fetchMutation.mutate()}
+      disabled={fetchMutation.isPending}
+      data-testid={`btn-view-${docType}-${personId}`}
+      className="text-xs gap-1.5"
+    >
+      {fetchMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : icon}
+      {label}
+    </Button>
+  );
+}
+
+function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applicationId: number }) {
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+
+  const { data: dossier, isLoading: dossierLoading } = useQuery<DossierItem[]>({
+    queryKey: ["/api/lawyer/applications", applicationId, "people-dossier"],
+    enabled: people.length > 0,
+    retry: false,
+  });
+
+  const dossierById = new Map<number, DossierItem>();
+  if (dossier) {
+    for (const item of dossier) {
+      dossierById.set(item.personId, item);
+    }
+  }
+
+  const toggleExpand = (id: number) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const getVerificationBadge = (person: EnrichedPerson) => {
     if (person.entityType === "corporate") {
       switch (person.kybLookupStatus) {
@@ -761,7 +882,6 @@ function PeopleTab({ people }: { people: EnrichedPerson[] }) {
     if (person.isVerified) {
       return <Badge className="bg-green-600 text-xs gap-1"><CheckCircle2 className="h-3 w-3" />Verified</Badge>;
     }
-    // Use identity verification step status when available
     if (person.verificationStep) {
       const step = person.verificationStep;
       if (step.status === "verified") {
@@ -831,94 +951,276 @@ function PeopleTab({ people }: { people: EnrichedPerson[] }) {
             {directors.length} director{directors.length !== 1 ? "s" : ""} · {shareholders.length} shareholder{shareholders.length !== 1 ? "s" : ""}
           </p>
         </div>
+        {dossierLoading && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Loading identity data…
+          </span>
+        )}
       </div>
 
       <div className="space-y-4">
-        {people.map((person) => (
-          <Card key={person.id} data-testid={`person-card-${person.id}`}>
-            <CardContent className="pt-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3 min-w-0">
-                  <div className="h-9 w-9 rounded-full bg-muted flex items-center justify-center shrink-0">
-                    {person.entityType === "corporate" ? (
-                      <Building2 className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <Users className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium truncate" data-testid={`text-person-name-${person.id}`}>
-                        {person.entityType === "corporate"
-                          ? person.corporateName || "Corporate Entity"
-                          : person.displayName || person.inviteEmail || "—"}
-                      </p>
-                      {person.entityType === "corporate" && (
-                        <Badge variant="outline" className="text-xs shrink-0">Corporate</Badge>
-                      )}
-                      {person.autoVerifyMethod && (
-                        <Badge variant="secondary" className="text-xs shrink-0 gap-1">
-                          <ShieldCheck className="h-3 w-3" />
-                          Auto-verified
-                        </Badge>
+        {people.map((person) => {
+          const dossierItem = dossierById.get(person.id!);
+          const isExpanded = expandedIds.has(person.id!);
+
+          return (
+            <Card key={person.id} data-testid={`person-card-${person.id}`}>
+              <CardContent className="pt-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <div className="h-9 w-9 rounded-full bg-muted flex items-center justify-center shrink-0">
+                      {person.entityType === "corporate" ? (
+                        <Building2 className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Users className="h-4 w-4 text-muted-foreground" />
                       )}
                     </div>
-                    <p className="text-sm text-muted-foreground">{getRoleLabel(person.role)}</p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium truncate" data-testid={`text-person-name-${person.id}`}>
+                          {person.entityType === "corporate"
+                            ? person.corporateName || "Corporate Entity"
+                            : person.displayName || person.inviteEmail || "—"}
+                        </p>
+                        {person.entityType === "corporate" && (
+                          <Badge variant="outline" className="text-xs shrink-0">Corporate</Badge>
+                        )}
+                        {person.autoVerifyMethod && (
+                          <Badge variant="secondary" className="text-xs shrink-0 gap-1">
+                            <ShieldCheck className="h-3 w-3" />
+                            Auto-verified
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">{getRoleLabel(person.role)}</p>
 
-                    {person.entityType === "corporate" ? (
-                      <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
-                        {person.corporateRcNumber && (
-                          <p className="flex items-center gap-1">
-                            <Hash className="h-3 w-3" />RC: {person.corporateRcNumber}
-                          </p>
-                        )}
-                        {person.corporateCountry && <p>Country: {person.corporateCountry}</p>}
-                        {(person.corporateAuthorisedRepName || person.inviteEmail) && (
-                          <div className="mt-1.5 pt-1.5 border-t border-dashed border-muted-foreground/20">
-                            <p className="font-medium text-foreground/70 mb-0.5">Authorised Representative</p>
-                            {person.corporateAuthorisedRepName && <p>{person.corporateAuthorisedRepName}</p>}
-                            {person.inviteEmail && <p>{person.inviteEmail}</p>}
-                            <div className="flex items-center gap-1 mt-1">
-                              {person.inviteStatus === "accepted" ? (
-                                <span className="flex items-center gap-1 text-green-700 dark:text-green-400">
-                                  <CheckCircle2 className="h-3 w-3" />Rep invite accepted
-                                </span>
-                              ) : person.inviteStatus === "pending" ? (
-                                <span className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />Rep invite sent, awaiting response
-                                </span>
-                              ) : person.inviteStatus === "not_invited" ? (
-                                <span className="flex items-center gap-1">
-                                  <AlertCircle className="h-3 w-3" />Rep not yet invited
-                                </span>
-                              ) : person.inviteStatus === "rejected" ? (
-                                <span className="flex items-center gap-1 text-destructive">
-                                  <XCircle className="h-3 w-3" />Rep invite rejected
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
-                        {person.inviteEmail && <p>{person.inviteEmail}</p>}
-                        <div className="flex items-center gap-3 flex-wrap mt-1">
-                          {person.sharesAllocated != null && (
-                            <span>{person.sharesAllocated.toLocaleString()} shares</span>
+                      {person.entityType === "corporate" ? (
+                        <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
+                          {person.corporateRcNumber && (
+                            <p className="flex items-center gap-1">
+                              <Hash className="h-3 w-3" />RC: {person.corporateRcNumber}
+                            </p>
                           )}
-                          {person.shareClass && <span>Class: {person.shareClass}</span>}
-                          {person.sharePercentage && <span>{person.sharePercentage}%</span>}
+                          {person.corporateCountry && <p>Country: {person.corporateCountry}</p>}
+                          {(person.corporateAuthorisedRepName || person.inviteEmail) && (
+                            <div className="mt-1.5 pt-1.5 border-t border-dashed border-muted-foreground/20">
+                              <p className="font-medium text-foreground/70 mb-0.5">Authorised Representative</p>
+                              {person.corporateAuthorisedRepName && <p>{person.corporateAuthorisedRepName}</p>}
+                              {person.inviteEmail && <p>{person.inviteEmail}</p>}
+                              <div className="flex items-center gap-1 mt-1">
+                                {person.inviteStatus === "accepted" ? (
+                                  <span className="flex items-center gap-1 text-green-700 dark:text-green-400">
+                                    <CheckCircle2 className="h-3 w-3" />Rep invite accepted
+                                  </span>
+                                ) : person.inviteStatus === "pending" ? (
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />Rep invite sent, awaiting response
+                                  </span>
+                                ) : person.inviteStatus === "not_invited" ? (
+                                  <span className="flex items-center gap-1">
+                                    <AlertCircle className="h-3 w-3" />Rep not yet invited
+                                  </span>
+                                ) : person.inviteStatus === "rejected" ? (
+                                  <span className="flex items-center gap-1 text-destructive">
+                                    <XCircle className="h-3 w-3" />Rep invite rejected
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      ) : (
+                        <div className="mt-2 text-xs text-muted-foreground space-y-0.5">
+                          {person.inviteEmail && <p>{person.inviteEmail}</p>}
+                          <div className="flex items-center gap-3 flex-wrap mt-1">
+                            {person.sharesAllocated != null && (
+                              <span>{person.sharesAllocated.toLocaleString()} shares</span>
+                            )}
+                            {person.shareClass && <span>Class: {person.shareClass}</span>}
+                            {person.sharePercentage && <span>{person.sharePercentage}%</span>}
+                          </div>
+                        </div>
+                      )}
+
+                      {dossierItem && (
+                        <button
+                          className="mt-3 flex items-center gap-1 text-xs text-primary hover:underline"
+                          onClick={() => toggleExpand(person.id!)}
+                          data-testid={`btn-expand-person-${person.id}`}
+                        >
+                          {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                          {isExpanded ? "Hide identity details" : "View identity details"}
+                        </button>
+                      )}
+
+                      {isExpanded && dossierItem && dossierItem.entityType === "individual" && (
+                        <div className="mt-3 pt-3 border-t space-y-3" data-testid={`dossier-individual-${person.id}`}>
+                          {dossierItem.profile ? (
+                            <>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                                {dossierItem.profile.fullName && (
+                                  <div>
+                                    <p className="text-muted-foreground flex items-center gap-1"><User className="h-3 w-3" />Full Name</p>
+                                    <p className="font-medium">{dossierItem.profile.fullName}</p>
+                                  </div>
+                                )}
+                                {dossierItem.profile.phone && (
+                                  <div>
+                                    <p className="text-muted-foreground flex items-center gap-1"><Phone className="h-3 w-3" />Phone</p>
+                                    <p className="font-medium">{dossierItem.profile.phone}</p>
+                                  </div>
+                                )}
+                                {dossierItem.profile.dateOfBirth && (
+                                  <div>
+                                    <p className="text-muted-foreground flex items-center gap-1"><Calendar className="h-3 w-3" />Date of Birth</p>
+                                    <p className="font-medium">{dossierItem.profile.dateOfBirth}</p>
+                                  </div>
+                                )}
+                                {dossierItem.profile.gender && (
+                                  <div>
+                                    <p className="text-muted-foreground">Gender</p>
+                                    <p className="font-medium capitalize">{dossierItem.profile.gender}</p>
+                                  </div>
+                                )}
+                                {dossierItem.profile.nationality && (
+                                  <div>
+                                    <p className="text-muted-foreground">Nationality</p>
+                                    <p className="font-medium">{dossierItem.profile.nationality}</p>
+                                  </div>
+                                )}
+                                {dossierItem.profile.idType && (
+                                  <div>
+                                    <p className="text-muted-foreground">ID Type</p>
+                                    <p className="font-medium capitalize">{dossierItem.profile.idType.replace(/_/g, " ")}</p>
+                                  </div>
+                                )}
+                              </div>
+                              {(dossierItem.profile.addressLine1 || dossierItem.profile.city || dossierItem.profile.state) && (
+                                <div className="text-xs">
+                                  <p className="text-muted-foreground flex items-center gap-1 mb-0.5"><MapPin className="h-3 w-3" />Address</p>
+                                  <p className="font-medium">
+                                    {[dossierItem.profile.addressLine1, dossierItem.profile.addressLine2, dossierItem.profile.city, dossierItem.profile.state, dossierItem.profile.country].filter(Boolean).join(", ")}
+                                  </p>
+                                </div>
+                              )}
+                              {dossierItem.verificationStatus && (
+                                <div className="flex flex-wrap gap-2">
+                                  {[
+                                    { label: "BVN/NIN", done: !!dossierItem.verificationStatus.bvnNinVerified },
+                                    { label: "Document", done: dossierItem.verificationStatus.docSubmitted },
+                                    { label: "Biometric", done: dossierItem.verificationStatus.biometricSubmitted },
+                                    { label: "Verified", done: dossierItem.verificationStatus.status === "verified" },
+                                  ].map(step => (
+                                    <span
+                                      key={step.label}
+                                      className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${step.done ? "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-900 text-green-700 dark:text-green-400" : "bg-muted border-muted text-muted-foreground"}`}
+                                    >
+                                      {step.done ? <CheckCircle2 className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                                      {step.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex flex-wrap gap-2 pt-1">
+                                {dossierItem.profile.hasPassportPhoto && (
+                                  <PersonDocumentButton
+                                    applicationId={applicationId}
+                                    personId={person.id!}
+                                    docType="passport_photo"
+                                    label="Passport Photo"
+                                    icon={<ImageIcon className="h-3 w-3" />}
+                                  />
+                                )}
+                                {dossierItem.profile.hasSignature && (
+                                  <PersonDocumentButton
+                                    applicationId={applicationId}
+                                    personId={person.id!}
+                                    docType="signature"
+                                    label="Signature"
+                                    icon={<PenLine className="h-3 w-3" />}
+                                  />
+                                )}
+                                {dossierItem.profile.hasIdDocument && (
+                                  <PersonDocumentButton
+                                    applicationId={applicationId}
+                                    personId={person.id!}
+                                    docType="id_document"
+                                    label="ID Document"
+                                    icon={<FileImage className="h-3 w-3" />}
+                                  />
+                                )}
+                                {!dossierItem.profile.hasPassportPhoto && !dossierItem.profile.hasSignature && !dossierItem.profile.hasIdDocument && (
+                                  <p className="text-xs text-muted-foreground italic">No identity documents uploaded yet.</p>
+                                )}
+                              </div>
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground italic">No profile data on file. Person may not have completed registration.</p>
+                          )}
+                        </div>
+                      )}
+
+                      {isExpanded && dossierItem && dossierItem.entityType === "corporate" && (
+                        <div className="mt-3 pt-3 border-t space-y-2 text-xs" data-testid={`dossier-corporate-${person.id}`}>
+                          {dossierItem.corporateInfo ? (
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                              {(dossierItem.corporateInfo.fullName || dossierItem.corporateInfo.companyName) && (
+                                <div>
+                                  <p className="text-muted-foreground">Registered Name</p>
+                                  <p className="font-medium">{(dossierItem.corporateInfo.fullName || dossierItem.corporateInfo.companyName) as string}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.rcNumber && (
+                                <div>
+                                  <p className="text-muted-foreground">RC Number</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.rcNumber as string}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.tinNumber && (
+                                <div>
+                                  <p className="text-muted-foreground">TIN</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.tinNumber as string}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.amlScreeningStatus && (
+                                <div>
+                                  <p className="text-muted-foreground">AML Status</p>
+                                  <p className="font-medium capitalize">{(dossierItem.corporateInfo.amlScreeningStatus as string).replace(/_/g, " ")}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.headOfficeAddress && (
+                                <div className="col-span-2">
+                                  <p className="text-muted-foreground">Head Office</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.headOfficeAddress as string}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.contactPersonName && (
+                                <div>
+                                  <p className="text-muted-foreground">Contact Person</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.contactPersonName as string}</p>
+                                </div>
+                              )}
+                              {dossierItem.corporateInfo.contactPersonEmail && (
+                                <div>
+                                  <p className="text-muted-foreground">Contact Email</p>
+                                  <p className="font-medium">{dossierItem.corporateInfo.contactPersonEmail as string}</p>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-muted-foreground italic">No registry or KYC data found for this corporate entity.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
+                  <div className="shrink-0">{getVerificationBadge(person)}</div>
                 </div>
-                <div className="shrink-0">{getVerificationBadge(person)}</div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   );
@@ -1045,6 +1347,7 @@ function DocumentsTab({
   const [selectedDoc, setSelectedDoc] = useState<ApplicationChecklistItem | null>(null);
   const [qualityStatus, setQualityStatus] = useState<string>("");
   const [qualityNotes, setQualityNotes] = useState("");
+  const [kycDocsExpanded, setKycDocsExpanded] = useState(true);
 
   // Fetch field verification findings (only if an address_proof doc might be reviewed)
   const { data: fieldVerificationJob } = useQuery<FieldVerificationJob>({
@@ -1052,6 +1355,16 @@ function DocumentsTab({
     enabled: !!addressVerificationStatus && addressVerificationStatus !== "none",
     retry: false,
   });
+
+  // Fetch people dossier for identity documents section
+  const { data: dossier } = useQuery<DossierItem[]>({
+    queryKey: ["/api/lawyer/applications", applicationId, "people-dossier"],
+    retry: false,
+  });
+
+  const individualDossierItems = (dossier || []).filter((d): d is DossierIndividual =>
+    d.entityType === "individual" && d.profile !== null && (d.profile.hasSignature || d.profile.hasPassportPhoto || d.profile.hasIdDocument)
+  );
 
   const getDocumentFile = (checklistItem: ApplicationChecklistItem): DocumentFile | undefined => {
     return documents.find(doc => doc.docType === checklistItem.key);
@@ -1086,6 +1399,75 @@ function DocumentsTab({
   };
 
   return (
+    <div className="space-y-4">
+      {individualDossierItems.length > 0 && (
+        <Card data-testid="card-kyc-documents">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                  Identity & KYC Documents
+                </CardTitle>
+                <CardDescription>
+                  Verified identity documents for directors and shareholders
+                </CardDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setKycDocsExpanded(prev => !prev)}
+                data-testid="btn-toggle-kyc-docs"
+              >
+                {kycDocsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+            </div>
+          </CardHeader>
+          {kycDocsExpanded && (
+            <CardContent className="pt-0">
+              <div className="divide-y">
+                {individualDossierItems.map((item) => (
+                  <div key={item.personId} className="py-3" data-testid={`kyc-docs-row-${item.personId}`}>
+                    <p className="text-sm font-medium mb-2">
+                      {item.profile?.fullName || item.inviteEmail || `Person #${item.personId}`}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {item.profile?.hasPassportPhoto && (
+                        <PersonDocumentButton
+                          applicationId={applicationId}
+                          personId={item.personId}
+                          docType="passport_photo"
+                          label="Passport Photo"
+                          icon={<ImageIcon className="h-3 w-3" />}
+                        />
+                      )}
+                      {item.profile?.hasSignature && (
+                        <PersonDocumentButton
+                          applicationId={applicationId}
+                          personId={item.personId}
+                          docType="signature"
+                          label="Signature"
+                          icon={<PenLine className="h-3 w-3" />}
+                        />
+                      )}
+                      {item.profile?.hasIdDocument && (
+                        <PersonDocumentButton
+                          applicationId={applicationId}
+                          personId={item.personId}
+                          docType="id_document"
+                          label="ID Document"
+                          icon={<FileImage className="h-3 w-3" />}
+                        />
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Document Quality Review</CardTitle>
@@ -1313,6 +1695,7 @@ function DocumentsTab({
         </div>
       </CardContent>
     </Card>
+    </div>
   );
 }
 

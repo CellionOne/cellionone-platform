@@ -332,6 +332,10 @@ export default function ApplicationDetailsPage() {
   }
 
   const { application, checklist, payment, clarifications } = data;
+
+  // Separate standard checklist items from per-person/entity document requirements
+  const standardItems = checklist.filter(item => item.source !== "people_requirement");
+  const peopleReqItems = checklist.filter(item => item.source === "people_requirement");
   
   const completedItems = checklist.filter(item => item.status === "provided" || item.status === "accepted").length;
   const requiredItems = checklist.filter(item => item.required).length;
@@ -340,6 +344,36 @@ export default function ApplicationDetailsPage() {
   const hasMissingRequired = checklist.some(
     item => item.required && item.status !== "provided" && item.status !== "accepted"
   );
+
+  // Group people_req items by person (extract person name from label prefix before " — ")
+  type PeopleDocGroup = {
+    personName: string;
+    entityTypeBadge: "Individual" | "Limited Company" | "Business Name" | "NGO / Trustee";
+    items: ApplicationChecklistItem[];
+  };
+
+  const peopleDocGroups: PeopleDocGroup[] = (() => {
+    const groups = new Map<string, ApplicationChecklistItem[]>();
+    for (const item of peopleReqItems) {
+      const dashIdx = item.label.indexOf(" — ");
+      const personName = dashIdx >= 0 ? item.label.substring(0, dashIdx) : item.label;
+      if (!groups.has(personName)) groups.set(personName, []);
+      groups.get(personName)!.push(item);
+    }
+    return Array.from(groups.entries()).map(([personName, items]) => {
+      // Detect entity type from key slug patterns
+      const keys = items.map(i => i.key ?? "");
+      let entityTypeBadge: PeopleDocGroup["entityTypeBadge"] = "Individual";
+      if (keys.some(k => k.includes("_cac_cert_registration") || k.includes("_proprietor_gov_id") || k.includes("_proof_business_address"))) {
+        entityTypeBadge = "Business Name";
+      } else if (keys.some(k => k.includes("_cac_cert_incorporation_trustees") || k.includes("_constitution_rules") || k.includes("_list_of_trustees"))) {
+        entityTypeBadge = "NGO / Trustee";
+      } else if (keys.some(k => k.includes("_cac_cert_incorporation") || k.includes("_memorandum_articles") || k.includes("_board_resolution") || k.includes("_list_of_directors"))) {
+        entityTypeBadge = "Limited Company";
+      }
+      return { personName, entityTypeBadge, items };
+    });
+  })();
 
   const currentStatusIndex = statusTimeline.findIndex(s => s.status === application.status);
 
@@ -449,7 +483,7 @@ export default function ApplicationDetailsPage() {
                 <Progress value={progress} className="h-2" />
                 
                 <div className="divide-y mt-4">
-                  {checklist.map((item) => {
+                  {standardItems.map((item) => {
                     const isAutoResolved =
                       item.status === "provided" &&
                       item.isAutoResolved === true;
@@ -593,6 +627,133 @@ export default function ApplicationDetailsPage() {
               </CardContent>
             </Card>
 
+            {peopleDocGroups.length > 0 && (
+              <Card data-testid="card-people-entity-documents">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    People &amp; Entity Documents
+                  </CardTitle>
+                  <CardDescription>
+                    Supporting documents required for each unverified director or shareholder
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {peopleDocGroups.map((group) => {
+                    const groupComplete = group.items.every(
+                      i => i.status === "provided" || i.status === "accepted"
+                    );
+                    const badgeVariant =
+                      group.entityTypeBadge === "Individual"
+                        ? "secondary"
+                        : "outline";
+                    return (
+                      <div key={group.personName} data-testid={`people-doc-group-${group.personName.replace(/\s+/g, "-")}`}>
+                        <div className="flex items-center gap-2 mb-3">
+                          {group.entityTypeBadge === "Individual" ? (
+                            <UserCheck className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Building2 className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          <span className="text-sm font-medium">{group.personName}</span>
+                          <Badge variant={badgeVariant} className="text-xs">
+                            {group.entityTypeBadge}
+                          </Badge>
+                          {groupComplete && (
+                            <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400 ml-auto">
+                              <CheckCircle2 className="h-3 w-3" />
+                              Complete
+                            </span>
+                          )}
+                        </div>
+                        <div className="divide-y rounded-lg border">
+                          {group.items.map((item) => {
+                            const isProvided = item.status === "provided" || item.status === "accepted";
+                            const isAutoRes = isProvided && item.isAutoResolved;
+                            const docLabel = item.label.includes(" — ")
+                              ? item.label.split(" — ").slice(1).join(" — ")
+                              : item.label;
+                            return (
+                              <div
+                                key={item.id}
+                                className="flex items-center justify-between gap-3 px-3 py-2.5"
+                                data-testid={`people-doc-item-${item.key}`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <div className={`h-7 w-7 rounded-md flex items-center justify-center shrink-0 ${
+                                    isProvided ? "bg-green-100 dark:bg-green-900/30" : "bg-muted"
+                                  }`}>
+                                    {isProvided ? (
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                                    ) : (
+                                      <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-medium leading-tight">{docLabel}</p>
+                                    {isAutoRes ? (
+                                      <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400">
+                                        <ShieldCheck className="h-3 w-3" />
+                                        Verified — on file
+                                      </span>
+                                    ) : isProvided ? (
+                                      <span className="text-xs text-muted-foreground">Uploaded</span>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">Required · PDF, JPEG or PNG</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <StatusBadge status={item.status || "missing"} />
+                                  {(item.status === "missing" || item.status === "rejected") && (
+                                    <div className="relative">
+                                      <Input
+                                        type="file"
+                                        accept=".pdf,.jpg,.jpeg,.png"
+                                        className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                                        disabled={uploadMutation.isPending || isFileUploading}
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) {
+                                            uploadMutation.mutate({ checklistId: item.id, file });
+                                            e.target.value = "";
+                                          }
+                                        }}
+                                        data-testid={`upload-people-doc-${item.key}`}
+                                      />
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="pointer-events-none h-7 px-2 text-xs"
+                                        disabled={uploadMutation.isPending || isFileUploading}
+                                      >
+                                        {(uploadMutation.isPending || isFileUploading) ? (
+                                          <LoadingSpinner size="sm" />
+                                        ) : (
+                                          <Upload className="h-3.5 w-3.5 mr-1" />
+                                        )}
+                                        Upload
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {peopleReqItems.some(i => i.status === "missing" || i.status === "rejected") && (
+                    <p className="text-xs text-muted-foreground">
+                      Once a director or shareholder completes their identity verification on the platform, their documents will be automatically resolved.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Company Details</CardTitle>
@@ -690,14 +851,27 @@ export default function ApplicationDetailsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {hasMissingRequired && (
-                  <div className="flex items-start gap-2 p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
-                    <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
-                      Upload all required documents before proceeding to payment.
-                    </p>
-                  </div>
-                )}
+                {hasMissingRequired && (() => {
+                  const missingPeopleReq = peopleReqItems.filter(
+                    i => i.required && i.status !== "provided" && i.status !== "accepted"
+                  ).length;
+                  const missingStandard = standardItems.filter(
+                    i => i.required && i.status !== "provided" && i.status !== "accepted"
+                  ).length;
+                  return (
+                    <div className="flex items-start gap-2 p-2.5 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                      <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="text-xs text-amber-700 dark:text-amber-400 space-y-0.5">
+                        {missingStandard > 0 && <p>Upload all required documents before proceeding to payment.</p>}
+                        {missingPeopleReq > 0 && (
+                          <p data-testid="alert-people-docs-missing">
+                            {missingPeopleReq} supporting document{missingPeopleReq > 1 ? "s" : ""} still required from directors/shareholders.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {payment?.status === "success" ? (
                   <div className="space-y-3">

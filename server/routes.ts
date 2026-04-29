@@ -28,7 +28,7 @@ import { registerCieApiRoutes } from "./routes/cieApiRoutes";
 import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
 import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
-import { syncChecklistFromVerifications } from "./services/checklistSyncService";
+import { syncChecklistFromVerifications, syncPeopleDocumentRequirements } from "./services/checklistSyncService";
 
 // Maximum number of Smile ID error results for a given RC number before we
 // stop retrying live lookups. Configurable via SMILE_ID_MAX_ERROR_RETRIES env
@@ -261,6 +261,7 @@ async function createDefaultChecklist(applicationId: number, operatingAddress?: 
 async function syncDirectorVerification(personUserId: string): Promise<void> {
   try {
     const people = await storage.getCompanyPeopleByPersonUserId(personUserId);
+    const appIds = new Set<number>();
     for (const person of people) {
       if (person.entityType === 'corporate') continue;
       if (!person.isVerified) {
@@ -270,7 +271,12 @@ async function syncDirectorVerification(personUserId: string): Promise<void> {
       }
       if (person.applicationId && person.founderId) {
         await syncChecklistFromVerifications(person.applicationId, person.founderId);
+        appIds.add(person.applicationId);
       }
+    }
+    // Also sync per-person document requirements for all affected applications
+    for (const appId of appIds) {
+      await syncPeopleDocumentRequirements(appId);
     }
   } catch (err) {
     console.error(`[ChecklistSync] syncDirectorVerification failed for user ${personUserId}:`, err);
@@ -3635,6 +3641,13 @@ export async function registerRoutes(
         ipAddress: req.ip,
       });
 
+      // Sync per-person document requirements if this person is linked to an application
+      if (person.applicationId) {
+        syncPeopleDocumentRequirements(person.applicationId).catch(e =>
+          console.error("[PeopleDocSync] background sync error after add:", e)
+        );
+      }
+
       res.json(person);
     } catch (error) {
       console.error("Error inviting company person:", error);
@@ -3665,6 +3678,14 @@ export async function registerRoutes(
         ...(newApplicationId !== undefined ? { applicationId: newApplicationId } : {}),
       });
 
+      // Sync per-person document requirements when a person is linked to an application
+      const linkedAppId = newApplicationId ?? person.applicationId;
+      if (linkedAppId) {
+        syncPeopleDocumentRequirements(linkedAppId).catch(e =>
+          console.error("[PeopleDocSync] background sync error after put:", e)
+        );
+      }
+
       res.json(updated);
     } catch (error) {
       console.error("Error updating company person:", error);
@@ -3684,6 +3705,7 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Person not found" });
       }
 
+      const personAppId = person.applicationId;
       await storage.deleteCompanyPerson(id);
 
       await storage.createAuditLog({
@@ -3694,6 +3716,13 @@ export async function registerRoutes(
         details: { inviteEmail: person.inviteEmail, role: person.role },
         ipAddress: req.ip,
       });
+
+      // Sync (cleanup orphaned items) after removing a person
+      if (personAppId) {
+        syncPeopleDocumentRequirements(personAppId).catch(e =>
+          console.error("[PeopleDocSync] background cleanup error after remove:", e)
+        );
+      }
 
       res.json({ message: "Person removed" });
     } catch (error) {
@@ -5623,6 +5652,10 @@ export async function registerRoutes(
       }
       
       const updated = await storage.updateApplication(applicationId, parsed.data);
+      // Sync per-person document requirements after any update (idempotent)
+      syncPeopleDocumentRequirements(applicationId).catch(e =>
+        console.error("[PeopleDocSync] background sync error:", e)
+      );
       res.json(updated);
     } catch (error) {
       console.error("Error updating application:", error);
@@ -5643,6 +5676,9 @@ export async function registerRoutes(
       if (application.status !== "draft") {
         return res.status(400).json({ message: "Application already submitted" });
       }
+
+      // Final sync of per-person document requirements before submission
+      await syncPeopleDocumentRequirements(applicationId);
       
       const updated = await storage.updateApplication(applicationId, {
         status: "submitted",

@@ -66,3 +66,150 @@ export async function syncChecklistFromVerifications(applicationId: number, foun
     console.error(`[ChecklistSync] Failed for application ${applicationId}:`, err);
   }
 }
+
+// Document sets per entity type/business type
+type DocSlug = { slug: string; label: string };
+
+function getDocSlugsForPerson(
+  personId: number,
+  displayName: string,
+  entityType: string | null,
+  bizType: string | null | undefined,
+): DocSlug[] {
+  const n = displayName;
+  if (entityType === "corporate") {
+    if (bizType === "bn") {
+      return [
+        { slug: "cac_cert_registration", label: `${n} — CAC Certificate of Registration` },
+        { slug: "proprietor_gov_id", label: `${n} — Proprietor Government ID` },
+        { slug: "proof_business_address", label: `${n} — Proof of Business Address` },
+      ];
+    }
+    if (bizType === "it") {
+      return [
+        { slug: "cac_cert_incorporation_trustees", label: `${n} — CAC Certificate of Incorporation of Trustees` },
+        { slug: "constitution_rules", label: `${n} — Constitution / Rules of the Association` },
+        { slug: "list_of_trustees", label: `${n} — List of Trustees` },
+        { slug: "board_resolution_minutes", label: `${n} — Board Resolution / Minutes Authorising the Registration` },
+      ];
+    }
+    // Default to "co"
+    return [
+      { slug: "cac_cert_incorporation", label: `${n} — CAC Certificate of Incorporation` },
+      { slug: "memorandum_articles", label: `${n} — Memorandum & Articles of Association` },
+      { slug: "board_resolution", label: `${n} — Board Resolution (Authorising the Directorship/Shareholding)` },
+      { slug: "list_of_directors", label: `${n} — List of Directors` },
+    ];
+  }
+  // Individual
+  return [
+    { slug: "gov_id", label: `${n} — Government-Issued ID` },
+    { slug: "passport_photo", label: `${n} — Passport Photograph` },
+    { slug: "proof_of_address", label: `${n} — Proof of Address` },
+  ];
+}
+
+function isCompanyPersonVerified(person: {
+  entityType: string | null;
+  isVerified: boolean | null;
+  autoVerifyMethod: string | null;
+  kybLookupStatus: string | null;
+}): boolean {
+  if (person.entityType === "corporate") {
+    return !!person.autoVerifyMethod || person.kybLookupStatus === "found";
+  }
+  return person.isVerified === true;
+}
+
+/**
+ * Idempotently create/update/delete per-person document checklist items
+ * (source = 'people_requirement') for every director/shareholder in the application.
+ *
+ * - Creates items for unverified parties that don't have them yet.
+ * - Auto-resolves items for parties that are already verified.
+ * - Deletes items whose person has been removed from the application.
+ *
+ * Safe to call multiple times — fully idempotent.
+ */
+export async function syncPeopleDocumentRequirements(applicationId: number): Promise<void> {
+  try {
+    const [people, allItems] = await Promise.all([
+      storage.getCompanyPeople(applicationId),
+      storage.getChecklistItems(applicationId),
+    ]);
+
+    const existingPeopleReqItems = allItems.filter(i => i.source === "people_requirement");
+
+    // Build the full set of expected item keys for current people
+    const expectedKeys = new Set<string>();
+
+    for (const person of people) {
+      const displayName =
+        person.entityType === "corporate"
+          ? (person.corporateName ?? person.title ?? "Corporate Entity")
+          : (person.title ?? person.inviteEmail ?? `Person ${person.id}`);
+
+      const docSlugs = getDocSlugsForPerson(
+        person.id,
+        displayName,
+        person.entityType ?? "individual",
+        person.corporateBusinessType,
+      );
+
+      const verified = isCompanyPersonVerified(person);
+
+      for (const { slug, label } of docSlugs) {
+        const key = `people_req_${person.id}_${slug}`;
+        expectedKeys.add(key);
+
+        const existing = existingPeopleReqItems.find(i => i.key === key);
+
+        if (!existing) {
+          // Create new item
+          if (verified) {
+            await storage.createChecklistItem({
+              applicationId,
+              key,
+              label,
+              required: true,
+              status: "accepted",
+              isAutoResolved: true,
+              source: "people_requirement",
+              reviewerNotes: "Auto-resolved: identity/entity verified on the platform",
+            });
+          } else {
+            await storage.createChecklistItem({
+              applicationId,
+              key,
+              label,
+              required: true,
+              status: "missing",
+              source: "people_requirement",
+            });
+          }
+        } else {
+          // Item exists — update label if name changed, auto-resolve if newly verified
+          const updates: Record<string, unknown> = {};
+          if (existing.label !== label) updates.label = label;
+          if (verified && existing.status === "missing") {
+            updates.status = "accepted";
+            updates.isAutoResolved = true;
+            updates.reviewerNotes = "Auto-resolved: identity/entity verified on the platform";
+          }
+          if (Object.keys(updates).length > 0) {
+            await storage.updateChecklistItem(existing.id, updates as Parameters<typeof storage.updateChecklistItem>[1]);
+          }
+        }
+      }
+    }
+
+    // Clean up orphaned items (person removed or business type changed)
+    for (const item of existingPeopleReqItems) {
+      if (item.key && !expectedKeys.has(item.key)) {
+        await storage.deleteChecklistItem(item.id);
+      }
+    }
+  } catch (err) {
+    console.error(`[PeopleDocSync] Failed for application ${applicationId}:`, err);
+  }
+}

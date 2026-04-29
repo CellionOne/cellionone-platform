@@ -1,10 +1,11 @@
 import { db } from "../db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { 
   companyApplications, 
   documentFiles, 
   identityVerifications, 
   payments,
+  applicationChecklistItems,
   type CompanyApplication 
 } from "@shared/schema";
 
@@ -37,14 +38,17 @@ export async function calculateApplicationReadiness(
     throw new Error("Application not found");
   }
 
-  const documents = await db.select().from(documentFiles)
-    .where(eq(documentFiles.applicationId, applicationId));
-
-  const [identityVerification] = await db.select().from(identityVerifications)
-    .where(eq(identityVerifications.founderUserId, application.founderUserId));
-
-  const [payment] = await db.select().from(payments)
-    .where(eq(payments.applicationId, applicationId));
+  const [documents, identityVerification, payment, peopleReqItems] = await Promise.all([
+    db.select().from(documentFiles).where(eq(documentFiles.applicationId, applicationId)),
+    db.select().from(identityVerifications).where(eq(identityVerifications.founderUserId, application.founderUserId)).then(r => r[0]),
+    db.select().from(payments).where(eq(payments.applicationId, applicationId)).then(r => r[0]),
+    db.select().from(applicationChecklistItems).where(
+      and(
+        eq(applicationChecklistItems.applicationId, applicationId),
+        eq(applicationChecklistItems.source, "people_requirement")
+      )
+    ),
+  ]);
 
   const identityVerified = identityVerification?.status === "verified";
   const identityFromPreviousRegistration =
@@ -53,7 +57,7 @@ export async function calculateApplicationReadiness(
     application.paymentState === "paid_escrowed" || 
     application.paymentState === "released_to_lawyer";
 
-  return computeReadinessScore(application, documents, identityVerified, paymentComplete, identityFromPreviousRegistration);
+  return computeReadinessScore(application, documents, identityVerified, paymentComplete, identityFromPreviousRegistration, peopleReqItems);
 }
 
 export function computeReadinessScore(
@@ -61,7 +65,8 @@ export function computeReadinessScore(
   documents: Array<{ docType: string; qualityStatus?: string | null }>,
   identityVerified: boolean,
   paymentComplete: boolean,
-  identityFromPreviousRegistration = false
+  identityFromPreviousRegistration = false,
+  peopleReqItems: Array<{ key: string | null; label: string; status: string | null; required: boolean | null }> = []
 ): ReadinessResult {
   const breakdown: ReadinessBreakdownCategory[] = [];
   const nextSteps: string[] = [];
@@ -115,11 +120,26 @@ export function computeReadinessScore(
       note,
     };
   });
+
+  // Add outstanding people_requirement items to the doc score
+  const outstandingPeopleReq = peopleReqItems.filter(
+    i => i.required && i.status !== "accepted" && i.status !== "provided"
+  );
+  for (const item of outstandingPeopleReq) {
+    docItems.push({
+      name: item.label,
+      status: "incomplete",
+    });
+  }
+
   const docScore = Math.round((docItems.filter(i => i.status === "complete").length / docItems.length) * 100);
   breakdown.push({ category: "Required Documents", score: docScore, weight: 30, items: docItems });
   
   if (docScore < 100) {
     nextSteps.push("Upload all required documents");
+  }
+  if (outstandingPeopleReq.length > 0) {
+    nextSteps.push(`${outstandingPeopleReq.length} supporting document${outstandingPeopleReq.length > 1 ? "s" : ""} still required from directors/shareholders`);
   }
 
   const verificationItems: ReadinessBreakdownItem[] = [

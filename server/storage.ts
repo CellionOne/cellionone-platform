@@ -125,6 +125,7 @@ export interface IStorage {
   getChecklistItems(applicationId: number): Promise<ApplicationChecklistItem[]>;
   createChecklistItem(data: InsertChecklistItem): Promise<ApplicationChecklistItem>;
   updateChecklistItem(id: number, data: Partial<InsertChecklistItem>): Promise<ApplicationChecklistItem | undefined>;
+  deleteChecklistItem(id: number): Promise<void>;
 
   // Documents
   getDocument(id: number): Promise<DocumentFile | undefined>;
@@ -724,6 +725,10 @@ export class DatabaseStorage implements IStorage {
       .where(eq(applicationChecklistItems.id, id))
       .returning();
     return item;
+  }
+
+  async deleteChecklistItem(id: number): Promise<void> {
+    await db.delete(applicationChecklistItems).where(eq(applicationChecklistItems.id, id));
   }
 
   // Documents

@@ -2785,8 +2785,8 @@ export async function registerRoutes(
         const smileIdentityCore = require('smile-identity-core');
         const SID_SERVER_BIO = process.env.SMILE_ID_SERVER || '0';
         const WebApi = smileIdentityCore.WebApi;
-        const bioBioCallbackUrl = (process.env.SITE_URL || `${req.protocol}://${req.get('host')}`) + '/api/smile-id/biometric-callback';
-        const connection = new WebApi(PARTNER_ID_BIO, bioBioCallbackUrl, API_KEY_BIO, SID_SERVER_BIO);
+        const biometricCallbackUrl = (process.env.SITE_URL || `${req.protocol}://${req.get('host')}`) + '/api/smile-id/biometric-callback';
+        const connection = new WebApi(PARTNER_ID_BIO, biometricCallbackUrl, API_KEY_BIO, SID_SERVER_BIO);
         const smileJobId = `bio-${invite.companyProfileId}-${invite.directorIndex}-${Date.now()}`;
         const partnerParams = { job_id: smileJobId, user_id: founderId, job_type: 4 };
         const idInfo = { country: 'NG', entered: true };

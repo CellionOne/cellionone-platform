@@ -6408,11 +6408,12 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       // Server-side stage transition guard — prevents skipping or reversing stages
       const allowedTransitions: Record<string, string[]> = {
-        submitted:         ["under_review"],
-        under_review:      ["filed"],
-        filed:             ["pending_originals"],
-        pending_originals: ["courier_in_transit"],
-        courier_in_transit:["completed"],
+        submitted:               ["under_review"],
+        under_review:            ["filed"],
+        clarification_requested: ["under_review"],
+        filed:                   ["pending_originals"],
+        pending_originals:       ["courier_in_transit"],
+        courier_in_transit:      ["completed"],
       };
       const currentStatus = application.status ?? "";
       if (!allowedTransitions[currentStatus]?.includes(status)) {

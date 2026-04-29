@@ -1630,11 +1630,12 @@ function ClarificationsTab({
 }
 
 const STATUS_TRANSITIONS: Record<string, { value: string; label: string }[]> = {
-  submitted: [{ value: "under_review", label: "Under Review" }],
-  under_review: [{ value: "filed", label: "Filed with CAC" }],
-  filed: [{ value: "pending_originals", label: "Pending Originals" }],
-  pending_originals: [{ value: "courier_in_transit", label: "Courier In Transit" }],
-  courier_in_transit: [{ value: "completed", label: "Completed" }],
+  submitted:               [{ value: "under_review", label: "Under Review" }],
+  under_review:            [{ value: "filed", label: "Filed with CAC" }],
+  clarification_requested: [{ value: "under_review", label: "Under Review (resume)" }],
+  filed:                   [{ value: "pending_originals", label: "Pending Originals" }],
+  pending_originals:       [{ value: "courier_in_transit", label: "Courier In Transit" }],
+  courier_in_transit:      [{ value: "completed", label: "Completed" }],
 };
 
 const STATUS_REQUIRES_RC = new Set(["filed", "completed"]);

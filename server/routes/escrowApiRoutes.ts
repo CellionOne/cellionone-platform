@@ -5,6 +5,7 @@ import { db } from "../db";
 import { eq, desc } from "drizzle-orm";
 import { kycWebhookConfigs, escrowTransactions, userRoles } from "@shared/schema";
 import { authenticateApiKey, type ApiKeyRequest } from "../middleware/apiKeyAuth";
+import { getSiteBaseUrl } from "../services/emailService";
 import { isAuthenticated } from "../replit_integrations/auth";
 import crypto from "crypto";
 import { createBankPortalUserAndSendInvite } from "./bankPortalRoutes";
@@ -1119,7 +1120,7 @@ export function registerEscrowApiRoutes(app: Express): void {
       });
 
       if (body.contactEmail) {
-        const baseUrl = process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
+        const baseUrl = getSiteBaseUrl(req);
         try {
           await createBankPortalUserAndSendInvite(body.contactEmail, partner.id, partner.name, baseUrl);
         } catch (inviteErr) {

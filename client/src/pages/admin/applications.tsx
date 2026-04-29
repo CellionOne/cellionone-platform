@@ -868,9 +868,9 @@ export default function AdminApplications() {
                         <div className="flex items-start gap-2">
                           <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                           <div>
-                            <p className="font-medium text-amber-800 dark:text-amber-300">No bank details configured</p>
+                            <p className="font-medium text-amber-800 dark:text-amber-300">This lawyer has no bank details configured.</p>
                             <p className="text-amber-700 dark:text-amber-400 text-xs mt-0.5">
-                              This lawyer has no bank account set up.{" "}
+                              Set up their{" "}
                               <button
                                 type="button"
                                 className="underline font-medium"
@@ -884,7 +884,7 @@ export default function AdminApplications() {
                                 }}
                                 data-testid="link-open-bank-setup"
                               >
-                                Set up bank details
+                                bank details
                               </button>{" "}
                               before releasing payment.
                             </p>

@@ -288,10 +288,10 @@ async function syncChecklistFromVerifications(applicationId: number, founderId: 
     }
 
     // ── director_id & shareholder_details ─────────────────────────────────────
-    // Only evaluate team members with the "director" or "shareholder" role.
-    // Other roles (e.g. secretary) are not relevant to these checklist items.
-    const directors = teamMembers.filter((p) => p.role === "director");
-    const shareholders = teamMembers.filter((p) => p.role === "shareholder");
+    // Match exact roles AND the combined "director_shareholder" role.
+    // "secretary" and any other administrative roles are excluded from the check.
+    const directors = teamMembers.filter((p) => p.role === "director" || p.role === "director_shareholder");
+    const shareholders = teamMembers.filter((p) => p.role === "shareholder" || p.role === "director_shareholder");
 
     function isPersonVerified(person: typeof teamMembers[number]): boolean {
       if (person.entityType === "corporate") {
@@ -5680,7 +5680,9 @@ export async function registerRoutes(
         if (!itemBelongsToApp) {
           return res.status(400).json({ message: "Checklist item does not belong to this application" });
         }
-        await storage.updateChecklistItem(parsedChecklistId, { status: "provided" });
+        // Resetting isAutoResolved to false marks this as a manual upload.
+        // The "Verified — on file" badge will no longer show for this item.
+        await storage.updateChecklistItem(parsedChecklistId, { status: "provided", isAutoResolved: false });
       }
 
       const document = await storage.createDocument({

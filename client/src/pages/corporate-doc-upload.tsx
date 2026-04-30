@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 interface DocSlot {
   key: string;
   label: string;
+  description?: string;
 }
 
 interface UploadTokenData {
@@ -200,10 +201,13 @@ export default function CorporateDocUploadPage() {
             {slots.map((slot) => {
               const file = files[slot.key] ?? null;
               return (
-                <div key={slot.key} className="space-y-2">
+                <div key={slot.key} className="space-y-1.5">
                   <Label htmlFor={`file-${slot.key}`}>
                     {slot.label} <span className="text-destructive">*</span>
                   </Label>
+                  {slot.description && (
+                    <p className="text-xs text-muted-foreground leading-relaxed">{slot.description}</p>
+                  )}
                   <div className="relative">
                     <Input
                       id={`file-${slot.key}`}

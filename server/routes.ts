@@ -6356,7 +6356,26 @@ export async function registerRoutes(
       const displayName = record.entityName ?? "Corporate Entity";
       const bizType = person?.corporateBusinessType ?? "co";
       const docSlugs = getDocSlugsForPerson(record.personId, displayName, "corporate", bizType);
-      const requiredDocSlots = docSlugs.map(d => ({ key: d.slug, label: d.label.split(" — ").slice(1).join(" — ") }));
+
+      const CORP_DOC_DESCRIPTIONS: Record<string, string> = {
+        cac_cert_incorporation: "Official certificate from the CAC confirming the company's incorporation",
+        memorandum_articles: "Constitutional documents governing the company's formation and operation (MEMAT)",
+        board_resolution: "Board resolution authorising this entity to act as director or shareholder",
+        list_of_directors: "Current list of directors as registered with the CAC",
+        cac_cert_registration: "Certificate from the CAC confirming registration of the business name",
+        proprietor_gov_id: "Valid government-issued ID (national ID, passport, or driver's licence) of the proprietor",
+        proof_business_address: "Recent utility bill or bank statement showing the business's registered address",
+        cac_cert_incorporation_trustees: "CAC certificate of incorporation of trustees for the NGO or association",
+        constitution_rules: "The association's governing constitution or rules document",
+        list_of_trustees: "Current list of trustees as registered with the CAC",
+        board_resolution_minutes: "Board/trustee meeting minutes authorising participation in this incorporation",
+      };
+
+      const requiredDocSlots = docSlugs.map(d => ({
+        key: d.slug,
+        label: d.label.split(" — ").slice(1).join(" — "),
+        description: CORP_DOC_DESCRIPTIONS[d.slug] ?? "",
+      }));
 
       res.json({
         entityName: record.entityName,
@@ -6407,33 +6426,58 @@ export async function registerRoutes(
       const files = req.files as Record<string, Express.Multer.File[]>;
       const submittedSlugs = new Set(Object.keys(files ?? {}).filter(k => files[k]?.length > 0));
 
-      // Phase 1 — full validation, no side effects — unexpected slugs
+      // Phase 1 — full validation with no token side effects
+
+      // 1a. Unexpected slugs (not valid for this entity type)
       const unexpectedSlugs = [...submittedSlugs].filter(s => !requiredSlugSet.has(s));
       if (unexpectedSlugs.length > 0) {
         return res.status(400).json({ message: `Unexpected document field(s): ${unexpectedSlugs.join(", ")}` });
       }
 
-      // Phase 1 — full validation: all required slugs must be present
+      // 1b. All required slugs must be present
       const missingSlugs = [...requiredSlugSet].filter(s => !submittedSlugs.has(s));
       if (missingSlugs.length > 0) {
         const missingLabels = requiredDocSlugs.filter(d => missingSlugs.includes(d.slug)).map(d => d.label.split(" — ").slice(1).join(" — "));
         return res.status(400).json({ message: `All required documents must be submitted. Missing: ${missingLabels.join(", ")}` });
       }
 
-      // Phase 1 — full validation: MIME / extension check on every file
-      const allowedMime = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
-      const allowedExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
+      // 1c. Strict file type check: both MIME type AND extension must be in the allowed set,
+      //     plus magic-byte verification so renamed files with valid extensions are rejected.
+      const allowedMime = new Set(["application/pdf", "image/jpeg", "image/png"]);
+      const allowedExtensions = new Set([".pdf", ".jpg", ".jpeg", ".png"]);
+
+      function checkMagicBytes(buf: Buffer, ext: string): boolean {
+        if (buf.length < 4) return false;
+        // PDF: %PDF
+        if (ext === ".pdf" && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return true;
+        // JPEG: FF D8 FF
+        if ((ext === ".jpg" || ext === ".jpeg") && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true;
+        // PNG: 89 50 4E 47
+        if (ext === ".png" && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true;
+        return false;
+      }
+
       const { default: pathMod } = await import("path");
       for (const { slug } of requiredDocSlugs) {
         const file = files[slug]?.[0];
         if (!file) continue;
         const fileExt = pathMod.extname(file.originalname || "").toLowerCase();
-        if (!allowedMime.includes(file.mimetype) && !allowedExtensions.includes(fileExt)) {
-          return res.status(400).json({ message: `File type not allowed for ${slug}. Accepted: PDF, JPG, PNG.` });
+        const mimeNorm = file.mimetype === "image/jpg" ? "image/jpeg" : file.mimetype;
+        if (!allowedExtensions.has(fileExt) || !allowedMime.has(mimeNorm)) {
+          return res.status(400).json({ message: `File type not allowed for "${slug}". Accepted formats: PDF, JPG, PNG.` });
+        }
+        if (!checkMagicBytes(file.buffer, fileExt)) {
+          return res.status(400).json({ message: `File content does not match its extension for "${slug}". Please upload a valid PDF, JPG, or PNG.` });
         }
       }
 
-      // Phase 2 — upload all files and update checklist items
+      // Phase 1.5 — all validation passed; atomically claim token before any uploads
+      // claimCorporateDocUploadToken sets usedAt WHERE usedAt IS NULL AND expiresAt > NOW()
+      // ensuring only one concurrent submission can proceed per token.
+      const claimed = await storage.claimCorporateDocUploadToken(record.id);
+      if (!claimed) return res.status(410).json({ message: "This upload link has already been used or has expired" });
+
+      // Phase 2 — upload all files and update checklist items (token already consumed above)
       const objectStorage = new ObjectStorageService();
 
       async function uploadCorpFile(file: Express.Multer.File, docType: string): Promise<string> {
@@ -6491,9 +6535,7 @@ export async function registerRoutes(
         }
       }
 
-      // Phase 3 — all uploads and checklist updates succeeded; now mark token used and audit
-      await storage.markCorporateDocUploadTokenUsed(record.id);
-
+      // Phase 3 — all uploads and checklist updates succeeded; token was already claimed
       await storage.createAuditLog({
         actorUserId: `corp_upload_${record.personId}`,
         action: "corporate_document_upload",

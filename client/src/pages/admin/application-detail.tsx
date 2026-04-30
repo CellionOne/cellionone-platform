@@ -347,7 +347,24 @@ function PersonRow({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {person.isVerified ? (
+          {isCorporate ? (
+            (person.isVerified || person.autoVerifyMethod) ? (
+              <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 dark:bg-green-900/30 dark:text-green-300 px-2 py-0.5 rounded-full">
+                <ShieldCheck className="h-3 w-3" />
+                {person.kybLookupStatus === "found" ? "KYB Verified" : person.autoVerifyMethod ? "Platform Verified" : "Verified"}
+              </span>
+            ) : person.kybLookupStatus === "not_found" ? (
+              <span className="flex items-center gap-1 text-xs text-red-700 bg-red-100 dark:bg-red-900/30 dark:text-red-300 px-2 py-0.5 rounded-full">
+                <ShieldAlert className="h-3 w-3" />
+                KYB Failed
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                <ShieldAlert className="h-3 w-3" />
+                Pending KYB
+              </span>
+            )
+          ) : person.isVerified ? (
             <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 dark:bg-green-900/30 dark:text-green-300 px-2 py-0.5 rounded-full">
               <ShieldCheck className="h-3 w-3" />
               Verified
@@ -549,7 +566,7 @@ export default function AdminApplicationDetail() {
 
   const canResend =
     application.applicationType === "incorporation" &&
-    ["draft", "pending_verification", "submitted"].includes(application.status || "");
+    ["draft", "pending_verification", "submitted", "under_review"].includes(application.status || "");
 
   return (
     <DashboardLayout>

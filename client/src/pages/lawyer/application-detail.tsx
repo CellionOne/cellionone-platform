@@ -1304,14 +1304,18 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                         </div>
                       )}
 
-                      {dossierItem && (
+                      {(dossierItem || person.entityType === "corporate") && (
                         <button
                           className="mt-3 flex items-center gap-1 text-xs text-primary hover:underline"
                           onClick={() => toggleExpand(person.id!)}
                           data-testid={`btn-expand-person-${person.id}`}
                         >
                           {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                          {isExpanded ? "Hide identity details" : "View identity details"}
+                          {isExpanded
+                            ? "Hide details"
+                            : person.entityType === "corporate"
+                              ? "View documents & details"
+                              : "View identity details"}
                         </button>
                       )}
 

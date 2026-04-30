@@ -2063,6 +2063,7 @@ function DocumentsTab({
                   )}
                   <p className="text-xs text-muted-foreground">
                     Requested {req.createdAt ? new Date(req.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                    {req.fulfilledAt && ` · Fulfilled ${new Date(req.fulfilledAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
                   </p>
                   {req.status === "actioned" && (sharedDocs?.length ?? 0) > 0 && (
                     <p className="text-xs text-blue-700 dark:text-blue-400">

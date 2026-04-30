@@ -7158,12 +7158,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(403).json({ message: "Access denied" });
       }
 
-      const sharedDocs = await db.select().from(documentFiles)
-        .where(and(
-          eq(documentFiles.applicationId, applicationId),
-          eq(documentFiles.shareWithLawyer, true)
-        ))
-        .orderBy(desc(documentFiles.createdAt));
+      const sharedDocs = await storage.getDocumentsByApplicationSharedWithLawyer(applicationId);
 
       res.json(sharedDocs);
     } catch (error: any) {

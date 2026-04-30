@@ -132,6 +132,7 @@ export interface IStorage {
   getDocument(id: number): Promise<DocumentFile | undefined>;
   getDocumentsByUser(ownerUserId: string): Promise<DocumentFile[]>;
   getDocumentsByApplication(applicationId: number): Promise<DocumentFile[]>;
+  getDocumentsByApplicationSharedWithLawyer(applicationId: number): Promise<DocumentFile[]>;
   createDocument(data: InsertDocumentFile): Promise<DocumentFile>;
 
   // Payments
@@ -758,6 +759,15 @@ export class DatabaseStorage implements IStorage {
 
   async getDocumentsByApplication(applicationId: number): Promise<DocumentFile[]> {
     return db.select().from(documentFiles).where(eq(documentFiles.applicationId, applicationId));
+  }
+
+  async getDocumentsByApplicationSharedWithLawyer(applicationId: number): Promise<DocumentFile[]> {
+    return db.select().from(documentFiles)
+      .where(and(
+        eq(documentFiles.applicationId, applicationId),
+        eq(documentFiles.shareWithLawyer, true)
+      ))
+      .orderBy(desc(documentFiles.createdAt));
   }
 
   async createDocument(data: InsertDocumentFile): Promise<DocumentFile> {

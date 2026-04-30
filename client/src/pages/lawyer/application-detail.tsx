@@ -1604,6 +1604,25 @@ function DocumentsTab({
     refetchInterval: 30000,
   });
 
+  const [downloadingDocId, setDownloadingDocId] = useState<number | null>(null);
+
+  const handleSharedDocDownload = async (docId: number) => {
+    setDownloadingDocId(docId);
+    try {
+      const res = await apiRequest("GET", `/api/documents/${docId}/download`);
+      const data = await res.json();
+      if (data.downloadUrl) {
+        window.open(data.downloadUrl, "_blank", "noopener,noreferrer");
+      } else {
+        toast({ title: "Download failed", description: "No download URL returned", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Download failed", description: "Could not retrieve the file", variant: "destructive" });
+    } finally {
+      setDownloadingDocId(null);
+    }
+  };
+
   const fulfillDocRequestMutation = useMutation({
     mutationFn: async (requestId: number) => {
       const res = await apiRequest("PATCH", `/api/lawyer/document-requests/${requestId}/fulfill`, {});
@@ -2088,34 +2107,81 @@ function DocumentsTab({
                 </div>
               ))}
             </div>
-
-            {/* Shared documents panel — shown when the founder has shared at least one document */}
-            {(sharedDocs?.length ?? 0) > 0 && (
-              <div className="mt-4 pt-4 border-t">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Documents Shared by Founder</p>
-                <div className="space-y-1">
-                  {sharedDocs!.map((f) => (
-                    <div key={f.id} className="flex items-center gap-2 text-sm py-1" data-testid={`shared-doc-${f.id}`}>
-                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="truncate">{f.filename || f.docType}</span>
-                      <a
-                        href={`/api/documents/${f.id}/download`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-auto shrink-0 text-xs text-primary underline-offset-2 hover:underline"
-                        data-testid={`link-download-shared-doc-${f.id}`}
-                      >
-                        Download
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
             </>
           )}
         </CardContent>
       </Card>
+
+      {/* Shared Documents Card — visible whenever the founder has shared at least one file */}
+      {(sharedDocs?.length ?? 0) > 0 && (
+        <Card data-testid="card-shared-documents">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              Documents Shared by Founder
+              <Badge variant="secondary">{sharedDocs!.length}</Badge>
+            </CardTitle>
+            <CardDescription>
+              Files the founder has marked as shared with you. Click Download to open the file.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {sharedDocs!.map((f) => {
+                const sizeKB = f.sizeBytes ? (f.sizeBytes / 1024) : null;
+                const sizeLabel = sizeKB !== null
+                  ? sizeKB >= 1024
+                    ? `${(sizeKB / 1024).toFixed(1)} MB`
+                    : `${Math.round(sizeKB)} KB`
+                  : null;
+                const sharedOn = f.createdAt
+                  ? new Date(f.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                  : null;
+                return (
+                  <div key={f.id} className="flex items-start gap-2 py-2 px-3 rounded-md bg-muted/40" data-testid={`shared-doc-${f.id}`}>
+                    <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate" data-testid={`text-shared-doc-filename-${f.id}`}>
+                        {f.filename || f.docType}
+                      </p>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                        {f.docType && (
+                          <span className="text-xs text-muted-foreground" data-testid={`text-shared-doc-type-${f.id}`}>
+                            {f.docType.replace(/_/g, " ")}
+                          </span>
+                        )}
+                        {sizeLabel && (
+                          <span className="text-xs text-muted-foreground" data-testid={`text-shared-doc-size-${f.id}`}>
+                            {sizeLabel}
+                          </span>
+                        )}
+                        {sharedOn && (
+                          <span className="text-xs text-muted-foreground" data-testid={`text-shared-doc-date-${f.id}`}>
+                            Shared {sharedOn}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 h-7 text-xs gap-1"
+                      disabled={downloadingDocId === f.id}
+                      onClick={() => handleSharedDocDownload(f.id)}
+                      data-testid={`btn-download-shared-doc-${f.id}`}
+                    >
+                      {downloadingDocId === f.id
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <Download className="h-3 w-3" />}
+                      Download
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Request Documents Dialog */}
       <Dialog open={docRequestDialogOpen} onOpenChange={setDocRequestDialogOpen}>

@@ -471,9 +471,10 @@ function PersonRow({
   );
 }
 
-function DocumentRow({ doc, people }: { doc: DocumentFile; people?: CompanyPerson[] }) {
+function DocumentRow({ doc, people, applicationId }: { doc: DocumentFile; people?: CompanyPerson[]; applicationId?: number }) {
   const { toast } = useToast();
   const [downloading, setDownloading] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState(doc.qualityStatus || "not_checked");
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -492,6 +493,23 @@ function DocumentRow({ doc, people }: { doc: DocumentFile; people?: CompanyPerso
     }
   };
 
+  const statusMutation = useMutation({
+    mutationFn: (qualityStatus: string) =>
+      apiRequest("PATCH", `/api/admin/documents/${doc.id}/status`, { qualityStatus }),
+    onSuccess: async (res, qualityStatus) => {
+      setCurrentStatus(qualityStatus);
+      if (applicationId) {
+        await queryClient.invalidateQueries({ queryKey: ["/api/admin/applications", applicationId, "documents"] });
+      }
+    },
+    onError: () => toast({ title: "Failed to update status", variant: "destructive" }),
+  });
+
+  const toggleStatus = (newStatus: string) => {
+    const next = currentStatus === newStatus ? "not_checked" : newStatus;
+    statusMutation.mutate(next);
+  };
+
   const uploadedAt = doc.createdAt
     ? new Date(doc.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
     : "—";
@@ -506,7 +524,15 @@ function DocumentRow({ doc, people }: { doc: DocumentFile; people?: CompanyPerso
     : null;
 
   return (
-    <div className="flex items-center justify-between gap-3 border rounded-lg px-4 py-3" data-testid={`doc-row-${doc.id}`}>
+    <div
+      className={`flex items-center justify-between gap-3 border rounded-lg px-4 py-3 transition-colors ${
+        currentStatus === "pass" ? "border-green-200 bg-green-50/40 dark:border-green-900/40 dark:bg-green-900/10" :
+        currentStatus === "rejected" ? "border-red-200 bg-red-50/40 dark:border-red-900/40 dark:bg-red-900/10" :
+        currentStatus === "needs_attention" ? "border-amber-200 bg-amber-50/40 dark:border-amber-900/40 dark:bg-amber-900/10" :
+        ""
+      }`}
+      data-testid={`doc-row-${doc.id}`}
+    >
       <div className="flex items-center gap-3 min-w-0">
         <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
         <div className="min-w-0">
@@ -517,6 +543,15 @@ function DocumentRow({ doc, people }: { doc: DocumentFile; people?: CompanyPerso
                 {personLabel}
               </span>
             )}
+            {currentStatus === "pass" && (
+              <span className="text-xs text-green-700 dark:text-green-400 font-medium shrink-0">Accepted</span>
+            )}
+            {currentStatus === "rejected" && (
+              <span className="text-xs text-red-700 dark:text-red-400 font-medium shrink-0">Rejected</span>
+            )}
+            {currentStatus === "needs_attention" && (
+              <span className="text-xs text-amber-700 dark:text-amber-400 font-medium shrink-0">Needs Attention</span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             {doc.docType} &bull; {doc.category} &bull; {uploadedAt}
@@ -524,16 +559,40 @@ function DocumentRow({ doc, people }: { doc: DocumentFile; people?: CompanyPerso
           </p>
         </div>
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleDownload}
-        disabled={downloading}
-        data-testid={`button-download-doc-${doc.id}`}
-      >
-        {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-        <span className="ml-1 hidden sm:inline">Download</span>
-      </Button>
+      <div className="flex items-center gap-2 shrink-0">
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`h-8 w-8 p-0 ${currentStatus === "pass" ? "text-green-600 bg-green-100 dark:bg-green-900/30 hover:bg-green-200" : "text-muted-foreground hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"}`}
+          onClick={() => toggleStatus("pass")}
+          disabled={statusMutation.isPending}
+          title="Accept document"
+          data-testid={`button-accept-doc-${doc.id}`}
+        >
+          <CheckCircle2 className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`h-8 w-8 p-0 ${currentStatus === "rejected" ? "text-red-600 bg-red-100 dark:bg-red-900/30 hover:bg-red-200" : "text-muted-foreground hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"}`}
+          onClick={() => toggleStatus("rejected")}
+          disabled={statusMutation.isPending}
+          title="Reject document"
+          data-testid={`button-reject-doc-${doc.id}`}
+        >
+          <XCircle className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleDownload}
+          disabled={downloading}
+          data-testid={`button-download-doc-${doc.id}`}
+        >
+          {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          <span className="ml-1 hidden sm:inline">Download</span>
+        </Button>
+      </div>
     </div>
   );
 }
@@ -870,7 +929,7 @@ export default function AdminApplicationDetail() {
             ) : (
               <div className="space-y-3">
                 {documents.map((doc) => (
-                  <DocumentRow key={doc.id} doc={doc} people={people} />
+                  <DocumentRow key={doc.id} doc={doc} people={people} applicationId={applicationId} />
                 ))}
               </div>
             )}

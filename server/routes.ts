@@ -8795,6 +8795,40 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  app.patch("/api/admin/documents/:id/status", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const documentId = parseInt(req.params.id);
+      if (isNaN(documentId)) return res.status(400).json({ message: "Invalid document ID" });
+
+      const { qualityStatus } = req.body;
+      const allowed = ["not_checked", "pass", "needs_attention", "rejected"];
+      if (!allowed.includes(qualityStatus)) {
+        return res.status(400).json({ message: "Invalid status. Use: not_checked, pass, needs_attention, or rejected" });
+      }
+
+      const updated = await storage.updateDocument(documentId, {
+        qualityStatus,
+        lastQualityCheckedAt: new Date(),
+      });
+      if (!updated) return res.status(404).json({ message: "Document not found" });
+
+      const adminId = getUserId(req);
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_document_status",
+        entityType: "document_file",
+        entityId: documentId.toString(),
+        details: { qualityStatus },
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("[Admin] Error updating document status:", error);
+      res.status(500).json({ message: "Failed to update document status" });
+    }
+  });
+
   app.post("/api/admin/applications/:id/assign", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const applicationId = parseInt(req.params.id);

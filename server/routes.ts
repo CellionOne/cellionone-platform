@@ -6035,6 +6035,7 @@ export async function registerRoutes(
   app.post("/api/director-upload/:token", directorDocUpload.fields([
     { name: "passportPhoto", maxCount: 1 },
     { name: "govId", maxCount: 1 },
+    { name: "signature", maxCount: 1 },
   ]), async (req: any, res) => {
     try {
       const { token } = req.params;
@@ -6046,6 +6047,7 @@ export async function registerRoutes(
       const files = req.files as Record<string, Express.Multer.File[]>;
       const passportFile = files?.passportPhoto?.[0];
       const govIdFile = files?.govId?.[0];
+      const signatureFile = files?.signature?.[0];
 
       if (!passportFile || !govIdFile) {
         return res.status(400).json({ message: "Both passport photograph and government ID are required" });
@@ -6091,6 +6093,9 @@ export async function registerRoutes(
       if (govIdFile) {
         await uploadFile(govIdFile, "director_id");
       }
+      if (signatureFile) {
+        await uploadFile(signatureFile, "signature");
+      }
 
       // Mark the director_id checklist item as provided with source: manual_upload
       const checklistItems = await storage.getChecklistItems(record.applicationId);
@@ -6102,6 +6107,20 @@ export async function registerRoutes(
           source: "manual_upload",
           reviewerNotes: `Uploaded by director (${record.directorEmail}) via upload link`,
         });
+      }
+
+      // Mark the per-person signature checklist item as provided (if it exists)
+      if (signatureFile) {
+        const sigKey = `people_req_${record.personId}_signature`;
+        const sigItem = checklistItems.find(i => i.key === sigKey && i.status !== "accepted");
+        if (sigItem) {
+          await storage.updateChecklistItem(sigItem.id, {
+            status: "provided",
+            isAutoResolved: false,
+            source: "people_requirement",
+            reviewerNotes: `Signature uploaded by director (${record.directorEmail}) via upload link`,
+          });
+        }
       }
 
       // Mark token as used
@@ -6535,6 +6554,24 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
         let profile: Record<string, unknown> | null = null;
         let verificationStatus: Record<string, unknown> | null = null;
+
+        // For directors who uploaded via invite link (no platform account), check document_files
+        // for their documents (ownerUserId = "director_upload_{personId}")
+        let inviteUploadDocs: { hasSignature: boolean; hasPassportPhoto: boolean; hasIdDocument: boolean } | null = null;
+        if (!resolvedUserId && person.id) {
+          const inviteOwner = `director_upload_${person.id}`;
+          const inviteDocs = await db.select({ docType: documentFiles.docType })
+            .from(documentFiles)
+            .where(eq(documentFiles.ownerUserId, inviteOwner));
+          if (inviteDocs.length > 0) {
+            inviteUploadDocs = {
+              hasSignature: inviteDocs.some(d => d.docType === "signature"),
+              hasPassportPhoto: inviteDocs.some(d => d.docType === "passport_photo"),
+              hasIdDocument: inviteDocs.some(d => d.docType === "director_id"),
+            };
+          }
+        }
+
         if (resolvedUserId) {
           const [fp, iv] = await Promise.all([
             storage.getFounderProfile(resolvedUserId).catch(() => undefined),
@@ -6604,6 +6641,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           personUserId: resolvedUserId,
           profile,
           verificationStatus,
+          inviteUploadDocs,
         };
       }));
 
@@ -6649,7 +6687,42 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         if (linkedUser) resolvedUserId = linkedUser.id;
       }
 
-      if (!resolvedUserId) return res.status(404).json({ message: "Person has not registered yet" });
+      const objectStorage = new ObjectStorageService();
+
+      // For directors without a platform account (invite-link only), serve from document_files
+      if (!resolvedUserId) {
+        const inviteOwner = `director_upload_${personId}`;
+        const docTypeMap: Record<string, string[]> = {
+          signature: ["signature"],
+          passport_photo: ["passport_photo"],
+          id_document: ["director_id"],
+          selfie: [],
+        };
+        const targetDocTypes = docTypeMap[type] || [];
+        if (targetDocTypes.length === 0) {
+          return res.status(404).json({ message: "Document not available for invite-link directors" });
+        }
+
+        await Promise.all([
+          storage.createAuditLog({
+            actorUserId: lawyerId,
+            action: "sensitive_data_access",
+            entityType: "application",
+            entityId: applicationId.toString(),
+            details: { applicationId, maskedPersonEmail: maskEmail(person.inviteEmail), documentType: type, lawyerId, source: "invite_upload" },
+            ipAddress: req.ip,
+          }),
+        ]);
+
+        const [docFile] = await db.select()
+          .from(documentFiles)
+          .where(and(eq(documentFiles.ownerUserId, inviteOwner), inArray(documentFiles.docType, targetDocTypes)));
+
+        if (!docFile) return res.status(404).json({ message: "Document not uploaded yet" });
+
+        const downloadURL = await objectStorage.getObjectEntityDownloadURL(docFile.storagePath, 900);
+        return res.json({ downloadURL });
+      }
 
       // Log both sensitive-data access and audit trail (done before fetch so it's always recorded)
       await Promise.all([
@@ -6675,8 +6748,6 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           ipAddress: req.ip,
         }),
       ]);
-
-      const objectStorage = new ObjectStorageService();
 
       // Selfie: served from identity_verifications (selfieFileId → documentFiles, or selfieUrl)
       if (type === "selfie") {

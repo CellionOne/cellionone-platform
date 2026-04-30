@@ -109,6 +109,7 @@ function getDocSlugsForPerson(
     { slug: "gov_id", label: `${n} — Government-Issued ID` },
     { slug: "passport_photo", label: `${n} — Passport Photograph` },
     { slug: "proof_of_address", label: `${n} — Proof of Address` },
+    { slug: "signature", label: `${n} — Signature Specimen` },
   ];
 }
 

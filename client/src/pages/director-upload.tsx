@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRoute } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { CheckCircle2, Upload, AlertCircle, FileText, Loader2, Building2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CheckCircle2, Upload, AlertCircle, FileText, Loader2, Building2, PenLine, Eraser, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import SignatureCanvas from "react-signature-canvas";
 
 interface UploadTokenData {
   directorName: string | null;
@@ -26,6 +28,10 @@ export default function DirectorUploadPage() {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [passportFile, setPassportFile] = useState<File | null>(null);
   const [govIdFile, setGovIdFile] = useState<File | null>(null);
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [sigPadEmpty, setSigPadEmpty] = useState(true);
+
+  const sigRef = useRef<SignatureCanvas>(null);
 
   useEffect(() => {
     if (!token) {
@@ -57,18 +63,41 @@ export default function DirectorUploadPage() {
     return () => { cancelled = true; };
   }, [token]);
 
+  const handleClearSignature = useCallback(() => {
+    sigRef.current?.clear();
+    setSigPadEmpty(true);
+    setSignatureFile(null);
+  }, []);
+
+  const handleSaveSignature = useCallback(() => {
+    if (!sigRef.current || sigRef.current.isEmpty()) return;
+    const canvas = sigRef.current.getTrimmedCanvas();
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const file = new File([blob], "signature.png", { type: "image/png" });
+        setSignatureFile(file);
+        toast({ title: "Signature captured", description: "Your drawn signature will be submitted with your documents." });
+      }
+    }, "image/png");
+  }, [toast]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passportFile || !govIdFile) {
-      toast({ title: "Both documents are required", description: "Please upload both your passport photograph and government-issued ID.", variant: "destructive" });
+      toast({ title: "Documents required", description: "Please upload both your passport photograph and government-issued ID.", variant: "destructive" });
+      return;
+    }
+    if (!signatureFile) {
+      toast({ title: "Signature required", description: "Please draw or upload your signature specimen.", variant: "destructive" });
       return;
     }
 
     setStep("uploading");
     try {
       const formData = new FormData();
-      if (passportFile) formData.append("passportPhoto", passportFile);
-      if (govIdFile) formData.append("govId", govIdFile);
+      formData.append("passportPhoto", passportFile);
+      formData.append("govId", govIdFile);
+      formData.append("signature", signatureFile);
 
       const res = await fetch(`/api/director-upload/${encodeURIComponent(token)}`, {
         method: "POST",
@@ -164,7 +193,7 @@ export default function DirectorUploadPage() {
             {tokenData?.directorName
               ? `Hello ${tokenData.directorName}, please`
               : "Please"}{" "}
-            upload your identification documents for the company incorporation. No account creation is required.
+            upload your identification documents and signature for the company incorporation. No account creation is required.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -230,6 +259,99 @@ export default function DirectorUploadPage() {
               <p className="text-xs text-muted-foreground">JPEG, PNG or PDF · max 10 MB</p>
             </div>
 
+            <div className="space-y-2">
+              <Label>
+                Signature Specimen <span className="text-destructive">*</span>
+              </Label>
+              <Tabs defaultValue="draw" className="w-full">
+                <TabsList className="w-full">
+                  <TabsTrigger value="draw" className="flex-1 gap-1.5" data-testid="tab-draw-signature">
+                    <PenLine className="h-3.5 w-3.5" />
+                    Draw
+                  </TabsTrigger>
+                  <TabsTrigger value="upload" className="flex-1 gap-1.5" data-testid="tab-upload-signature">
+                    <Upload className="h-3.5 w-3.5" />
+                    Upload scan
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="draw" className="mt-3 space-y-3">
+                  {signatureFile && !sigPadEmpty ? (
+                    <div className="flex items-center gap-2 rounded-md border border-primary bg-primary/5 px-3 py-2 text-sm">
+                      <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                      <span className="text-foreground">Signature captured — ready to submit</span>
+                    </div>
+                  ) : (
+                    <div className="border-2 border-dashed rounded-lg bg-white dark:bg-gray-50 overflow-hidden" data-testid="signature-pad-container">
+                      <SignatureCanvas
+                        ref={sigRef}
+                        penColor="#000000"
+                        canvasProps={{
+                          className: "w-full",
+                          style: { width: "100%", height: "140px" },
+                          "data-testid": "canvas-signature-pad",
+                        } as any}
+                        onBegin={() => setSigPadEmpty(false)}
+                      />
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleClearSignature}
+                      disabled={sigPadEmpty && !signatureFile}
+                      data-testid="button-clear-signature"
+                    >
+                      <Eraser className="h-4 w-4 mr-1" />
+                      Clear
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleSaveSignature}
+                      disabled={sigPadEmpty}
+                      data-testid="button-save-signature"
+                    >
+                      <Check className="h-4 w-4 mr-1" />
+                      Capture signature
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Sign in the box above, then click "Capture signature"</p>
+                </TabsContent>
+                <TabsContent value="upload" className="mt-3 space-y-2">
+                  <div className="relative">
+                    <Input
+                      id="signatureUpload"
+                      type="file"
+                      accept=".jpg,.jpeg,.png"
+                      className="absolute inset-0 opacity-0 cursor-pointer h-full"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        setSignatureFile(f);
+                        setSigPadEmpty(true);
+                      }}
+                      data-testid="input-signature-upload"
+                    />
+                    <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${signatureFile ? "border-primary bg-primary/5" : "border-input bg-background"}`}>
+                      {signatureFile ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                          <span className="truncate text-foreground">{signatureFile.name}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="text-muted-foreground">Choose file…</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Upload a scan or clear photo of your handwritten signature · JPEG or PNG · max 5 MB</p>
+                </TabsContent>
+              </Tabs>
+            </div>
+
             {tokenData?.expiresAt && (
               <p className="text-xs text-muted-foreground">
                 Link expires: {new Date(tokenData.expiresAt).toLocaleString()}
@@ -239,7 +361,7 @@ export default function DirectorUploadPage() {
             <Button
               type="submit"
               className="w-full"
-              disabled={step === "uploading" || !passportFile || !govIdFile}
+              disabled={step === "uploading" || !passportFile || !govIdFile || !signatureFile}
               data-testid="btn-submit-director-upload"
             >
               {step === "uploading" ? (

@@ -787,6 +787,11 @@ interface DossierIndividual {
     selfieUrl: string | null;
     verifiedAt: string | null;
   } | null;
+  inviteUploadDocs: {
+    hasSignature: boolean;
+    hasPassportPhoto: boolean;
+    hasIdDocument: boolean;
+  } | null;
 }
 
 interface DossierCorporate {
@@ -1294,6 +1299,45 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                                 <p className="text-xs text-muted-foreground italic">No identity documents uploaded yet.</p>
                               )}
                             </>
+                          ) : dossierItem.inviteUploadDocs ? (
+                            <div className="space-y-2" data-testid={`invite-upload-docs-${person.id}`}>
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+                                <FileText className="h-3 w-3" />
+                                <span>Documents uploaded via invite link</span>
+                              </div>
+                              <div className="flex flex-wrap gap-4">
+                                {dossierItem.inviteUploadDocs.hasPassportPhoto && (
+                                  <PersonDocumentPreview
+                                    applicationId={applicationId}
+                                    personId={person.id!}
+                                    docType="passport_photo"
+                                    label="Passport Photo"
+                                  />
+                                )}
+                                {dossierItem.inviteUploadDocs.hasSignature && (
+                                  <PersonDocumentPreview
+                                    applicationId={applicationId}
+                                    personId={person.id!}
+                                    docType="signature"
+                                    label="Signature Specimen"
+                                  />
+                                )}
+                                {dossierItem.inviteUploadDocs.hasIdDocument && (
+                                  <PersonDocumentPreview
+                                    applicationId={applicationId}
+                                    personId={person.id!}
+                                    docType="id_document"
+                                    label="ID Document"
+                                  />
+                                )}
+                              </div>
+                              {!dossierItem.inviteUploadDocs.hasSignature && (
+                                <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  Signature specimen not yet provided
+                                </p>
+                              )}
+                            </div>
                           ) : (
                             <p className="text-xs text-muted-foreground italic" data-testid={`text-not-verified-${person.id}`}>
                               Not yet verified — no data available.

@@ -6315,11 +6315,11 @@ export async function registerRoutes(
       const result: Array<{
         personId: number;
         status: "active" | "used" | "expired";
-        sentAt: string;
-        expiresAt: string;
+        sentAt: Date | null;
+        expiresAt: Date;
       }> = [];
 
-      for (const row of rows as any[]) {
+      for (const row of rows) {
         if (seen.has(row.personId)) continue;
         seen.add(row.personId);
         let status: "active" | "used" | "expired";

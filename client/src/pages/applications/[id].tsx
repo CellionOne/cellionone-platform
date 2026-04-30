@@ -233,13 +233,16 @@ export default function ApplicationDetailsPage() {
       p.entityType !== "corporate"
   );
 
-  const directorInviteMutation = useMutation({
-    mutationFn: async (personId: number) => {
-      return apiRequest("POST", `/api/applications/${applicationId}/director-upload-invite/${personId}`);
+  type InviteResponse = { success: boolean; message: string; emailSent?: boolean; uploadLink?: string };
+
+  const directorInviteMutation = useMutation<InviteResponse, Error, number>({
+    mutationFn: async (personId: number): Promise<InviteResponse> => {
+      const res = await apiRequest("POST", `/api/applications/${applicationId}/director-upload-invite/${personId}`);
+      return res.json() as Promise<InviteResponse>;
     },
-    onSuccess: (data: any, personId) => {
-      setInviteSentTo((prev) => new Set([...prev, personId]));
-      if (data?.emailSent === false && data?.uploadLink) {
+    onSuccess: (data, personId) => {
+      setInviteSentTo((prev) => { const next = new Set(prev); next.add(personId); return next; });
+      if (data.emailSent === false && data.uploadLink) {
         toast({
           title: "Email delivery failed",
           description: `The email could not be sent. Share this link manually: ${data.uploadLink}`,
@@ -250,7 +253,7 @@ export default function ApplicationDetailsPage() {
         toast({ title: "Upload link sent", description: "The director will receive an email with the upload link." });
       }
     },
-    onError: (error: any) => {
+    onError: (error) => {
       toast({ title: "Failed to send link", description: error.message, variant: "destructive" });
     },
   });
@@ -267,14 +270,15 @@ export default function ApplicationDetailsPage() {
     (corporateInviteTokens?.tokens ?? []).map(t => [t.personId, t])
   );
 
-  const corporateInviteMutation = useMutation({
-    mutationFn: async (personId: number) => {
-      return apiRequest("POST", `/api/applications/${applicationId}/corporate-doc-invite/${personId}`);
+  const corporateInviteMutation = useMutation<InviteResponse, Error, number>({
+    mutationFn: async (personId: number): Promise<InviteResponse> => {
+      const res = await apiRequest("POST", `/api/applications/${applicationId}/corporate-doc-invite/${personId}`);
+      return res.json() as Promise<InviteResponse>;
     },
-    onSuccess: (data: any, personId) => {
-      setCorpInviteSentTo((prev) => new Set([...prev, personId]));
+    onSuccess: (data, personId) => {
+      setCorpInviteSentTo((prev) => { const next = new Set(prev); next.add(personId); return next; });
       queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId, "corporate-invite-tokens"] });
-      if (data?.emailSent === false && data?.uploadLink) {
+      if (data.emailSent === false && data.uploadLink) {
         toast({
           title: "Email delivery failed",
           description: `The email could not be sent. Share this link manually: ${data.uploadLink}`,
@@ -285,7 +289,7 @@ export default function ApplicationDetailsPage() {
         toast({ title: "Upload link sent", description: "The entity representative will receive an email with the document upload link." });
       }
     },
-    onError: (error: any) => {
+    onError: (error) => {
       toast({ title: "Failed to send link", description: error.message, variant: "destructive" });
     },
   });

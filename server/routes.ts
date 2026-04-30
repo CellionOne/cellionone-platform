@@ -5763,7 +5763,7 @@ export async function registerRoutes(
     try {
       const userId = getUserId(req);
       const applicationId = parseInt(req.params.id);
-      const { checklistItemId, docType } = req.body;
+      const { checklistItemId, docType, personId, category: reqCategory } = req.body;
       const file = req.file;
 
       if (!file) {
@@ -5836,7 +5836,8 @@ export async function registerRoutes(
       const document = await storage.createDocument({
         ownerUserId: userId,
         applicationId,
-        category: "company",
+        companyPersonId: personId ? parseInt(personId) : null,
+        category: reqCategory || "company",
         docType: docType || "uploaded_document",
         filename: file.originalname || "uploaded_file",
         storagePath: objectPath,

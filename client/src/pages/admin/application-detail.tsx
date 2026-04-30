@@ -211,7 +211,7 @@ function PersonUploadDialog({
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [docType, setDocType] = useState("");
-  const [category, setCategory] = useState("company");
+  const [category, setCategory] = useState("identity");
   const [uploading, setUploading] = useState(false);
 
   const personLabel = person.entityType === "corporate"
@@ -230,6 +230,7 @@ function PersonUploadDialog({
       form.append("file", file);
       form.append("docType", docType.trim());
       form.append("category", category);
+      form.append("personId", String(person.id));
 
       const res = await fetch(`/api/applications/${applicationId}/documents/upload`, {
         method: "POST",
@@ -312,14 +313,17 @@ function PersonRow({
   person,
   personChecklist,
   applicationId,
+  allDocs,
 }: {
   person: CompanyPerson;
   personChecklist: ApplicationChecklistItem[];
   applicationId: number;
+  allDocs: DocumentFile[];
 }) {
   const isCorporate = person.entityType === "corporate";
   const [expanded, setExpanded] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const personDocs = allDocs.filter((d) => d.companyPersonId === person.id);
 
   const displayName = isCorporate
     ? person.corporateName
@@ -382,6 +386,12 @@ function PersonRow({
               {personChecklist.filter(i => i.status === "accepted").length}/{personChecklist.length} docs
             </span>
           )}
+          {personDocs.length > 0 && (
+            <span className="flex items-center gap-1 text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+              <Upload className="h-3 w-3" />
+              {personDocs.length} file{personDocs.length !== 1 ? "s" : ""}
+            </span>
+          )}
           {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
         </div>
       </button>
@@ -421,6 +431,33 @@ function PersonRow({
               ))}
             </div>
           )}
+
+          {personDocs.length > 0 && (
+            <div className="pt-2 border-t">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                Uploaded Files ({personDocs.length})
+              </p>
+              <div className="space-y-1.5">
+                {personDocs.map((doc) => {
+                  const uploadedAt = doc.createdAt
+                    ? new Date(doc.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                    : "—";
+                  return (
+                    <div
+                      key={doc.id}
+                      className="flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-muted/40"
+                      data-testid={`person-doc-${doc.id}`}
+                    >
+                      <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="font-medium truncate">{doc.filename}</span>
+                      <span className="text-muted-foreground shrink-0">{doc.docType}</span>
+                      <span className="text-muted-foreground shrink-0 ml-auto">{uploadedAt}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -434,7 +471,7 @@ function PersonRow({
   );
 }
 
-function DocumentRow({ doc }: { doc: DocumentFile }) {
+function DocumentRow({ doc, people }: { doc: DocumentFile; people?: CompanyPerson[] }) {
   const { toast } = useToast();
   const [downloading, setDownloading] = useState(false);
 
@@ -459,12 +496,28 @@ function DocumentRow({ doc }: { doc: DocumentFile }) {
     ? new Date(doc.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
     : "—";
 
+  const linkedPerson = people && doc.companyPersonId
+    ? people.find((p) => p.id === doc.companyPersonId)
+    : null;
+  const personLabel = linkedPerson
+    ? linkedPerson.entityType === "corporate"
+      ? linkedPerson.corporateName || "Corporate Entity"
+      : `${linkedPerson.firstName || ""} ${linkedPerson.lastName || ""}`.trim() || linkedPerson.inviteEmail || "Person"
+    : null;
+
   return (
     <div className="flex items-center justify-between gap-3 border rounded-lg px-4 py-3" data-testid={`doc-row-${doc.id}`}>
       <div className="flex items-center gap-3 min-w-0">
         <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
         <div className="min-w-0">
-          <p className="text-sm font-medium truncate">{doc.filename}</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium truncate">{doc.filename}</p>
+            {personLabel && (
+              <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full shrink-0">
+                {personLabel}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground">
             {doc.docType} &bull; {doc.category} &bull; {uploadedAt}
             {doc.sizeBytes ? ` \u2022 ${(doc.sizeBytes / 1024).toFixed(0)} KB` : ""}
@@ -796,6 +849,7 @@ export default function AdminApplicationDetail() {
                     person={person}
                     personChecklist={personChecklistMap.get(person.id) ?? []}
                     applicationId={applicationId}
+                    allDocs={documents}
                   />
                 ))}
               </div>
@@ -816,7 +870,7 @@ export default function AdminApplicationDetail() {
             ) : (
               <div className="space-y-3">
                 {documents.map((doc) => (
-                  <DocumentRow key={doc.id} doc={doc} />
+                  <DocumentRow key={doc.id} doc={doc} people={people} />
                 ))}
               </div>
             )}

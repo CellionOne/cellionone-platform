@@ -249,6 +249,7 @@ export const documentFiles = pgTable("document_files", {
   id: serial("id").primaryKey(),
   ownerUserId: varchar("owner_user_id").notNull(),
   applicationId: integer("application_id"),
+  companyPersonId: integer("company_person_id"), // FK to company_people — set when uploaded for a specific person
   category: varchar("category", { length: 50 }).notNull(), // identity, company, filing, stamped_originals, courier
   docType: varchar("doc_type", { length: 100 }).notNull(), // passport, nin, utility_bill, cac_form, stamped_certificate
   filename: varchar("filename", { length: 255 }).notNull(),

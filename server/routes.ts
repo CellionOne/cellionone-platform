@@ -6052,10 +6052,24 @@ export async function registerRoutes(
       if (!passportFile || !govIdFile) {
         return res.status(400).json({ message: "Both passport photograph and government ID are required" });
       }
+      if (!signatureFile) {
+        return res.status(400).json({ message: "Signature specimen is required" });
+      }
+
+      // Signature-specific constraints: JPEG/PNG only, max 5 MB
+      const sigAllowedMime = ["image/jpeg", "image/jpg", "image/png"];
+      const sigAllowedExt = [".jpg", ".jpeg", ".png"];
+      const { default: pathMod } = await import("path");
+      const sigExt = pathMod.extname(signatureFile.originalname || "").toLowerCase();
+      if (!sigAllowedMime.includes(signatureFile.mimetype) && !sigAllowedExt.includes(sigExt)) {
+        return res.status(400).json({ message: "Signature must be a JPEG or PNG image" });
+      }
+      if (signatureFile.size > 5 * 1024 * 1024) {
+        return res.status(400).json({ message: "Signature image must be 5 MB or smaller" });
+      }
 
       const allowedMime = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
       const allowedExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
-      const { default: pathMod } = await import("path");
 
       const objectStorage = new ObjectStorageService();
 
@@ -6109,15 +6123,29 @@ export async function registerRoutes(
         });
       }
 
-      // Mark the per-person signature checklist item as provided (if it exists)
-      if (signatureFile) {
+      // Mark the per-person signature checklist item as provided (create if absent)
+      {
         const sigKey = `people_req_${record.personId}_signature`;
-        const sigItem = checklistItems.find(i => i.key === sigKey && i.status !== "accepted");
+        const sigItem = checklistItems.find(i => i.key === sigKey);
         if (sigItem) {
-          await storage.updateChecklistItem(sigItem.id, {
+          if (sigItem.status !== "accepted") {
+            await storage.updateChecklistItem(sigItem.id, {
+              status: "provided",
+              isAutoResolved: false,
+              source: "people_requirement",
+              reviewerNotes: `Signature uploaded by director (${record.directorEmail}) via upload link`,
+            });
+          }
+        } else {
+          // Item not yet seeded (e.g. older application) — create and mark provided immediately
+          await storage.createChecklistItem({
+            applicationId: record.applicationId,
+            key: sigKey,
+            label: `Director — Signature Specimen`,
+            required: true,
             status: "provided",
-            isAutoResolved: false,
             source: "people_requirement",
+            isAutoResolved: false,
             reviewerNotes: `Signature uploaded by director (${record.directorEmail}) via upload link`,
           });
         }

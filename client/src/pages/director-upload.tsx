@@ -281,15 +281,17 @@ export default function DirectorUploadPage() {
                       <span className="text-foreground">Signature captured — ready to submit</span>
                     </div>
                   ) : (
-                    <div className="border-2 border-dashed rounded-lg bg-white dark:bg-gray-50 overflow-hidden" data-testid="signature-pad-container">
+                    <div
+                      className="border-2 border-dashed rounded-lg bg-white dark:bg-gray-50 overflow-hidden"
+                      data-testid="signature-pad-container"
+                    >
                       <SignatureCanvas
                         ref={sigRef}
                         penColor="#000000"
                         canvasProps={{
                           className: "w-full",
                           style: { width: "100%", height: "140px" },
-                          "data-testid": "canvas-signature-pad",
-                        } as any}
+                        }}
                         onBegin={() => setSigPadEmpty(false)}
                       />
                     </div>
@@ -328,6 +330,19 @@ export default function DirectorUploadPage() {
                       className="absolute inset-0 opacity-0 cursor-pointer h-full"
                       onChange={(e) => {
                         const f = e.target.files?.[0] || null;
+                        if (f) {
+                          const allowedTypes = ["image/jpeg", "image/jpg", "image/png"];
+                          if (!allowedTypes.includes(f.type)) {
+                            toast({ title: "Invalid file type", description: "Signature must be a JPEG or PNG image.", variant: "destructive" });
+                            e.target.value = "";
+                            return;
+                          }
+                          if (f.size > 5 * 1024 * 1024) {
+                            toast({ title: "File too large", description: "Signature image must be 5 MB or smaller.", variant: "destructive" });
+                            e.target.value = "";
+                            return;
+                          }
+                        }
                         setSignatureFile(f);
                         setSigPadEmpty(true);
                       }}

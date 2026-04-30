@@ -6407,7 +6407,7 @@ export async function registerRoutes(
       const files = req.files as Record<string, Express.Multer.File[]>;
       const submittedSlugs = new Set(Object.keys(files ?? {}).filter(k => files[k]?.length > 0));
 
-      // Phase 1 — full validation BEFORE touching the token: unexpected slugs
+      // Phase 1 — full validation, no side effects — unexpected slugs
       const unexpectedSlugs = [...submittedSlugs].filter(s => !requiredSlugSet.has(s));
       if (unexpectedSlugs.length > 0) {
         return res.status(400).json({ message: `Unexpected document field(s): ${unexpectedSlugs.join(", ")}` });
@@ -6433,11 +6433,7 @@ export async function registerRoutes(
         }
       }
 
-      // Phase 2 — all validation passed; atomically claim token to block concurrent duplicates
-      const claimed = await storage.claimCorporateDocUploadToken(record.id);
-      if (!claimed) return res.status(410).json({ message: "This upload link has already been used or has expired" });
-
-      // Phase 3 — upload files and update checklist (token is already consumed)
+      // Phase 2 — upload all files and update checklist items
       const objectStorage = new ObjectStorageService();
 
       async function uploadCorpFile(file: Express.Multer.File, docType: string): Promise<string> {
@@ -6494,6 +6490,9 @@ export async function registerRoutes(
           });
         }
       }
+
+      // Phase 3 — all uploads and checklist updates succeeded; now mark token used and audit
+      await storage.markCorporateDocUploadTokenUsed(record.id);
 
       await storage.createAuditLog({
         actorUserId: `corp_upload_${record.personId}`,

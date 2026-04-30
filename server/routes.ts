@@ -7172,7 +7172,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const lawyerId = getUserId(req);
       const requestId = parseInt(req.params.id);
 
-      const [docReq] = await db.select().from(lawyerDocumentRequests).where(eq(lawyerDocumentRequests.id, requestId));
+      const docReq = await storage.getLawyerDocumentRequest(requestId);
       if (!docReq) return res.status(404).json({ message: "Request not found" });
 
       const application = await storage.getApplication(docReq.applicationId);
@@ -7183,9 +7183,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "Request is already resolved" });
       }
 
-      await db.update(lawyerDocumentRequests)
-        .set({ status: "fulfilled", fulfilledAt: new Date(), resolvedByUserId: lawyerId })
-        .where(eq(lawyerDocumentRequests.id, requestId));
+      await storage.updateLawyerDocumentRequest(requestId, { status: "fulfilled", fulfilledAt: new Date(), resolvedByUserId: lawyerId });
 
       await storage.createAuditLog({
         actorUserId: lawyerId,

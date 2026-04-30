@@ -1604,6 +1604,24 @@ function DocumentsTab({
     refetchInterval: 30000,
   });
 
+  const fulfillDocRequestMutation = useMutation({
+    mutationFn: async (requestId: number) => {
+      const res = await apiRequest("PATCH", `/api/lawyer/document-requests/${requestId}/fulfill`, {});
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to mark fulfilled");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lawyer/applications", applicationId, "document-requests"] });
+      toast({ title: "Request marked as fulfilled" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update request", description: error.message, variant: "destructive" });
+    },
+  });
+
   const createDocRequestMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", `/api/lawyer/applications/${applicationId}/document-requests`, {
@@ -2020,6 +2038,7 @@ function DocumentsTab({
               <p className="text-sm">No document requests yet</p>
             </div>
           ) : (
+            <>
             <div className="divide-y">
               {docRequests!.map((req) => (
                 <div key={req.id} className="py-3 first:pt-0 last:pb-0 space-y-1" data-testid={`doc-request-${req.id}`}>
@@ -2050,6 +2069,21 @@ function DocumentsTab({
                       The founder has shared {sharedDocs!.length} document{sharedDocs!.length !== 1 ? "s" : ""} — see "Documents Shared by Founder" below.
                     </p>
                   )}
+                  {(req.status === "actioned" || req.status === "open") && (
+                    <div className="pt-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1"
+                        disabled={fulfillDocRequestMutation.isPending}
+                        onClick={() => fulfillDocRequestMutation.mutate(req.id)}
+                        data-testid={`btn-fulfill-request-${req.id}`}
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        Mark Fulfilled
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -2062,7 +2096,7 @@ function DocumentsTab({
                   {sharedDocs!.map((f) => (
                     <div key={f.id} className="flex items-center gap-2 text-sm py-1" data-testid={`shared-doc-${f.id}`}>
                       <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="truncate">{f.fileName || f.docType}</span>
+                      <span className="truncate">{f.filename || f.docType}</span>
                       <a
                         href={`/api/documents/${f.id}/download`}
                         target="_blank"
@@ -2077,6 +2111,7 @@ function DocumentsTab({
                 </div>
               </div>
             )}
+            </>
           )}
         </CardContent>
       </Card>

@@ -6914,6 +6914,11 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       if (!isOwner && !isAssignedLawyer && !isAdmin) {
         return res.status(403).json({ message: "Access denied" });
       }
+      // shareWithLawyer === false means the founder explicitly chose not to share this file.
+      // null = not configured (legacy / fresh upload) — lawyers retain access.
+      if (isAssignedLawyer && !isOwner && !isAdmin && doc.shareWithLawyer === false) {
+        return res.status(403).json({ message: "The founder has not shared this document with you" });
+      }
       
       let downloadUrl: string | null = null;
       let storageConfigured = false;
@@ -7163,6 +7168,42 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       res.json(sharedDocs);
     } catch (error: any) {
       res.status(500).json({ message: "Failed to fetch shared documents" });
+    }
+  });
+
+  // PATCH /api/lawyer/document-requests/:id/fulfill — lawyer marks a request as fulfilled
+  app.patch("/api/lawyer/document-requests/:id/fulfill", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const lawyerId = getUserId(req);
+      const requestId = parseInt(req.params.id);
+
+      const [docReq] = await db.select().from(lawyerDocumentRequests).where(eq(lawyerDocumentRequests.id, requestId));
+      if (!docReq) return res.status(404).json({ message: "Request not found" });
+
+      const application = await storage.getApplication(docReq.applicationId);
+      if (!application || application.assignedLawyerUserId !== lawyerId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (docReq.status === "fulfilled") {
+        return res.status(400).json({ message: "Request is already fulfilled" });
+      }
+
+      await db.update(lawyerDocumentRequests)
+        .set({ status: "fulfilled", fulfilledAt: new Date() })
+        .where(eq(lawyerDocumentRequests.id, requestId));
+
+      await storage.createAuditLog({
+        actorUserId: lawyerId,
+        action: "lawyer_fulfill_document_request",
+        entityType: "lawyer_document_request",
+        entityId: requestId.toString(),
+        details: { applicationId: docReq.applicationId },
+        ipAddress: req.ip,
+      }).catch(() => {});
+
+      res.json({ message: "Request marked as fulfilled" });
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to update request" });
     }
   });
 

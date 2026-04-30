@@ -43,6 +43,7 @@ const LawyerServiceRequestDetail = lazy(() => import("@/pages/lawyer/service-req
 const AdminDashboard = lazy(() => import("@/pages/admin/dashboard"));
 const AdminUsers = lazy(() => import("@/pages/admin/users"));
 const AdminApplications = lazy(() => import("@/pages/admin/applications"));
+const AdminApplicationDetail = lazy(() => import("@/pages/admin/application-detail"));
 const AdminFeatureFlags = lazy(() => import("@/pages/admin/feature-flags"));
 const AdminAuditLogs = lazy(() => import("@/pages/admin/audit-logs"));
 const AdminAIEvents = lazy(() => import("@/pages/admin/ai-events"));
@@ -371,6 +372,9 @@ function Router() {
         </Route>
         <Route path="/admin/users">
           <ProtectedRoute component={AdminUsers} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/applications/:id">
+          <ProtectedRoute component={AdminApplicationDetail} roles={["admin"]} />
         </Route>
         <Route path="/admin/applications">
           <ProtectedRoute component={AdminApplications} roles={["admin"]} />

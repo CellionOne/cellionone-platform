@@ -8712,6 +8712,88 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // ── Admin: get full application detail (application + checklist + people) ──
+  app.get("/api/admin/applications/:id", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const applicationId = parseInt(req.params.id);
+      if (isNaN(applicationId)) return res.status(400).json({ message: "Invalid application ID" });
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const [checklistItems, people] = await Promise.all([
+        storage.getChecklistItems(applicationId),
+        storage.getCompanyPeople(applicationId),
+      ]);
+
+      res.json({ application, checklistItems, people });
+    } catch (error) {
+      console.error("[Admin] Error fetching application detail:", error);
+      res.status(500).json({ message: "Failed to fetch application detail" });
+    }
+  });
+
+  // ── Admin: override a checklist item status / reviewer notes ──
+  app.patch("/api/admin/applications/:id/checklist-items/:itemId", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const applicationId = parseInt(req.params.id);
+      const itemId = parseInt(req.params.itemId);
+      if (isNaN(applicationId) || isNaN(itemId)) return res.status(400).json({ message: "Invalid ID" });
+
+      const { status, reviewerNotes } = req.body as { status?: string; reviewerNotes?: string };
+      const validStatuses = ["missing", "provided", "accepted", "rejected", "needs_attention"];
+      if (status && !validStatuses.includes(status)) {
+        return res.status(400).json({ message: "Invalid status value" });
+      }
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const updated = await storage.updateChecklistItem(itemId, {
+        ...(status !== undefined ? { status } : {}),
+        ...(reviewerNotes !== undefined ? { reviewerNotes } : {}),
+      });
+
+      if (!updated) return res.status(404).json({ message: "Checklist item not found" });
+
+      const adminId = getUserId(req);
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_override",
+        entityType: "checklist_item",
+        entityId: itemId.toString(),
+        details: {
+          applicationId,
+          ...(status !== undefined ? { status } : {}),
+          ...(reviewerNotes !== undefined ? { reviewerNotes } : {}),
+        },
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("[Admin] Error updating checklist item:", error);
+      res.status(500).json({ message: "Failed to update checklist item" });
+    }
+  });
+
+  // ── Admin: list all documents for an application ──
+  app.get("/api/admin/applications/:id/documents", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const applicationId = parseInt(req.params.id);
+      if (isNaN(applicationId)) return res.status(400).json({ message: "Invalid application ID" });
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const docs = await storage.getDocumentsByApplication(applicationId);
+      res.json(docs);
+    } catch (error) {
+      console.error("[Admin] Error fetching application documents:", error);
+      res.status(500).json({ message: "Failed to fetch documents" });
+    }
+  });
+
   app.post("/api/admin/applications/:id/assign", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
       const applicationId = parseInt(req.params.id);

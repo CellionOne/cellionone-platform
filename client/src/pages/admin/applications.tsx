@@ -894,9 +894,11 @@ export default function AdminApplications() {
                         <Building2 className="h-6 w-6 text-primary" />
                       </div>
                       <div className="min-w-0">
-                        <h3 className="font-semibold text-lg truncate">
-                          {app.companyName1 || "Untitled Application"}
-                        </h3>
+                        <Link href={`/admin/applications/${app.id}`}>
+                          <h3 className="font-semibold text-lg truncate hover:text-primary hover:underline cursor-pointer" data-testid={`link-app-name-${app.id}`}>
+                            {app.companyName1 || "Untitled Application"}
+                          </h3>
+                        </Link>
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground mt-1">
                           <span>#{app.id}</span>
                           <span>&bull;</span>
@@ -918,6 +920,11 @@ export default function AdminApplications() {
                     </div>
                     <div className="flex items-center gap-4 sm:shrink-0 flex-wrap">
                       <StatusBadge status={app.status || "draft"} />
+                      <Link href={`/admin/applications/${app.id}`}>
+                        <Button variant="outline" size="sm" data-testid={`button-view-app-${app.id}`}>
+                          View
+                        </Button>
+                      </Link>
                       <Button
                         variant="outline"
                         size="sm"

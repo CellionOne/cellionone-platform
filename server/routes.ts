@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, lawyerDocumentRequests, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne, inArray, sql } from "drizzle-orm";
 import * as services from "./services";
@@ -7041,6 +7041,121 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // PATCH /api/document-files/:id/share-with-lawyer — founder toggles sharing a document with their assigned lawyer
+  app.patch("/api/document-files/:id/share-with-lawyer", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const documentId = parseInt(req.params.id);
+      const { shareWithLawyer } = z.object({ shareWithLawyer: z.boolean() }).parse(req.body);
+
+      const doc = await storage.getDocument(documentId);
+      if (!doc) return res.status(404).json({ message: "Document not found" });
+      if (doc.ownerUserId !== userId) return res.status(403).json({ message: "Access denied" });
+
+      const updated = await storage.updateDocument(documentId, { shareWithLawyer });
+      res.json({ id: updated?.id, shareWithLawyer: updated?.shareWithLawyer });
+
+      // Background: auto-fulfil open lawyer doc requests for this application and notify lawyer
+      if (shareWithLawyer && doc.applicationId) {
+        (async () => {
+          try {
+            const openRequests = await db.select().from(lawyerDocumentRequests)
+              .where(and(
+                eq(lawyerDocumentRequests.applicationId, doc.applicationId!),
+                eq(lawyerDocumentRequests.status, "open")
+              ));
+            if (openRequests.length === 0) return;
+
+            await db.update(lawyerDocumentRequests)
+              .set({ status: "fulfilled", fulfilledAt: new Date() })
+              .where(and(
+                eq(lawyerDocumentRequests.applicationId, doc.applicationId!),
+                eq(lawyerDocumentRequests.status, "open")
+              ));
+
+            const application = await storage.getApplication(doc.applicationId!);
+            if (!application?.assignedLawyerUserId) return;
+
+            const lawyer = await storage.getUser(application.assignedLawyerUserId);
+            if (!lawyer?.email) return;
+
+            const emailSvc = await import("./services/emailService");
+            const { client, fromEmail } = await emailSvc.getResendClient();
+            const baseUrl = emailSvc.getSiteBaseUrl(req);
+            const lawyerCaseUrl = `${baseUrl}/lawyer/applications/${doc.applicationId}`;
+
+            await client.emails.send({
+              from: fromEmail,
+              to: lawyer.email,
+              subject: `Documents Shared: ${application.companyName1 || `Application #${doc.applicationId}`}`,
+              html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                  <h2 style="color: #1a1a1a;">Documents Now Available</h2>
+                  <p>Hello ${lawyer.firstName || "Lawyer"},</p>
+                  <p>The founder of <strong>${application.companyName1 || `Application #${doc.applicationId}`}</strong> has shared new documents with you in Cellion One.</p>
+                  <p style="margin: 24px 0;">
+                    <a href="${lawyerCaseUrl}" style="background-color: #16a34a; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600;">View Documents</a>
+                  </p>
+                  <p style="color: #666; font-size: 13px;">This is an automated notification from Cellion One.</p>
+                </div>
+              `,
+            });
+
+            // In-app notification for lawyer
+            await storage.createNotification?.({
+              userId: application.assignedLawyerUserId,
+              title: "Documents Shared",
+              message: `The founder has shared documents for ${application.companyName1 || `Application #${doc.applicationId}`}.`,
+              type: "document",
+              linkUrl: `/lawyer/applications/${doc.applicationId}`,
+            }).catch(() => {});
+          } catch (err) {
+            console.error("[LawyerShare] Auto-fulfil error:", err);
+          }
+        })();
+      }
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: error.errors[0]?.message });
+      res.status(500).json({ message: "Failed to update document" });
+    }
+  });
+
+  // GET /api/founder/applications/:id/document-requests — founder lists lawyer doc requests for an application
+  app.get("/api/founder/applications/:id/document-requests", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.founderUserId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const requests = await storage.listLawyerDocumentRequestsByApplication(applicationId);
+      res.json(requests);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch document requests" });
+    }
+  });
+
+  // GET /api/founder/lawyer-doc-requests — all open lawyer doc requests across founder's applications
+  app.get("/api/founder/lawyer-doc-requests", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const myApplications = await storage.getApplicationsByFounder(userId);
+      if (myApplications.length === 0) return res.json([]);
+
+      const appIds = myApplications.map(a => a.id);
+      const allRequests = await Promise.all(
+        appIds.map(id => storage.listLawyerDocumentRequestsByApplication(id))
+      );
+      const open = allRequests.flat().filter(r => r.status === "open");
+      res.json(open);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch lawyer document requests" });
+    }
+  });
+
   // PATCH /api/founder/bank-doc-requests/:id/dismiss — founder marks a request as actioned
   app.patch("/api/founder/bank-doc-requests/:id/dismiss", isAuthenticated, async (req: any, res) => {
     try {
@@ -7313,6 +7428,112 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error) {
       console.error("Error fetching clarifications:", error);
       res.status(500).json({ message: "Failed to fetch clarifications" });
+    }
+  });
+
+  // ============== LAWYER DOCUMENT REQUEST ROUTES ==============
+
+  // POST /api/lawyer/applications/:id/document-requests — lawyer requests documents from founder
+  app.post("/api/lawyer/applications/:id/document-requests", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+
+      const { documentsRequested, reason } = z.object({
+        documentsRequested: z.string().min(5, "Please describe the documents needed"),
+        reason: z.string().optional(),
+      }).parse(req.body);
+
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const docRequest = await storage.createLawyerDocumentRequest({
+        applicationId,
+        requestingLawyerUserId: userId,
+        documentsRequested,
+        reason: reason || null,
+        status: "open",
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "create_lawyer_document_request",
+        entityType: "lawyer_document_request",
+        entityId: docRequest.id.toString(),
+        details: { applicationId, documentsRequested },
+        ipAddress: req.ip,
+      });
+
+      res.status(201).json(docRequest);
+
+      // Background: notify founder by email and in-app notification
+      (async () => {
+        try {
+          const founder = await storage.getUser(application.founderUserId);
+          if (!founder?.email) return;
+
+          const emailSvc = await import("./services/emailService");
+          const { client, fromEmail } = await emailSvc.getResendClient();
+          const baseUrl = emailSvc.getSiteBaseUrl(req);
+          const vaultUrl = `${baseUrl}/founder/vault`;
+
+          await client.emails.send({
+            from: fromEmail,
+            to: founder.email,
+            subject: `Action Required: Documents Requested for ${application.companyName1 || `Application #${applicationId}`}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #1a1a1a;">Your Lawyer Has Requested Documents</h2>
+                <p>Hello ${founder.firstName || "Founder"},</p>
+                <p>Your assigned lawyer has requested the following documents for <strong>${application.companyName1 || `Application #${applicationId}`}</strong>:</p>
+                <blockquote style="border-left: 4px solid #16a34a; padding: 12px 16px; margin: 16px 0; background: #f0fdf4; color: #166534;">
+                  ${documentsRequested}
+                </blockquote>
+                ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ""}
+                <p>Please go to your Document Vault, upload the required documents, and toggle "Share with Lawyer" on each one.</p>
+                <p style="margin: 24px 0;">
+                  <a href="${vaultUrl}" style="background-color: #16a34a; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600;">Go to Document Vault</a>
+                </p>
+                <p style="color: #666; font-size: 13px;">This is an automated notification from Cellion One.</p>
+              </div>
+            `,
+          });
+
+          await storage.createNotification?.({
+            userId: application.founderUserId,
+            title: "Documents Requested by Your Lawyer",
+            message: `Your lawyer has requested: ${documentsRequested.substring(0, 100)}${documentsRequested.length > 100 ? "…" : ""}`,
+            type: "document",
+            linkUrl: "/founder/vault",
+          }).catch(() => {});
+        } catch (err) {
+          console.error("[LawyerDocRequest] Notification error:", err);
+        }
+      })();
+    } catch (error: any) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: error.errors[0]?.message });
+      console.error("Error creating lawyer document request:", error);
+      res.status(500).json({ message: error.message || "Failed to create document request" });
+    }
+  });
+
+  // GET /api/lawyer/applications/:id/document-requests — list document requests for an application
+  app.get("/api/lawyer/applications/:id/document-requests", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const requests = await storage.listLawyerDocumentRequestsByApplication(applicationId);
+      res.json(requests);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch document requests" });
     }
   });
 

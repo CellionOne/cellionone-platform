@@ -54,6 +54,8 @@ import {
   ImageIcon,
   PenLine,
   FileImage,
+  FilePlus2,
+  Inbox,
 } from "lucide-react";
 import type { 
   CompanyApplication, 
@@ -63,6 +65,7 @@ import type {
   ExecutionDeclaration,
   DocumentFile,
   CompanyPerson,
+  LawyerDocumentRequest,
 } from "@shared/schema";
 import { insertClarificationRequestSchema } from "@shared/schema";
 
@@ -1579,6 +1582,41 @@ function DocumentsTab({
   const [qualityStatus, setQualityStatus] = useState<string>("");
   const [qualityNotes, setQualityNotes] = useState("");
   const [kycDocsExpanded, setKycDocsExpanded] = useState(true);
+  const [docRequestDialogOpen, setDocRequestDialogOpen] = useState(false);
+  const [docRequestText, setDocRequestText] = useState("");
+  const [docRequestReason, setDocRequestReason] = useState("");
+
+  const { data: docRequests, isLoading: docRequestsLoading } = useQuery<LawyerDocumentRequest[]>({
+    queryKey: ["/api/lawyer/applications", applicationId, "document-requests"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/lawyer/applications/${applicationId}/document-requests`);
+      return res.json();
+    },
+  });
+
+  const createDocRequestMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/lawyer/applications/${applicationId}/document-requests`, {
+        documentsRequested: docRequestText.trim(),
+        reason: docRequestReason.trim() || undefined,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to send request");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lawyer/applications", applicationId, "document-requests"] });
+      toast({ title: "Document request sent", description: "The founder has been notified by email." });
+      setDocRequestDialogOpen(false);
+      setDocRequestText("");
+      setDocRequestReason("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to send request", description: error.message, variant: "destructive" });
+    },
+  });
 
   // Fetch field verification findings (only if an address_proof doc might be reviewed)
   const { data: fieldVerificationJob } = useQuery<FieldVerificationJob>({
@@ -1935,6 +1973,134 @@ function DocumentsTab({
         </div>
       </CardContent>
     </Card>
+
+      {/* Document Requests Section */}
+      <Card data-testid="card-document-requests">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Inbox className="h-5 w-5 text-primary" />
+              Document Requests
+              {(docRequests?.length ?? 0) > 0 && (
+                <Badge variant="secondary">{docRequests!.length}</Badge>
+              )}
+            </CardTitle>
+            <Button
+              size="sm"
+              onClick={() => setDocRequestDialogOpen(true)}
+              data-testid="btn-request-documents"
+            >
+              <FilePlus2 className="h-4 w-4 mr-1.5" />
+              Request Documents
+            </Button>
+          </div>
+          <CardDescription>
+            Formally request documents from the founder. They will be notified by email and can share documents from their vault.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {docRequestsLoading ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (docRequests?.length ?? 0) === 0 ? (
+            <div className="text-center py-6 text-muted-foreground" data-testid="doc-requests-empty">
+              <Inbox className="h-8 w-8 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">No document requests yet</p>
+            </div>
+          ) : (
+            <div className="divide-y">
+              {docRequests!.map((req) => (
+                <div key={req.id} className="py-3 first:pt-0 last:pb-0 space-y-1" data-testid={`doc-request-${req.id}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-medium">{req.documentsRequested}</p>
+                    {req.status === "fulfilled" ? (
+                      <Badge className="shrink-0 bg-green-100 text-green-800 border-green-200 dark:bg-green-900/40 dark:text-green-300 gap-1 text-xs">
+                        <CheckCircle2 className="h-3 w-3" />Fulfilled
+                      </Badge>
+                    ) : req.status === "actioned" ? (
+                      <Badge variant="secondary" className="shrink-0 gap-1 text-xs">
+                        <Clock className="h-3 w-3" />Actioned
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="shrink-0 gap-1 text-xs text-amber-700 border-amber-300 dark:text-amber-400 dark:border-amber-700">
+                        <Clock className="h-3 w-3" />Open
+                      </Badge>
+                    )}
+                  </div>
+                  {req.reason && (
+                    <p className="text-xs text-muted-foreground">Reason: {req.reason}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Requested {req.createdAt ? new Date(req.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                    {req.fulfilledAt && ` · Fulfilled ${new Date(req.fulfilledAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Request Documents Dialog */}
+      <Dialog open={docRequestDialogOpen} onOpenChange={setDocRequestDialogOpen}>
+        <DialogContent className="max-w-md" data-testid="dialog-request-documents">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FilePlus2 className="h-5 w-5 text-primary" />
+              Request Documents from Founder
+            </DialogTitle>
+            <DialogDescription>
+              Describe the documents you need. The founder will be notified by email and can share them from their Document Vault.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="doc-request-text">Documents Needed <span className="text-destructive">*</span></Label>
+              <Textarea
+                id="doc-request-text"
+                placeholder="e.g. Passport copy for all directors, utility bill dated within 3 months, signed board resolution..."
+                value={docRequestText}
+                onChange={(e) => setDocRequestText(e.target.value)}
+                rows={4}
+                data-testid="input-doc-request-text"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="doc-request-reason">Reason (optional)</Label>
+              <Textarea
+                id="doc-request-reason"
+                placeholder="e.g. CAC requires these for the application filing..."
+                value={docRequestReason}
+                onChange={(e) => setDocRequestReason(e.target.value)}
+                rows={2}
+                data-testid="input-doc-request-reason"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDocRequestDialogOpen(false)}
+              disabled={createDocRequestMutation.isPending}
+              data-testid="btn-cancel-doc-request"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createDocRequestMutation.mutate()}
+              disabled={!docRequestText.trim() || createDocRequestMutation.isPending}
+              data-testid="btn-submit-doc-request"
+            >
+              {createDocRequestMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 animate-spin mr-1.5" />Sending…</>
+              ) : (
+                <><Send className="h-4 w-4 mr-1.5" />Send Request</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

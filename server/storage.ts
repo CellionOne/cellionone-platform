@@ -54,6 +54,7 @@ import {
   bankPortalUsers, type BankPortalUser, type InsertBankPortalUser,
   bankCompanyDispatches, type BankCompanyDispatch, type InsertBankCompanyDispatch,
   bankDocumentRequests, type BankDocumentRequest, type InsertBankDocumentRequest,
+  lawyerDocumentRequests, type LawyerDocumentRequest, type InsertLawyerDocumentRequest,
   kycStrReports, type KycStrReport, type InsertKycStrReport,
   cieSecurities, type CieSecurity, type InsertCieSecurity,
   ciePrices, type CiePrice, type InsertCiePrice,
@@ -430,6 +431,12 @@ export interface IStorage {
   listBankDocumentRequests(filters?: { status?: string; bankPartnerId?: number }): Promise<BankDocumentRequest[]>;
   getBankDocumentRequest(id: number): Promise<BankDocumentRequest | undefined>;
   updateBankDocumentRequest(id: number, data: Partial<InsertBankDocumentRequest>): Promise<BankDocumentRequest | undefined>;
+
+  // Lawyer Document Requests
+  createLawyerDocumentRequest(data: InsertLawyerDocumentRequest): Promise<LawyerDocumentRequest>;
+  listLawyerDocumentRequestsByApplication(applicationId: number): Promise<LawyerDocumentRequest[]>;
+  getLawyerDocumentRequest(id: number): Promise<LawyerDocumentRequest | undefined>;
+  updateLawyerDocumentRequest(id: number, data: Partial<InsertLawyerDocumentRequest>): Promise<LawyerDocumentRequest | undefined>;
 
   // STR Reports
   createStrReport(data: InsertKycStrReport): Promise<KycStrReport>;
@@ -2167,6 +2174,28 @@ export class DatabaseStorage implements IStorage {
 
   async updateBankDocumentRequest(id: number, data: Partial<InsertBankDocumentRequest>): Promise<BankDocumentRequest | undefined> {
     const [req] = await db.update(bankDocumentRequests).set(data).where(eq(bankDocumentRequests.id, id)).returning();
+    return req;
+  }
+
+  // Lawyer Document Requests
+  async createLawyerDocumentRequest(data: InsertLawyerDocumentRequest): Promise<LawyerDocumentRequest> {
+    const [req] = await db.insert(lawyerDocumentRequests).values(data).returning();
+    return req;
+  }
+
+  async listLawyerDocumentRequestsByApplication(applicationId: number): Promise<LawyerDocumentRequest[]> {
+    return db.select().from(lawyerDocumentRequests)
+      .where(eq(lawyerDocumentRequests.applicationId, applicationId))
+      .orderBy(desc(lawyerDocumentRequests.createdAt));
+  }
+
+  async getLawyerDocumentRequest(id: number): Promise<LawyerDocumentRequest | undefined> {
+    const [req] = await db.select().from(lawyerDocumentRequests).where(eq(lawyerDocumentRequests.id, id));
+    return req;
+  }
+
+  async updateLawyerDocumentRequest(id: number, data: Partial<InsertLawyerDocumentRequest>): Promise<LawyerDocumentRequest | undefined> {
+    const [req] = await db.update(lawyerDocumentRequests).set(data).where(eq(lawyerDocumentRequests.id, id)).returning();
     return req;
   }
 

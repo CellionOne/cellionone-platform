@@ -258,6 +258,7 @@ export const documentFiles = pgTable("document_files", {
   mimeType: varchar("mime_type", { length: 100 }),
   isSensitive: boolean("is_sensitive").default(true),
   shareWithBank: boolean("share_with_bank").default(false).notNull(),
+  shareWithLawyer: boolean("share_with_lawyer").default(false).notNull(),
   qualityStatus: varchar("quality_status", { length: 50 }).default("not_checked"), // not_checked, pass, needs_attention
   qualityReport: json("quality_report").$type<{
     blurScore?: number;
@@ -2031,6 +2032,26 @@ export const bankDocumentRequests = pgTable("bank_document_requests", {
 export const insertBankDocumentRequestSchema = createInsertSchema(bankDocumentRequests).omit({ id: true, createdAt: true });
 export type BankDocumentRequest = typeof bankDocumentRequests.$inferSelect;
 export type InsertBankDocumentRequest = z.infer<typeof insertBankDocumentRequestSchema>;
+
+// ============== LAWYER DOCUMENT REQUESTS ==============
+export const lawyerDocumentRequests = pgTable("lawyer_document_requests", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  requestingLawyerUserId: varchar("requesting_lawyer_user_id", { length: 255 }).notNull(),
+  documentsRequested: text("documents_requested").notNull(),
+  reason: text("reason"),
+  status: varchar("status", { length: 50 }).default("open"), // open, actioned, fulfilled
+  createdAt: timestamp("created_at").defaultNow(),
+  fulfilledAt: timestamp("fulfilled_at"),
+}, (table) => [
+  index("idx_lawyer_doc_requests_application").on(table.applicationId),
+  index("idx_lawyer_doc_requests_lawyer").on(table.requestingLawyerUserId),
+  index("idx_lawyer_doc_requests_status").on(table.status),
+]);
+
+export const insertLawyerDocumentRequestSchema = createInsertSchema(lawyerDocumentRequests).omit({ id: true, createdAt: true });
+export type LawyerDocumentRequest = typeof lawyerDocumentRequests.$inferSelect;
+export type InsertLawyerDocumentRequest = z.infer<typeof insertLawyerDocumentRequestSchema>;
 
 export const escrowTransactions = pgTable("escrow_transactions", {
   id: serial("id").primaryKey(),

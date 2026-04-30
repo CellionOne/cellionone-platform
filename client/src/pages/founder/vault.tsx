@@ -30,8 +30,9 @@ import {
   ArrowLeft,
   BanknoteIcon,
   AlertTriangle,
+  Scale,
 } from "lucide-react";
-import type { DocumentFile, CompanyApplication, ProfileChecklistItem } from "@shared/schema";
+import type { DocumentFile, CompanyApplication, ProfileChecklistItem, LawyerDocumentRequest } from "@shared/schema";
 
 interface CompanyDocumentGroup {
   profileId: number;
@@ -525,6 +526,7 @@ function formatFileSize(bytes: number | null | undefined): string {
 function DocumentRow({ doc }: { doc: DocumentFile }) {
   const { toast } = useToast();
   const [shared, setShared] = useState<boolean>(doc.shareWithBank ?? false);
+  const [sharedWithLawyer, setSharedWithLawyer] = useState<boolean>(doc.shareWithLawyer ?? false);
 
   const toggleMutation = useMutation({
     mutationFn: async (value: boolean) => {
@@ -544,9 +546,28 @@ function DocumentRow({ doc }: { doc: DocumentFile }) {
     },
   });
 
+  const lawyerToggleMutation = useMutation({
+    mutationFn: async (value: boolean) => {
+      const res = await apiRequest("PATCH", `/api/document-files/${doc.id}/share-with-lawyer`, { shareWithLawyer: value });
+      if (!res.ok) throw new Error("Failed to update");
+      return res.json();
+    },
+    onMutate: (value) => {
+      setSharedWithLawyer(value);
+    },
+    onError: (_err, value) => {
+      setSharedWithLawyer(!value);
+      toast({ title: "Error", description: "Could not update lawyer sharing setting.", variant: "destructive" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/vault"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/lawyer-doc-requests"] });
+    },
+  });
+
   return (
     <div
-      className="flex items-center justify-between py-3 first:pt-0 last:pb-0 gap-3"
+      className="flex items-start justify-between py-3 first:pt-0 last:pb-0 gap-3"
       data-testid={`document-${doc.id}`}
     >
       <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -560,49 +581,77 @@ function DocumentRow({ doc }: { doc: DocumentFile }) {
           </p>
         </div>
       </div>
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <Switch
-            id={`bank-share-${doc.id}`}
-            checked={shared}
-            onCheckedChange={(v) => toggleMutation.mutate(v)}
-            disabled={toggleMutation.isPending}
-            data-testid={`switch-bank-share-${doc.id}`}
-          />
-          <label htmlFor={`bank-share-${doc.id}`} className="cursor-pointer select-none">
-            {shared ? (
-              <Badge variant="default" className="bg-primary/10 text-primary border-primary/20 text-xs font-medium hover:bg-primary/10">
-                Shared with bank
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
-                Private
-              </Badge>
-            )}
-          </label>
+      <div className="flex flex-col items-end gap-2 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Switch
+              id={`bank-share-${doc.id}`}
+              checked={shared}
+              onCheckedChange={(v) => toggleMutation.mutate(v)}
+              disabled={toggleMutation.isPending}
+              data-testid={`switch-bank-share-${doc.id}`}
+            />
+            <label htmlFor={`bank-share-${doc.id}`} className="cursor-pointer select-none">
+              {shared ? (
+                <Badge variant="default" className="bg-primary/10 text-primary border-primary/20 text-xs font-medium hover:bg-primary/10">
+                  Shared with bank
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
+                  Bank: Private
+                </Badge>
+              )}
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id={`lawyer-share-${doc.id}`}
+              checked={sharedWithLawyer}
+              onCheckedChange={(v) => lawyerToggleMutation.mutate(v)}
+              disabled={lawyerToggleMutation.isPending}
+              data-testid={`switch-lawyer-share-${doc.id}`}
+            />
+            <label htmlFor={`lawyer-share-${doc.id}`} className="cursor-pointer select-none">
+              {sharedWithLawyer ? (
+                <Badge variant="default" className="bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 text-xs font-medium hover:bg-blue-100">
+                  <Scale className="h-3 w-3 mr-1" />
+                  Shared with lawyer
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs font-normal text-muted-foreground">
+                  Lawyer: Private
+                </Badge>
+              )}
+            </label>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            asChild
+            data-testid={`button-download-${doc.id}`}
+          >
+            <a href={`/api/documents/${doc.id}/download`} download>
+              <Download className="h-4 w-4" />
+            </a>
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          asChild
-          data-testid={`button-download-${doc.id}`}
-        >
-          <a href={`/api/documents/${doc.id}/download`} download>
-            <Download className="h-4 w-4" />
-          </a>
-        </Button>
       </div>
     </div>
   );
 }
 
 export default function VaultPage() {
+  const { toast } = useToast();
   const { data, isLoading } = useQuery<VaultData>({
     queryKey: ["/api/founder/vault"],
   });
 
   const { data: bankDocRequests } = useQuery<BankDocRequest[]>({
     queryKey: ["/api/founder/bank-doc-requests"],
+  });
+
+  const { data: lawyerDocRequests } = useQuery<LawyerDocumentRequest[]>({
+    queryKey: ["/api/founder/lawyer-doc-requests"],
   });
 
   const [dismissedRequests, setDismissedRequests] = useState<Set<number>>(new Set());
@@ -758,6 +807,23 @@ export default function VaultPage() {
                           {dismissingIds.has(req.id) ? "Dismissing…" : "Dismiss"}
                         </Button>
                       </div>
+                    </AlertDescription>
+                  </Alert>
+                ))}
+              </div>
+            )}
+            {(lawyerDocRequests?.length ?? 0) > 0 && (
+              <div className="space-y-3 mb-6">
+                {lawyerDocRequests!.map(req => (
+                  <Alert key={req.id} className="border-blue-300 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-700" data-testid={`alert-lawyer-doc-request-${req.id}`}>
+                    <Scale className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                    <AlertTitle className="text-blue-800 dark:text-blue-300 font-semibold">
+                      Your lawyer has requested documents
+                    </AlertTitle>
+                    <AlertDescription className="text-blue-700 dark:text-blue-400">
+                      <p className="mb-1"><span className="font-medium">Requested:</span> {req.documentsRequested}</p>
+                      {req.reason && <p className="mb-1"><span className="font-medium">Reason:</span> {req.reason}</p>}
+                      <p className="text-xs mt-2">Toggle "Share with lawyer" on the relevant documents below to fulfil this request. Your lawyer will be notified automatically.</p>
                     </AlertDescription>
                   </Alert>
                 ))}

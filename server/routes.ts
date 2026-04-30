@@ -6017,6 +6017,7 @@ export async function registerRoutes(
         requiredDocSlots: [
           { key: "passportPhoto", label: "Passport Photograph" },
           { key: "govId", label: "Government-issued ID (NIN slip, International Passport, Driver's Licence)" },
+          { key: "signature", label: "Signature Specimen" },
         ],
       });
     } catch (error) {
@@ -6061,7 +6062,7 @@ export async function registerRoutes(
       const sigAllowedExt = [".jpg", ".jpeg", ".png"];
       const { default: pathMod } = await import("path");
       const sigExt = pathMod.extname(signatureFile.originalname || "").toLowerCase();
-      if (!sigAllowedMime.includes(signatureFile.mimetype) && !sigAllowedExt.includes(sigExt)) {
+      if (!sigAllowedMime.includes(signatureFile.mimetype) || !sigAllowedExt.includes(sigExt)) {
         return res.status(400).json({ message: "Signature must be a JPEG or PNG image" });
       }
       if (signatureFile.size > 5 * 1024 * 1024) {

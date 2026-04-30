@@ -292,7 +292,7 @@ export default function DirectorUploadPage() {
                           className: "w-full",
                           style: { width: "100%", height: "140px" },
                         }}
-                        onBegin={() => setSigPadEmpty(false)}
+                        onBegin={() => { setSigPadEmpty(false); setSignatureFile(null); }}
                       />
                     </div>
                   )}

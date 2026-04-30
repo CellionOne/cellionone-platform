@@ -19,7 +19,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import type { CompanyApplication, ApplicationChecklistItem, CompanyPerson, DocumentFile } from "@shared/schema";
 import {
   ArrowLeft,
@@ -225,6 +225,7 @@ function PersonUploadDialog({
 
     setUploading(true);
     try {
+      const csrf = await getCsrfToken();
       const form = new FormData();
       form.append("file", file);
       form.append("docType", docType.trim());
@@ -233,6 +234,7 @@ function PersonUploadDialog({
       const res = await fetch(`/api/applications/${applicationId}/documents/upload`, {
         method: "POST",
         credentials: "include",
+        headers: { "X-CSRF-Token": csrf },
         body: form,
       });
 

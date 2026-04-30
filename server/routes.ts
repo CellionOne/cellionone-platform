@@ -6396,6 +6396,10 @@ export async function registerRoutes(
       if (record.usedAt) return res.status(410).json({ message: "This upload link has already been used" });
       if (new Date() > record.expiresAt) return res.status(410).json({ message: "This upload link has expired" });
 
+      // Atomically claim the token before any processing to prevent concurrent submission races
+      const claimed = await storage.claimCorporateDocUploadToken(record.id);
+      if (!claimed) return res.status(410).json({ message: "This upload link has already been used or has expired" });
+
       // Determine required slugs for this entity type
       const people = await storage.getCompanyPeople(record.applicationId);
       const person = people.find(p => p.id === record.personId);
@@ -6484,9 +6488,6 @@ export async function registerRoutes(
           });
         }
       }
-
-      // All uploads succeeded — mark token used
-      await storage.markCorporateDocUploadTokenUsed(record.id);
 
       await storage.createAuditLog({
         actorUserId: `corp_upload_${record.personId}`,

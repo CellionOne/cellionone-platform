@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, and, desc, sql, count, inArray, or, ilike, gte, lte, lt, isNotNull } from "drizzle-orm";
+import { eq, and, desc, sql, count, inArray, or, ilike, gte, lte, lt, isNotNull, isNull, gt } from "drizzle-orm";
 import {
   users, type User,
   founderProfiles, type FounderProfile, type InsertFounderProfile,
@@ -263,6 +263,7 @@ export interface IStorage {
   createCorporateDocUploadToken(data: InsertCorporateDocUploadToken): Promise<CorporateDocUploadToken>;
   getCorporateDocUploadToken(token: string): Promise<CorporateDocUploadToken | undefined>;
   markCorporateDocUploadTokenUsed(id: number): Promise<void>;
+  claimCorporateDocUploadToken(id: number): Promise<boolean>;
 
   // Sensitive Data Access Logging
   logSensitiveDataAccess(data: {
@@ -2742,6 +2743,22 @@ export class DatabaseStorage implements IStorage {
 
   async markCorporateDocUploadTokenUsed(id: number): Promise<void> {
     await db.update(corporateDocUploadTokens).set({ usedAt: new Date() }).where(eq(corporateDocUploadTokens.id, id));
+  }
+
+  async claimCorporateDocUploadToken(id: number): Promise<boolean> {
+    const now = new Date();
+    const result = await db
+      .update(corporateDocUploadTokens)
+      .set({ usedAt: now })
+      .where(
+        and(
+          eq(corporateDocUploadTokens.id, id),
+          isNull(corporateDocUploadTokens.usedAt),
+          gt(corporateDocUploadTokens.expiresAt, now),
+        )
+      )
+      .returning({ id: corporateDocUploadTokens.id });
+    return result.length > 0;
   }
 }
 

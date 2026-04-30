@@ -6198,6 +6198,10 @@ export async function registerRoutes(
         return res.status(400).json({ message: "This corporate entity has no contact email on file" });
       }
 
+      // Invalidate any existing active (unused + unexpired) tokens for this person
+      // so only one valid token exists at any time (#230 dedup guard)
+      await storage.expireActiveCorporateDocTokens(personId);
+
       const cryptoMod = await import("crypto");
       const token = cryptoMod.randomBytes(48).toString("hex");
       const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 hours
@@ -7059,6 +7063,125 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error) {
       console.error("Error fetching people dossier:", error);
       res.status(500).json({ message: "Failed to fetch people dossier" });
+    }
+  });
+
+  // ============== LAWYER: LIST CORPORATE ENTITY UPLOADED DOCUMENTS ==============
+  app.get("/api/lawyer/applications/:id/people/:personId/corporate-docs", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const lawyerId = getUserId(req);
+      const applicationId = parseInt(req.params.id, 10);
+      const personId = parseInt(req.params.personId, 10);
+
+      if (isNaN(applicationId) || isNaN(personId)) {
+        return res.status(400).json({ message: "Invalid ID" });
+      }
+
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== lawyerId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const [person] = await db.select()
+        .from(companyPeople)
+        .where(and(eq(companyPeople.id, personId), eq(companyPeople.applicationId, applicationId)));
+
+      if (!person) return res.status(404).json({ message: "Person not found" });
+      if (person.entityType !== "corporate") {
+        return res.status(400).json({ message: "Person is not a corporate entity" });
+      }
+
+      const docs = await storage.getCorporateDocsByPersonId(personId, applicationId);
+
+      await storage.createAuditLog({
+        actorUserId: lawyerId,
+        action: "sensitive_data_access",
+        entityType: "application",
+        entityId: applicationId.toString(),
+        details: { applicationId, personId, docCount: docs.length, action: "view_corporate_docs" },
+        ipAddress: req.ip,
+      });
+
+      const objectStorage = new ObjectStorageService();
+      const docsWithUrls = await Promise.all(
+        docs.map(async (doc) => {
+          const downloadURL = await objectStorage.getObjectEntityDownloadURL(doc.storagePath, 900).catch(() => null);
+          return { id: doc.id, docType: doc.docType, filename: doc.filename, downloadURL, createdAt: doc.createdAt };
+        })
+      );
+
+      return res.json({ docs: docsWithUrls, personIsVerified: person.isVerified ?? false });
+    } catch (error) {
+      console.error("Error fetching corporate docs:", error);
+      res.status(500).json({ message: "Failed to fetch corporate documents" });
+    }
+  });
+
+  // ============== LAWYER: MARK CORPORATE ENTITY AS VERIFIED ==============
+  app.post("/api/lawyer/applications/:id/people/:personId/verify-corporate", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const lawyerId = getUserId(req);
+      const applicationId = parseInt(req.params.id, 10);
+      const personId = parseInt(req.params.personId, 10);
+
+      if (isNaN(applicationId) || isNaN(personId)) {
+        return res.status(400).json({ message: "Invalid ID" });
+      }
+
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== lawyerId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const [person] = await db.select()
+        .from(companyPeople)
+        .where(and(eq(companyPeople.id, personId), eq(companyPeople.applicationId, applicationId)));
+
+      if (!person) return res.status(404).json({ message: "Person not found" });
+      if (person.entityType !== "corporate") {
+        return res.status(400).json({ message: "Person is not a corporate entity" });
+      }
+
+      if (person.isVerified) {
+        return res.status(400).json({ message: "Corporate entity is already verified" });
+      }
+
+      const docs = await storage.getCorporateDocsByPersonId(personId, applicationId);
+      if (docs.length === 0) {
+        return res.status(400).json({ message: "No documents uploaded yet for this corporate entity" });
+      }
+
+      await storage.updateCompanyPerson(personId, {
+        isVerified: true,
+        autoVerifyMethod: "lawyer_review",
+      });
+
+      // Accept all checklist items that relate to this person's documents
+      const checklistItems = await storage.getChecklistItems(applicationId);
+      const personPrefix = `people_req_${personId}_`;
+      for (const item of checklistItems) {
+        if (item.key.startsWith(personPrefix) && item.status === "provided") {
+          await storage.updateChecklistItem(item.id, {
+            status: "accepted",
+            isAutoResolved: false,
+            reviewerNotes: `Reviewed and accepted by assigned lawyer`,
+          });
+        }
+      }
+
+      await storage.createAuditLog({
+        actorUserId: lawyerId,
+        action: "corporate_entity_verified",
+        entityType: "company_person",
+        entityId: personId.toString(),
+        details: { applicationId, personId, autoVerifyMethod: "lawyer_review", docCount: docs.length },
+        ipAddress: req.ip,
+      });
+
+      return res.json({ success: true, message: "Corporate entity marked as verified" });
+    } catch (error) {
+      console.error("Error verifying corporate entity:", error);
+      res.status(500).json({ message: "Failed to verify corporate entity" });
     }
   });
 

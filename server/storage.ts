@@ -262,6 +262,8 @@ export interface IStorage {
   // Corporate Doc Upload Tokens
   createCorporateDocUploadToken(data: InsertCorporateDocUploadToken): Promise<CorporateDocUploadToken>;
   getCorporateDocUploadToken(token: string): Promise<CorporateDocUploadToken | undefined>;
+  getCorporateDocsByPersonId(personId: number, applicationId: number): Promise<DocumentFile[]>;
+  expireActiveCorporateDocTokens(personId: number): Promise<void>;
   markCorporateDocUploadTokenUsed(id: number): Promise<void>;
   claimCorporateDocUploadToken(id: number): Promise<boolean>;
 
@@ -2743,6 +2745,32 @@ export class DatabaseStorage implements IStorage {
 
   async markCorporateDocUploadTokenUsed(id: number): Promise<void> {
     await db.update(corporateDocUploadTokens).set({ usedAt: new Date() }).where(eq(corporateDocUploadTokens.id, id));
+  }
+
+  async getCorporateDocsByPersonId(personId: number, applicationId: number): Promise<DocumentFile[]> {
+    return db.select()
+      .from(documentFiles)
+      .where(
+        and(
+          eq(documentFiles.ownerUserId, `corp_upload_${personId}`),
+          eq(documentFiles.applicationId, applicationId),
+        )
+      )
+      .orderBy(documentFiles.createdAt);
+  }
+
+  async expireActiveCorporateDocTokens(personId: number): Promise<void> {
+    const now = new Date();
+    await db
+      .update(corporateDocUploadTokens)
+      .set({ expiresAt: now })
+      .where(
+        and(
+          eq(corporateDocUploadTokens.personId, personId),
+          isNull(corporateDocUploadTokens.usedAt),
+          gt(corporateDocUploadTokens.expiresAt, now),
+        )
+      );
   }
 
   async claimCorporateDocUploadToken(id: number): Promise<boolean> {

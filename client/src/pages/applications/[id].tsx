@@ -719,12 +719,25 @@ export default function ApplicationDetailsPage() {
                               const isActive = justSent || persistedToken?.status === "active";
                               const isStale = !justSent && (persistedToken?.status === "used" || persistedToken?.status === "expired");
                               return (
-                                <span className="ml-auto">
+                                <span className="ml-auto flex items-center gap-2">
                                   {isActive ? (
-                                    <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400" data-testid={`corp-invite-sent-${pid}`}>
-                                      <CheckCircle2 className="h-3 w-3" />
-                                      Active — link sent
-                                    </span>
+                                    <>
+                                      <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400" data-testid={`corp-invite-sent-${pid}`}>
+                                        <CheckCircle2 className="h-3 w-3" />
+                                        Link active
+                                      </span>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 px-2 text-xs text-muted-foreground"
+                                        onClick={() => corporateInviteMutation.mutate(pid)}
+                                        disabled={corporateInviteMutation.isPending}
+                                        data-testid={`btn-resend-corp-upload-link-${pid}`}
+                                      >
+                                        <Send className="h-3 w-3 mr-1" />
+                                        Resend
+                                      </Button>
+                                    </>
                                   ) : (
                                     <Button
                                       variant="ghost"

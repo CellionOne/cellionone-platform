@@ -970,6 +970,134 @@ function PersonDocumentPreview({
   );
 }
 
+interface CorpDoc {
+  id: number;
+  docType: string;
+  filename: string;
+  downloadURL: string | null;
+  createdAt: string | null;
+}
+
+function CorporateDocsPanel({
+  applicationId,
+  personId,
+  personIsVerifiedInitial,
+  onVerified,
+}: {
+  applicationId: number;
+  personId: number;
+  personIsVerifiedInitial: boolean;
+  onVerified: () => void;
+}) {
+  const { toast } = useToast();
+
+  const { data, isLoading, isError } = useQuery<{ docs: CorpDoc[]; personIsVerified: boolean }>({
+    queryKey: ["/api/lawyer/applications", applicationId, "people", personId, "corporate-docs"],
+    retry: false,
+  });
+
+  const verifyMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/lawyer/applications/${applicationId}/people/${personId}/verify-corporate`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || "Verification failed");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Corporate entity verified", description: "All uploaded documents have been accepted." });
+      queryClient.invalidateQueries({ queryKey: ["/api/lawyer/applications", applicationId, "people", personId, "corporate-docs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId] });
+      onVerified();
+    },
+    onError: (err: Error) => {
+      toast({ title: "Could not verify", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const isVerified = data?.personIsVerified ?? personIsVerifiedInitial;
+  const docs = data?.docs ?? [];
+
+  if (isLoading) {
+    return (
+      <div className="mt-3 pt-3 border-t flex items-center gap-2 text-xs text-muted-foreground" data-testid={`corp-docs-loading-${personId}`}>
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Loading uploaded documents…
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="mt-3 pt-3 border-t flex items-center gap-2 text-xs text-destructive" data-testid={`corp-docs-error-${personId}`}>
+        <AlertCircle className="h-3 w-3" />
+        Failed to load corporate documents.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t space-y-3" data-testid={`corp-docs-panel-${personId}`}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium flex items-center gap-1.5">
+          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+          Corporate Documents
+        </p>
+        {isVerified ? (
+          <Badge className="bg-green-600 text-xs gap-1" data-testid={`badge-corp-verified-${personId}`}>
+            <ShieldCheck className="h-3 w-3" />Docs Verified
+          </Badge>
+        ) : docs.length > 0 ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs gap-1.5 border-green-600 text-green-700 hover:bg-green-50 dark:hover:bg-green-950/30"
+            disabled={verifyMutation.isPending}
+            onClick={() => verifyMutation.mutate()}
+            data-testid={`btn-verify-corporate-${personId}`}
+          >
+            {verifyMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
+            Mark as Verified
+          </Button>
+        ) : null}
+      </div>
+
+      {docs.length === 0 ? (
+        <p className="text-xs text-muted-foreground italic" data-testid={`corp-docs-empty-${personId}`}>
+          No documents uploaded yet — awaiting the authorised representative.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {docs.map((doc) => (
+            <div key={doc.id} className="flex items-center justify-between gap-2 text-xs py-1.5 px-2 rounded bg-muted/50" data-testid={`corp-doc-row-${doc.id}`}>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <FileCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span className="truncate text-foreground font-medium capitalize">{doc.docType.replace(/_/g, " ")}</span>
+                <span className="text-muted-foreground truncate hidden sm:inline">— {doc.filename}</span>
+              </div>
+              {doc.downloadURL ? (
+                <a
+                  href={doc.downloadURL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 flex items-center gap-1 text-primary hover:underline"
+                  data-testid={`link-corp-doc-${doc.id}`}
+                >
+                  <Download className="h-3 w-3" />
+                  View
+                </a>
+              ) : (
+                <span className="text-muted-foreground shrink-0">Unavailable</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applicationId: number }) {
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
 
@@ -997,9 +1125,13 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
 
   const getVerificationBadge = (person: EnrichedPerson) => {
     if (person.entityType === "corporate") {
+      if (person.kybLookupStatus === "found") {
+        return <Badge className="bg-green-600 text-xs gap-1"><CheckCircle2 className="h-3 w-3" />KYB Verified</Badge>;
+      }
+      if (person.isVerified) {
+        return <Badge className="bg-green-600 text-xs gap-1"><ShieldCheck className="h-3 w-3" />Docs Verified</Badge>;
+      }
       switch (person.kybLookupStatus) {
-        case "found":
-          return <Badge className="bg-green-600 text-xs gap-1"><CheckCircle2 className="h-3 w-3" />KYB Verified</Badge>;
         case "not_found":
           return <Badge variant="destructive" className="text-xs gap-1"><XCircle className="h-3 w-3" />KYB Failed</Badge>;
         case "error":
@@ -1490,6 +1622,17 @@ function PeopleTab({ people, applicationId }: { people: EnrichedPerson[]; applic
                             </div>
                           )}
                         </div>
+                      )}
+
+                      {isExpanded && person.entityType === "corporate" && person.id && (
+                        <CorporateDocsPanel
+                          applicationId={applicationId}
+                          personId={person.id}
+                          personIsVerifiedInitial={person.isVerified ?? false}
+                          onVerified={() => {
+                            queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId] });
+                          }}
+                        />
                       )}
                     </div>
                   </div>

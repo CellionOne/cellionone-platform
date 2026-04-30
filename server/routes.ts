@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, lawyerDocumentRequests, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, lawyerDocumentRequests, corporateDocUploadTokens, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne, inArray, sql } from "drizzle-orm";
 import * as services from "./services";
@@ -6172,9 +6172,9 @@ export async function registerRoutes(
 
   // ============== CORPORATE DOC UPLOAD INVITE ROUTES ==============
 
-  // POST /api/applications/:id/corporate-doc-upload-invite/:personId
+  // POST /api/applications/:id/corporate-doc-invite/:personId
   // Founder/admin: create a time-limited upload link for a corporate entity's authorised rep
-  app.post("/api/applications/:id/corporate-doc-upload-invite/:personId", isAuthenticated, async (req: any, res) => {
+  app.post("/api/applications/:id/corporate-doc-invite/:personId", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const applicationId = parseInt(req.params.id, 10);
@@ -6287,6 +6287,55 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/applications/:id/corporate-invite-tokens
+  // Authenticated: returns the latest token status for each corporate entity in the application
+  app.get("/api/applications/:id/corporate-invite-tokens", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id, 10);
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const userRoles = await getUserRoles(userId);
+      const isAdmin = userRoles.includes("admin");
+      const isOwner = application.founderUserId === userId;
+      if (!isOwner && !isAdmin) return res.status(403).json({ message: "Access denied" });
+
+      // Fetch latest token per personId (most recently created)
+      const rows = await db
+        .select()
+        .from(corporateDocUploadTokens)
+        .where(eq(corporateDocUploadTokens.applicationId, applicationId))
+        .orderBy(desc(corporateDocUploadTokens.createdAt));
+
+      // Build a map of personId → latest token status
+      const now = new Date();
+      const seen = new Set<number>();
+      const result: Array<{
+        personId: number;
+        status: "active" | "used" | "expired";
+        sentAt: string;
+        expiresAt: string;
+      }> = [];
+
+      for (const row of rows as any[]) {
+        if (seen.has(row.personId)) continue;
+        seen.add(row.personId);
+        let status: "active" | "used" | "expired";
+        if (row.usedAt) status = "used";
+        else if (now > row.expiresAt) status = "expired";
+        else status = "active";
+        result.push({ personId: row.personId, status, sentAt: row.createdAt, expiresAt: row.expiresAt });
+      }
+
+      res.json({ tokens: result });
+    } catch (error) {
+      console.error("[CorporateInviteTokens] Error:", error);
+      res.status(500).json({ message: "Failed to retrieve invite token status" });
+    }
+  });
+
   // GET /api/corporate-doc-upload/:token
   // Public: validate token, return entity info and required document slots
   app.get("/api/corporate-doc-upload/:token", async (req, res) => {
@@ -6324,21 +6373,21 @@ export async function registerRoutes(
   });
 
   // POST /api/corporate-doc-upload/:token
-  // Public (token-authenticated): accept corporate entity documents, update checklist items
+  // Public (token-authenticated): accept ALL required corporate entity documents, update checklist items
   const corpDocUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 },
   });
 
-  // Accept one file per slug (up to 10 fields)
-  const CORP_DOC_SLUGS = [
+  // Accept one file per slug — all slugs across all entity types (multer pre-parses all fields)
+  const ALL_CORP_DOC_SLUGS = [
     "cac_cert_incorporation", "memorandum_articles", "board_resolution", "list_of_directors",
     "cac_cert_registration", "proprietor_gov_id", "proof_business_address",
     "cac_cert_incorporation_trustees", "constitution_rules", "list_of_trustees", "board_resolution_minutes",
   ];
 
   app.post("/api/corporate-doc-upload/:token", corpDocUpload.fields(
-    CORP_DOC_SLUGS.map(slug => ({ name: slug, maxCount: 1 }))
+    ALL_CORP_DOC_SLUGS.map(slug => ({ name: slug, maxCount: 1 }))
   ), async (req: any, res) => {
     try {
       const { token } = req.params;
@@ -6347,10 +6396,28 @@ export async function registerRoutes(
       if (record.usedAt) return res.status(410).json({ message: "This upload link has already been used" });
       if (new Date() > record.expiresAt) return res.status(410).json({ message: "This upload link has expired" });
 
+      // Determine required slugs for this entity type
+      const people = await storage.getCompanyPeople(record.applicationId);
+      const person = people.find(p => p.id === record.personId);
+      const displayName = record.entityName ?? "Corporate Entity";
+      const bizType = person?.corporateBusinessType ?? "co";
+      const requiredDocSlugs = getDocSlugsForPerson(record.personId, displayName, "corporate", bizType);
+      const requiredSlugSet = new Set(requiredDocSlugs.map(d => d.slug));
+
       const files = req.files as Record<string, Express.Multer.File[]>;
-      const uploadedSlugs = Object.keys(files ?? {}).filter(k => files[k]?.length > 0);
-      if (uploadedSlugs.length === 0) {
-        return res.status(400).json({ message: "At least one document file is required" });
+      const submittedSlugs = new Set(Object.keys(files ?? {}).filter(k => files[k]?.length > 0));
+
+      // Reject any unexpected (entity-type-irrelevant) slugs
+      const unexpectedSlugs = [...submittedSlugs].filter(s => !requiredSlugSet.has(s));
+      if (unexpectedSlugs.length > 0) {
+        return res.status(400).json({ message: `Unexpected document field(s): ${unexpectedSlugs.join(", ")}` });
+      }
+
+      // Enforce that every required slug has a file
+      const missingSlugs = [...requiredSlugSet].filter(s => !submittedSlugs.has(s));
+      if (missingSlugs.length > 0) {
+        const missingLabels = requiredDocSlugs.filter(d => missingSlugs.includes(d.slug)).map(d => d.label.split(" — ").slice(1).join(" — "));
+        return res.status(400).json({ message: `All required documents must be submitted. Missing: ${missingLabels.join(", ")}` });
       }
 
       const allowedMime = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
@@ -6386,13 +6453,13 @@ export async function registerRoutes(
 
       const checklistItems = await storage.getChecklistItems(record.applicationId);
 
-      for (const slug of uploadedSlugs) {
+      // Process only the required slugs
+      for (const { slug, label } of requiredDocSlugs) {
         const file = files[slug]?.[0];
-        if (!file) continue;
+        if (!file) continue; // already validated above
 
         await uploadCorpFile(file, slug);
 
-        // Mark the per-person checklist item as provided
         const itemKey = `people_req_${record.personId}_${slug}`;
         const existing = checklistItems.find(i => i.key === itemKey);
         if (existing) {
@@ -6405,16 +6472,10 @@ export async function registerRoutes(
             });
           }
         } else {
-          // Item not yet seeded — create and mark provided
-          const people = await storage.getCompanyPeople(record.applicationId);
-          const person = people.find(p => p.id === record.personId);
-          const displayName = record.entityName ?? "Corporate Entity";
-          const docSlugs = getDocSlugsForPerson(record.personId, displayName, "corporate", person?.corporateBusinessType ?? "co");
-          const docInfo = docSlugs.find(d => d.slug === slug);
           await storage.createChecklistItem({
             applicationId: record.applicationId,
             key: itemKey,
-            label: docInfo?.label ?? `${displayName} — ${slug}`,
+            label,
             required: true,
             status: "provided",
             source: "people_requirement",
@@ -6424,6 +6485,7 @@ export async function registerRoutes(
         }
       }
 
+      // All uploads succeeded — mark token used
       await storage.markCorporateDocUploadTokenUsed(record.id);
 
       await storage.createAuditLog({

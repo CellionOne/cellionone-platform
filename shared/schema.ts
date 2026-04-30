@@ -2714,8 +2714,8 @@ export type InsertDirectorUploadToken = z.infer<typeof insertDirectorUploadToken
 export const corporateDocUploadTokens = pgTable("corporate_doc_upload_tokens", {
   id: serial("id").primaryKey(),
   token: varchar("token", { length: 128 }).notNull().unique(),
-  applicationId: integer("application_id").notNull(),
-  personId: integer("person_id").notNull(), // company_people.id
+  applicationId: integer("application_id").notNull().references(() => companyApplications.id),
+  personId: integer("person_id").notNull().references(() => companyPeople.id),
   entityName: varchar("entity_name", { length: 255 }),
   contactEmail: varchar("contact_email", { length: 255 }).notNull(),
   expiresAt: timestamp("expires_at").notNull(),

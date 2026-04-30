@@ -255,12 +255,25 @@ export default function ApplicationDetailsPage() {
     },
   });
 
+  const { data: corporateInviteTokens } = useQuery<{
+    tokens: Array<{ personId: number; status: "active" | "used" | "expired"; sentAt: string; expiresAt: string }>;
+  }>({
+    queryKey: ["/api/applications", applicationId, "corporate-invite-tokens"],
+    queryFn: () => fetch(`/api/applications/${applicationId}/corporate-invite-tokens`).then(r => r.json()),
+    enabled: !!applicationId,
+  });
+
+  const corpTokenStatusMap = new Map(
+    (corporateInviteTokens?.tokens ?? []).map(t => [t.personId, t])
+  );
+
   const corporateInviteMutation = useMutation({
     mutationFn: async (personId: number) => {
-      return apiRequest("POST", `/api/applications/${applicationId}/corporate-doc-upload-invite/${personId}`);
+      return apiRequest("POST", `/api/applications/${applicationId}/corporate-doc-invite/${personId}`);
     },
     onSuccess: (data: any, personId) => {
       setCorpInviteSentTo((prev) => new Set([...prev, personId]));
+      queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId, "corporate-invite-tokens"] });
       if (data?.emailSent === false && data?.uploadLink) {
         toast({
           title: "Email delivery failed",
@@ -695,28 +708,35 @@ export default function ApplicationDetailsPage() {
                           ) : (
                             group.entityTypeBadge !== "Individual" &&
                             group.personId !== null &&
-                            application.status === "draft" && (
-                              <span className="ml-auto">
-                                {corpInviteSentTo.has(group.personId!) ? (
-                                  <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400" data-testid={`corp-invite-sent-${group.personId}`}>
-                                    <CheckCircle2 className="h-3 w-3" />
-                                    Link sent
-                                  </span>
-                                ) : (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 px-2 text-xs"
-                                    onClick={() => corporateInviteMutation.mutate(group.personId!)}
-                                    disabled={corporateInviteMutation.isPending}
-                                    data-testid={`btn-send-corp-upload-link-${group.personId}`}
-                                  >
-                                    <Send className="h-3 w-3 mr-1" />
-                                    Send upload link
-                                  </Button>
-                                )}
-                              </span>
-                            )
+                            application.status === "draft" && (() => {
+                              const pid = group.personId!;
+                              const persistedToken = corpTokenStatusMap.get(pid);
+                              const justSent = corpInviteSentTo.has(pid);
+                              const isActive = justSent || persistedToken?.status === "active";
+                              const isStale = !justSent && (persistedToken?.status === "used" || persistedToken?.status === "expired");
+                              return (
+                                <span className="ml-auto">
+                                  {isActive ? (
+                                    <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400" data-testid={`corp-invite-sent-${pid}`}>
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      Active — link sent
+                                    </span>
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-2 text-xs"
+                                      onClick={() => corporateInviteMutation.mutate(pid)}
+                                      disabled={corporateInviteMutation.isPending}
+                                      data-testid={`btn-send-corp-upload-link-${pid}`}
+                                    >
+                                      <Send className="h-3 w-3 mr-1" />
+                                      {isStale ? "Resend link" : "Send upload link"}
+                                    </Button>
+                                  )}
+                                </span>
+                              );
+                            })()
                           )}
                         </div>
                         <div className="divide-y rounded-lg border">

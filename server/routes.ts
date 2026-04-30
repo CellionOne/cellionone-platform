@@ -7868,6 +7868,15 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
   // ============== ADMIN PROFILE EDIT & RESEND COMPLETION ==============
 
+  const addressFieldSchema = z.object({
+    line1: z.string().optional(),
+    line2: z.string().optional(),
+    city: z.string().optional(),
+    state: z.string().optional(),
+    postalCode: z.string().optional(),
+    country: z.string().optional(),
+  });
+
   const adminProfileEditSchema = z.object({
     companyName1: z.string().min(1).max(255).optional(),
     companyName2: z.string().max(255).optional().nullable(),
@@ -7875,23 +7884,13 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     companyType: z.enum(["LTD", "PLC", "LLP", "BN", "NGO", "UNLIMITED"]).optional(),
     businessDescription: z.string().optional().nullable(),
     selectedActivities: z.array(z.string()).optional().nullable(),
-    registeredAddress: z.object({
-      line1: z.string().optional(),
-      line2: z.string().optional(),
-      city: z.string().optional(),
-      state: z.string().optional(),
-      postalCode: z.string().optional(),
-      country: z.string().optional(),
-    }).optional().nullable(),
-    operatingAddress: z.object({
-      line1: z.string().optional(),
-      line2: z.string().optional(),
-      city: z.string().optional(),
-      state: z.string().optional(),
-      postalCode: z.string().optional(),
-      country: z.string().optional(),
-    }).optional().nullable(),
+    registeredAddress: addressFieldSchema.optional().nullable(),
+    operatingAddress: addressFieldSchema.optional().nullable(),
+    directorsData: z.array(z.record(z.unknown())).optional().nullable(),
+    shareholdersData: z.array(z.record(z.unknown())).optional().nullable(),
   });
+
+  type AdminProfileEditData = z.infer<typeof adminProfileEditSchema>;
 
   app.patch("/api/admin/applications/:id/profile", isAuthenticated, requireRole("admin"), async (req: any, res) => {
     try {
@@ -7906,8 +7905,24 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const app = await storage.getApplication(applicationId);
       if (!app) return res.status(404).json({ message: "Application not found" });
 
+      if (app.applicationType !== "incorporation") {
+        return res.status(400).json({ message: "Profile editing is only available for incorporation applications" });
+      }
+
       const adminId = getUserId(req);
-      const updated = await storage.updateApplication(applicationId, parsed.data as any);
+      const editData: AdminProfileEditData = parsed.data;
+      const updated = await storage.updateApplication(applicationId, {
+        ...(editData.companyName1 !== undefined ? { companyName1: editData.companyName1 } : {}),
+        ...(editData.companyName2 !== undefined ? { companyName2: editData.companyName2 } : {}),
+        ...(editData.companyName3 !== undefined ? { companyName3: editData.companyName3 } : {}),
+        ...(editData.companyType !== undefined ? { companyType: editData.companyType } : {}),
+        ...(editData.businessDescription !== undefined ? { businessDescription: editData.businessDescription } : {}),
+        ...(editData.selectedActivities !== undefined ? { selectedActivities: editData.selectedActivities as string[] | null } : {}),
+        ...(editData.registeredAddress !== undefined ? { registeredAddress: editData.registeredAddress } : {}),
+        ...(editData.operatingAddress !== undefined ? { operatingAddress: editData.operatingAddress } : {}),
+        ...(editData.directorsData !== undefined ? { directorsData: editData.directorsData as any[] | null } : {}),
+        ...(editData.shareholdersData !== undefined ? { shareholdersData: editData.shareholdersData as any[] | null } : {}),
+      });
 
       await storage.createAuditLog({
         actorUserId: adminId,
@@ -7932,6 +7947,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       const application = await storage.getApplication(applicationId);
       if (!application) return res.status(404).json({ message: "Application not found" });
+
+      if (application.applicationType !== "incorporation") {
+        return res.status(400).json({ message: "Completion link is only available for incorporation applications" });
+      }
 
       const completableStatuses = ["draft", "pending_verification", "submitted"];
       if (!completableStatuses.includes(application.status || "")) {

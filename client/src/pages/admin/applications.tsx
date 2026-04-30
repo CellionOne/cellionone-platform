@@ -148,6 +148,10 @@ export default function AdminApplications() {
   const [editOpsCity, setEditOpsCity] = useState("");
   const [editOpsState, setEditOpsState] = useState("");
   const [editOpsCountry, setEditOpsCountry] = useState("Nigeria");
+  const [editDirectorsJson, setEditDirectorsJson] = useState("");
+  const [editShareholdersJson, setEditShareholdersJson] = useState("");
+  const [directorsJsonError, setDirectorsJsonError] = useState("");
+  const [shareholdersJsonError, setShareholdersJsonError] = useState("");
 
   const { data: applications, isLoading } = useQuery<ApplicationWithLawyer[]>({
     queryKey: ["/api/admin/applications"],
@@ -325,8 +329,21 @@ export default function AdminApplications() {
     },
   });
 
+  interface AdminProfileEditPayload {
+    companyName1?: string;
+    companyName2?: string | null;
+    companyName3?: string | null;
+    companyType?: "LTD" | "PLC" | "LLP" | "BN" | "NGO" | "UNLIMITED";
+    businessDescription?: string | null;
+    selectedActivities?: string[] | null;
+    registeredAddress?: { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
+    operatingAddress?: { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
+    directorsData?: Record<string, unknown>[] | null;
+    shareholdersData?: Record<string, unknown>[] | null;
+  }
+
   const editProfileMutation = useMutation({
-    mutationFn: async ({ applicationId, data }: { applicationId: number; data: Record<string, any> }) => {
+    mutationFn: async ({ applicationId, data }: { applicationId: number; data: AdminProfileEditPayload }) => {
       const res = await apiRequest("PATCH", `/api/admin/applications/${applicationId}/profile`, data);
       if (!res.ok) {
         const err = await res.json();
@@ -365,48 +382,81 @@ export default function AdminApplications() {
     setEditBusinessDescription(app.businessDescription || "");
     const acts = app.selectedActivities;
     setEditActivities(Array.isArray(acts) ? acts.join(", ") : "");
-    const reg = app.registeredAddress as any;
+    const reg = app.registeredAddress as { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
     setEditRegLine1(reg?.line1 || "");
     setEditRegCity(reg?.city || "");
     setEditRegState(reg?.state || "");
     setEditRegCountry(reg?.country || "Nigeria");
-    const ops = app.operatingAddress as any;
+    const ops = app.operatingAddress as { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
     setEditOpsLine1(ops?.line1 || "");
     setEditOpsCity(ops?.city || "");
     setEditOpsState(ops?.state || "");
     setEditOpsCountry(ops?.country || "Nigeria");
+    const dirs = app.directorsData;
+    setEditDirectorsJson(Array.isArray(dirs) && dirs.length ? JSON.stringify(dirs, null, 2) : "");
+    setDirectorsJsonError("");
+    const shares = app.shareholdersData;
+    setEditShareholdersJson(Array.isArray(shares) && shares.length ? JSON.stringify(shares, null, 2) : "");
+    setShareholdersJsonError("");
     setEditProfileOpen(true);
   }
 
   function submitEditProfile() {
     if (!editProfileApp) return;
+    let directorsJsonValid = true;
+    let shareholdersJsonValid = true;
+    let parsedDirectors: Record<string, unknown>[] | null = null;
+    let parsedShareholders: Record<string, unknown>[] | null = null;
+
+    if (editDirectorsJson.trim()) {
+      try {
+        const parsed = JSON.parse(editDirectorsJson);
+        if (!Array.isArray(parsed)) throw new Error("Must be a JSON array");
+        parsedDirectors = parsed as Record<string, unknown>[];
+        setDirectorsJsonError("");
+      } catch {
+        setDirectorsJsonError("Invalid JSON — must be a valid array");
+        directorsJsonValid = false;
+      }
+    } else {
+      setDirectorsJsonError("");
+    }
+
+    if (editShareholdersJson.trim()) {
+      try {
+        const parsed = JSON.parse(editShareholdersJson);
+        if (!Array.isArray(parsed)) throw new Error("Must be a JSON array");
+        parsedShareholders = parsed as Record<string, unknown>[];
+        setShareholdersJsonError("");
+      } catch {
+        setShareholdersJsonError("Invalid JSON — must be a valid array");
+        shareholdersJsonValid = false;
+      }
+    } else {
+      setShareholdersJsonError("");
+    }
+
+    if (!directorsJsonValid || !shareholdersJsonValid) return;
+
     const activities = editActivities
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    editProfileMutation.mutate({
-      applicationId: editProfileApp.id,
-      data: {
-        companyName1: editCompanyName1,
-        companyName2: editCompanyName2 || null,
-        companyName3: editCompanyName3 || null,
-        companyType: editCompanyType,
-        businessDescription: editBusinessDescription || null,
-        selectedActivities: activities.length ? activities : null,
-        registeredAddress: {
-          line1: editRegLine1,
-          city: editRegCity,
-          state: editRegState,
-          country: editRegCountry,
-        },
-        operatingAddress: {
-          line1: editOpsLine1,
-          city: editOpsCity,
-          state: editOpsState,
-          country: editOpsCountry,
-        },
-      },
-    });
+
+    const payload: AdminProfileEditPayload = {
+      companyName1: editCompanyName1,
+      companyName2: editCompanyName2 || null,
+      companyName3: editCompanyName3 || null,
+      companyType: editCompanyType as AdminProfileEditPayload["companyType"],
+      businessDescription: editBusinessDescription || null,
+      selectedActivities: activities.length ? activities : null,
+      registeredAddress: { line1: editRegLine1, city: editRegCity, state: editRegState, country: editRegCountry },
+      operatingAddress: { line1: editOpsLine1, city: editOpsCity, state: editOpsState, country: editOpsCountry },
+      directorsData: parsedDirectors,
+      shareholdersData: parsedShareholders,
+    };
+
+    editProfileMutation.mutate({ applicationId: editProfileApp.id, data: payload });
   }
 
   const filteredApplications = applications?.filter((app) => {
@@ -909,30 +959,34 @@ export default function AdminApplications() {
                           Send to Bank
                         </Button>
                       )}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openEditProfile(app)}
-                        data-testid={`button-edit-profile-${app.id}`}
-                      >
-                        <Pencil className="h-4 w-4 mr-1" />
-                        Edit
-                      </Button>
-                      {["draft", "pending_verification", "submitted"].includes(app.status || "") && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => resendCompletionMutation.mutate(app.id)}
-                          disabled={resendCompletionMutation.isPending}
-                          data-testid={`button-resend-completion-${app.id}`}
-                        >
-                          {resendCompletionMutation.isPending ? (
-                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                          ) : (
-                            <MailCheck className="h-4 w-4 mr-1" />
+                      {app.applicationType === "incorporation" && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditProfile(app)}
+                            data-testid={`button-edit-profile-${app.id}`}
+                          >
+                            <Pencil className="h-4 w-4 mr-1" />
+                            Edit
+                          </Button>
+                          {["draft", "pending_verification", "submitted"].includes(app.status || "") && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => resendCompletionMutation.mutate(app.id)}
+                              disabled={resendCompletionMutation.isPending}
+                              data-testid={`button-resend-completion-${app.id}`}
+                            >
+                              {resendCompletionMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              ) : (
+                                <MailCheck className="h-4 w-4 mr-1" />
+                              )}
+                              Resend Link
+                            </Button>
                           )}
-                          Resend Link
-                        </Button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -1507,6 +1561,42 @@ export default function AdminApplications() {
                   <Input id="edit-ops-country" value={editOpsCountry} onChange={(e) => setEditOpsCountry(e.target.value)} placeholder="Nigeria" data-testid="input-edit-ops-country" />
                 </div>
               </div>
+            </div>
+
+            <Separator />
+
+            {/* Directors Data JSON */}
+            <div>
+              <p className="text-sm font-medium text-muted-foreground mb-1">Directors Data (JSON array)</p>
+              <p className="text-xs text-muted-foreground mb-2">Leave blank to keep existing data. Must be a valid JSON array if provided.</p>
+              <Textarea
+                id="edit-directors-json"
+                value={editDirectorsJson}
+                onChange={(e) => { setEditDirectorsJson(e.target.value); setDirectorsJsonError(""); }}
+                placeholder='[{"fullName": "John Doe", "role": "director", ...}]'
+                rows={5}
+                className="font-mono text-xs"
+                data-testid="textarea-edit-directors-json"
+              />
+              {directorsJsonError && <p className="text-xs text-destructive mt-1">{directorsJsonError}</p>}
+            </div>
+
+            <Separator />
+
+            {/* Shareholders Data JSON */}
+            <div>
+              <p className="text-sm font-medium text-muted-foreground mb-1">Shareholders Data (JSON array)</p>
+              <p className="text-xs text-muted-foreground mb-2">Leave blank to keep existing data. Must be a valid JSON array if provided.</p>
+              <Textarea
+                id="edit-shareholders-json"
+                value={editShareholdersJson}
+                onChange={(e) => { setEditShareholdersJson(e.target.value); setShareholdersJsonError(""); }}
+                placeholder='[{"fullName": "Jane Doe", "sharePercentage": 50, ...}]'
+                rows={5}
+                className="font-mono text-xs"
+                data-testid="textarea-edit-shareholders-json"
+              />
+              {shareholdersJsonError && <p className="text-xs text-destructive mt-1">{shareholdersJsonError}</p>}
             </div>
           </div>
 

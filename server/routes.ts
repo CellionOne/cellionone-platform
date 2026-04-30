@@ -7866,6 +7866,150 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // ============== ADMIN PROFILE EDIT & RESEND COMPLETION ==============
+
+  const adminProfileEditSchema = z.object({
+    companyName1: z.string().min(1).max(255).optional(),
+    companyName2: z.string().max(255).optional().nullable(),
+    companyName3: z.string().max(255).optional().nullable(),
+    companyType: z.enum(["LTD", "PLC", "LLP", "BN", "NGO", "UNLIMITED"]).optional(),
+    businessDescription: z.string().optional().nullable(),
+    selectedActivities: z.array(z.string()).optional().nullable(),
+    registeredAddress: z.object({
+      line1: z.string().optional(),
+      line2: z.string().optional(),
+      city: z.string().optional(),
+      state: z.string().optional(),
+      postalCode: z.string().optional(),
+      country: z.string().optional(),
+    }).optional().nullable(),
+    operatingAddress: z.object({
+      line1: z.string().optional(),
+      line2: z.string().optional(),
+      city: z.string().optional(),
+      state: z.string().optional(),
+      postalCode: z.string().optional(),
+      country: z.string().optional(),
+    }).optional().nullable(),
+  });
+
+  app.patch("/api/admin/applications/:id/profile", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const applicationId = parseInt(req.params.id);
+      if (isNaN(applicationId)) return res.status(400).json({ message: "Invalid application ID" });
+
+      const parsed = adminProfileEditSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+
+      const app = await storage.getApplication(applicationId);
+      if (!app) return res.status(404).json({ message: "Application not found" });
+
+      const adminId = getUserId(req);
+      const updated = await storage.updateApplication(applicationId, parsed.data as any);
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_profile_edit",
+        entityType: "company_application",
+        entityId: applicationId.toString(),
+        details: { fields: Object.keys(parsed.data), note: "Admin edited application profile on behalf of founder" },
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("[Admin] Error editing application profile:", error);
+      res.status(500).json({ message: "Failed to update application profile" });
+    }
+  });
+
+  app.post("/api/admin/applications/:id/resend-completion", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const applicationId = parseInt(req.params.id);
+      if (isNaN(applicationId)) return res.status(400).json({ message: "Invalid application ID" });
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const completableStatuses = ["draft", "pending_verification", "submitted"];
+      if (!completableStatuses.includes(application.status || "")) {
+        return res.status(400).json({ message: "Completion link can only be resent for draft or submitted applications" });
+      }
+
+      const founder = await storage.getUser(application.founderUserId);
+      if (!founder?.email) return res.status(404).json({ message: "Founder email not found" });
+
+      const adminId = getUserId(req);
+      const emailSvc = await import("./services/emailService");
+      const { client, fromEmail } = await emailSvc.getResendClient();
+      const baseUrl = emailSvc.getSiteBaseUrl(req);
+      const completionUrl = `${baseUrl}/applications/${applicationId}`;
+      const founderFirstName = founder.firstName || "there";
+      const companyName = application.companyName1 || `Application #${applicationId}`;
+      const safeFirstName = founderFirstName.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const safeCompanyName = companyName.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+      await client.emails.send({
+        from: fromEmail,
+        to: founder.email,
+        subject: `Action required: Complete your ${safeCompanyName} registration on Cellion One`,
+        html: `<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
+    <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+      <div style="text-align: center; margin-bottom: 32px;">
+        <div style="display: inline-block; background: #16a34a; padding: 12px 20px; border-radius: 8px; margin-bottom: 16px;">
+          <span style="color: white; font-size: 22px; font-weight: bold; letter-spacing: 0.5px;">Cellion One</span>
+        </div>
+      </div>
+      <h2 style="color: #18181b; font-size: 20px; margin-bottom: 12px;">Hi ${safeFirstName},</h2>
+      <p style="color: #52525b; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+        Your company registration application for <strong>${safeCompanyName}</strong> is still incomplete.
+        Our team is ready to process it as soon as you finish filling in the required details.
+      </p>
+      <p style="color: #52525b; font-size: 16px; line-height: 1.6; margin-bottom: 32px;">
+        Click the button below to pick up exactly where you left off — it only takes a few minutes to complete.
+      </p>
+      <div style="text-align: center; margin-bottom: 32px;">
+        <a href="${completionUrl}" style="display: inline-block; background: #16a34a; color: white; font-size: 16px; font-weight: 600; padding: 14px 32px; border-radius: 6px; text-decoration: none;">
+          Complete My Application
+        </a>
+      </div>
+      <p style="color: #71717a; font-size: 14px; line-height: 1.6; margin-bottom: 8px;">
+        Or copy and paste this link into your browser:
+      </p>
+      <p style="color: #16a34a; font-size: 13px; word-break: break-all; margin-bottom: 32px;">
+        ${completionUrl}
+      </p>
+      <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 0 0 24px 0;">
+      <p style="color: #a1a1aa; font-size: 12px; text-align: center; margin: 0;">
+        &copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.<br>
+        If you did not create this application, please contact us at service@cellionone.com.
+      </p>
+    </div>
+  </body>
+</html>`,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_resend_completion",
+        entityType: "company_application",
+        entityId: applicationId.toString(),
+        details: { founderEmail: founder.email, companyName },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Completion link sent successfully" });
+    } catch (error) {
+      console.error("[Admin] Error resending completion link:", error);
+      res.status(500).json({ message: "Failed to send completion link" });
+    }
+  });
+
   // ============== LAWYER BANK DETAILS & PAYOUT LEDGER ==============
 
   const bankDetailsSchema = z.object({

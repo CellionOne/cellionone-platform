@@ -5,6 +5,7 @@ import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/status-badge";
@@ -31,6 +32,8 @@ import {
   CheckCircle2,
   XCircle,
   ArrowLeftRight,
+  Pencil,
+  MailCheck,
 } from "lucide-react";
 import {
   Dialog,
@@ -41,6 +44,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import type { CompanyApplication, LawyerProfile, PayoutLedger } from "@shared/schema";
 
 interface BankPartnerBasic { id: number; name: string; }
@@ -126,6 +130,24 @@ export default function AdminApplications() {
   const [lawyersExpanded, setLawyersExpanded] = useState(false);
   const [payoutsExpanded, setPayoutsExpanded] = useState(false);
   const [lawyerFeeNaira, setLawyerFeeNaira] = useState<string>("");
+
+  // Edit Profile dialog state
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [editProfileApp, setEditProfileApp] = useState<ApplicationWithLawyer | null>(null);
+  const [editCompanyName1, setEditCompanyName1] = useState("");
+  const [editCompanyName2, setEditCompanyName2] = useState("");
+  const [editCompanyName3, setEditCompanyName3] = useState("");
+  const [editCompanyType, setEditCompanyType] = useState("LTD");
+  const [editBusinessDescription, setEditBusinessDescription] = useState("");
+  const [editActivities, setEditActivities] = useState("");
+  const [editRegLine1, setEditRegLine1] = useState("");
+  const [editRegCity, setEditRegCity] = useState("");
+  const [editRegState, setEditRegState] = useState("");
+  const [editRegCountry, setEditRegCountry] = useState("Nigeria");
+  const [editOpsLine1, setEditOpsLine1] = useState("");
+  const [editOpsCity, setEditOpsCity] = useState("");
+  const [editOpsState, setEditOpsState] = useState("");
+  const [editOpsCountry, setEditOpsCountry] = useState("Nigeria");
 
   const { data: applications, isLoading } = useQuery<ApplicationWithLawyer[]>({
     queryKey: ["/api/admin/applications"],
@@ -302,6 +324,90 @@ export default function AdminApplications() {
       toast({ title: "Failed to save bank details", description: e.message, variant: "destructive" });
     },
   });
+
+  const editProfileMutation = useMutation({
+    mutationFn: async ({ applicationId, data }: { applicationId: number; data: Record<string, any> }) => {
+      const res = await apiRequest("PATCH", `/api/admin/applications/${applicationId}/profile`, data);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to update profile");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/applications"] });
+      toast({ title: "Profile updated", description: "Application profile has been updated on behalf of the founder." });
+      setEditProfileOpen(false);
+      setEditProfileApp(null);
+    },
+    onError: (e: Error) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
+  });
+
+  const resendCompletionMutation = useMutation({
+    mutationFn: async (applicationId: number) => {
+      const res = await apiRequest("POST", `/api/admin/applications/${applicationId}/resend-completion`, {});
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to send email");
+      }
+      return res.json();
+    },
+    onSuccess: () => toast({ title: "Email sent", description: "A completion link has been sent to the founder." }),
+    onError: (e: Error) => toast({ title: "Email failed", description: e.message, variant: "destructive" }),
+  });
+
+  function openEditProfile(app: ApplicationWithLawyer) {
+    setEditProfileApp(app);
+    setEditCompanyName1(app.companyName1 || "");
+    setEditCompanyName2(app.companyName2 || "");
+    setEditCompanyName3(app.companyName3 || "");
+    setEditCompanyType(app.companyType || "LTD");
+    setEditBusinessDescription(app.businessDescription || "");
+    const acts = app.selectedActivities;
+    setEditActivities(Array.isArray(acts) ? acts.join(", ") : "");
+    const reg = app.registeredAddress as any;
+    setEditRegLine1(reg?.line1 || "");
+    setEditRegCity(reg?.city || "");
+    setEditRegState(reg?.state || "");
+    setEditRegCountry(reg?.country || "Nigeria");
+    const ops = app.operatingAddress as any;
+    setEditOpsLine1(ops?.line1 || "");
+    setEditOpsCity(ops?.city || "");
+    setEditOpsState(ops?.state || "");
+    setEditOpsCountry(ops?.country || "Nigeria");
+    setEditProfileOpen(true);
+  }
+
+  function submitEditProfile() {
+    if (!editProfileApp) return;
+    const activities = editActivities
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    editProfileMutation.mutate({
+      applicationId: editProfileApp.id,
+      data: {
+        companyName1: editCompanyName1,
+        companyName2: editCompanyName2 || null,
+        companyName3: editCompanyName3 || null,
+        companyType: editCompanyType,
+        businessDescription: editBusinessDescription || null,
+        selectedActivities: activities.length ? activities : null,
+        registeredAddress: {
+          line1: editRegLine1,
+          city: editRegCity,
+          state: editRegState,
+          country: editRegCountry,
+        },
+        operatingAddress: {
+          line1: editOpsLine1,
+          city: editOpsCity,
+          state: editOpsState,
+          country: editOpsCountry,
+        },
+      },
+    });
+  }
 
   const filteredApplications = applications?.filter((app) => {
     const matchesStatus = statusFilter === "all" || app.status === statusFilter;
@@ -803,6 +909,31 @@ export default function AdminApplications() {
                           Send to Bank
                         </Button>
                       )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEditProfile(app)}
+                        data-testid={`button-edit-profile-${app.id}`}
+                      >
+                        <Pencil className="h-4 w-4 mr-1" />
+                        Edit
+                      </Button>
+                      {["draft", "pending_verification", "submitted"].includes(app.status || "") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => resendCompletionMutation.mutate(app.id)}
+                          disabled={resendCompletionMutation.isPending}
+                          data-testid={`button-resend-completion-${app.id}`}
+                        >
+                          {resendCompletionMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                          ) : (
+                            <MailCheck className="h-4 w-4 mr-1" />
+                          )}
+                          Resend Link
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -1229,6 +1360,164 @@ export default function AdminApplications() {
               data-testid="button-save-bank-details"
             >
               {bankDetailsMutation.isPending ? <LoadingSpinner size="sm" /> : "Save & Create Recipient"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Profile Dialog */}
+      <Dialog open={editProfileOpen} onOpenChange={(open) => { setEditProfileOpen(open); if (!open) setEditProfileApp(null); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Application Profile</DialogTitle>
+            <DialogDescription>
+              Update details for "{editProfileApp?.companyName1 || 'this application'}" on behalf of the founder. All changes are audit-logged.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 py-2">
+            {/* Company Names */}
+            <div>
+              <p className="text-sm font-medium text-muted-foreground mb-3">Company Names</p>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-name1">Preferred Name <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="edit-name1"
+                    value={editCompanyName1}
+                    onChange={(e) => setEditCompanyName1(e.target.value)}
+                    placeholder="First choice company name"
+                    data-testid="input-edit-name1"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-name2">Second Choice <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                  <Input
+                    id="edit-name2"
+                    value={editCompanyName2}
+                    onChange={(e) => setEditCompanyName2(e.target.value)}
+                    placeholder="Alternative name"
+                    data-testid="input-edit-name2"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-name3">Third Choice <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                  <Input
+                    id="edit-name3"
+                    value={editCompanyName3}
+                    onChange={(e) => setEditCompanyName3(e.target.value)}
+                    placeholder="Third alternative name"
+                    data-testid="input-edit-name3"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Company Type & Description */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Company Type</Label>
+                <Select value={editCompanyType} onValueChange={setEditCompanyType}>
+                  <SelectTrigger data-testid="select-edit-company-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="LTD">Private Limited (LTD)</SelectItem>
+                    <SelectItem value="PLC">Public Limited (PLC)</SelectItem>
+                    <SelectItem value="LLP">Limited Liability Partnership (LLP)</SelectItem>
+                    <SelectItem value="BN">Business Name (BN)</SelectItem>
+                    <SelectItem value="NGO">Non-Governmental Organisation (NGO)</SelectItem>
+                    <SelectItem value="UNLIMITED">Unlimited Company</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-description">Business Description</Label>
+              <Textarea
+                id="edit-description"
+                value={editBusinessDescription}
+                onChange={(e) => setEditBusinessDescription(e.target.value)}
+                placeholder="Describe the nature and objectives of the business…"
+                rows={3}
+                data-testid="input-edit-description"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-activities">Selected Activities <span className="text-xs text-muted-foreground">(comma-separated)</span></Label>
+              <Textarea
+                id="edit-activities"
+                value={editActivities}
+                onChange={(e) => setEditActivities(e.target.value)}
+                placeholder="e.g. Retail trading, Software development, Consulting services"
+                rows={2}
+                data-testid="input-edit-activities"
+              />
+            </div>
+
+            <Separator />
+
+            {/* Registered Address */}
+            <div>
+              <p className="text-sm font-medium text-muted-foreground mb-3">Registered Address</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label htmlFor="edit-reg-line1">Street Address</Label>
+                  <Input id="edit-reg-line1" value={editRegLine1} onChange={(e) => setEditRegLine1(e.target.value)} placeholder="1 Example Street" data-testid="input-edit-reg-line1" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-reg-city">City</Label>
+                  <Input id="edit-reg-city" value={editRegCity} onChange={(e) => setEditRegCity(e.target.value)} placeholder="Lagos" data-testid="input-edit-reg-city" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-reg-state">State</Label>
+                  <Input id="edit-reg-state" value={editRegState} onChange={(e) => setEditRegState(e.target.value)} placeholder="Lagos State" data-testid="input-edit-reg-state" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-reg-country">Country</Label>
+                  <Input id="edit-reg-country" value={editRegCountry} onChange={(e) => setEditRegCountry(e.target.value)} placeholder="Nigeria" data-testid="input-edit-reg-country" />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Operating Address */}
+            <div>
+              <p className="text-sm font-medium text-muted-foreground mb-3">Operating Address</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label htmlFor="edit-ops-line1">Street Address</Label>
+                  <Input id="edit-ops-line1" value={editOpsLine1} onChange={(e) => setEditOpsLine1(e.target.value)} placeholder="1 Example Street" data-testid="input-edit-ops-line1" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-ops-city">City</Label>
+                  <Input id="edit-ops-city" value={editOpsCity} onChange={(e) => setEditOpsCity(e.target.value)} placeholder="Lagos" data-testid="input-edit-ops-city" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-ops-state">State</Label>
+                  <Input id="edit-ops-state" value={editOpsState} onChange={(e) => setEditOpsState(e.target.value)} placeholder="Lagos State" data-testid="input-edit-ops-state" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-ops-country">Country</Label>
+                  <Input id="edit-ops-country" value={editOpsCountry} onChange={(e) => setEditOpsCountry(e.target.value)} placeholder="Nigeria" data-testid="input-edit-ops-country" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setEditProfileOpen(false)}>Cancel</Button>
+            <Button
+              onClick={submitEditProfile}
+              disabled={editProfileMutation.isPending || !editCompanyName1.trim()}
+              data-testid="button-save-edit-profile"
+            >
+              {editProfileMutation.isPending ? <LoadingSpinner size="sm" /> : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

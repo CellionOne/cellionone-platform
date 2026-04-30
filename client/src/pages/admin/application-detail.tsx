@@ -1,15 +1,23 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useParams, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/status-badge";
 import { LoadingSpinner } from "@/components/loading-spinner";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CompanyApplication, ApplicationChecklistItem, CompanyPerson, DocumentFile } from "@shared/schema";
@@ -29,6 +37,10 @@ import {
   Briefcase,
   ShieldCheck,
   ShieldAlert,
+  ChevronDown,
+  ChevronRight,
+  Upload,
+  MailCheck,
 } from "lucide-react";
 
 interface AdminAppDetail {
@@ -64,9 +76,11 @@ function ChecklistStatusIcon({ status }: { status: string }) {
 function ChecklistItemRow({
   item,
   applicationId,
+  compact = false,
 }: {
   item: ApplicationChecklistItem;
   applicationId: number;
+  compact?: boolean;
 }) {
   const { toast } = useToast();
   const [localStatus, setLocalStatus] = useState(item.status || "missing");
@@ -90,31 +104,39 @@ function ChecklistItemRow({
     updateMutation.mutate({ status: localStatus, reviewerNotes: localNotes || undefined });
   };
 
+  // For compact (per-person) mode, strip the "PersonName — " prefix from label
+  const displayLabel = compact
+    ? item.label.includes(" — ") ? item.label.substring(item.label.indexOf(" — ") + 3) : item.label
+    : item.label;
+
   return (
-    <div className="border rounded-lg p-4 space-y-3" data-testid={`checklist-item-${item.id}`}>
+    <div
+      className={`border rounded-lg p-3 space-y-2 ${compact ? "bg-muted/20" : ""}`}
+      data-testid={`checklist-item-${item.id}`}
+    >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3 min-w-0">
+        <div className="flex items-start gap-2 min-w-0">
           <div className="mt-0.5 shrink-0">
             <ChecklistStatusIcon status={item.status || "missing"} />
           </div>
           <div className="min-w-0">
-            <p className="font-medium text-sm">{item.label}</p>
-            <p className="text-xs text-muted-foreground mt-0.5 uppercase tracking-wide">{item.key}</p>
-            {item.source && (
+            <p className={`font-medium ${compact ? "text-xs" : "text-sm"}`}>{displayLabel}</p>
+            {!compact && (
+              <p className="text-xs text-muted-foreground mt-0.5 uppercase tracking-wide">{item.key}</p>
+            )}
+            {item.source && !compact && (
               <p className="text-xs text-muted-foreground">Source: {item.source}</p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[item.status || "missing"]}`}>
             {STATUS_LABELS[item.status || "missing"]}
           </span>
-          {item.required && (
-            <span className="text-xs text-muted-foreground">Required</span>
-          )}
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
+            className="h-6 px-2 text-xs"
             onClick={() => setEditing(!editing)}
             data-testid={`button-edit-checklist-${item.id}`}
           >
@@ -124,17 +146,17 @@ function ChecklistItemRow({
       </div>
 
       {item.reviewerNotes && !editing && (
-        <p className="text-sm text-muted-foreground bg-muted/50 rounded px-3 py-2 ml-7">
+        <p className="text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1.5 ml-6">
           Note: {item.reviewerNotes}
         </p>
       )}
 
       {editing && (
-        <div className="ml-7 space-y-3 border-t pt-3">
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-medium w-16 shrink-0">Status</label>
+        <div className="ml-6 space-y-2 border-t pt-2">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium w-12 shrink-0">Status</label>
             <Select value={localStatus} onValueChange={setLocalStatus}>
-              <SelectTrigger className="w-48" data-testid={`select-checklist-status-${item.id}`}>
+              <SelectTrigger className="h-7 text-xs w-44" data-testid={`select-checklist-status-${item.id}`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -146,30 +168,249 @@ function ChecklistItemRow({
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-start gap-3">
-            <label className="text-sm font-medium w-16 shrink-0 mt-2">Notes</label>
+          <div className="flex items-start gap-2">
+            <label className="text-xs font-medium w-12 shrink-0 mt-1.5">Notes</label>
             <Textarea
               value={localNotes}
               onChange={(e) => setLocalNotes(e.target.value)}
               placeholder="Optional reviewer notes..."
               rows={2}
-              className="flex-1"
+              className="flex-1 text-xs"
               data-testid={`textarea-checklist-notes-${item.id}`}
             />
           </div>
           <div className="flex justify-end">
             <Button
               size="sm"
+              className="h-7 text-xs"
               onClick={handleSave}
               disabled={updateMutation.isPending}
               data-testid={`button-save-checklist-${item.id}`}
             >
-              {updateMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {updateMutation.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
               Save
             </Button>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function PersonUploadDialog({
+  open,
+  onOpenChange,
+  person,
+  applicationId,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  person: CompanyPerson;
+  applicationId: number;
+}) {
+  const { toast } = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [docType, setDocType] = useState("");
+  const [category, setCategory] = useState("company");
+  const [uploading, setUploading] = useState(false);
+
+  const personLabel = person.entityType === "corporate"
+    ? person.corporateName || "Corporate Entity"
+    : `${person.firstName || ""} ${person.lastName || ""}`.trim() || person.inviteEmail || "Person";
+
+  const handleUpload = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) return toast({ title: "Please select a file", variant: "destructive" });
+    if (!docType.trim()) return toast({ title: "Please enter a document name", variant: "destructive" });
+
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("docType", docType.trim());
+      form.append("category", category);
+
+      const res = await fetch(`/api/applications/${applicationId}/documents/upload`, {
+        method: "POST",
+        credentials: "include",
+        body: form,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Upload failed");
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/applications", applicationId, "documents"] });
+      toast({ title: "Document uploaded successfully" });
+      onOpenChange(false);
+      setDocType("");
+      if (fileRef.current) fileRef.current.value = "";
+    } catch (err: any) {
+      toast({ title: err.message || "Upload failed", variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Upload Document for {personLabel}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label>Document Name / Type</Label>
+            <Input
+              placeholder="e.g. CAC Certificate, Board Resolution"
+              value={docType}
+              onChange={(e) => setDocType(e.target.value)}
+              data-testid="input-person-doc-type"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Category</Label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger data-testid="select-person-doc-category">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="identity">Identity</SelectItem>
+                <SelectItem value="company">Company</SelectItem>
+                <SelectItem value="filing">Filing</SelectItem>
+                <SelectItem value="stamped_originals">Stamped Originals</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>File</Label>
+            <Input
+              type="file"
+              ref={fileRef}
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+              data-testid="input-person-doc-file"
+            />
+            <p className="text-xs text-muted-foreground">PDF, JPEG, PNG, DOC or DOCX — max 10 MB</p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleUpload} disabled={uploading} data-testid="button-confirm-person-upload">
+            {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+            Upload
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PersonRow({
+  person,
+  personChecklist,
+  applicationId,
+}: {
+  person: CompanyPerson;
+  personChecklist: ApplicationChecklistItem[];
+  applicationId: number;
+}) {
+  const isCorporate = person.entityType === "corporate";
+  const [expanded, setExpanded] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+
+  const displayName = isCorporate
+    ? person.corporateName
+    : `${person.firstName || ""} ${person.lastName || ""}`.trim() || person.inviteEmail;
+
+  return (
+    <div className="border rounded-lg overflow-hidden" data-testid={`person-row-${person.id}`}>
+      {/* Header row */}
+      <button
+        className="w-full flex items-start justify-between gap-3 px-4 py-3 hover:bg-muted/40 transition-colors text-left"
+        onClick={() => setExpanded(!expanded)}
+        data-testid={`button-expand-person-${person.id}`}
+      >
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="h-9 w-9 rounded-full bg-muted flex items-center justify-center shrink-0 mt-0.5">
+            {isCorporate ? <Briefcase className="h-4 w-4 text-muted-foreground" /> : <User className="h-4 w-4 text-muted-foreground" />}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-medium">{displayName}</p>
+            <p className="text-xs text-muted-foreground">
+              {person.role} &bull; {isCorporate ? `Corporate (${person.corporateBusinessType?.toUpperCase() || "CO"})` : "Individual"}
+              {person.inviteEmail && !isCorporate && ` \u2022 ${person.inviteEmail}`}
+            </p>
+            {isCorporate && person.corporateRcNumber && (
+              <p className="text-xs text-muted-foreground">RC: {person.corporateRcNumber}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {person.isVerified ? (
+            <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 dark:bg-green-900/30 dark:text-green-300 px-2 py-0.5 rounded-full">
+              <ShieldCheck className="h-3 w-3" />
+              Verified
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+              <ShieldAlert className="h-3 w-3" />
+              {person.inviteStatus === "accepted" ? "Pending KYC" : person.inviteStatus || "Pending"}
+            </span>
+          )}
+          {personChecklist.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {personChecklist.filter(i => i.status === "accepted").length}/{personChecklist.length} docs
+            </span>
+          )}
+          {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+        </div>
+      </button>
+
+      {/* Expanded panel */}
+      {expanded && (
+        <div className="border-t px-4 py-3 space-y-3 bg-muted/10">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Document Requirements
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => setUploadOpen(true)}
+              data-testid={`button-upload-person-doc-${person.id}`}
+            >
+              <Upload className="h-3 w-3 mr-1" />
+              Upload Document
+            </Button>
+          </div>
+
+          {personChecklist.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-2">
+              No document requirements on record for this person.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {personChecklist.map((item) => (
+                <ChecklistItemRow
+                  key={item.id}
+                  item={item}
+                  applicationId={applicationId}
+                  compact
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <PersonUploadDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        person={person}
+        applicationId={applicationId}
+      />
     </div>
   );
 }
@@ -195,9 +436,9 @@ function DocumentRow({ doc }: { doc: DocumentFile }) {
     }
   };
 
-  const uploadedAt = doc.createdAt ? new Date(doc.createdAt).toLocaleDateString("en-GB", {
-    day: "numeric", month: "short", year: "numeric",
-  }) : "—";
+  const uploadedAt = doc.createdAt
+    ? new Date(doc.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+    : "—";
 
   return (
     <div className="flex items-center justify-between gap-3 border rounded-lg px-4 py-3" data-testid={`doc-row-${doc.id}`}>
@@ -207,7 +448,7 @@ function DocumentRow({ doc }: { doc: DocumentFile }) {
           <p className="text-sm font-medium truncate">{doc.filename}</p>
           <p className="text-xs text-muted-foreground">
             {doc.docType} &bull; {doc.category} &bull; {uploadedAt}
-            {doc.sizeBytes ? ` &bull; ${(doc.sizeBytes / 1024).toFixed(0)} KB` : ""}
+            {doc.sizeBytes ? ` \u2022 ${(doc.sizeBytes / 1024).toFixed(0)} KB` : ""}
           </p>
         </div>
       </div>
@@ -225,48 +466,10 @@ function DocumentRow({ doc }: { doc: DocumentFile }) {
   );
 }
 
-function PersonRow({ person }: { person: CompanyPerson }) {
-  const isCorporate = person.entityType === "corporate";
-
-  return (
-    <div className="flex items-start justify-between gap-3 border rounded-lg px-4 py-3" data-testid={`person-row-${person.id}`}>
-      <div className="flex items-start gap-3 min-w-0">
-        <div className="h-9 w-9 rounded-full bg-muted flex items-center justify-center shrink-0">
-          {isCorporate ? <Briefcase className="h-4 w-4 text-muted-foreground" /> : <User className="h-4 w-4 text-muted-foreground" />}
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-medium">
-            {isCorporate ? person.corporateName : `${person.firstName || ""} ${person.lastName || ""}`.trim() || person.inviteEmail}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {person.role} &bull; {isCorporate ? `Corporate (${person.corporateBusinessType?.toUpperCase() || "CO"})` : "Individual"}
-            {person.inviteEmail && !isCorporate && ` &bull; ${person.inviteEmail}`}
-          </p>
-          {isCorporate && person.corporateRcNumber && (
-            <p className="text-xs text-muted-foreground">RC: {person.corporateRcNumber}</p>
-          )}
-        </div>
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {person.isVerified ? (
-          <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 dark:bg-green-900/30 dark:text-green-300 px-2 py-0.5 rounded-full">
-            <ShieldCheck className="h-3 w-3" />
-            Verified
-          </span>
-        ) : (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-            <ShieldAlert className="h-3 w-3" />
-            {person.inviteStatus === "accepted" ? "Pending KYC" : person.inviteStatus || "Pending"}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function AdminApplicationDetail() {
   const { id } = useParams<{ id: string }>();
   const applicationId = parseInt(id || "0");
+  const { toast } = useToast();
 
   const { data, isLoading, error } = useQuery<AdminAppDetail>({
     queryKey: ["/api/admin/applications", applicationId],
@@ -286,6 +489,12 @@ export default function AdminApplicationDetail() {
         return r.json();
       }),
     enabled: !isNaN(applicationId) && applicationId > 0,
+  });
+
+  const resendMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/admin/applications/${applicationId}/resend-completion`, {}),
+    onSuccess: () => toast({ title: "Completion link resent to founder" }),
+    onError: (err: any) => toast({ title: err?.message || "Failed to resend link", variant: "destructive" }),
   });
 
   if (isLoading) {
@@ -316,12 +525,31 @@ export default function AdminApplicationDetail() {
 
   const { application, checklistItems, people } = data;
 
+  // Split checklist into standard items and per-person requirement items
+  const standardItems = checklistItems.filter((i) => i.source !== "people_requirement");
+  const peopleReqItems = checklistItems.filter((i) => i.source === "people_requirement");
+
+  // Build a map: personId → checklist items
+  const personChecklistMap = new Map<number, ApplicationChecklistItem[]>();
+  for (const item of peopleReqItems) {
+    const match = (item.key ?? "").match(/^people_req_(\d+)_/);
+    if (match) {
+      const pid = parseInt(match[1], 10);
+      if (!personChecklistMap.has(pid)) personChecklistMap.set(pid, []);
+      personChecklistMap.get(pid)!.push(item);
+    }
+  }
+
   const checklistSummary = {
     total: checklistItems.length,
     accepted: checklistItems.filter((i) => i.status === "accepted").length,
     rejected: checklistItems.filter((i) => i.status === "rejected").length,
     missing: checklistItems.filter((i) => !i.status || i.status === "missing").length,
   };
+
+  const canResend =
+    application.applicationType === "incorporation" &&
+    ["draft", "pending_verification", "submitted"].includes(application.status || "");
 
   return (
     <DashboardLayout>
@@ -407,6 +635,25 @@ export default function AdminApplicationDetail() {
                       <span className="font-medium text-primary">{application.rcNumber}</span>
                     </div>
                   )}
+                  {canResend && (
+                    <div className="pt-2 border-t">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => resendMutation.mutate()}
+                        disabled={resendMutation.isPending}
+                        data-testid="button-resend-completion-link"
+                      >
+                        {resendMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <MailCheck className="h-4 w-4 mr-2" />
+                        )}
+                        Resend Completion Link to Founder
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -478,18 +725,37 @@ export default function AdminApplicationDetail() {
           </TabsContent>
 
           {/* ── Checklist ── */}
-          <TabsContent value="checklist" className="mt-4">
-            {checklistItems.length === 0 ? (
+          <TabsContent value="checklist" className="mt-4 space-y-6">
+            {standardItems.length === 0 && peopleReqItems.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <FileText className="h-10 w-10 mx-auto mb-3 opacity-30" />
                 <p>No checklist items for this application.</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {checklistItems.map((item) => (
-                  <ChecklistItemRow key={item.id} item={item} applicationId={applicationId} />
-                ))}
-              </div>
+              <>
+                {standardItems.length > 0 && (
+                  <div className="space-y-3">
+                    {peopleReqItems.length > 0 && (
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                        Application Requirements
+                      </h3>
+                    )}
+                    {standardItems.map((item) => (
+                      <ChecklistItemRow key={item.id} item={item} applicationId={applicationId} />
+                    ))}
+                  </div>
+                )}
+                {peopleReqItems.length > 0 && (
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                      People &amp; Entity Documents
+                    </h3>
+                    {peopleReqItems.map((item) => (
+                      <ChecklistItemRow key={item.id} item={item} applicationId={applicationId} />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 
@@ -502,8 +768,16 @@ export default function AdminApplicationDetail() {
               </div>
             ) : (
               <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Click a person to expand their document requirements and upload additional files.
+                </p>
                 {people.map((person) => (
-                  <PersonRow key={person.id} person={person} />
+                  <PersonRow
+                    key={person.id}
+                    person={person}
+                    personChecklist={personChecklistMap.get(person.id) ?? []}
+                    applicationId={applicationId}
+                  />
                 ))}
               </div>
             )}

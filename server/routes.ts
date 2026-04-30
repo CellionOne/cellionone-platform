@@ -28,7 +28,7 @@ import { registerCieApiRoutes } from "./routes/cieApiRoutes";
 import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
 import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
-import { syncChecklistFromVerifications, syncPeopleDocumentRequirements, syncAllApplicationsForVerifiedUser } from "./services/checklistSyncService";
+import { syncChecklistFromVerifications, syncPeopleDocumentRequirements, syncAllApplicationsForVerifiedUser, getDocSlugsForPerson } from "./services/checklistSyncService";
 
 // Maximum number of Smile ID error results for a given RC number before we
 // stop retrying live lookups. Configurable via SMILE_ID_MAX_ERROR_RETRIES env
@@ -6166,6 +6166,277 @@ export async function registerRoutes(
       res.json({ success: true, message: "Documents uploaded successfully" });
     } catch (error) {
       console.error("[DirectorUpload] POST error:", error);
+      res.status(500).json({ message: "Failed to upload documents. Please try again." });
+    }
+  });
+
+  // ============== CORPORATE DOC UPLOAD INVITE ROUTES ==============
+
+  // POST /api/applications/:id/corporate-doc-upload-invite/:personId
+  // Founder/admin: create a time-limited upload link for a corporate entity's authorised rep
+  app.post("/api/applications/:id/corporate-doc-upload-invite/:personId", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id, 10);
+      const personId = parseInt(req.params.personId, 10);
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const userRoles = await getUserRoles(userId);
+      const isAdmin = userRoles.includes("admin");
+      const isOwner = application.founderUserId === userId;
+      if (!isOwner && !isAdmin) return res.status(403).json({ message: "Access denied" });
+
+      const people = await storage.getCompanyPeople(applicationId);
+      const person = people.find(p => p.id === personId);
+      if (!person) return res.status(404).json({ message: "Entity not found for this application" });
+      if (person.entityType !== "corporate") {
+        return res.status(400).json({ message: "This person entry is not a corporate entity" });
+      }
+      if (!person.inviteEmail) {
+        return res.status(400).json({ message: "This corporate entity has no contact email on file" });
+      }
+
+      const cryptoMod = await import("crypto");
+      const token = cryptoMod.randomBytes(48).toString("hex");
+      const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 hours
+
+      const entityName = person.corporateName ?? person.title ?? null;
+      await storage.createCorporateDocUploadToken({
+        token,
+        applicationId,
+        personId,
+        entityName,
+        contactEmail: person.inviteEmail,
+        expiresAt,
+      });
+
+      const { getSiteBaseUrl, getResendClient } = await import("./services/emailService");
+      const baseUrl = getSiteBaseUrl(req);
+      const uploadLink = `${baseUrl}/corporate-doc-upload/${token}`;
+
+      const companyName = application.companyName1 || "the company";
+      const founderProfile = await storage.getFounderProfile(userId);
+      const founderName = founderProfile?.fullName?.trim() || "The founder";
+
+      let emailSent = false;
+      try {
+        const { client, fromEmail } = await getResendClient();
+        const bizTypeLabels: Record<string, string> = { co: "limited company", bn: "business name", it: "NGO / incorporated trustees" };
+        const bizTypeLabel = bizTypeLabels[person.corporateBusinessType ?? "co"] ?? "entity";
+        const docSlugs = getDocSlugsForPerson(personId, entityName ?? "Corporate Entity", "corporate", person.corporateBusinessType);
+        const docListHtml = docSlugs.map(d => `<li style="color:#374151;font-size:14px;">${d.label.split(" — ").slice(1).join(" — ")}</li>`).join("");
+
+        await client.emails.send({
+          from: fromEmail,
+          to: person.inviteEmail,
+          subject: `Upload ${entityName ?? "entity"} documents for ${companyName} incorporation`,
+          html: `
+            <!DOCTYPE html>
+            <html>
+              <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+              <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f4f4f5;margin:0;padding:20px;">
+                <div style="max-width:600px;margin:0 auto;background:white;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                  <div style="text-align:center;margin-bottom:32px;">
+                    <div style="display:inline-block;background:#16a34a;padding:12px;border-radius:8px;margin-bottom:16px;">
+                      <span style="color:white;font-size:24px;font-weight:bold;">C</span>
+                    </div>
+                    <h1 style="color:#111827;font-size:24px;font-weight:700;margin:0;">Cellion One</h1>
+                  </div>
+                  <h2 style="color:#111827;font-size:20px;font-weight:600;margin-bottom:16px;">Corporate entity document upload request</h2>
+                  <p style="color:#374151;margin-bottom:16px;">
+                    ${founderName} has requested that you upload supporting documents for <strong>${entityName ?? "your entity"}</strong> (${bizTypeLabel}), which is a director/shareholder in the incorporation of <strong>${companyName}</strong>.
+                  </p>
+                  <p style="color:#374151;margin-bottom:8px;">The following documents are required:</p>
+                  <ul style="margin:0 0 24px 0;padding-left:20px;">${docListHtml}</ul>
+                  <p style="color:#374151;margin-bottom:24px;">No account creation is required. Use the secure link below to upload your documents.</p>
+                  <div style="text-align:center;margin-bottom:24px;">
+                    <a href="${uploadLink}" style="display:inline-block;background:#16a34a;color:white;text-decoration:none;padding:14px 28px;border-radius:6px;font-weight:600;font-size:16px;">
+                      Upload documents
+                    </a>
+                  </div>
+                  <p style="color:#6b7280;font-size:14px;margin-bottom:8px;">This link expires in 72 hours. If you did not expect this email, you can safely ignore it.</p>
+                  <p style="color:#6b7280;font-size:12px;">Or copy this link: <a href="${uploadLink}" style="color:#16a34a;">${uploadLink}</a></p>
+                </div>
+              </body>
+            </html>
+          `,
+        });
+        emailSent = true;
+      } catch (emailErr) {
+        console.error("[CorporateDocUploadInvite] Email failed:", emailErr);
+      }
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "send_corporate_doc_upload_invite",
+        entityType: "company_person",
+        entityId: personId.toString(),
+        ipAddress: req.ip,
+      });
+
+      if (emailSent) {
+        res.json({ success: true, message: "Upload link sent to entity contact" });
+      } else {
+        res.json({ success: true, emailSent: false, uploadLink, message: "Upload link created but the email could not be delivered. Share the link manually with the entity representative." });
+      }
+    } catch (error) {
+      console.error("[CorporateDocUploadInvite] Error:", error);
+      res.status(500).json({ message: "Failed to send corporate document upload invite" });
+    }
+  });
+
+  // GET /api/corporate-doc-upload/:token
+  // Public: validate token, return entity info and required document slots
+  app.get("/api/corporate-doc-upload/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const record = await storage.getCorporateDocUploadToken(token);
+      if (!record) return res.status(404).json({ message: "Invalid or expired upload link" });
+      if (record.usedAt) return res.status(410).json({ message: "This upload link has already been used" });
+      if (new Date() > record.expiresAt) return res.status(410).json({ message: "This upload link has expired" });
+
+      const [application, people] = await Promise.all([
+        storage.getApplication(record.applicationId),
+        storage.getCompanyPeople(record.applicationId),
+      ]);
+      const companyName = application?.companyName1 || "the company";
+      const person = people.find(p => p.id === record.personId);
+
+      const displayName = record.entityName ?? "Corporate Entity";
+      const bizType = person?.corporateBusinessType ?? "co";
+      const docSlugs = getDocSlugsForPerson(record.personId, displayName, "corporate", bizType);
+      const requiredDocSlots = docSlugs.map(d => ({ key: d.slug, label: d.label.split(" — ").slice(1).join(" — ") }));
+
+      res.json({
+        entityName: record.entityName,
+        companyName,
+        expiresAt: record.expiresAt,
+        personId: record.personId,
+        applicationId: record.applicationId,
+        requiredDocSlots,
+      });
+    } catch (error) {
+      console.error("[CorporateDocUpload] GET error:", error);
+      res.status(500).json({ message: "Failed to validate upload link" });
+    }
+  });
+
+  // POST /api/corporate-doc-upload/:token
+  // Public (token-authenticated): accept corporate entity documents, update checklist items
+  const corpDocUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+  });
+
+  // Accept one file per slug (up to 10 fields)
+  const CORP_DOC_SLUGS = [
+    "cac_cert_incorporation", "memorandum_articles", "board_resolution", "list_of_directors",
+    "cac_cert_registration", "proprietor_gov_id", "proof_business_address",
+    "cac_cert_incorporation_trustees", "constitution_rules", "list_of_trustees", "board_resolution_minutes",
+  ];
+
+  app.post("/api/corporate-doc-upload/:token", corpDocUpload.fields(
+    CORP_DOC_SLUGS.map(slug => ({ name: slug, maxCount: 1 }))
+  ), async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      const record = await storage.getCorporateDocUploadToken(token);
+      if (!record) return res.status(404).json({ message: "Invalid or expired upload link" });
+      if (record.usedAt) return res.status(410).json({ message: "This upload link has already been used" });
+      if (new Date() > record.expiresAt) return res.status(410).json({ message: "This upload link has expired" });
+
+      const files = req.files as Record<string, Express.Multer.File[]>;
+      const uploadedSlugs = Object.keys(files ?? {}).filter(k => files[k]?.length > 0);
+      if (uploadedSlugs.length === 0) {
+        return res.status(400).json({ message: "At least one document file is required" });
+      }
+
+      const allowedMime = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
+      const allowedExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
+      const objectStorage = new ObjectStorageService();
+      const { default: pathMod } = await import("path");
+
+      async function uploadCorpFile(file: Express.Multer.File, docType: string): Promise<string> {
+        const fileExt = pathMod.extname(file.originalname || "").toLowerCase();
+        if (!allowedMime.includes(file.mimetype) && !allowedExtensions.includes(fileExt)) {
+          throw new Error(`File type not allowed for ${docType}`);
+        }
+        const uploadURL = await objectStorage.getObjectEntityUploadURL();
+        const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+        const uploadResponse = await fetch(uploadURL, {
+          method: "PUT",
+          body: file.buffer,
+          headers: { "Content-Type": file.mimetype, "Content-Length": String(file.buffer.length) },
+        });
+        if (!uploadResponse.ok) throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
+
+        await storage.createDocument({
+          ownerUserId: `corp_upload_${record.personId}`,
+          applicationId: record.applicationId,
+          category: "company",
+          docType,
+          filename: file.originalname || "uploaded_file",
+          storagePath: objectPath,
+          isSensitive: true,
+        });
+        return objectPath;
+      }
+
+      const checklistItems = await storage.getChecklistItems(record.applicationId);
+
+      for (const slug of uploadedSlugs) {
+        const file = files[slug]?.[0];
+        if (!file) continue;
+
+        await uploadCorpFile(file, slug);
+
+        // Mark the per-person checklist item as provided
+        const itemKey = `people_req_${record.personId}_${slug}`;
+        const existing = checklistItems.find(i => i.key === itemKey);
+        if (existing) {
+          if (existing.status !== "accepted") {
+            await storage.updateChecklistItem(existing.id, {
+              status: "provided",
+              isAutoResolved: false,
+              source: "people_requirement",
+              reviewerNotes: `Uploaded by authorised rep (${record.contactEmail}) via upload link`,
+            });
+          }
+        } else {
+          // Item not yet seeded — create and mark provided
+          const people = await storage.getCompanyPeople(record.applicationId);
+          const person = people.find(p => p.id === record.personId);
+          const displayName = record.entityName ?? "Corporate Entity";
+          const docSlugs = getDocSlugsForPerson(record.personId, displayName, "corporate", person?.corporateBusinessType ?? "co");
+          const docInfo = docSlugs.find(d => d.slug === slug);
+          await storage.createChecklistItem({
+            applicationId: record.applicationId,
+            key: itemKey,
+            label: docInfo?.label ?? `${displayName} — ${slug}`,
+            required: true,
+            status: "provided",
+            source: "people_requirement",
+            isAutoResolved: false,
+            reviewerNotes: `Uploaded by authorised rep (${record.contactEmail}) via upload link`,
+          });
+        }
+      }
+
+      await storage.markCorporateDocUploadTokenUsed(record.id);
+
+      await storage.createAuditLog({
+        actorUserId: `corp_upload_${record.personId}`,
+        action: "corporate_document_upload",
+        entityType: "company_person",
+        entityId: record.personId.toString(),
+        ipAddress: req.ip,
+      });
+
+      res.json({ success: true, message: "Documents uploaded successfully" });
+    } catch (error) {
+      console.error("[CorporateDocUpload] POST error:", error);
       res.status(500).json({ message: "Failed to upload documents. Please try again." });
     }
   });

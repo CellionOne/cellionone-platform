@@ -73,7 +73,7 @@ export async function syncChecklistFromVerifications(applicationId: number, foun
 // Document sets per entity type/business type
 type DocSlug = { slug: string; label: string };
 
-function getDocSlugsForPerson(
+export function getDocSlugsForPerson(
   personId: number,
   displayName: string,
   entityType: string | null,

@@ -353,6 +353,7 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction):
     "/api/csp-report",
     "/api/csrf-token",
     "/api/director-upload/",
+    "/api/corporate-doc-upload/",
   ];
   if (exemptPaths.some((path) => req.path.startsWith(path))) {
     return next();

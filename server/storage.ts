@@ -67,6 +67,7 @@ import {
   cieIngestionLogs, type CieIngestionLog, type InsertCieIngestionLog,
   cieSubscriptions, type CieSubscription, type InsertCieSubscription,
   directorUploadTokens, type DirectorUploadToken, type InsertDirectorUploadToken,
+  corporateDocUploadTokens, type CorporateDocUploadToken, type InsertCorporateDocUploadToken,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -257,6 +258,11 @@ export interface IStorage {
   createDirectorUploadToken(data: InsertDirectorUploadToken): Promise<DirectorUploadToken>;
   getDirectorUploadToken(token: string): Promise<DirectorUploadToken | undefined>;
   markDirectorUploadTokenUsed(id: number): Promise<void>;
+
+  // Corporate Doc Upload Tokens
+  createCorporateDocUploadToken(data: InsertCorporateDocUploadToken): Promise<CorporateDocUploadToken>;
+  getCorporateDocUploadToken(token: string): Promise<CorporateDocUploadToken | undefined>;
+  markCorporateDocUploadTokenUsed(id: number): Promise<void>;
 
   // Sensitive Data Access Logging
   logSensitiveDataAccess(data: {
@@ -2722,6 +2728,20 @@ export class DatabaseStorage implements IStorage {
 
   async markDirectorUploadTokenUsed(id: number): Promise<void> {
     await db.update(directorUploadTokens).set({ usedAt: new Date() }).where(eq(directorUploadTokens.id, id));
+  }
+
+  async createCorporateDocUploadToken(data: InsertCorporateDocUploadToken): Promise<CorporateDocUploadToken> {
+    const [token] = await db.insert(corporateDocUploadTokens).values(data).returning();
+    return token;
+  }
+
+  async getCorporateDocUploadToken(token: string): Promise<CorporateDocUploadToken | undefined> {
+    const [row] = await db.select().from(corporateDocUploadTokens).where(eq(corporateDocUploadTokens.token, token));
+    return row;
+  }
+
+  async markCorporateDocUploadTokenUsed(id: number): Promise<void> {
+    await db.update(corporateDocUploadTokens).set({ usedAt: new Date() }).where(eq(corporateDocUploadTokens.id, id));
   }
 }
 

@@ -2710,3 +2710,23 @@ export const insertDirectorUploadTokenSchema = createInsertSchema(directorUpload
 export type DirectorUploadToken = typeof directorUploadTokens.$inferSelect;
 export type InsertDirectorUploadToken = z.infer<typeof insertDirectorUploadTokenSchema>;
 
+// ============== CORPORATE DOC UPLOAD TOKENS ==============
+export const corporateDocUploadTokens = pgTable("corporate_doc_upload_tokens", {
+  id: serial("id").primaryKey(),
+  token: varchar("token", { length: 128 }).notNull().unique(),
+  applicationId: integer("application_id").notNull(),
+  personId: integer("person_id").notNull(), // company_people.id
+  entityName: varchar("entity_name", { length: 255 }),
+  contactEmail: varchar("contact_email", { length: 255 }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_corp_doc_upload_tokens_token").on(table.token),
+  index("idx_corp_doc_upload_tokens_application").on(table.applicationId),
+]);
+
+export const insertCorporateDocUploadTokenSchema = createInsertSchema(corporateDocUploadTokens).omit({ id: true, createdAt: true });
+export type CorporateDocUploadToken = typeof corporateDocUploadTokens.$inferSelect;
+export type InsertCorporateDocUploadToken = z.infer<typeof insertCorporateDocUploadTokenSchema>;
+

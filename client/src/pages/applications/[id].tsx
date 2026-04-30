@@ -223,6 +223,7 @@ export default function ApplicationDetailsPage() {
 
   const [isFileUploading, setIsFileUploading] = useState(false);
   const [inviteSentTo, setInviteSentTo] = useState<Set<number>>(new Set());
+  const [corpInviteSentTo, setCorpInviteSentTo] = useState<Set<number>>(new Set());
 
   const directors = teamPeople.filter(
     (p) =>
@@ -247,6 +248,28 @@ export default function ApplicationDetailsPage() {
         });
       } else {
         toast({ title: "Upload link sent", description: "The director will receive an email with the upload link." });
+      }
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to send link", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const corporateInviteMutation = useMutation({
+    mutationFn: async (personId: number) => {
+      return apiRequest("POST", `/api/applications/${applicationId}/corporate-doc-upload-invite/${personId}`);
+    },
+    onSuccess: (data: any, personId) => {
+      setCorpInviteSentTo((prev) => new Set([...prev, personId]));
+      if (data?.emailSent === false && data?.uploadLink) {
+        toast({
+          title: "Email delivery failed",
+          description: `The email could not be sent. Share this link manually: ${data.uploadLink}`,
+          variant: "destructive",
+          duration: 15000,
+        });
+      } else {
+        toast({ title: "Upload link sent", description: "The entity representative will receive an email with the document upload link." });
       }
     },
     onError: (error: any) => {
@@ -348,6 +371,7 @@ export default function ApplicationDetailsPage() {
   // Group people_req items by person (extract person name from label prefix before " — ")
   type PeopleDocGroup = {
     personName: string;
+    personId: number | null;
     entityTypeBadge: "Individual" | "Limited Company" | "Business Name" | "NGO / Trustee";
     items: ApplicationChecklistItem[];
   };
@@ -371,7 +395,11 @@ export default function ApplicationDetailsPage() {
       } else if (keys.some(k => k.includes("_cac_cert_incorporation") || k.includes("_memorandum_articles") || k.includes("_board_resolution") || k.includes("_list_of_directors"))) {
         entityTypeBadge = "Limited Company";
       }
-      return { personName, entityTypeBadge, items };
+      // Extract personId from the item key pattern: people_req_{personId}_{slug}
+      const firstKey = items[0]?.key ?? "";
+      const personIdMatch = firstKey.match(/^people_req_(\d+)_/);
+      const personId = personIdMatch ? parseInt(personIdMatch[1], 10) : null;
+      return { personName, personId, entityTypeBadge, items };
     });
   })();
 
@@ -649,7 +677,7 @@ export default function ApplicationDetailsPage() {
                         : "outline";
                     return (
                       <div key={group.personName} data-testid={`people-doc-group-${group.personName.replace(/\s+/g, "-")}`}>
-                        <div className="flex items-center gap-2 mb-3">
+                        <div className="flex items-center gap-2 mb-3 flex-wrap">
                           {group.entityTypeBadge === "Individual" ? (
                             <UserCheck className="h-4 w-4 text-muted-foreground" />
                           ) : (
@@ -659,11 +687,36 @@ export default function ApplicationDetailsPage() {
                           <Badge variant={badgeVariant} className="text-xs">
                             {group.entityTypeBadge}
                           </Badge>
-                          {groupComplete && (
+                          {groupComplete ? (
                             <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400 ml-auto">
                               <CheckCircle2 className="h-3 w-3" />
                               Complete
                             </span>
+                          ) : (
+                            group.entityTypeBadge !== "Individual" &&
+                            group.personId !== null &&
+                            application.status === "draft" && (
+                              <span className="ml-auto">
+                                {corpInviteSentTo.has(group.personId!) ? (
+                                  <span className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-400" data-testid={`corp-invite-sent-${group.personId}`}>
+                                    <CheckCircle2 className="h-3 w-3" />
+                                    Link sent
+                                  </span>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-xs"
+                                    onClick={() => corporateInviteMutation.mutate(group.personId!)}
+                                    disabled={corporateInviteMutation.isPending}
+                                    data-testid={`btn-send-corp-upload-link-${group.personId}`}
+                                  >
+                                    <Send className="h-3 w-3 mr-1" />
+                                    Send upload link
+                                  </Button>
+                                )}
+                              </span>
+                            )
                           )}
                         </div>
                         <div className="divide-y rounded-lg border">

@@ -436,8 +436,10 @@ export interface IStorage {
   // Lawyer Document Requests
   createLawyerDocumentRequest(data: InsertLawyerDocumentRequest): Promise<LawyerDocumentRequest>;
   listLawyerDocumentRequestsByApplication(applicationId: number): Promise<LawyerDocumentRequest[]>;
+  listOpenLawyerDocumentRequestsByApplication(applicationId: number): Promise<LawyerDocumentRequest[]>;
   getLawyerDocumentRequest(id: number): Promise<LawyerDocumentRequest | undefined>;
   updateLawyerDocumentRequest(id: number, data: Partial<InsertLawyerDocumentRequest>): Promise<LawyerDocumentRequest | undefined>;
+  markLawyerDocumentRequestsActioned(applicationId: number): Promise<LawyerDocumentRequest[]>;
 
   // STR Reports
   createStrReport(data: InsertKycStrReport): Promise<KycStrReport>;
@@ -2207,6 +2209,24 @@ export class DatabaseStorage implements IStorage {
   async updateLawyerDocumentRequest(id: number, data: Partial<InsertLawyerDocumentRequest>): Promise<LawyerDocumentRequest | undefined> {
     const [req] = await db.update(lawyerDocumentRequests).set(data).where(eq(lawyerDocumentRequests.id, id)).returning();
     return req;
+  }
+
+  async listOpenLawyerDocumentRequestsByApplication(applicationId: number): Promise<LawyerDocumentRequest[]> {
+    return db.select().from(lawyerDocumentRequests)
+      .where(and(
+        eq(lawyerDocumentRequests.applicationId, applicationId),
+        eq(lawyerDocumentRequests.status, "open")
+      ));
+  }
+
+  async markLawyerDocumentRequestsActioned(applicationId: number): Promise<LawyerDocumentRequest[]> {
+    return db.update(lawyerDocumentRequests)
+      .set({ status: "actioned" })
+      .where(and(
+        eq(lawyerDocumentRequests.applicationId, applicationId),
+        eq(lawyerDocumentRequests.status, "open")
+      ))
+      .returning();
   }
 
   // STR Reports

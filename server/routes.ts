@@ -7075,18 +7075,9 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       if (shareWithLawyer && doc.applicationId) {
         (async () => {
           try {
-            const openRequests = await db.select().from(lawyerDocumentRequests)
-              .where(and(
-                eq(lawyerDocumentRequests.applicationId, doc.applicationId!),
-                eq(lawyerDocumentRequests.status, "open")
-              ));
+            const openRequests = await storage.listOpenLawyerDocumentRequestsByApplication(doc.applicationId!);
             if (openRequests.length > 0) {
-              await db.update(lawyerDocumentRequests)
-                .set({ status: "actioned" })
-                .where(and(
-                  eq(lawyerDocumentRequests.applicationId, doc.applicationId!),
-                  eq(lawyerDocumentRequests.status, "open")
-                ));
+              await storage.markLawyerDocumentRequestsActioned(doc.applicationId!);
               // Audit log the actioning
               for (const req of openRequests) {
                 await storage.createAuditLog({

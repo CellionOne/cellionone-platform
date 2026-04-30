@@ -1592,6 +1592,16 @@ function DocumentsTab({
       const res = await apiRequest("GET", `/api/lawyer/applications/${applicationId}/document-requests`);
       return res.json();
     },
+    refetchInterval: 30000,
+  });
+
+  const { data: sharedDocs } = useQuery<DocumentFile[]>({
+    queryKey: ["/api/lawyer/applications", applicationId, "shared-documents"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/lawyer/applications/${applicationId}/shared-documents`);
+      return res.json();
+    },
+    refetchInterval: 30000,
   });
 
   const createDocRequestMutation = useMutation({
@@ -1608,6 +1618,7 @@ function DocumentsTab({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/lawyer/applications", applicationId, "document-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/lawyer/applications", applicationId, "shared-documents"] });
       toast({ title: "Document request sent", description: "The founder has been notified by email." });
       setDocRequestDialogOpen(false);
       setDocRequestText("");
@@ -2019,12 +2030,12 @@ function DocumentsTab({
                         <CheckCircle2 className="h-3 w-3" />Fulfilled
                       </Badge>
                     ) : req.status === "actioned" ? (
-                      <Badge variant="secondary" className="shrink-0 gap-1 text-xs">
-                        <Clock className="h-3 w-3" />Actioned
+                      <Badge className="shrink-0 bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 gap-1 text-xs">
+                        <CheckCircle2 className="h-3 w-3" />Founder Responded
                       </Badge>
                     ) : (
                       <Badge variant="outline" className="shrink-0 gap-1 text-xs text-amber-700 border-amber-300 dark:text-amber-400 dark:border-amber-700">
-                        <Clock className="h-3 w-3" />Open
+                        <Clock className="h-3 w-3" />Awaiting Response
                       </Badge>
                     )}
                   </div>
@@ -2033,11 +2044,39 @@ function DocumentsTab({
                   )}
                   <p className="text-xs text-muted-foreground">
                     Requested {req.createdAt ? new Date(req.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
-                    {req.fulfilledAt && ` · Fulfilled ${new Date(req.fulfilledAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
                   </p>
+                  {req.status === "actioned" && (sharedDocs?.length ?? 0) > 0 && (
+                    <p className="text-xs text-blue-700 dark:text-blue-400">
+                      The founder has shared {sharedDocs!.length} document{sharedDocs!.length !== 1 ? "s" : ""} — see "Documents Shared by Founder" below.
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
+
+            {/* Shared documents panel — shown when the founder has shared at least one document */}
+            {(sharedDocs?.length ?? 0) > 0 && (
+              <div className="mt-4 pt-4 border-t">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Documents Shared by Founder</p>
+                <div className="space-y-1">
+                  {sharedDocs!.map((f) => (
+                    <div key={f.id} className="flex items-center gap-2 text-sm py-1" data-testid={`shared-doc-${f.id}`}>
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="truncate">{f.fileName || f.docType}</span>
+                      <a
+                        href={`/api/documents/${f.id}/download`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-auto shrink-0 text-xs text-primary underline-offset-2 hover:underline"
+                        data-testid={`link-download-shared-doc-${f.id}`}
+                      >
+                        Download
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           )}
         </CardContent>
       </Card>

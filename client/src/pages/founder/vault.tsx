@@ -823,7 +823,7 @@ export default function VaultPage() {
                     <AlertDescription className="text-blue-700 dark:text-blue-400">
                       <p className="mb-1"><span className="font-medium">Requested:</span> {req.documentsRequested}</p>
                       {req.reason && <p className="mb-1"><span className="font-medium">Reason:</span> {req.reason}</p>}
-                      <p className="text-xs mt-2">Toggle "Share with lawyer" on the relevant documents below to fulfil this request. Your lawyer will be notified automatically.</p>
+                      <p className="text-xs mt-2">Toggle "Share with lawyer" on the relevant documents below to respond to this request. Your lawyer will be notified automatically and can review the shared documents in their portal.</p>
                     </AlertDescription>
                   </Alert>
                 ))}

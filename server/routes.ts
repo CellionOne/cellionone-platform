@@ -7055,7 +7055,18 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
       const updated = await storage.updateDocument(documentId, { shareWithLawyer });
       res.json({ id: updated?.id, shareWithLawyer: updated?.shareWithLawyer });
 
-      // Background: auto-fulfil open lawyer doc requests for this application and notify lawyer
+      // Audit log the share action
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: shareWithLawyer ? "share_document_with_lawyer" : "unshare_document_with_lawyer",
+        entityType: "document_file",
+        entityId: documentId.toString(),
+        details: { applicationId: doc.applicationId, shareWithLawyer },
+        ipAddress: req.ip,
+      }).catch(() => {});
+
+      // Background: mark open lawyer doc requests for this application as "actioned"
+      // (founder has responded; lawyer must confirm satisfaction to mark "fulfilled")
       if (shareWithLawyer && doc.applicationId) {
         (async () => {
           try {
@@ -7064,14 +7075,25 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
                 eq(lawyerDocumentRequests.applicationId, doc.applicationId!),
                 eq(lawyerDocumentRequests.status, "open")
               ));
-            if (openRequests.length === 0) return;
-
-            await db.update(lawyerDocumentRequests)
-              .set({ status: "fulfilled", fulfilledAt: new Date() })
-              .where(and(
-                eq(lawyerDocumentRequests.applicationId, doc.applicationId!),
-                eq(lawyerDocumentRequests.status, "open")
-              ));
+            if (openRequests.length > 0) {
+              await db.update(lawyerDocumentRequests)
+                .set({ status: "actioned" })
+                .where(and(
+                  eq(lawyerDocumentRequests.applicationId, doc.applicationId!),
+                  eq(lawyerDocumentRequests.status, "open")
+                ));
+              // Audit log the actioning
+              for (const req of openRequests) {
+                await storage.createAuditLog({
+                  actorUserId: userId,
+                  action: "fulfill_lawyer_document_request",
+                  entityType: "lawyer_document_request",
+                  entityId: req.id.toString(),
+                  details: { documentId, applicationId: doc.applicationId, triggeredBy: "share_with_lawyer" },
+                  ipAddress: null,
+                }).catch(() => {});
+              }
+            }
 
             const application = await storage.getApplication(doc.applicationId!);
             if (!application?.assignedLawyerUserId) return;
@@ -7092,7 +7114,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                   <h2 style="color: #1a1a1a;">Documents Now Available</h2>
                   <p>Hello ${lawyer.firstName || "Lawyer"},</p>
-                  <p>The founder of <strong>${application.companyName1 || `Application #${doc.applicationId}`}</strong> has shared new documents with you in Cellion One.</p>
+                  <p>The founder of <strong>${application.companyName1 || `Application #${doc.applicationId}`}</strong> has shared new documents with you in Cellion One. You can view and download them from the Documents tab in the case view.</p>
                   <p style="margin: 24px 0;">
                     <a href="${lawyerCaseUrl}" style="background-color: #16a34a; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600;">View Documents</a>
                   </p>
@@ -7102,21 +7124,45 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
             });
 
             // In-app notification for lawyer
-            await storage.createNotification?.({
+            await storage.createNotification({
               userId: application.assignedLawyerUserId,
-              title: "Documents Shared",
-              message: `The founder has shared documents for ${application.companyName1 || `Application #${doc.applicationId}`}.`,
+              title: "Documents Shared by Founder",
+              message: `The founder has shared documents for ${application.companyName1 || `Application #${doc.applicationId}`}. Review the Documents tab.`,
               type: "document",
               linkUrl: `/lawyer/applications/${doc.applicationId}`,
             }).catch(() => {});
           } catch (err) {
-            console.error("[LawyerShare] Auto-fulfil error:", err);
+            console.error("[LawyerShare] Background error:", err);
           }
         })();
       }
     } catch (error: any) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: error.errors[0]?.message });
       res.status(500).json({ message: "Failed to update document" });
+    }
+  });
+
+  // GET /api/lawyer/applications/:id/shared-documents — documents the founder has shared with the assigned lawyer
+  app.get("/api/lawyer/applications/:id/shared-documents", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+
+      const application = await storage.getApplication(applicationId);
+      if (!application || application.assignedLawyerUserId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const sharedDocs = await db.select().from(documentFiles)
+        .where(and(
+          eq(documentFiles.applicationId, applicationId),
+          eq(documentFiles.shareWithLawyer, true)
+        ))
+        .orderBy(desc(documentFiles.createdAt));
+
+      res.json(sharedDocs);
+    } catch (error: any) {
+      res.status(500).json({ message: "Failed to fetch shared documents" });
     }
   });
 

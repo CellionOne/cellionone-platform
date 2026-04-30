@@ -8936,9 +8936,9 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "Completion link is only available for incorporation applications" });
       }
 
-      const completableStatuses = ["draft", "pending_verification", "submitted"];
+      const completableStatuses = ["draft", "pending_verification", "submitted", "under_review"];
       if (!completableStatuses.includes(application.status || "")) {
-        return res.status(400).json({ message: "Completion link can only be resent for draft or submitted applications" });
+        return res.status(400).json({ message: "Completion link can only be resent for applications that are draft, submitted, or under review" });
       }
 
       const founder = await storage.getUser(application.founderUserId);

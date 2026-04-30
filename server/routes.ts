@@ -5833,6 +5833,9 @@ export async function registerRoutes(
         await storage.updateChecklistItem(parsedChecklistId, { status: "provided", isAutoResolved: false, source: uploadSource2 });
       }
 
+      // Auto-share with the assigned lawyer when an admin uploads
+      const autoShareWithLawyer = isAdmin && !!application.assignedLawyerUserId ? true : null;
+
       const document = await storage.createDocument({
         ownerUserId: userId,
         applicationId,
@@ -5842,6 +5845,7 @@ export async function registerRoutes(
         filename: file.originalname || "uploaded_file",
         storagePath: objectPath,
         isSensitive: true,
+        shareWithLawyer: autoShareWithLawyer,
       });
 
       await storage.createAuditLog({
@@ -5851,6 +5855,17 @@ export async function registerRoutes(
         entityId: document.id.toString(),
         ipAddress: req.ip,
       });
+
+      // Notify the assigned lawyer that a new document is ready for review
+      if (autoShareWithLawyer && application.assignedLawyerUserId) {
+        await storage.createNotification({
+          userId: application.assignedLawyerUserId,
+          type: "info",
+          title: "New document ready for review",
+          message: `Admin has uploaded a document for ${application.companyName1 || `Application #${applicationId}`}. Review the Documents tab.`,
+          linkUrl: `/lawyer/applications/${applicationId}`,
+        });
+      }
 
       res.json({ document, objectPath });
     } catch (error) {

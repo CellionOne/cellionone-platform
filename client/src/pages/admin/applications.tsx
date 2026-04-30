@@ -141,12 +141,16 @@ export default function AdminApplications() {
   const [editBusinessDescription, setEditBusinessDescription] = useState("");
   const [editActivities, setEditActivities] = useState("");
   const [editRegLine1, setEditRegLine1] = useState("");
+  const [editRegLine2, setEditRegLine2] = useState("");
   const [editRegCity, setEditRegCity] = useState("");
   const [editRegState, setEditRegState] = useState("");
+  const [editRegPostalCode, setEditRegPostalCode] = useState("");
   const [editRegCountry, setEditRegCountry] = useState("Nigeria");
   const [editOpsLine1, setEditOpsLine1] = useState("");
+  const [editOpsLine2, setEditOpsLine2] = useState("");
   const [editOpsCity, setEditOpsCity] = useState("");
   const [editOpsState, setEditOpsState] = useState("");
+  const [editOpsPostalCode, setEditOpsPostalCode] = useState("");
   const [editOpsCountry, setEditOpsCountry] = useState("Nigeria");
   const [editDirectorsJson, setEditDirectorsJson] = useState("");
   const [editShareholdersJson, setEditShareholdersJson] = useState("");
@@ -384,13 +388,17 @@ export default function AdminApplications() {
     setEditActivities(Array.isArray(acts) ? acts.join(", ") : "");
     const reg = app.registeredAddress as { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
     setEditRegLine1(reg?.line1 || "");
+    setEditRegLine2(reg?.line2 || "");
     setEditRegCity(reg?.city || "");
     setEditRegState(reg?.state || "");
+    setEditRegPostalCode(reg?.postalCode || "");
     setEditRegCountry(reg?.country || "Nigeria");
     const ops = app.operatingAddress as { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
     setEditOpsLine1(ops?.line1 || "");
+    setEditOpsLine2(ops?.line2 || "");
     setEditOpsCity(ops?.city || "");
     setEditOpsState(ops?.state || "");
+    setEditOpsPostalCode(ops?.postalCode || "");
     setEditOpsCountry(ops?.country || "Nigeria");
     const dirs = app.directorsData;
     setEditDirectorsJson(Array.isArray(dirs) && dirs.length ? JSON.stringify(dirs, null, 2) : "");
@@ -450,10 +458,25 @@ export default function AdminApplications() {
       companyType: editCompanyType as AdminProfileEditPayload["companyType"],
       businessDescription: editBusinessDescription || null,
       selectedActivities: activities.length ? activities : null,
-      registeredAddress: { line1: editRegLine1, city: editRegCity, state: editRegState, country: editRegCountry },
-      operatingAddress: { line1: editOpsLine1, city: editOpsCity, state: editOpsState, country: editOpsCountry },
-      directorsData: parsedDirectors,
-      shareholdersData: parsedShareholders,
+      registeredAddress: {
+        line1: editRegLine1,
+        line2: editRegLine2 || undefined,
+        city: editRegCity,
+        state: editRegState,
+        postalCode: editRegPostalCode || undefined,
+        country: editRegCountry,
+      },
+      operatingAddress: {
+        line1: editOpsLine1,
+        line2: editOpsLine2 || undefined,
+        city: editOpsCity,
+        state: editOpsState,
+        postalCode: editOpsPostalCode || undefined,
+        country: editOpsCountry,
+      },
+      // Only include JSON blobs if the admin provided a value — blank means "keep existing"
+      ...(parsedDirectors !== null ? { directorsData: parsedDirectors } : {}),
+      ...(parsedShareholders !== null ? { shareholdersData: parsedShareholders } : {}),
     };
 
     editProfileMutation.mutate({ applicationId: editProfileApp.id, data: payload });
@@ -1520,8 +1543,12 @@ export default function AdminApplications() {
               <p className="text-sm font-medium text-muted-foreground mb-3">Registered Address</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="sm:col-span-2 space-y-1.5">
-                  <Label htmlFor="edit-reg-line1">Street Address</Label>
+                  <Label htmlFor="edit-reg-line1">Street Address (Line 1)</Label>
                   <Input id="edit-reg-line1" value={editRegLine1} onChange={(e) => setEditRegLine1(e.target.value)} placeholder="1 Example Street" data-testid="input-edit-reg-line1" />
+                </div>
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label htmlFor="edit-reg-line2">Line 2 (optional)</Label>
+                  <Input id="edit-reg-line2" value={editRegLine2} onChange={(e) => setEditRegLine2(e.target.value)} placeholder="Flat / Suite / Floor" data-testid="input-edit-reg-line2" />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="edit-reg-city">City</Label>
@@ -1530,6 +1557,10 @@ export default function AdminApplications() {
                 <div className="space-y-1.5">
                   <Label htmlFor="edit-reg-state">State</Label>
                   <Input id="edit-reg-state" value={editRegState} onChange={(e) => setEditRegState(e.target.value)} placeholder="Lagos State" data-testid="input-edit-reg-state" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-reg-postal">Postal Code (optional)</Label>
+                  <Input id="edit-reg-postal" value={editRegPostalCode} onChange={(e) => setEditRegPostalCode(e.target.value)} placeholder="100001" data-testid="input-edit-reg-postal" />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="edit-reg-country">Country</Label>
@@ -1545,8 +1576,12 @@ export default function AdminApplications() {
               <p className="text-sm font-medium text-muted-foreground mb-3">Operating Address</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="sm:col-span-2 space-y-1.5">
-                  <Label htmlFor="edit-ops-line1">Street Address</Label>
+                  <Label htmlFor="edit-ops-line1">Street Address (Line 1)</Label>
                   <Input id="edit-ops-line1" value={editOpsLine1} onChange={(e) => setEditOpsLine1(e.target.value)} placeholder="1 Example Street" data-testid="input-edit-ops-line1" />
+                </div>
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label htmlFor="edit-ops-line2">Line 2 (optional)</Label>
+                  <Input id="edit-ops-line2" value={editOpsLine2} onChange={(e) => setEditOpsLine2(e.target.value)} placeholder="Flat / Suite / Floor" data-testid="input-edit-ops-line2" />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="edit-ops-city">City</Label>
@@ -1555,6 +1590,10 @@ export default function AdminApplications() {
                 <div className="space-y-1.5">
                   <Label htmlFor="edit-ops-state">State</Label>
                   <Input id="edit-ops-state" value={editOpsState} onChange={(e) => setEditOpsState(e.target.value)} placeholder="Lagos State" data-testid="input-edit-ops-state" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-ops-postal">Postal Code (optional)</Label>
+                  <Input id="edit-ops-postal" value={editOpsPostalCode} onChange={(e) => setEditOpsPostalCode(e.target.value)} placeholder="100001" data-testid="input-edit-ops-postal" />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="edit-ops-country">Country</Label>

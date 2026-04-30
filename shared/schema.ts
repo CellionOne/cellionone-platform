@@ -2043,6 +2043,7 @@ export const lawyerDocumentRequests = pgTable("lawyer_document_requests", {
   status: varchar("status", { length: 50 }).default("open"), // open, actioned, fulfilled
   createdAt: timestamp("created_at").defaultNow(),
   fulfilledAt: timestamp("fulfilled_at"),
+  resolvedByUserId: varchar("resolved_by_user_id", { length: 255 }),
 }, (table) => [
   index("idx_lawyer_doc_requests_application").on(table.applicationId),
   index("idx_lawyer_doc_requests_lawyer").on(table.requestingLawyerUserId),

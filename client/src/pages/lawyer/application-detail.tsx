@@ -1625,16 +1625,16 @@ function DocumentsTab({
 
   const fulfillDocRequestMutation = useMutation({
     mutationFn: async (requestId: number) => {
-      const res = await apiRequest("PATCH", `/api/lawyer/document-requests/${requestId}/fulfill`, {});
+      const res = await apiRequest("PATCH", `/api/lawyer/document-requests/${requestId}/resolve`, {});
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.message || "Failed to mark fulfilled");
+        throw new Error(err.message || "Failed to mark resolved");
       }
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/lawyer/applications", applicationId, "document-requests"] });
-      toast({ title: "Request marked as fulfilled" });
+      toast({ title: "Request marked as resolved" });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update request", description: error.message, variant: "destructive" });
@@ -2065,7 +2065,7 @@ function DocumentsTab({
                     <p className="text-sm font-medium">{req.documentsRequested}</p>
                     {req.status === "fulfilled" ? (
                       <Badge className="shrink-0 bg-green-100 text-green-800 border-green-200 dark:bg-green-900/40 dark:text-green-300 gap-1 text-xs">
-                        <CheckCircle2 className="h-3 w-3" />Fulfilled
+                        <CheckCircle2 className="h-3 w-3" />Resolved
                       </Badge>
                     ) : req.status === "actioned" ? (
                       <Badge className="shrink-0 bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 gap-1 text-xs">
@@ -2082,7 +2082,7 @@ function DocumentsTab({
                   )}
                   <p className="text-xs text-muted-foreground">
                     Requested {req.createdAt ? new Date(req.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
-                    {req.fulfilledAt && ` · Fulfilled ${new Date(req.fulfilledAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
+                    {req.fulfilledAt && ` · Resolved ${new Date(req.fulfilledAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}
                   </p>
                   {req.status === "actioned" && (sharedDocs?.length ?? 0) > 0 && (
                     <p className="text-xs text-blue-700 dark:text-blue-400">
@@ -2100,7 +2100,7 @@ function DocumentsTab({
                         data-testid={`btn-fulfill-request-${req.id}`}
                       >
                         <CheckCircle2 className="h-3 w-3" />
-                        Mark Fulfilled
+                        Mark Resolved
                       </Button>
                     </div>
                   )}

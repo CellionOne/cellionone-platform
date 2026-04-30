@@ -7166,8 +7166,8 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
-  // PATCH /api/lawyer/document-requests/:id/fulfill — lawyer marks a request as fulfilled
-  app.patch("/api/lawyer/document-requests/:id/fulfill", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
+  // Shared handler: lawyer marks a document request as resolved/fulfilled
+  async function handleResolveDocumentRequest(req: any, res: any) {
     try {
       const lawyerId = getUserId(req);
       const requestId = parseInt(req.params.id);
@@ -7180,27 +7180,33 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(403).json({ message: "Access denied" });
       }
       if (docReq.status === "fulfilled") {
-        return res.status(400).json({ message: "Request is already fulfilled" });
+        return res.status(400).json({ message: "Request is already resolved" });
       }
 
       await db.update(lawyerDocumentRequests)
-        .set({ status: "fulfilled", fulfilledAt: new Date() })
+        .set({ status: "fulfilled", fulfilledAt: new Date(), resolvedByUserId: lawyerId })
         .where(eq(lawyerDocumentRequests.id, requestId));
 
       await storage.createAuditLog({
         actorUserId: lawyerId,
-        action: "lawyer_fulfill_document_request",
+        action: "lawyer_resolve_document_request",
         entityType: "lawyer_document_request",
         entityId: requestId.toString(),
         details: { applicationId: docReq.applicationId },
         ipAddress: req.ip,
       }).catch(() => {});
 
-      res.json({ message: "Request marked as fulfilled" });
+      res.json({ message: "Request marked as resolved" });
     } catch (error: any) {
       res.status(500).json({ message: "Failed to update request" });
     }
-  });
+  }
+
+  // PATCH /api/lawyer/document-requests/:id/resolve — lawyer marks a request as resolved
+  app.patch("/api/lawyer/document-requests/:id/resolve", isAuthenticated, requireRole("lawyer"), handleResolveDocumentRequest);
+
+  // PATCH /api/lawyer/document-requests/:id/fulfill — kept for backwards compatibility
+  app.patch("/api/lawyer/document-requests/:id/fulfill", isAuthenticated, requireRole("lawyer"), handleResolveDocumentRequest);
 
   // GET /api/founder/applications/:id/document-requests — founder lists lawyer doc requests for an application
   app.get("/api/founder/applications/:id/document-requests", isAuthenticated, async (req: any, res) => {

@@ -6396,10 +6396,6 @@ export async function registerRoutes(
       if (record.usedAt) return res.status(410).json({ message: "This upload link has already been used" });
       if (new Date() > record.expiresAt) return res.status(410).json({ message: "This upload link has expired" });
 
-      // Atomically claim the token before any processing to prevent concurrent submission races
-      const claimed = await storage.claimCorporateDocUploadToken(record.id);
-      if (!claimed) return res.status(410).json({ message: "This upload link has already been used or has expired" });
-
       // Determine required slugs for this entity type
       const people = await storage.getCompanyPeople(record.applicationId);
       const person = people.find(p => p.id === record.personId);
@@ -6411,29 +6407,40 @@ export async function registerRoutes(
       const files = req.files as Record<string, Express.Multer.File[]>;
       const submittedSlugs = new Set(Object.keys(files ?? {}).filter(k => files[k]?.length > 0));
 
-      // Reject any unexpected (entity-type-irrelevant) slugs
+      // Phase 1 — full validation BEFORE touching the token: unexpected slugs
       const unexpectedSlugs = [...submittedSlugs].filter(s => !requiredSlugSet.has(s));
       if (unexpectedSlugs.length > 0) {
         return res.status(400).json({ message: `Unexpected document field(s): ${unexpectedSlugs.join(", ")}` });
       }
 
-      // Enforce that every required slug has a file
+      // Phase 1 — full validation: all required slugs must be present
       const missingSlugs = [...requiredSlugSet].filter(s => !submittedSlugs.has(s));
       if (missingSlugs.length > 0) {
         const missingLabels = requiredDocSlugs.filter(d => missingSlugs.includes(d.slug)).map(d => d.label.split(" — ").slice(1).join(" — "));
         return res.status(400).json({ message: `All required documents must be submitted. Missing: ${missingLabels.join(", ")}` });
       }
 
+      // Phase 1 — full validation: MIME / extension check on every file
       const allowedMime = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
       const allowedExtensions = [".pdf", ".jpg", ".jpeg", ".png"];
-      const objectStorage = new ObjectStorageService();
       const { default: pathMod } = await import("path");
-
-      async function uploadCorpFile(file: Express.Multer.File, docType: string): Promise<string> {
+      for (const { slug } of requiredDocSlugs) {
+        const file = files[slug]?.[0];
+        if (!file) continue;
         const fileExt = pathMod.extname(file.originalname || "").toLowerCase();
         if (!allowedMime.includes(file.mimetype) && !allowedExtensions.includes(fileExt)) {
-          throw new Error(`File type not allowed for ${docType}`);
+          return res.status(400).json({ message: `File type not allowed for ${slug}. Accepted: PDF, JPG, PNG.` });
         }
+      }
+
+      // Phase 2 — all validation passed; atomically claim token to block concurrent duplicates
+      const claimed = await storage.claimCorporateDocUploadToken(record.id);
+      if (!claimed) return res.status(410).json({ message: "This upload link has already been used or has expired" });
+
+      // Phase 3 — upload files and update checklist (token is already consumed)
+      const objectStorage = new ObjectStorageService();
+
+      async function uploadCorpFile(file: Express.Multer.File, docType: string): Promise<string> {
         const uploadURL = await objectStorage.getObjectEntityUploadURL();
         const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
         const uploadResponse = await fetch(uploadURL, {
@@ -6457,10 +6464,9 @@ export async function registerRoutes(
 
       const checklistItems = await storage.getChecklistItems(record.applicationId);
 
-      // Process only the required slugs
       for (const { slug, label } of requiredDocSlugs) {
         const file = files[slug]?.[0];
-        if (!file) continue; // already validated above
+        if (!file) continue;
 
         await uploadCorpFile(file, slug);
 

@@ -349,10 +349,6 @@ export default function AdminApplications() {
   const editProfileMutation = useMutation({
     mutationFn: async ({ applicationId, data }: { applicationId: number; data: AdminProfileEditPayload }) => {
       const res = await apiRequest("PATCH", `/api/admin/applications/${applicationId}/profile`, data);
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Failed to update profile");
-      }
       return res.json();
     },
     onSuccess: () => {
@@ -364,17 +360,17 @@ export default function AdminApplications() {
     onError: (e: Error) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
   });
 
+  const [resendPendingId, setResendPendingId] = useState<number | null>(null);
+
   const resendCompletionMutation = useMutation({
     mutationFn: async (applicationId: number) => {
+      setResendPendingId(applicationId);
       const res = await apiRequest("POST", `/api/admin/applications/${applicationId}/resend-completion`, {});
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Failed to send email");
-      }
       return res.json();
     },
     onSuccess: () => toast({ title: "Email sent", description: "A completion link has been sent to the founder." }),
     onError: (e: Error) => toast({ title: "Email failed", description: e.message, variant: "destructive" }),
+    onSettled: () => setResendPendingId(null),
   });
 
   function openEditProfile(app: ApplicationWithLawyer) {
@@ -998,10 +994,10 @@ export default function AdminApplications() {
                               variant="outline"
                               size="sm"
                               onClick={() => resendCompletionMutation.mutate(app.id)}
-                              disabled={resendCompletionMutation.isPending}
+                              disabled={resendPendingId === app.id}
                               data-testid={`button-resend-completion-${app.id}`}
                             >
-                              {resendCompletionMutation.isPending ? (
+                              {resendPendingId === app.id ? (
                                 <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                               ) : (
                                 <MailCheck className="h-4 w-4 mr-1" />

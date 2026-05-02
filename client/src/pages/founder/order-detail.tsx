@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Loader2, ArrowLeft, CheckCircle2, Clock, AlertCircle, XCircle, ClipboardList, ArrowRight, FileText } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle2, Clock, AlertCircle, XCircle, ClipboardList, ArrowRight, FileText, Printer } from "lucide-react";
 import { Link } from "wouter";
 import { DashboardLayout } from "@/components/dashboard-layout";
 
@@ -88,6 +88,7 @@ export default function OrderDetailPage() {
       sku: string;
       quantity: number;
       unitPrice: number;
+      alreadyObtained: boolean | null;
       cellionCut: number | null;
       lawyerNet: number | null;
       metadata: Record<string, unknown> | null;
@@ -95,6 +96,13 @@ export default function OrderDetailPage() {
   }>({
     queryKey: ["/api/founder/orders", orderId],
   });
+
+  const applicationId = data?.order.applicationId;
+  const { data: applicationData } = useQuery<{ selectedNames?: string[] }>({
+    queryKey: ["/api/applications", applicationId],
+    enabled: !!applicationId,
+  });
+  const selectedNames: string[] = applicationData?.selectedNames ?? [];
 
   const { data: serviceRequests } = useQuery<ServiceRequest[]>({
     queryKey: ["/api/founder/orders", orderId, "service-requests"],
@@ -234,33 +242,64 @@ export default function OrderDetailPage() {
 
         <Card data-testid="card-order-receipt">
           <CardHeader>
-            <CardTitle>Receipt</CardTitle>
-            <CardDescription>
-              Placed on {new Date(order.createdAt).toLocaleDateString("en-NG", { year: "numeric", month: "long", day: "numeric" })}
-            </CardDescription>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle>Receipt</CardTitle>
+                <CardDescription>
+                  Placed on {new Date(order.createdAt).toLocaleDateString("en-NG", { year: "numeric", month: "long", day: "numeric" })}
+                </CardDescription>
+              </div>
+              <a
+                href={`/api/founder/orders/${order.id}/invoice`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button variant="outline" size="sm" data-testid="button-print-invoice">
+                  <Printer className="h-4 w-4 mr-1" /> Print Invoice
+                </Button>
+              </a>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {items.map((item) => {
               const qty = item.quantity || 1;
               const lineTotal = item.unitPrice * qty;
               const isIncorp = item.sku.startsWith("CAC_") || item.sku === "NGO";
+              const waived = !!item.alreadyObtained;
               return (
-                <div key={item.id} className="flex items-center justify-between gap-4" data-testid={`receipt-item-${item.sku}`}>
-                  <div className="min-w-0">
-                    <p className="font-medium">{item.sku}</p>
-                    {qty > 1 && isIncorp ? (
-                      <p className="text-sm text-muted-foreground">{formatNgn(item.unitPrice)} × {qty} names</p>
-                    ) : qty > 1 ? (
+                <div key={item.id} className={`flex items-start justify-between gap-4 ${waived ? "opacity-50" : ""}`} data-testid={`receipt-item-${item.sku}`}>
+                  <div className="min-w-0 flex-1">
+                    <p className={`font-medium ${waived ? "line-through" : ""}`}>{item.sku}</p>
+                    {waived && (
+                      <p className="text-xs text-muted-foreground italic">Waived — already obtained</p>
+                    )}
+                    {!waived && isIncorp && qty > 1 && (
+                      <>
+                        <p className="text-sm text-muted-foreground">{formatNgn(item.unitPrice)} × {qty} name searches</p>
+                        {selectedNames.length > 0 && (
+                          <ul className="mt-1 space-y-0.5">
+                            {selectedNames.slice(0, qty).map((n, i) => (
+                              <li key={i} className="text-xs text-muted-foreground pl-2 border-l border-border">
+                                {i + 1}. {n}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </>
+                    )}
+                    {!waived && !isIncorp && qty > 1 && (
                       <p className="text-sm text-muted-foreground">Qty: {qty}</p>
-                    ) : null}
+                    )}
                   </div>
-                  <span className="font-medium flex-shrink-0" data-testid={`receipt-line-total-${item.sku}`}>{formatNgn(lineTotal)}</span>
+                  <span className={`font-medium flex-shrink-0 ${waived ? "line-through" : ""}`} data-testid={`receipt-line-total-${item.sku}`}>
+                    {waived ? formatNgn(lineTotal) : formatNgn(lineTotal)}
+                  </span>
                 </div>
               );
             })}
             <Separator />
             <div className="flex items-center justify-between gap-4 text-sm text-muted-foreground">
-              <span>Subtotal</span>
+              <span>Subtotal (billable)</span>
               <span data-testid="text-receipt-subtotal">{formatNgn(order.totalAmount)}</span>
             </div>
             {(order.adminFeeAmount ?? 0) > 0 && (

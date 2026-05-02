@@ -4241,6 +4241,103 @@ export async function registerRoutes(
     }
   });
 
+  // ============== FOUNDER ORDER INVOICE (printable HTML) ==============
+  app.get("/api/founder/orders/:id/invoice", isAuthenticated, requireRole("founder"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const orderId = parseInt(req.params.id, 10);
+      if (isNaN(orderId)) return res.status(400).json({ message: "Invalid order ID" });
+
+      const result = await orderService.getOrderById(orderId);
+      if (!result) return res.status(404).json({ message: "Order not found" });
+      if (result.order.founderId !== userId) return res.status(403).json({ message: "Forbidden" });
+
+      const { order, items } = result;
+
+      // Fetch application selectedNames if order has applicationId
+      let selectedNames: string[] = [];
+      if (order.applicationId) {
+        const [app] = await db.select({ selectedNames: companyApplicationsTable.selectedNames })
+          .from(companyApplicationsTable)
+          .where(eq(companyApplicationsTable.id, order.applicationId));
+        selectedNames = (app?.selectedNames as string[] | null) ?? [];
+      }
+
+      const fmtNgn = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 0 })}`;
+      const billable = items.filter(i => !i.alreadyObtained);
+      const waived = items.filter(i => i.alreadyObtained);
+      const adminFee = order.adminFeeAmount ?? 0;
+      const grandTotal = order.totalAmount + adminFee;
+
+      const lineRows = billable.map(item => {
+        const qty = item.quantity || 1;
+        const lineTotal = item.unitPrice * qty;
+        const isIncorp = item.sku.startsWith("CAC_") || item.sku === "NGO";
+        const namesList = isIncorp && qty > 1 && selectedNames.length > 0
+          ? `<ol style="margin:4px 0 0 0;padding-left:16px;font-size:11px;color:#555;">${selectedNames.slice(0, qty).map((n, i) => `<li>${n}</li>`).join("")}</ol>`
+          : "";
+        const qtyNote = isIncorp && qty > 1
+          ? `<div style="font-size:11px;color:#555;">${fmtNgn(item.unitPrice)} × ${qty} name searches</div>${namesList}`
+          : qty > 1 ? `<div style="font-size:11px;color:#555;">Qty: ${qty}</div>` : "";
+        return `<tr>
+          <td style="padding:8px 0;border-bottom:1px solid #eee;">
+            <strong>${item.sku}</strong>${qtyNote}
+          </td>
+          <td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right;">${fmtNgn(lineTotal)}</td>
+        </tr>`;
+      }).join("");
+
+      const waivedRows = waived.length > 0 ? `
+        <tr><td colspan="2" style="padding:8px 0 2px 0;font-size:11px;color:#888;font-style:italic;">Waived (admin-marked as already obtained):</td></tr>
+        ${waived.map(item => `<tr>
+          <td style="padding:4px 0;color:#aaa;text-decoration:line-through;font-size:12px;">${item.sku}</td>
+          <td style="padding:4px 0;color:#aaa;text-decoration:line-through;font-size:12px;text-align:right;">${fmtNgn(item.unitPrice * (item.quantity || 1))}</td>
+        </tr>`).join("")}` : "";
+
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Invoice — Order #${order.id}</title>
+<style>
+  body { font-family: Arial, sans-serif; color: #111; max-width: 700px; margin: 40px auto; padding: 20px; }
+  h1 { color: #0f6b3d; margin: 0 0 4px 0; }
+  .meta { color: #555; font-size: 13px; margin-bottom: 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; border-bottom: 2px solid #0f6b3d; padding: 8px 0; font-size: 13px; }
+  .total-row td { font-weight: bold; font-size: 15px; padding: 12px 0 4px 0; border-top: 2px solid #0f6b3d; }
+  .subtotal-row td { color: #555; font-size: 13px; padding: 6px 0; }
+  @media print { body { margin: 0; } button { display: none; } }
+</style>
+</head>
+<body>
+<h1>Cellion One</h1>
+<div class="meta">Tax Invoice — Order #${order.id}<br>
+Date: ${new Date(order.createdAt as string).toLocaleDateString("en-NG", { year: "numeric", month: "long", day: "numeric" })}<br>
+Status: ${order.status}</div>
+<table>
+  <thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
+  <tbody>
+    ${lineRows}
+    ${waivedRows}
+    <tr class="subtotal-row"><td>Subtotal (billable)</td><td style="text-align:right;">${fmtNgn(order.totalAmount)}</td></tr>
+    ${adminFee > 0 ? `<tr class="subtotal-row"><td>Administration Fee (10%)</td><td style="text-align:right;">${fmtNgn(adminFee)}</td></tr>` : ""}
+    <tr class="total-row"><td>Total</td><td style="text-align:right;">${fmtNgn(grandTotal)}</td></tr>
+  </tbody>
+</table>
+<p style="font-size:11px;color:#888;margin-top:24px;">This is a system-generated invoice from Cellion One Legal Technologies Ltd.</p>
+<button onclick="window.print()" style="margin-top:16px;padding:8px 20px;background:#0f6b3d;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;">Print / Save as PDF</button>
+</body>
+</html>`;
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(html);
+    } catch (error) {
+      console.error("Error generating order invoice:", error);
+      res.status(500).json({ message: "Failed to generate invoice" });
+    }
+  });
+
   // ============== FOUNDER SERVICE REQUESTS ==============
   app.get("/api/founder/service-requests", isAuthenticated, requireRole("founder"), async (req: any, res) => {
     try {
@@ -5273,6 +5370,14 @@ export async function registerRoutes(
       const ADD_ON_SKUS = ["TIN", "SCUML", "TM", "OFFICE_ONLY", "OFFICE_PLUS_MAIL", "ADD_DIR", "BANK_ACCOUNT"];
       if (!ADD_ON_SKUS.includes(item.sku)) {
         return res.status(400).json({ message: "Only add-on items can be marked as already obtained" });
+      }
+
+      // Block toggles on finalized (paid) orders to preserve accounting integrity
+      const [orderCheck] = await db.select({ status: ordersTable.status })
+        .from(ordersTable)
+        .where(eq(ordersTable.id, item.orderId));
+      if (orderCheck?.status === "paid") {
+        return res.status(400).json({ message: "Cannot modify billing items on a paid order. Create a credit note instead." });
       }
 
       const newValue = !item.alreadyObtained;

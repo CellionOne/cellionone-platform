@@ -5593,6 +5593,7 @@ export async function registerRoutes(
           businessDescription: rest.businessDescription || undefined,
           registeredAddress: rest.registeredAddress || undefined,
           operatingAddress: rest.operatingAddress || undefined,
+          wizardStep: wizardStep != null ? parseInt(String(wizardStep)) : undefined,
         });
         return res.json(updated);
       }
@@ -5607,6 +5608,7 @@ export async function registerRoutes(
         businessDescription: rest.businessDescription || undefined,
         registeredAddress: rest.registeredAddress || undefined,
         operatingAddress: rest.operatingAddress || undefined,
+        wizardStep: wizardStep != null ? parseInt(String(wizardStep)) : 1,
         status: "draft",
       });
       await storage.createAuditLog({

@@ -161,6 +161,17 @@ export default function NewApplicationPage() {
     queryKey: ["/api/registered-office/options"],
   });
 
+  // On mount (no ?draft param): read wizard-draft-id from localStorage so that
+  // a subsequent Save & Exit will patch the existing draft rather than creating a duplicate.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("draft")) return; // will be handled by the effect below
+    const storedId = localStorage.getItem("wizard-draft-id");
+    if (!storedId) return;
+    const id = parseInt(storedId);
+    if (!isNaN(id)) setDraftApplicationId(id);
+  }, []);
+
   // Load draft from server if ?draft=<id> is in the URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -210,18 +221,22 @@ export default function NewApplicationPage() {
           })));
         }
 
-        // Prefer the explicitly saved step; fall back to inference from data
-        const savedStep = localStorage.getItem(`wizard-draft-step-${id}`);
-        if (savedStep) {
-          const step = parseInt(savedStep);
-          if (!isNaN(step) && step >= 1 && step <= 5) {
-            setCurrentStep(step);
-          }
-        } else if (!app.companyType) setCurrentStep(1);
-        else if (!app.companyName1) setCurrentStep(2);
-        else if (!app.businessDescription) setCurrentStep(3);
-        else if (!app.operatingAddress?.line1) setCurrentStep(4);
-        else setCurrentStep(5);
+        // Restore the wizard step: server-persisted value takes priority over localStorage
+        const serverStep = app.wizardStep;
+        if (serverStep && serverStep >= 1 && serverStep <= 5) {
+          setCurrentStep(serverStep);
+        } else {
+          // Fall back to localStorage, then infer from data
+          const lsStep = localStorage.getItem(`wizard-draft-step-${id}`);
+          if (lsStep) {
+            const step = parseInt(lsStep);
+            if (!isNaN(step) && step >= 1 && step <= 5) setCurrentStep(step);
+          } else if (!app.companyType) setCurrentStep(1);
+          else if (!app.companyName1) setCurrentStep(2);
+          else if (!app.businessDescription) setCurrentStep(3);
+          else if (!app.operatingAddress?.line1) setCurrentStep(4);
+          else setCurrentStep(5);
+        }
 
         toast({ title: "Draft loaded", description: "Your saved draft has been restored." });
       })
@@ -348,6 +363,7 @@ export default function NewApplicationPage() {
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/applications/draft", {
         draftApplicationId,
+        wizardStep: currentStep,
         applicationType: formData.applicationType,
         companyType: formData.companyType || undefined,
         companyName1: formData.companyName1 || undefined,
@@ -355,7 +371,9 @@ export default function NewApplicationPage() {
         companyName3: formData.companyName3 || undefined,
         businessDescription: formData.businessDescription || undefined,
         registeredAddress: formData.useRegisteredOffice ? undefined : (formData.registeredAddress.line1 ? formData.registeredAddress : undefined),
-        operatingAddress: formData.operatingAddress.line1 ? formData.operatingAddress : undefined,
+        operatingAddress: sameAsRegistered
+          ? { ...formData.registeredAddress }
+          : (formData.operatingAddress.line1 ? formData.operatingAddress : undefined),
       });
       return response.json() as Promise<{ id: number }>;
     },

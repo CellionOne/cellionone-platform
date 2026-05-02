@@ -127,7 +127,7 @@ interface ApplicationDetailData {
   founderKyc: FounderKyc | null;
 }
 
-function NameAvailabilityReviewPanel({ applicationId, application, readOnly }: { applicationId: number; application: CompanyApplication; readOnly?: boolean }) {
+function NameAvailabilityReviewPanel({ applicationId, application, readOnly }: { applicationId: string; application: CompanyApplication; readOnly?: boolean }) {
   const { toast } = useToast();
   const [name1Avail, setName1Avail] = useState("");
   const [name2Avail, setName2Avail] = useState("");
@@ -151,6 +151,7 @@ function NameAvailabilityReviewPanel({ applicationId, application, readOnly }: {
       return response.json();
     },
     onSuccess: () => {
+      // applicationId is a string (route param) — must match the page's query key exactly
       queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId] });
       toast({ title: "Availability saved", description: "The founder has been notified to select their preferred name." });
       setSaved(true);
@@ -342,7 +343,7 @@ export default function LawyerApplicationDetail() {
 
         {(application.status === 'names_submitted' || application.status === 'names_reviewed') && (
           <NameAvailabilityReviewPanel
-            applicationId={parseInt(applicationId!)}
+            applicationId={applicationId!}
             application={application}
             readOnly={application.status === 'names_reviewed'}
           />

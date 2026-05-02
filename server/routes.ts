@@ -4108,7 +4108,7 @@ export async function registerRoutes(
       }
 
       // Multi-name billing: when an application has 2-3 selected names, multiply the
-      // CAC incorporation fee by the name count. Add-ons are always charged once.
+      // CAC/NGO incorporation fee by the name count. Add-ons are always charged once.
       if (applicationId) {
         const [appForNames] = await db.select({ selectedNames: companyApplicationsTable.selectedNames })
           .from(companyApplicationsTable)
@@ -4116,7 +4116,7 @@ export async function registerRoutes(
         const nameCount = (appForNames?.selectedNames ?? []).length;
         if (nameCount > 1) {
           finalItems = finalItems.map(i =>
-            i.sku.startsWith("CAC_") ? { ...i, quantity: nameCount } : i
+            (i.sku.startsWith("CAC_") || i.sku === "NGO") ? { ...i, quantity: nameCount } : i
           );
         }
       }
@@ -5269,6 +5269,12 @@ export async function registerRoutes(
       const [item] = await db.select().from(orderItemsTable).where(eq(orderItemsTable.id, itemId));
       if (!item) return res.status(404).json({ message: "Order item not found" });
 
+      // Security guard: only allow toggling add-on items, never core incorporation lines
+      const ADD_ON_SKUS = ["TIN", "SCUML", "TM", "OFFICE_ONLY", "OFFICE_PLUS_MAIL", "ADD_DIR", "BANK_ACCOUNT"];
+      if (!ADD_ON_SKUS.includes(item.sku)) {
+        return res.status(400).json({ message: "Only add-on items can be marked as already obtained" });
+      }
+
       const newValue = !item.alreadyObtained;
       const [updated] = await db.update(orderItemsTable)
         .set({ alreadyObtained: newValue })
@@ -5279,14 +5285,33 @@ export async function registerRoutes(
       const [order] = await db.select().from(ordersTable).where(eq(ordersTable.id, item.orderId));
       if (order && ["draft", "pending_payment"].includes(order.status || "")) {
         const allItems = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
+        // The DB update above already committed, so re-selected items reflect the new alreadyObtained value
         const billable = allItems.filter(i => !i.alreadyObtained);
         const newTotal = billable.reduce((sum, i) => sum + i.unitPrice * (i.quantity || 1), 0);
         const newCellionCut = billable.reduce((sum, i) => sum + i.cellionCut * (i.quantity || 1), 0);
         const newLawyerNet = billable.reduce((sum, i) => sum + i.lawyerNet * (i.quantity || 1), 0);
         const newAdminFee = Math.round(newTotal * 0.10);
+        const newPaystackTotal = newTotal + newAdminFee;
+
         await db.update(ordersTable)
           .set({ totalAmount: newTotal, adminFeeAmount: newAdminFee, totalCellionCut: newCellionCut, totalLawyerNet: newLawyerNet, updatedAt: new Date() })
           .where(eq(ordersTable.id, order.id));
+
+        // Update the pending payment amount so Paystack reconciliation reflects the new total.
+        // Cancel the existing initiated payment so the founder must re-initiate checkout at
+        // the correct price (Paystack links are immutable once created).
+        if (order.status === "pending_payment") {
+          await db.update(orderPaymentsTable)
+            .set({ amount: newPaystackTotal, status: "cancelled" })
+            .where(and(
+              eq(orderPaymentsTable.orderId, order.id),
+              eq(orderPaymentsTable.status, "initiated")
+            ));
+          // Revert order to draft so the founder re-initiates checkout at new price
+          await db.update(ordersTable)
+            .set({ status: "draft", updatedAt: new Date() })
+            .where(eq(ordersTable.id, order.id));
+        }
       }
 
       await storage.createAuditLog({

@@ -5728,6 +5728,31 @@ export async function registerRoutes(
         }
       }
 
+      // Validate selectedNames: only allowed when status is names_reviewed, each entry must be
+      // one of the submitted names, and must be marked 'available' by the lawyer
+      if (parsed.data.selectedNames !== undefined) {
+        if (application.status !== "names_reviewed") {
+          return res.status(400).json({ message: "Name selection is only allowed once the lawyer has completed the availability review" });
+        }
+        const submittedNames: Record<string, string | null> = {
+          [application.companyName1 ?? ""]: application.name1Availability ?? null,
+          [application.companyName2 ?? ""]: application.name2Availability ?? null,
+          [application.companyName3 ?? ""]: application.name3Availability ?? null,
+        };
+        const selectedNames = parsed.data.selectedNames as string[];
+        if (!Array.isArray(selectedNames) || selectedNames.length === 0) {
+          return res.status(400).json({ message: "selectedNames must be a non-empty array" });
+        }
+        for (const name of selectedNames) {
+          if (!(name in submittedNames)) {
+            return res.status(400).json({ message: `'${name}' is not one of the submitted company names` });
+          }
+          if (submittedNames[name] !== "available") {
+            return res.status(400).json({ message: `'${name}' is not marked as available (current status: ${submittedNames[name] ?? "not reviewed"})` });
+          }
+        }
+      }
+
       const updated = await storage.updateApplication(applicationId, parsed.data);
       // Sync per-person document requirements after any update (idempotent)
       syncPeopleDocumentRequirements(applicationId).catch(e =>

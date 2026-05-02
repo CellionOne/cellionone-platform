@@ -5435,8 +5435,13 @@ export async function registerRoutes(
       const isOwner = application.founderUserId === userId;
       const isAssignedLawyer = application.assignedLawyerUserId === userId;
       const isAdmin = roles.includes("admin");
-      
-      if (!isOwner && !isAssignedLawyer && !isAdmin) {
+      // Lawyers may view unassigned names_submitted applications (open name-check queue)
+      const isLawyerViewingUnassignedNameCheck =
+        roles.includes("lawyer") &&
+        application.status === "names_submitted" &&
+        !application.assignedLawyerUserId;
+
+      if (!isOwner && !isAssignedLawyer && !isAdmin && !isLawyerViewingUnassignedNameCheck) {
         return res.status(403).json({ message: "Access denied" });
       }
       

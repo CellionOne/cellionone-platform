@@ -64,6 +64,8 @@ export default function LawyerApplications() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="names_submitted">Name Check Required</SelectItem>
+              <SelectItem value="names_reviewed">Names Reviewed</SelectItem>
               <SelectItem value="submitted">Submitted</SelectItem>
               <SelectItem value="under_review">Under Review</SelectItem>
               <SelectItem value="clarification_requested">Clarification Requested</SelectItem>

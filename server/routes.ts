@@ -3814,16 +3814,56 @@ export async function registerRoutes(
       if (residentialAddress !== undefined) patch.residentialAddress = residentialAddress?.trim() || null;
       if (nin?.trim()) patch.ninEncrypted = encryptField(nin.trim());
       if (bvn?.trim()) patch.bvnEncrypted = encryptField(bvn.trim());
-      // If fullName is now set and inviteStatus was "pending", mark as "notified"
-      if (patch.fullName && person.inviteStatus === 'pending') patch.inviteStatus = 'notified';
+
+      // Apply the same "fully-detailed" criteria as POST: all 5 mandatory fields must be
+      // present (either in this patch or already on the record) before moving to "notified".
+      // Also send a notification email when making this transition for the first time.
+      const mergedFullName = (patch.fullName ?? person.fullName)?.trim();
+      const mergedDob = (patch.dateOfBirth ?? person.dateOfBirth)?.trim();
+      const mergedNationality = (patch.nationality ?? person.nationality)?.trim();
+      const mergedPhone = (patch.phoneNumber ?? person.phoneNumber)?.trim();
+      const mergedAddress = (patch.residentialAddress ?? person.residentialAddress)?.trim();
+      const nowFullyDetailed = !!(mergedFullName && mergedDob && mergedNationality && mergedPhone && mergedAddress);
+
+      if (nowFullyDetailed && person.inviteStatus === 'pending') {
+        patch.inviteStatus = 'notified';
+        // Send notification email (same as POST path)
+        try {
+          const emailSvc = await import("./services/emailService");
+          const actorUser = await storage.getUser(userId);
+          const founderName = actorUser ? `${actorUser.firstName || ''} ${actorUser.lastName || ''}`.trim() : 'A founder';
+          let companyNameHint = '';
+          if (person.applicationId) {
+            const app = await storage.getApplication(person.applicationId);
+            companyNameHint = app?.companyName1 || '';
+          } else if (person.companyProfileId) {
+            const [cp] = await db
+              .select({ name: companyProfiles.companyName })
+              .from(companyProfiles)
+              .where(eq(companyProfiles.id, person.companyProfileId));
+            companyNameHint = cp?.name || '';
+          }
+          if (person.inviteEmail) {
+            await emailSvc.sendPersonAddedNotificationEmail(
+              person.inviteEmail,
+              mergedFullName || '',
+              person.role,
+              founderName,
+              companyNameHint
+            );
+          }
+        } catch (emailErr: any) {
+          console.warn("[CompanyPeople] Failed to send notification email on details update:", emailErr?.message);
+        }
+      }
 
       const updated = await storage.updateCompanyPerson(id, patch);
       await storage.createAuditLog({
         actorUserId: userId,
-        action: "company_person_details_updated",
+        action: nowFullyDetailed && person.inviteStatus === 'pending' ? "company_person_details_submitted" : "company_person_details_updated",
         entityType: "company_person",
         entityId: String(id),
-        details: { fields: Object.keys(patch) },
+        details: { fields: Object.keys(patch), fullyDetailed: nowFullyDetailed || undefined },
         ipAddress: req.ip,
       });
       res.json(updated);

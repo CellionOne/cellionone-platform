@@ -63,13 +63,11 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
     await storage.addUserRole(user.id, "founder");
   }
 
-  // Persist phone to founderProfiles — phone is stored here (not on the users table)
+  // Persist phone to founderProfiles — phone is stored here (not on the users table).
+  // If the write fails, we propagate the error so registration is not reported as successful
+  // while phone is silently lost.
   if (cleanPhone) {
-    try {
-      await storage.upsertFounderProfile({ userId: user.id, phone: cleanPhone });
-    } catch (e) {
-      console.warn('[Auth] Could not save phone to founder profile:', e);
-    }
+    await storage.upsertFounderProfile({ userId: user.id, phone: cleanPhone });
   }
 
   try {

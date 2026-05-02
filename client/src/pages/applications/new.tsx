@@ -15,6 +15,7 @@ import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { saveDraft, getDraft, deleteDraft, isOnline, onOnlineStatusChange, type ApplicationDraft } from "@/lib/offline-storage";
+import type { CompanyApplication, CompanyPerson } from "@shared/schema";
 import {
   Building2,
   ArrowRight,
@@ -185,8 +186,9 @@ export default function NewApplicationPage() {
       apiRequest("GET", `/api/applications/${id}`).then(r => r.json()),
       apiRequest("GET", `/api/company-people`).then(r => r.json()),
     ])
-      .then(([envelope, allPeople]: [any, any[]]) => {
-        const app = envelope.application ?? envelope;
+      .then(([envelope, allPeople]: [{ application: CompanyApplication } | CompanyApplication, CompanyPerson[]]) => {
+        // GET /api/applications/:id returns { application, checklist, people, ... }
+        const app: CompanyApplication = "application" in envelope ? envelope.application : envelope;
         setFormData(prev => ({
           ...prev,
           applicationType: app.applicationType || prev.applicationType,
@@ -195,16 +197,16 @@ export default function NewApplicationPage() {
           companyName2: app.companyName2 || prev.companyName2,
           companyName3: app.companyName3 || prev.companyName3,
           businessDescription: app.businessDescription || prev.businessDescription,
-          registeredAddress: app.registeredAddress || prev.registeredAddress,
-          operatingAddress: app.operatingAddress || prev.operatingAddress,
+          registeredAddress: (app.registeredAddress as typeof prev.registeredAddress) || prev.registeredAddress,
+          operatingAddress: (app.operatingAddress as typeof prev.operatingAddress) || prev.operatingAddress,
         }));
 
         // Restore directors linked to this draft application
-        const draftPeople = Array.isArray(allPeople)
-          ? allPeople.filter((p: any) => p.applicationId === id)
+        const draftPeople: CompanyPerson[] = Array.isArray(allPeople)
+          ? allPeople.filter((p) => p.applicationId === id)
           : [];
         if (draftPeople.length) {
-          setDirectors(draftPeople.map((p: any) => ({
+          setDirectors(draftPeople.map((p) => ({
             localId: crypto.randomUUID(),
             personId: p.id,
             personType: (p.entityType === "corporate" ? "corporate" : "individual") as "individual" | "corporate",
@@ -234,7 +236,7 @@ export default function NewApplicationPage() {
           } else if (!app.companyType) setCurrentStep(1);
           else if (!app.companyName1) setCurrentStep(2);
           else if (!app.businessDescription) setCurrentStep(3);
-          else if (!app.operatingAddress?.line1) setCurrentStep(4);
+          else if (!(app.operatingAddress as Record<string, string> | null)?.line1) setCurrentStep(4);
           else setCurrentStep(5);
         }
 

@@ -440,6 +440,7 @@ function InviteDialog() {
               {detailsMode && (
                 <div className="space-y-3 rounded-lg border p-3 bg-background">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Personal Details</p>
+                  <p className="text-xs text-muted-foreground">Fields marked <span className="text-destructive">*</span> are required to submit full details (all five must be filled).</p>
                   <FormField control={form.control} name="fullName" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Full Legal Name <span className="text-destructive">*</span></FormLabel>
@@ -450,14 +451,14 @@ function InviteDialog() {
                   <div className="grid grid-cols-2 gap-3">
                     <FormField control={form.control} name="dateOfBirth" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Date of Birth</FormLabel>
+                        <FormLabel>Date of Birth <span className="text-destructive">*</span></FormLabel>
                         <FormControl><Input type="date" data-testid="input-dob" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )} />
                     <FormField control={form.control} name="nationality" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Nationality</FormLabel>
+                        <FormLabel>Nationality <span className="text-destructive">*</span></FormLabel>
                         <FormControl><Input placeholder="Nigeria" data-testid="input-nationality" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
@@ -465,7 +466,7 @@ function InviteDialog() {
                   </div>
                   <FormField control={form.control} name="phoneNumber" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Phone Number</FormLabel>
+                      <FormLabel>Phone Number <span className="text-destructive">*</span></FormLabel>
                       <FormControl><Input type="tel" placeholder="+234 800 000 0000" data-testid="input-person-phone" {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
@@ -502,7 +503,7 @@ function InviteDialog() {
                   </div>
                   <FormField control={form.control} name="residentialAddress" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Residential Address</FormLabel>
+                      <FormLabel>Residential Address <span className="text-destructive">*</span></FormLabel>
                       <FormControl><Textarea placeholder="Full residential address" rows={2} data-testid="input-residential-address" {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>

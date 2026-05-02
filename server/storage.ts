@@ -85,7 +85,6 @@ export interface IStorage {
     email: string;
     firstName?: string;
     lastName?: string;
-    phone?: string;
     passwordHash: string;
     verificationToken: string;
     verificationTokenExpiry: Date;
@@ -99,7 +98,6 @@ export interface IStorage {
   updateUser(userId: string, data: Partial<{
     firstName: string;
     lastName: string;
-    phone: string;
     passwordHash: string;
     verificationToken: string;
     verificationTokenExpiry: Date;
@@ -581,7 +579,6 @@ export class DatabaseStorage implements IStorage {
     email: string;
     firstName?: string;
     lastName?: string;
-    phone?: string;
     passwordHash: string;
     verificationToken: string;
     verificationTokenExpiry: Date;
@@ -592,7 +589,6 @@ export class DatabaseStorage implements IStorage {
       email: data.email.toLowerCase(),
       firstName: data.firstName,
       lastName: data.lastName,
-      phone: data.phone,
       passwordHash: data.passwordHash,
       verificationToken: data.verificationToken,
       verificationTokenExpiry: data.verificationTokenExpiry,
@@ -639,7 +635,6 @@ export class DatabaseStorage implements IStorage {
   async updateUser(userId: string, data: Partial<{
     firstName: string;
     lastName: string;
-    phone: string;
     passwordHash: string;
     verificationToken: string;
     verificationTokenExpiry: Date;

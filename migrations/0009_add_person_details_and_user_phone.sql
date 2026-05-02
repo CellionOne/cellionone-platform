@@ -1,6 +1,3 @@
--- Add phone to users table
-ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "phone" varchar(50);
-
 -- Add personal detail fields to company_people (individual fully-detailed submission flow)
 ALTER TABLE "company_people" ADD COLUMN IF NOT EXISTS "full_name" varchar(255);
 ALTER TABLE "company_people" ADD COLUMN IF NOT EXISTS "date_of_birth" varchar;

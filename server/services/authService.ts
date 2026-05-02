@@ -47,7 +47,6 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
       verificationToken,
       verificationTokenExpiry,
       ...(inviteToken ? { pendingInviteToken: inviteToken } : {}),
-      ...(cleanPhone ? { phone: cleanPhone } : {}),
     });
     console.log(`[Auth] Re-registration for unverified account: ${email}`);
   } else {
@@ -58,14 +57,13 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
       verificationToken,
       verificationTokenExpiry,
       emailVerified: false,
-      phone: cleanPhone,
       ...(inviteToken ? { pendingInviteToken: inviteToken } : {}),
     });
 
     await storage.addUserRole(user.id, "founder");
   }
 
-  // Persist phone to founderProfiles immediately so it shows on the personal profile page
+  // Persist phone to founderProfiles — phone is stored here (not on the users table)
   if (cleanPhone) {
     try {
       await storage.upsertFounderProfile({ userId: user.id, phone: cleanPhone });

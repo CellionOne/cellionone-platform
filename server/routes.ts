@@ -3368,9 +3368,14 @@ export async function registerRoutes(
       } = req.body;
 
       const isCorporate = entityType === "corporate";
-      // "Fully-detailed" means the founder is submitting all details for an individual person
-      // instead of sending an invite link. Triggers notification email + inviteStatus = "notified".
-      const isFullyDetailed = !isCorporate && !!fullName?.trim();
+      // "Fully-detailed" requires all five mandatory personal detail fields for an individual.
+      // Triggers notification email + inviteStatus = "notified" instead of invite-link flow.
+      const isFullyDetailed = !isCorporate
+        && !!fullName?.trim()
+        && !!dateOfBirth?.trim()
+        && !!nationality?.trim()
+        && !!phoneNumber?.trim()
+        && !!residentialAddress?.trim();
 
       if (!inviteEmail || !role) {
         return res.status(400).json({ message: isCorporate ? "Authorised representative email and role are required" : "Email and role are required" });
@@ -3624,12 +3629,24 @@ export async function registerRoutes(
 
           if (isFullyDetailed) {
             // Notification-only email — no invite link, no action required
+            // Derive company name from applicationId or companyProfileId
+            let companyNameHint = '';
+            if (applicationId) {
+              const app = await storage.getApplication(applicationId);
+              companyNameHint = app?.companyName1 || '';
+            } else if (companyProfileId) {
+              const [cp] = await db
+                .select({ name: companyProfiles.companyName })
+                .from(companyProfiles)
+                .where(eq(companyProfiles.id, companyProfileId));
+              companyNameHint = cp?.name || '';
+            }
             await emailSvc.sendPersonAddedNotificationEmail(
               inviteEmail.toLowerCase().trim(),
               fullName?.trim() || '',
               role,
               founderName,
-              '' // company name hint not available here; can be enhanced later
+              companyNameHint
             );
           } else if (isCorporate) {
             await resend.emails.send({
@@ -3673,7 +3690,7 @@ export async function registerRoutes(
 
       await storage.createAuditLog({
         actorUserId: userId,
-        action: autoVerified ? "company_person_auto_verified" : "company_person_invited",
+        action: autoVerified ? "company_person_auto_verified" : isFullyDetailed ? "company_person_details_submitted" : "company_person_invited",
         entityType: "company_person",
         entityId: String(person.id),
         details: {
@@ -3681,6 +3698,7 @@ export async function registerRoutes(
           entityType: isCorporate ? "corporate" : "individual",
           corporateName: isCorporate ? corporateName : undefined,
           autoVerifyMethod: autoVerified ? autoVerifyMethod : undefined,
+          fullyDetailed: isFullyDetailed || undefined,
         },
         ipAddress: req.ip,
       });

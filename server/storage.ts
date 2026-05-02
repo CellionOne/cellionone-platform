@@ -119,6 +119,7 @@ export interface IStorage {
   getApplication(id: number): Promise<CompanyApplication | undefined>;
   getApplicationsByFounder(founderUserId: string): Promise<CompanyApplication[]>;
   getApplicationsByLawyer(lawyerUserId: string): Promise<CompanyApplication[]>;
+  getUnassignedNamesSubmittedApplications(): Promise<CompanyApplication[]>;
   getAllApplications(): Promise<CompanyApplication[]>;
   createApplication(data: InsertCompanyApplication): Promise<CompanyApplication>;
   updateApplication(id: number, data: Partial<InsertCompanyApplication>): Promise<CompanyApplication | undefined>;
@@ -707,6 +708,15 @@ export class DatabaseStorage implements IStorage {
   async getApplicationsByLawyer(lawyerUserId: string): Promise<CompanyApplication[]> {
     return db.select().from(companyApplications)
       .where(eq(companyApplications.assignedLawyerUserId, lawyerUserId))
+      .orderBy(desc(companyApplications.createdAt));
+  }
+
+  async getUnassignedNamesSubmittedApplications(): Promise<CompanyApplication[]> {
+    return db.select().from(companyApplications)
+      .where(and(
+        eq(companyApplications.status, "names_submitted"),
+        isNull(companyApplications.assignedLawyerUserId),
+      ))
       .orderBy(desc(companyApplications.createdAt));
   }
 

@@ -5820,9 +5820,13 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Application not found" });
       }
 
-      // Lawyers may only review applications assigned to them; admins bypass this check
+      // Lawyers may review unassigned names_submitted apps (open queue) or apps assigned to them.
+      // Admins bypass all assignment checks.
       if (roles.includes("lawyer") && !roles.includes("admin")) {
-        if (application.assignedLawyerUserId !== userId) {
+        const isAssignedToMe = application.assignedLawyerUserId === userId;
+        const isUnassignedNameCheck =
+          application.status === "names_submitted" && !application.assignedLawyerUserId;
+        if (!isAssignedToMe && !isUnassignedNameCheck) {
           return res.status(403).json({ message: "This application is not assigned to you" });
         }
       }
@@ -5852,11 +5856,18 @@ export async function registerRoutes(
         return res.status(400).json({ message: "name3Availability is required because the application has a third name option" });
       }
 
+      // Auto-assign the reviewing lawyer if the application was unassigned
+      const assignFields: Record<string, any> = {};
+      if (roles.includes("lawyer") && !application.assignedLawyerUserId) {
+        assignFields.assignedLawyerUserId = userId;
+      }
+
       const updated = await storage.updateApplication(applicationId, {
         name1Availability: name1Availability,
         name2Availability: name2Availability || undefined,
         name3Availability: name3Availability || undefined,
         status: "names_reviewed",
+        ...assignFields,
       });
 
       // Notify the founder
@@ -7093,8 +7104,17 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
   app.get("/api/lawyer/applications", isAuthenticated, requireRole("lawyer"), async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const applications = await storage.getApplicationsByLawyer(userId);
-      res.json(applications);
+      const [assigned, unassignedNameChecks] = await Promise.all([
+        storage.getApplicationsByLawyer(userId),
+        storage.getUnassignedNamesSubmittedApplications(),
+      ]);
+      // Merge unassigned name-check cases into the lawyer's queue, deduplicating by id
+      const assignedIds = new Set(assigned.map((a) => a.id));
+      const merged = [
+        ...assigned,
+        ...unassignedNameChecks.filter((a) => !assignedIds.has(a.id)),
+      ];
+      res.json(merged);
     } catch (error) {
       console.error("Error fetching lawyer applications:", error);
       res.status(500).json({ message: "Failed to fetch applications" });

@@ -381,7 +381,9 @@ export default function ApplicationDetailsPage() {
     setLocation(`/founder/checkout?${params.toString()}`);
   };
 
-  const INCORPORATION_FEE_KOBO = 10000000;
+  const INCORPORATION_FEE_UNIT_KOBO = 10000000;
+  const nameCount = (data?.application?.selectedNames ?? []).length || 1;
+  const INCORPORATION_FEE_KOBO = INCORPORATION_FEE_UNIT_KOBO * nameCount;
   const estimatedSubtotal = INCORPORATION_FEE_KOBO + addOnsTotalKobo;
   const estimatedAdminFee = Math.round(estimatedSubtotal * 0.10);
   const estimatedTotal = estimatedSubtotal + estimatedAdminFee;
@@ -1103,9 +1105,19 @@ export default function ApplicationDetailsPage() {
                   <div className="space-y-3">
                     <div className="space-y-2 text-sm">
                       <div className="flex items-center justify-between" data-testid="fee-line-incorporation">
-                        <span className="text-muted-foreground">Company Incorporation</span>
-                        <span className="font-medium">₦100,000</span>
+                        <span className="text-muted-foreground">
+                          {nameCount > 1
+                            ? `Company Incorporation × ${nameCount} names`
+                            : "Company Incorporation"}
+                        </span>
+                        <span className="font-medium">₦{(INCORPORATION_FEE_KOBO / 100).toLocaleString()}</span>
                       </div>
+                      {nameCount > 1 && (
+                        <div className="flex items-center justify-between text-xs text-muted-foreground pl-2" data-testid="fee-line-per-name">
+                          <span>₦100,000 × {nameCount} names</span>
+                          <span>{application.selectedNames?.join(", ")}</span>
+                        </div>
+                      )}
                       {selectedAddOnProducts.map(p => (
                         <div key={p.sku} className="flex items-center justify-between" data-testid={`fee-line-addon-${p.sku}`}>
                           <span className="text-muted-foreground">{ADD_ON_META[p.sku]?.label || p.name}</span>

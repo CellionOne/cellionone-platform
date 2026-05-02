@@ -101,6 +101,17 @@ export default function CheckoutPage() {
     queryKey: ["/api/products"],
   });
 
+  interface ApplicationBrief {
+    application: { selectedNames?: string[] | null };
+  }
+
+  const { data: applicationData } = useQuery<ApplicationBrief>({
+    queryKey: ["/api/applications", applicationId],
+    enabled: !!applicationId,
+  });
+
+  const nameCount = (applicationData?.application?.selectedNames ?? []).length || 1;
+
   interface ReadinessSummary {
     people: {
       id: number | string;
@@ -146,8 +157,11 @@ export default function CheckoutPage() {
   );
 
   const totalKobo = useMemo(() => {
-    return selectedProducts.reduce((sum, p) => sum + p.priceNgn, 0);
-  }, [selectedProducts]);
+    return selectedProducts.reduce((sum, p) => {
+      const qty = (p.sku.startsWith("CAC_") || p.sku === "NGO") ? nameCount : 1;
+      return sum + p.priceNgn * qty;
+    }, 0);
+  }, [selectedProducts, nameCount]);
 
   const hasIncorporation = selectedSkus.some(s => s.startsWith("CAC_") || s === "NGO");
 
@@ -558,23 +572,33 @@ export default function CheckoutPage() {
                 </div>
               ) : (
                 <>
-                  {selectedProducts.map((p) => (
-                    <div key={p.sku} className="flex items-center justify-between gap-2" data-testid={`summary-item-${p.sku}`}>
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-6 w-6 flex-shrink-0"
-                          onClick={(e) => { e.stopPropagation(); removeSku(p.sku); }}
-                          data-testid={`button-remove-${p.sku}`}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                        <span className="text-sm truncate">{p.name}</span>
+                  {selectedProducts.map((p) => {
+                    const isIncorp = p.sku.startsWith("CAC_") || p.sku === "NGO";
+                    const qty = isIncorp ? nameCount : 1;
+                    const lineTotal = p.priceNgn * qty;
+                    return (
+                      <div key={p.sku} className="flex items-center justify-between gap-2" data-testid={`summary-item-${p.sku}`}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 flex-shrink-0"
+                            onClick={(e) => { e.stopPropagation(); removeSku(p.sku); }}
+                            data-testid={`button-remove-${p.sku}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                          <div className="min-w-0">
+                            <span className="text-sm truncate block">{p.name}</span>
+                            {isIncorp && qty > 1 && (
+                              <span className="text-xs text-muted-foreground">{formatNgn(p.priceNgn)} × {qty} names</span>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-sm font-medium flex-shrink-0">{getSkuPriceLabel(p.sku, lineTotal)}</span>
                       </div>
-                      <span className="text-sm font-medium flex-shrink-0">{getSkuPriceLabel(p.sku, p.priceNgn)}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
 
                   <Separator />
                   <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground">

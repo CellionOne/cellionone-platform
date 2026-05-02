@@ -4107,6 +4107,20 @@ export async function registerRoutes(
         return res.status(400).json({ message: "No valid items in order." });
       }
 
+      // Multi-name billing: when an application has 2-3 selected names, multiply the
+      // CAC incorporation fee by the name count. Add-ons are always charged once.
+      if (applicationId) {
+        const [appForNames] = await db.select({ selectedNames: companyApplicationsTable.selectedNames })
+          .from(companyApplicationsTable)
+          .where(eq(companyApplicationsTable.id, applicationId));
+        const nameCount = (appForNames?.selectedNames ?? []).length;
+        if (nameCount > 1) {
+          finalItems = finalItems.map(i =>
+            i.sku.startsWith("CAC_") ? { ...i, quantity: nameCount } : i
+          );
+        }
+      }
+
       // Service gating: block post-inc SKU purchases only when all the founder's existing-company profiles
       // are unverified AND the order has no applicationId (incorporation context).
       // Founders with a verified existing company OR a completed incorporation may always purchase.
@@ -5224,6 +5238,70 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching admin order:", error);
       res.status(500).json({ message: "Failed to fetch order" });
+    }
+  });
+
+  app.get("/api/admin/applications/:id/order", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const applicationId = parseInt(req.params.id, 10);
+      if (isNaN(applicationId)) return res.status(400).json({ message: "Invalid application ID" });
+
+      const [order] = await db.select().from(ordersTable)
+        .where(eq(ordersTable.applicationId, applicationId))
+        .orderBy(desc(ordersTable.createdAt));
+
+      if (!order) return res.json(null);
+
+      const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
+      res.json({ order, items });
+    } catch (error) {
+      console.error("Error fetching application order:", error);
+      res.status(500).json({ message: "Failed to fetch order" });
+    }
+  });
+
+  app.patch("/api/admin/order-items/:itemId/already-obtained", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const itemId = parseInt(req.params.itemId, 10);
+      if (isNaN(itemId)) return res.status(400).json({ message: "Invalid item ID" });
+
+      const [item] = await db.select().from(orderItemsTable).where(eq(orderItemsTable.id, itemId));
+      if (!item) return res.status(404).json({ message: "Order item not found" });
+
+      const newValue = !item.alreadyObtained;
+      const [updated] = await db.update(orderItemsTable)
+        .set({ alreadyObtained: newValue })
+        .where(eq(orderItemsTable.id, itemId))
+        .returning();
+
+      // Recalculate order totals if order is still pending/draft
+      const [order] = await db.select().from(ordersTable).where(eq(ordersTable.id, item.orderId));
+      if (order && ["draft", "pending_payment"].includes(order.status || "")) {
+        const allItems = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
+        const billable = allItems.filter(i => !i.alreadyObtained);
+        const newTotal = billable.reduce((sum, i) => sum + i.unitPrice * (i.quantity || 1), 0);
+        const newCellionCut = billable.reduce((sum, i) => sum + i.cellionCut * (i.quantity || 1), 0);
+        const newLawyerNet = billable.reduce((sum, i) => sum + i.lawyerNet * (i.quantity || 1), 0);
+        const newAdminFee = Math.round(newTotal * 0.10);
+        await db.update(ordersTable)
+          .set({ totalAmount: newTotal, adminFeeAmount: newAdminFee, totalCellionCut: newCellionCut, totalLawyerNet: newLawyerNet, updatedAt: new Date() })
+          .where(eq(ordersTable.id, order.id));
+      }
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "order_item_already_obtained_toggled",
+        entityType: "order_item",
+        entityId: String(itemId),
+        details: { alreadyObtained: newValue, orderId: item.orderId, sku: item.sku },
+        ipAddress: req.ip,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error toggling already obtained:", error);
+      res.status(500).json({ message: "Failed to update item" });
     }
   });
 

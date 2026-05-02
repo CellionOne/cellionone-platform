@@ -4,6 +4,8 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -20,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
-import type { CompanyApplication, ApplicationChecklistItem, CompanyPerson, DocumentFile } from "@shared/schema";
+import type { CompanyApplication, ApplicationChecklistItem, CompanyPerson, DocumentFile, Order, OrderItem } from "@shared/schema";
 import {
   ArrowLeft,
   Building2,
@@ -41,6 +43,8 @@ import {
   ChevronRight,
   Upload,
   MailCheck,
+  CreditCard,
+  PackageCheck,
 } from "lucide-react";
 
 interface AdminAppDetail {
@@ -597,6 +601,196 @@ function DocumentRow({ doc, people, applicationId }: { doc: DocumentFile; people
   );
 }
 
+function formatNgn(kobo: number) {
+  return `₦${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 0 })}`;
+}
+
+const ADD_ON_SKUS_SET = new Set(["TIN", "SCUML", "TM", "OFFICE_ONLY", "OFFICE_PLUS_MAIL", "ADD_DIR", "BANK_ACCOUNT"]);
+
+function BillingTab({ applicationId }: { applicationId: number }) {
+  const { toast } = useToast();
+
+  const { data: orderData, isLoading: orderLoading } = useQuery<{ order: Order; items: OrderItem[] } | null>({
+    queryKey: ["/api/admin/applications", applicationId, "order"],
+    queryFn: () =>
+      fetch(`/api/admin/applications/${applicationId}/order`, { credentials: "include" }).then((r) => {
+        if (!r.ok) throw new Error("Failed to load order");
+        return r.json();
+      }),
+    enabled: applicationId > 0,
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: (itemId: number) =>
+      apiRequest("PATCH", `/api/admin/order-items/${itemId}/already-obtained`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/applications", applicationId, "order"] });
+      toast({ title: "Item updated" });
+    },
+    onError: () => toast({ title: "Failed to update item", variant: "destructive" }),
+  });
+
+  if (orderLoading) {
+    return (
+      <div className="flex justify-center py-12">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  if (!orderData) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <CreditCard className="h-10 w-10 mx-auto mb-3 opacity-30" />
+        <p>No order found for this application.</p>
+        <p className="text-xs mt-1">An order is created when the founder proceeds to checkout.</p>
+      </div>
+    );
+  }
+
+  const { order, items } = orderData;
+  const incorporationItems = items.filter((i) => i.sku.startsWith("CAC_") || i.sku === "NGO");
+  const addOnItems = items.filter((i) => ADD_ON_SKUS_SET.has(i.sku));
+  const billableTotal = items.filter((i) => !i.alreadyObtained).reduce((s, i) => s + i.unitPrice * (i.quantity || 1), 0);
+  const adminFee = order.adminFeeAmount || 0;
+
+  const statusColor =
+    order.status === "paid" ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" :
+    order.status === "pending_payment" ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" :
+    order.status === "failed" ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" :
+    "bg-muted text-muted-foreground";
+
+  return (
+    <div className="space-y-4" data-testid="billing-tab">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+            <CreditCard className="h-4 w-4" />
+            Order #{order.id}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1 text-sm">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Status</span>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`} data-testid="text-order-status">
+              {order.status}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Fulfilment</span>
+            <span className="font-medium capitalize" data-testid="text-order-fulfilment">{order.fulfilmentStatus || "pending"}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Created</span>
+            <span className="font-medium">{order.createdAt ? new Date(order.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Order Items</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {incorporationItems.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Incorporation</p>
+              {incorporationItems.map((item) => {
+                const lineTotal = item.unitPrice * (item.quantity || 1);
+                return (
+                  <div key={item.id} className="flex items-center justify-between gap-3 border rounded-lg px-3 py-2 text-sm" data-testid={`billing-item-${item.id}`}>
+                    <div className="min-w-0">
+                      <p className="font-medium">{item.sku}</p>
+                      {(item.quantity || 1) > 1 && (
+                        <p className="text-xs text-muted-foreground">{formatNgn(item.unitPrice)} × {item.quantity} names</p>
+                      )}
+                    </div>
+                    <span className="font-semibold shrink-0">{formatNgn(lineTotal)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {addOnItems.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Add-ons</p>
+              {addOnItems.map((item) => {
+                const lineTotal = item.unitPrice * (item.quantity || 1);
+                const isObtained = !!item.alreadyObtained;
+                return (
+                  <div
+                    key={item.id}
+                    className={`flex items-center justify-between gap-3 border rounded-lg px-3 py-2 text-sm transition-colors ${
+                      isObtained ? "border-amber-200 bg-amber-50/40 dark:border-amber-900/40 dark:bg-amber-900/10" : ""
+                    }`}
+                    data-testid={`billing-item-${item.id}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium">{item.sku}</p>
+                        {isObtained && (
+                          <Badge variant="outline" className="text-xs border-amber-400 text-amber-700 dark:text-amber-400" data-testid={`badge-obtained-${item.id}`}>
+                            <PackageCheck className="h-3 w-3 mr-1" />
+                            Already Obtained
+                          </Badge>
+                        )}
+                      </div>
+                      {isObtained && (
+                        <p className="text-xs text-muted-foreground mt-0.5">Excluded from billing — admin marked as already obtained</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className={`font-semibold ${isObtained ? "line-through text-muted-foreground" : ""}`}>
+                        {formatNgn(lineTotal)}
+                      </span>
+                      {order.status !== "paid" && (
+                        <Button
+                          variant={isObtained ? "default" : "outline"}
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => toggleMutation.mutate(item.id)}
+                          disabled={toggleMutation.isPending}
+                          data-testid={`button-toggle-obtained-${item.id}`}
+                        >
+                          {toggleMutation.isPending ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : isObtained ? (
+                            "Undo"
+                          ) : (
+                            "Mark Obtained"
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <Separator />
+          <div className="space-y-1.5 text-sm">
+            <div className="flex justify-between text-muted-foreground">
+              <span>Billable subtotal</span>
+              <span data-testid="text-billing-subtotal">{formatNgn(billableTotal)}</span>
+            </div>
+            <div className="flex justify-between text-muted-foreground">
+              <span>Administration Fee (10%)</span>
+              <span data-testid="text-billing-admin-fee">{formatNgn(adminFee)}</span>
+            </div>
+            <Separator />
+            <div className="flex justify-between font-semibold">
+              <span>Total</span>
+              <span data-testid="text-billing-total">{formatNgn(billableTotal + adminFee)}</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function AdminApplicationDetail() {
   const { id } = useParams<{ id: string }>();
   const applicationId = parseInt(id || "0");
@@ -712,7 +906,7 @@ export default function AdminApplicationDetail() {
         </div>
 
         <Tabs defaultValue="overview">
-          <TabsList className="grid grid-cols-4 w-full max-w-lg">
+          <TabsList className="grid grid-cols-5 w-full max-w-2xl">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="checklist">
               Checklist
@@ -733,6 +927,10 @@ export default function AdminApplicationDetail() {
               {documents.length > 0 && (
                 <span className="ml-1.5 text-xs bg-muted rounded-full px-1.5 py-0.5">{documents.length}</span>
               )}
+            </TabsTrigger>
+            <TabsTrigger value="billing">
+              <CreditCard className="h-3.5 w-3.5 mr-1.5" />
+              Billing
             </TabsTrigger>
           </TabsList>
 
@@ -933,6 +1131,11 @@ export default function AdminApplicationDetail() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          {/* ── Billing ── */}
+          <TabsContent value="billing" className="mt-4">
+            <BillingTab applicationId={applicationId} />
           </TabsContent>
         </Tabs>
       </div>

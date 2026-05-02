@@ -17,6 +17,8 @@ type ReceiptStatus = "issued" | "revoked" | "expired";
 
 interface ReceiptJson {
   companySummary?: { name: string; type: string; founders: string[] };
+  selectedNames?: string[];
+  nameCount?: number;
   statusTimeline?: { status: string; timestamp: string }[];
   documentHashes?: { docType: string; sha256: string }[];
   executionDeclarationRef?: number;
@@ -63,12 +65,17 @@ export async function issueReceipt(
   const shareholders = application.shareholdersData as Array<{ name?: string }> || [];
   const founderNames = shareholders.map(s => s.name || "Unknown").filter(Boolean);
   
+  const appSelectedNames = (application.selectedNames as string[] | null) ?? [];
   const receiptJson: ReceiptJson = {
     companySummary: {
       name: application.companyName1 || "Unknown",
       type: application.companyType || "LTD",
       founders: founderNames.length > 0 ? founderNames : ["Founder information pending"], 
     },
+    ...(appSelectedNames.length > 0 && {
+      selectedNames: appSelectedNames,
+      nameCount: appSelectedNames.length,
+    }),
     statusTimeline: [
       { status: "created", timestamp: application.createdAt?.toISOString() || new Date().toISOString() },
       ...(application.status ? [{ status: application.status, timestamp: application.updatedAt?.toISOString() || new Date().toISOString() }] : []),

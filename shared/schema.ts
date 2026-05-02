@@ -994,6 +994,7 @@ export const orderItems = pgTable("order_items", {
   unitPrice: integer("unit_price").notNull(), // in kobo
   cellionCut: integer("cellion_cut").notNull().default(0), // for this item in kobo
   lawyerNet: integer("lawyer_net").notNull().default(0), // unit_price - cellion_cut in kobo
+  alreadyObtained: boolean("already_obtained").default(false), // admin flag: add-on already obtained for this founder, exclude from billing
   metadata: json("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [

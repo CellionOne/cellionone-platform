@@ -5717,6 +5717,20 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Access denied" });
       }
 
+      // Founders may never write to protected system/lawyer-controlled fields regardless of status
+      const FOUNDER_PROTECTED_FIELDS: Array<keyof typeof parsed.data> = [
+        "status",
+        "name1Availability",
+        "name2Availability",
+        "name3Availability",
+        "assignedLawyerUserId",
+      ];
+      for (const field of FOUNDER_PROTECTED_FIELDS) {
+        if (parsed.data[field] !== undefined) {
+          return res.status(403).json({ message: `Field '${field}' is not writable by founders` });
+        }
+      }
+
       // Once names have been submitted, prevent founders from modifying phase-1 fields
       const lockedAfterNameSubmission = ["names_submitted", "names_reviewed", "pending_verification", "submitted", "under_review", "filed", "pending_originals", "courier_in_transit", "completed", "rejected"];
       const PHASE1_FIELDS: Array<keyof typeof parsed.data> = ["companyType", "companyName1", "companyName2", "companyName3"];

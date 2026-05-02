@@ -5570,6 +5570,59 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/applications/draft — save partial wizard state server-side mid-wizard
+  app.post("/api/applications/draft", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { draftApplicationId, wizardStep, ...rest } = req.body;
+
+      if (draftApplicationId) {
+        const existing = await storage.getApplication(parseInt(draftApplicationId));
+        if (!existing || existing.founderUserId !== userId) {
+          return res.status(403).json({ message: "Access denied" });
+        }
+        if (existing.status !== "draft") {
+          return res.status(400).json({ message: "Cannot update a non-draft application this way" });
+        }
+        const updated = await storage.updateApplication(parseInt(draftApplicationId), {
+          applicationType: rest.applicationType || undefined,
+          companyType: rest.companyType || undefined,
+          companyName1: rest.companyName1 || undefined,
+          companyName2: rest.companyName2 || undefined,
+          companyName3: rest.companyName3 || undefined,
+          businessDescription: rest.businessDescription || undefined,
+          registeredAddress: rest.registeredAddress || undefined,
+          operatingAddress: rest.operatingAddress || undefined,
+        });
+        return res.json(updated);
+      }
+
+      const application = await storage.createApplication({
+        founderUserId: userId,
+        applicationType: rest.applicationType || "incorporation",
+        companyType: rest.companyType || undefined,
+        companyName1: rest.companyName1 || undefined,
+        companyName2: rest.companyName2 || undefined,
+        companyName3: rest.companyName3 || undefined,
+        businessDescription: rest.businessDescription || undefined,
+        registeredAddress: rest.registeredAddress || undefined,
+        operatingAddress: rest.operatingAddress || undefined,
+        status: "draft",
+      });
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "save_draft",
+        entityType: "company_application",
+        entityId: application.id.toString(),
+        ipAddress: req.ip,
+      });
+      return res.json(application);
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      res.status(500).json({ message: "Failed to save draft" });
+    }
+  });
+
   app.post("/api/applications", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);

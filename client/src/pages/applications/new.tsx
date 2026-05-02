@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -23,6 +24,7 @@ import {
   Wifi,
   WifiOff,
   Save,
+  LogOut,
   MapPin,
   Mail,
   Shield,
@@ -146,6 +148,8 @@ export default function NewApplicationPage() {
   const [useCustomCountry, setUseCustomCountry] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
   const [isLoadingAi, setIsLoadingAi] = useState(false);
+  const [draftApplicationId, setDraftApplicationId] = useState<number | null>(null);
+  const [sameAsRegistered, setSameAsRegistered] = useState(false);
 
   // Fetch registered office options
   const { data: registeredOfficeOptions } = useQuery<{
@@ -156,6 +160,58 @@ export default function NewApplicationPage() {
   }>({
     queryKey: ["/api/registered-office/options"],
   });
+
+  // Load draft from server if ?draft=<id> is in the URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const draftParam = params.get("draft");
+    if (!draftParam) return;
+    const id = parseInt(draftParam);
+    if (isNaN(id)) return;
+    setDraftApplicationId(id);
+    apiRequest("GET", `/api/applications/${id}`)
+      .then(r => r.json())
+      .then((data: any) => {
+        setFormData(prev => ({
+          ...prev,
+          applicationType: data.applicationType || prev.applicationType,
+          companyType: data.companyType || prev.companyType,
+          companyName1: data.companyName1 || prev.companyName1,
+          companyName2: data.companyName2 || prev.companyName2,
+          companyName3: data.companyName3 || prev.companyName3,
+          businessDescription: data.businessDescription || prev.businessDescription,
+          registeredAddress: data.registeredAddress || prev.registeredAddress,
+          operatingAddress: data.operatingAddress || prev.operatingAddress,
+        }));
+        if (data.people?.length) {
+          setDirectors(data.people.map((p: any) => ({
+            localId: crypto.randomUUID(),
+            personId: p.id,
+            personType: (p.entityType === "corporate" ? "corporate" : "individual") as "individual" | "corporate",
+            fullName: p.entityType !== "corporate" ? (p.title || "") : "",
+            inviteEmail: p.inviteEmail || "",
+            role: p.role || "director",
+            sharesAllocated: p.sharesAllocated?.toString() || "",
+            shareClass: p.shareClass || "ordinary",
+            sharePercentage: p.sharePercentage || "",
+            corporateName: p.corporateName || "",
+            corporateRcNumber: p.corporateRcNumber || "",
+            corporateCountry: p.corporateCountry || "Nigeria",
+            authorisedRepName: p.corporateAuthorisedRepName || "",
+          })));
+        }
+        // Infer the wizard step from saved data
+        if (!data.companyType) setCurrentStep(1);
+        else if (!data.companyName1) setCurrentStep(2);
+        else if (!data.businessDescription) setCurrentStep(3);
+        else if (!data.operatingAddress?.line1) setCurrentStep(4);
+        else setCurrentStep(5);
+        toast({ title: "Draft loaded", description: "Your saved draft has been restored." });
+      })
+      .catch(() => {
+        toast({ title: "Could not load draft", description: "Starting fresh.", variant: "destructive" });
+      });
+  }, []);
 
   // Load draft from localStorage on mount
   useEffect(() => {
@@ -252,6 +308,51 @@ export default function NewApplicationPage() {
     return () => clearTimeout(timer);
   }, [formData, currentStep, autoSave]);
 
+  // Mirror registered address into operating address when same-as checkbox is ticked
+  useEffect(() => {
+    if (!sameAsRegistered) return;
+    setFormData(prev => ({
+      ...prev,
+      operatingAddress: { ...prev.registeredAddress },
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    sameAsRegistered,
+    formData.registeredAddress.line1,
+    formData.registeredAddress.line2,
+    formData.registeredAddress.city,
+    formData.registeredAddress.state,
+    formData.registeredAddress.postalCode,
+    formData.registeredAddress.country,
+  ]);
+
+  // saveDraftMutation — persists wizard state to the server mid-wizard
+  const saveDraftMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/applications/draft", {
+        draftApplicationId,
+        applicationType: formData.applicationType,
+        companyType: formData.companyType || undefined,
+        companyName1: formData.companyName1 || undefined,
+        companyName2: formData.companyName2 || undefined,
+        companyName3: formData.companyName3 || undefined,
+        businessDescription: formData.businessDescription || undefined,
+        registeredAddress: formData.useRegisteredOffice ? undefined : (formData.registeredAddress.line1 ? formData.registeredAddress : undefined),
+        operatingAddress: formData.operatingAddress.line1 ? formData.operatingAddress : undefined,
+      });
+      return response.json() as Promise<{ id: number }>;
+    },
+    onSuccess: (data) => {
+      setDraftApplicationId(data.id);
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
+      toast({ title: "Draft saved", description: "Your progress has been saved. You can continue anytime from your Applications list." });
+      navigate("/founder/applications");
+    },
+    onError: () => {
+      toast({ title: "Save failed", description: "Could not save your draft. Please try again.", variant: "destructive" });
+    },
+  });
+
   const persistDirectorMutation = useMutation({
     mutationFn: async (dir: Omit<DirectorEntry, "localId" | "personId">) => {
       const payload: Record<string, unknown> = {
@@ -326,6 +427,10 @@ export default function NewApplicationPage() {
       return app;
     },
     onSuccess: async (app) => {
+      // If continuing from a saved draft, mark the old draft as legacy to avoid duplication
+      if (draftApplicationId && draftApplicationId !== app.id) {
+        apiRequest("PATCH", `/api/applications/${draftApplicationId}`, { isLegacyDraft: true }).catch(() => {});
+      }
       deleteDraft(DRAFT_ID);
       queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/dashboard"] });
@@ -444,7 +549,10 @@ export default function NewApplicationPage() {
         return true;
       }
       case 5: {
-        const hasOperatingAddress = !!formData.operatingAddress.line1 && !!formData.operatingAddress.city && !!formData.operatingAddress.state;
+        // When same-as checkbox is ticked, the operating address will be auto-filled from registered
+        const hasOperatingAddress = sameAsRegistered
+          ? !!formData.registeredAddress.line1 && !!formData.registeredAddress.city && !!formData.registeredAddress.state
+          : !!formData.operatingAddress.line1 && !!formData.operatingAddress.city && !!formData.operatingAddress.state;
         if (formData.useRegisteredOffice) {
           return !!formData.registeredOfficeTier && hasOperatingAddress;
         }
@@ -467,6 +575,10 @@ export default function NewApplicationPage() {
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
     }
+  };
+
+  const handleSaveAndExit = () => {
+    saveDraftMutation.mutate();
   };
 
   return (
@@ -1201,64 +1313,90 @@ export default function NewApplicationPage() {
                       The actual location where your business operates. This is the address you will need to prove with a utility bill or bank statement — it may be the same as your registered address or different.
                     </p>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="op-line1">Street Address *</Label>
-                    <Input
-                      id="op-line1"
-                      placeholder="123 Business Street"
-                      value={formData.operatingAddress.line1}
-                      onChange={(e) => updateOperatingAddress("line1", e.target.value)}
-                      data-testid="input-operating-address-line1"
+                  <div className="flex items-center gap-2 py-1">
+                    <Checkbox
+                      id="same-as-registered"
+                      checked={sameAsRegistered}
+                      onCheckedChange={(checked) => setSameAsRegistered(!!checked)}
+                      data-testid="checkbox-same-as-registered"
                     />
+                    <label
+                      htmlFor="same-as-registered"
+                      className="text-sm font-medium leading-none cursor-pointer select-none"
+                    >
+                      Operating address is the same as the registered address
+                    </label>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="op-line2">Address Line 2</Label>
-                    <Input
-                      id="op-line2"
-                      placeholder="Suite, floor, building name (optional)"
-                      value={formData.operatingAddress.line2}
-                      onChange={(e) => updateOperatingAddress("line2", e.target.value)}
-                      data-testid="input-operating-address-line2"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="op-city">City *</Label>
-                      <Input
-                        id="op-city"
-                        placeholder="Lagos"
-                        value={formData.operatingAddress.city}
-                        onChange={(e) => updateOperatingAddress("city", e.target.value)}
-                        data-testid="input-operating-address-city"
-                      />
+                  {!sameAsRegistered && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="op-line1">Street Address *</Label>
+                        <Input
+                          id="op-line1"
+                          placeholder="123 Business Street"
+                          value={formData.operatingAddress.line1}
+                          onChange={(e) => updateOperatingAddress("line1", e.target.value)}
+                          data-testid="input-operating-address-line1"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="op-line2">Address Line 2</Label>
+                        <Input
+                          id="op-line2"
+                          placeholder="Suite, floor, building name (optional)"
+                          value={formData.operatingAddress.line2}
+                          onChange={(e) => updateOperatingAddress("line2", e.target.value)}
+                          data-testid="input-operating-address-line2"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="op-city">City *</Label>
+                          <Input
+                            id="op-city"
+                            placeholder="Lagos"
+                            value={formData.operatingAddress.city}
+                            onChange={(e) => updateOperatingAddress("city", e.target.value)}
+                            data-testid="input-operating-address-city"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="op-state">State *</Label>
+                          <Select
+                            value={formData.operatingAddress.state}
+                            onValueChange={(v) => updateOperatingAddress("state", v)}
+                          >
+                            <SelectTrigger data-testid="select-operating-address-state">
+                              <SelectValue placeholder="Select state" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {nigerianStates.map((state) => (
+                                <SelectItem key={state} value={state}>{state}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="op-postal">Postal Code</Label>
+                        <Input
+                          id="op-postal"
+                          placeholder="e.g. 100001"
+                          value={formData.operatingAddress.postalCode}
+                          onChange={(e) => updateOperatingAddress("postalCode", e.target.value)}
+                          data-testid="input-operating-address-postal"
+                        />
+                      </div>
+                    </>
+                  )}
+                  {sameAsRegistered && formData.registeredAddress.line1 && (
+                    <div className="rounded-md bg-muted px-4 py-3 text-sm text-muted-foreground space-y-0.5">
+                      <p className="font-medium text-foreground">Copied from registered address</p>
+                      <p>{formData.registeredAddress.line1}{formData.registeredAddress.line2 ? `, ${formData.registeredAddress.line2}` : ""}</p>
+                      <p>{formData.registeredAddress.city}, {formData.registeredAddress.state}{formData.registeredAddress.postalCode ? ` ${formData.registeredAddress.postalCode}` : ""}</p>
+                      <p>{formData.registeredAddress.country}</p>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="op-state">State *</Label>
-                      <Select
-                        value={formData.operatingAddress.state}
-                        onValueChange={(v) => updateOperatingAddress("state", v)}
-                      >
-                        <SelectTrigger data-testid="select-operating-address-state">
-                          <SelectValue placeholder="Select state" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {nigerianStates.map((state) => (
-                            <SelectItem key={state} value={state}>{state}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="op-postal">Postal Code</Label>
-                    <Input
-                      id="op-postal"
-                      placeholder="e.g. 100001"
-                      value={formData.operatingAddress.postalCode}
-                      onChange={(e) => updateOperatingAddress("postalCode", e.target.value)}
-                      data-testid="input-operating-address-postal"
-                    />
-                  </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1274,26 +1412,43 @@ export default function NewApplicationPage() {
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back
               </Button>
-              <Button
-                type="button"
-                onClick={handleNext}
-                disabled={!canProceed() || createMutation.isPending}
-                data-testid="button-next"
-              >
-                {createMutation.isPending ? (
-                  <>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleSaveAndExit}
+                  disabled={saveDraftMutation.isPending}
+                  data-testid="button-save-draft"
+                >
+                  {saveDraftMutation.isPending ? (
                     <LoadingSpinner size="sm" className="mr-2" />
-                    Creating...
-                  </>
-                ) : currentStep === 5 ? (
-                  "Create Application"
-                ) : (
-                  <>
-                    Next
-                    <ArrowRight className="h-4 w-4 ml-2" />
-                  </>
-                )}
-              </Button>
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
+                  Save & Exit
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleNext}
+                  disabled={!canProceed() || createMutation.isPending}
+                  data-testid="button-next"
+                >
+                  {createMutation.isPending ? (
+                    <>
+                      <LoadingSpinner size="sm" className="mr-2" />
+                      Creating...
+                    </>
+                  ) : currentStep === 5 ? (
+                    "Create Application"
+                  ) : (
+                    <>
+                      Next
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

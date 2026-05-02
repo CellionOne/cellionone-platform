@@ -125,6 +125,13 @@ export default function FounderApplications() {
                               Start fresh
                             </Link>
                           </Button>
+                        ) : app.status === "draft" ? (
+                          <Button variant="outline" size="sm" asChild data-testid={`button-continue-draft-${app.id}`}>
+                            <Link href={`/applications/new?draft=${app.id}`}>
+                              Continue
+                              <ArrowRight className="h-4 w-4 ml-1" />
+                            </Link>
+                          </Button>
                         ) : (
                           <Button variant="outline" size="sm" asChild data-testid={`button-view-${app.id}`}>
                             <Link href={`/applications/${app.id}`}>

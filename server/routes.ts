@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, lawyerDocumentRequests, corporateDocUploadTokens, type CompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, lawyerDocumentRequests, corporateDocUploadTokens, type CompanyPerson, type InsertCompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne, inArray, sql } from "drizzle-orm";
 import * as services from "./services";
@@ -3556,10 +3556,12 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Full legal name is required when submitting personal details" });
       }
 
-      // Encrypt NIN/BVN for fully-detailed individual submissions
+      // Encrypt NIN/BVN whenever provided — even for partial-detail submissions.
+      // This ensures sensitive identifiers are never lost if the founder provides them
+      // but omits other mandatory fields.
       let ninEncrypted: string | null = null;
       let bvnEncrypted: string | null = null;
-      if (isFullyDetailed) {
+      if (nin?.trim() || bvn?.trim()) {
         const { encryptField } = await import("./services/encryptionService");
         if (nin?.trim()) ninEncrypted = encryptField(nin.trim());
         if (bvn?.trim()) bvnEncrypted = encryptField(bvn.trim());

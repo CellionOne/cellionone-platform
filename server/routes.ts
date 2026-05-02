@@ -5716,7 +5716,18 @@ export async function registerRoutes(
       if (!application || application.founderUserId !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
+      // Once names have been submitted, prevent founders from modifying phase-1 fields
+      const lockedAfterNameSubmission = ["names_submitted", "names_reviewed", "pending_verification", "submitted", "under_review", "filed", "pending_originals", "courier_in_transit", "completed", "rejected"];
+      const PHASE1_FIELDS: Array<keyof typeof parsed.data> = ["companyType", "companyName1", "companyName2", "companyName3"];
+      if (lockedAfterNameSubmission.includes(application.status ?? "")) {
+        for (const field of PHASE1_FIELDS) {
+          if (parsed.data[field] !== undefined) {
+            return res.status(400).json({ message: `Field '${field}' cannot be modified after name check has been submitted` });
+          }
+        }
+      }
+
       const updated = await storage.updateApplication(applicationId, parsed.data);
       // Sync per-person document requirements after any update (idempotent)
       syncPeopleDocumentRequirements(applicationId).catch(e =>

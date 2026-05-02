@@ -127,7 +127,7 @@ interface ApplicationDetailData {
   founderKyc: FounderKyc | null;
 }
 
-function NameAvailabilityReviewPanel({ applicationId, application }: { applicationId: number; application: CompanyApplication }) {
+function NameAvailabilityReviewPanel({ applicationId, application, readOnly }: { applicationId: number; application: CompanyApplication; readOnly?: boolean }) {
   const { toast } = useToast();
   const [name1Avail, setName1Avail] = useState("");
   const [name2Avail, setName2Avail] = useState("");
@@ -167,21 +167,32 @@ function NameAvailabilityReviewPanel({ applicationId, application }: { applicati
     application.companyName3 ? { name: application.companyName3, label: "Alternative 2", value: name3Avail, setter: setName3Avail } : null,
   ].filter((item): item is NonNullable<typeof item> => item !== null);
 
-  if (saved) {
+  // Read-only summary view: used when status is already names_reviewed (results previously saved)
+  if (readOnly || saved) {
+    const availabilityLabel: Record<string, string> = {
+      available: "Available",
+      unavailable: "Unavailable",
+      similar_found: "Similar Found",
+    };
+    const readOnlyEntries = [
+      { name: application.companyName1, availability: application.name1Availability },
+      application.companyName2 ? { name: application.companyName2, availability: application.name2Availability } : null,
+      application.companyName3 ? { name: application.companyName3, availability: application.name3Availability } : null,
+    ].filter((item): item is NonNullable<typeof item> => item !== null);
     return (
       <Card className="border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30">
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-            Name Availability Submitted
+            Name Availability — Results Recorded
           </CardTitle>
-          <CardDescription>Results recorded. The founder has been notified to select their preferred name.</CardDescription>
+          <CardDescription>The founder has been notified to select their preferred name.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {nameEntries.map(item => (
+          {readOnlyEntries.map(item => (
             <div key={item.name} className="flex items-center justify-between text-sm p-2 rounded border bg-background">
               <span className="font-medium">{item.name}</span>
-              <span className="text-muted-foreground capitalize">{item.value.replace("_", " ")}</span>
+              <span className="text-muted-foreground">{availabilityLabel[item.availability ?? ""] ?? "—"}</span>
             </div>
           ))}
         </CardContent>
@@ -328,10 +339,11 @@ export default function LawyerApplicationDetail() {
           </div>
         </div>
 
-        {application.status === 'names_submitted' && (
+        {(application.status === 'names_submitted' || application.status === 'names_reviewed') && (
           <NameAvailabilityReviewPanel
             applicationId={parseInt(applicationId!)}
             application={application}
+            readOnly={application.status === 'names_reviewed'}
           />
         )}
 

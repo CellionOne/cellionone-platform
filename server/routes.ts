@@ -5784,7 +5784,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Application is not in names_submitted status" });
       }
 
-      const VALID_AVAILABILITY = ["available", "unavailable", "similar_found"];
+      const VALID_AVAILABILITY = ["pending", "available", "unavailable", "similar_found"];
       const { name1Availability, name2Availability, name3Availability } = req.body;
       if (name1Availability && !VALID_AVAILABILITY.includes(name1Availability)) {
         return res.status(400).json({ message: `Invalid name1Availability value. Must be one of: ${VALID_AVAILABILITY.join(", ")}` });

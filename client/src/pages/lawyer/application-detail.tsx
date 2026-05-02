@@ -135,6 +135,7 @@ function NameAvailabilityReviewPanel({ applicationId, application, readOnly }: {
   const [saved, setSaved] = useState(false);
 
   const availabilityOptions = [
+    { value: "pending", label: "Pending (not yet checked)" },
     { value: "available", label: "Available" },
     { value: "unavailable", label: "Unavailable" },
     { value: "similar_found", label: "Similar Found" },

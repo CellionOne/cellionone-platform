@@ -20,6 +20,7 @@ export const users = pgTable("users", {
   email: varchar("email").unique(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
+  phone: varchar("phone", { length: 50 }),
   profileImageUrl: varchar("profile_image_url"),
   passwordHash: varchar("password_hash"),
   emailVerified: boolean("email_verified").default(false),
@@ -86,6 +87,7 @@ export const registerSchema = z.object({
   password: passwordSchema,
   firstName: z.string().optional(),
   lastName: z.string().optional(),
+  phone: z.string().optional(),
   inviteToken: z.string().optional(),
 });
 

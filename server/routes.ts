@@ -3336,9 +3336,14 @@ export async function registerRoutes(
         applicationId, companyProfileId, deferInvite,
         entityType, corporateName, corporateRcNumber, corporateCountry, corporateAuthorisedRepName,
         corporateBusinessType,
+        // Personal detail fields for fully-detailed individual submission
+        fullName, dateOfBirth, nationality, phoneNumber, residentialAddress, nin, bvn,
       } = req.body;
 
       const isCorporate = entityType === "corporate";
+      // "Fully-detailed" means the founder is submitting all details for an individual person
+      // instead of sending an invite link. Triggers notification email + inviteStatus = "notified".
+      const isFullyDetailed = !isCorporate && !!fullName?.trim();
 
       if (!inviteEmail || !role) {
         return res.status(400).json({ message: isCorporate ? "Authorised representative email and role are required" : "Email and role are required" });
@@ -3513,17 +3518,27 @@ export async function registerRoutes(
         }
       }
 
+      // Encrypt NIN/BVN for fully-detailed individual submissions
+      let ninEncrypted: string | null = null;
+      let bvnEncrypted: string | null = null;
+      if (isFullyDetailed) {
+        const { encryptField } = await import("./services/encryptionService");
+        if (nin?.trim()) ninEncrypted = encryptField(nin.trim());
+        if (bvn?.trim()) bvnEncrypted = encryptField(bvn.trim());
+      }
+
       let person;
       try {
+        const finalInviteStatus = autoVerified ? 'accepted' : isDraft ? 'draft' : isFullyDetailed ? 'notified' : 'pending';
         person = await storage.createCompanyPerson({
           founderId: userId,
           inviteEmail: inviteEmail.toLowerCase().trim(),
           inviteToken,
-          inviteStatus: autoVerified ? 'accepted' : (isDraft ? "draft" : "pending"),
-          inviteSentAt: autoVerified || isDraft ? null : new Date(),
+          inviteStatus: finalInviteStatus,
+          inviteSentAt: (autoVerified || isDraft || isFullyDetailed) ? null : new Date(),
           isVerified: autoVerified || false,
           role,
-          title,
+          title: isFullyDetailed ? (fullName?.trim() || title || null) : (title || null),
           sharesAllocated: sharesAllocated || null,
           shareClass: shareClass || null,
           sharePercentage: sharePercentage || null,
@@ -3538,6 +3553,14 @@ export async function registerRoutes(
           kybLookupStatus,
           kybLookupAttemptedAt: kybLookupStatus ? new Date() : null,
           autoVerifyMethod,
+          // Personal detail fields (individual fully-detailed flow)
+          fullName: isFullyDetailed ? (fullName?.trim() || null) : null,
+          dateOfBirth: isFullyDetailed ? (dateOfBirth?.trim() || null) : null,
+          nationality: isFullyDetailed ? (nationality?.trim() || null) : null,
+          phoneNumber: isFullyDetailed ? (phoneNumber?.trim() || null) : null,
+          residentialAddress: isFullyDetailed ? (residentialAddress?.trim() || null) : null,
+          ninEncrypted,
+          bvnEncrypted,
         });
       } catch (insertErr: unknown) {
         // Unique constraint violation (concurrent insert of same RC/BN on same application)
@@ -3555,7 +3578,7 @@ export async function registerRoutes(
         throw insertErr;
       }
 
-      // Only send invitation email if not auto-verified and not a draft
+      // Send appropriate email: notification (fully-detailed), invite (standard), or skip (auto-verified/draft)
       if (!autoVerified && !isDraft) {
         try {
           const emailSvc = await import("./services/emailService");
@@ -3566,7 +3589,16 @@ export async function registerRoutes(
           const user = await storage.getUser(userId);
           const founderName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'A founder';
 
-          if (isCorporate) {
+          if (isFullyDetailed) {
+            // Notification-only email — no invite link, no action required
+            await emailSvc.sendPersonAddedNotificationEmail(
+              inviteEmail.toLowerCase().trim(),
+              fullName?.trim() || '',
+              role,
+              founderName,
+              '' // company name hint not available here; can be enhanced later
+            );
+          } else if (isCorporate) {
             await resend.emails.send({
               from: fromEmail,
               to: inviteEmail.toLowerCase().trim(),
@@ -3707,6 +3739,120 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error removing company person:", error);
       res.status(500).json({ message: "Failed to remove person" });
+    }
+  });
+
+  // PUT /api/company-people/:id/details — update personal details for an existing person
+  app.put("/api/company-people/:id/details", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const people = await storage.getCompanyPeopleByFounder(userId);
+      const person = people.find(p => p.id === id);
+      if (!person) return res.status(404).json({ message: "Person not found" });
+
+      const { fullName, dateOfBirth, nationality, phoneNumber, residentialAddress, nin, bvn } = req.body;
+      const { encryptField } = await import("./services/encryptionService");
+
+      const patch: Record<string, unknown> = {};
+      if (fullName !== undefined) patch.fullName = fullName?.trim() || null;
+      if (dateOfBirth !== undefined) patch.dateOfBirth = dateOfBirth?.trim() || null;
+      if (nationality !== undefined) patch.nationality = nationality?.trim() || null;
+      if (phoneNumber !== undefined) patch.phoneNumber = phoneNumber?.trim() || null;
+      if (residentialAddress !== undefined) patch.residentialAddress = residentialAddress?.trim() || null;
+      if (nin?.trim()) patch.ninEncrypted = encryptField(nin.trim());
+      if (bvn?.trim()) patch.bvnEncrypted = encryptField(bvn.trim());
+      // If fullName is now set and inviteStatus was "pending", mark as "notified"
+      if (patch.fullName && person.inviteStatus === 'pending') patch.inviteStatus = 'notified';
+
+      const updated = await storage.updateCompanyPerson(id, patch as any);
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "company_person_details_updated",
+        entityType: "company_person",
+        entityId: String(id),
+        details: { fields: Object.keys(patch) },
+        ipAddress: req.ip,
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating company person details:", error);
+      res.status(500).json({ message: "Failed to update person details" });
+    }
+  });
+
+  // GET /api/company-people/:id/documents — list documents linked to a person
+  app.get("/api/company-people/:id/documents", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const people = await storage.getCompanyPeopleByFounder(userId);
+      if (!people.find(p => p.id === id)) return res.status(404).json({ message: "Person not found" });
+      const docs = await db.select().from(documentFiles).where(eq(documentFiles.companyPersonId, id));
+      res.json(docs);
+    } catch (error) {
+      console.error("Error fetching person documents:", error);
+      res.status(500).json({ message: "Failed to fetch documents" });
+    }
+  });
+
+  // POST /api/company-people/:id/documents/upload — upload a document for a specific person
+  const personDocUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+  app.post("/api/company-people/:id/documents/upload", isAuthenticated, personDocUpload.single("file"), async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const people = await storage.getCompanyPeopleByFounder(userId);
+      if (!people.find(p => p.id === id)) return res.status(404).json({ message: "Person not found" });
+
+      const file = req.file;
+      if (!file) return res.status(400).json({ message: "No file provided" });
+
+      const allowedMime = ["application/pdf","image/jpeg","image/jpg","image/png"];
+      const allowedExt = [".pdf", ".jpg", ".jpeg", ".png"];
+      const fileExt = path.extname(file.originalname || "").toLowerCase();
+      if (!allowedMime.includes(file.mimetype) && !allowedExt.includes(fileExt)) {
+        return res.status(400).json({ message: "File type not allowed. Upload PDF, JPEG, or PNG." });
+      }
+
+      const objectStorage = new ObjectStorageService();
+      const uploadURL = await objectStorage.getObjectEntityUploadURL();
+      const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+
+      const uploadResponse = await fetch(uploadURL, {
+        method: "PUT",
+        body: file.buffer,
+        headers: { "Content-Type": file.mimetype, "Content-Length": String(file.buffer.length) },
+      });
+      if (!uploadResponse.ok) throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
+
+      const { docType } = req.body;
+      const document = await storage.createDocument({
+        ownerUserId: userId,
+        companyPersonId: id,
+        category: "person",
+        docType: docType || "uploaded_document",
+        filename: file.originalname || "uploaded_file",
+        storagePath: objectPath,
+        isSensitive: true,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "company_person_document_uploaded",
+        entityType: "document_file",
+        entityId: String(document.id),
+        details: { companyPersonId: id, docType },
+        ipAddress: req.ip,
+      });
+
+      res.json({ document, objectPath });
+    } catch (error) {
+      console.error("Error uploading person document:", error);
+      res.status(500).json({ message: "Failed to upload document" });
     }
   });
 

@@ -83,12 +83,14 @@ export interface IStorage {
   removeUserRole(userId: string, role: string): Promise<void>;
   createUserWithPassword(data: {
     email: string;
-    firstName: string;
-    lastName: string;
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
     passwordHash: string;
     verificationToken: string;
     verificationTokenExpiry: Date;
     emailVerified: boolean;
+    pendingInviteToken?: string;
   }): Promise<User>;
   markEmailVerified(userId: string): Promise<void>;
   updateVerificationToken(userId: string, token: string, expiry: Date): Promise<void>;
@@ -97,9 +99,11 @@ export interface IStorage {
   updateUser(userId: string, data: Partial<{
     firstName: string;
     lastName: string;
+    phone: string;
     passwordHash: string;
     verificationToken: string;
     verificationTokenExpiry: Date;
+    pendingInviteToken: string;
   }>): Promise<User>;
 
   // Founder Profiles
@@ -575,21 +579,25 @@ export class DatabaseStorage implements IStorage {
 
   async createUserWithPassword(data: {
     email: string;
-    firstName: string;
-    lastName: string;
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
     passwordHash: string;
     verificationToken: string;
     verificationTokenExpiry: Date;
     emailVerified: boolean;
+    pendingInviteToken?: string;
   }): Promise<User> {
     const [user] = await db.insert(users).values({
       email: data.email.toLowerCase(),
       firstName: data.firstName,
       lastName: data.lastName,
+      phone: data.phone,
       passwordHash: data.passwordHash,
       verificationToken: data.verificationToken,
       verificationTokenExpiry: data.verificationTokenExpiry,
       emailVerified: data.emailVerified,
+      ...(data.pendingInviteToken ? { pendingInviteToken: data.pendingInviteToken } : {}),
     }).returning();
     return user;
   }
@@ -631,10 +639,12 @@ export class DatabaseStorage implements IStorage {
   async updateUser(userId: string, data: Partial<{
     firstName: string;
     lastName: string;
+    phone: string;
     passwordHash: string;
     verificationToken: string;
     verificationTokenExpiry: Date;
     primaryIntent: string;
+    pendingInviteToken: string;
   }>): Promise<User> {
     const [user] = await db.update(users).set({
       ...data,

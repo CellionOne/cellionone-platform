@@ -1188,3 +1188,48 @@ export async function sendLawyerPayoutConfirmationEmail(opts: {
   await client.emails.send({ from: fromEmail, to, subject, html });
   console.log(`[PayoutEmail] Confirmation sent to ${to} for ref ${providerRef}`);
 }
+
+export async function sendPersonAddedNotificationEmail(
+  to: string,
+  personName: string,
+  role: string,
+  founderName: string,
+  companyNameHint: string
+) {
+  const { client, fromEmail } = await getResendClient();
+  const roleLabel = role === 'director_shareholder' ? 'Director & Shareholder'
+    : role.charAt(0).toUpperCase() + role.slice(1);
+  const year = new Date().getFullYear();
+  const subject = `You have been added as a ${roleLabel} on Cellion One`;
+  const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,.1);">
+    <div style="text-align:center;margin-bottom:32px;">
+      <div style="display:inline-block;background:#16a34a;padding:12px;border-radius:8px;margin-bottom:16px;">
+        <span style="color:#fff;font-size:24px;font-weight:bold;">C</span>
+      </div>
+      <h1 style="color:#18181b;font-size:24px;margin:0;">Cellion One</h1>
+    </div>
+    <h2 style="color:#18181b;font-size:20px;margin-bottom:16px;">You've been added to a company</h2>
+    <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:16px;">
+      Dear ${personName || 'there'},
+    </p>
+    <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:24px;">
+      <strong>${founderName}</strong> has added you as a <strong>${roleLabel}</strong>${companyNameHint ? ` for <strong>${companyNameHint}</strong>` : ''} on Cellion One, Nigeria&rsquo;s company incorporation platform.
+    </p>
+    <div style="background:#f0fdf4;border-radius:8px;padding:20px;margin-bottom:24px;border:1px solid #bbf7d0;">
+      <p style="color:#166534;font-size:15px;margin:0;font-weight:500;">No action is required from you at this time.</p>
+      <p style="color:#15803d;font-size:14px;margin:8px 0 0 0;">Your details have been submitted by the primary applicant. The Cellion team will be in touch if any additional information is needed.</p>
+    </div>
+    <p style="color:#71717a;font-size:14px;line-height:1.6;">
+      If you believe this was added in error or have any concerns, please contact us at <a href="mailto:service@cellionone.com" style="color:#16a34a;">service@cellionone.com</a>.
+    </p>
+    <hr style="border:none;border-top:1px solid #e4e4e7;margin:32px 0;">
+    <p style="color:#a1a1aa;font-size:12px;text-align:center;">&copy; ${year} Cellion Platforms Nigeria Limited. All rights reserved.</p>
+  </div>
+</body>
+</html>`;
+  await client.emails.send({ from: fromEmail, to, subject, html });
+}

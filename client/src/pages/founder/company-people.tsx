@@ -49,6 +49,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Link } from "wouter";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Users,
   UserPlus,
@@ -69,6 +70,12 @@ import {
   Fingerprint,
   Info,
   Building2,
+  Eye,
+  EyeOff,
+  Upload,
+  BellRing,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 interface CompanyPerson {
@@ -94,6 +101,11 @@ interface CompanyPerson {
   corporateBusinessType?: string | null;
   kybLookupStatus?: string | null;
   autoVerifyMethod?: string | null;
+  fullName?: string | null;
+  dateOfBirth?: string | null;
+  nationality?: string | null;
+  phoneNumber?: string | null;
+  residentialAddress?: string | null;
 }
 
 const inviteSchema = z.object({
@@ -103,6 +115,13 @@ const inviteSchema = z.object({
   sharesAllocated: z.string().optional(),
   shareClass: z.string().optional(),
   sharePercentage: z.string().optional(),
+  fullName: z.string().optional(),
+  dateOfBirth: z.string().optional(),
+  nationality: z.string().optional(),
+  phoneNumber: z.string().optional(),
+  nin: z.string().optional(),
+  bvn: z.string().optional(),
+  residentialAddress: z.string().optional(),
 });
 
 type InviteFormData = z.infer<typeof inviteSchema>;
@@ -149,6 +168,9 @@ function InviteDialog() {
   const [open, setOpen] = useState(false);
   const [personType, setPersonType] = useState<"individual" | "corporate" | "bn" | "it">("individual");
   const [corpForm, setCorpForm] = useState({ corporateName: "", corporateRcNumber: "", corporateCountry: "Nigeria", authorisedRepName: "", repEmail: "", role: "director" });
+  const [detailsMode, setDetailsMode] = useState(false);
+  const [showNin, setShowNin] = useState(false);
+  const [showBvn, setShowBvn] = useState(false);
 
   const form = useForm<InviteFormData>({
     resolver: zodResolver(inviteSchema),
@@ -159,6 +181,13 @@ function InviteDialog() {
       sharesAllocated: "",
       shareClass: "ordinary",
       sharePercentage: "",
+      fullName: "",
+      dateOfBirth: "",
+      nationality: "Nigeria",
+      phoneNumber: "",
+      nin: "",
+      bvn: "",
+      residentialAddress: "",
     },
   });
 
@@ -195,6 +224,7 @@ function InviteDialog() {
   });
 
   const handleIndividualSubmit = (data: InviteFormData) => {
+    const isFullyDetailed = detailsMode && !!data.fullName?.trim();
     const payload: Record<string, unknown> = {
       inviteEmail: data.inviteEmail,
       role: data.role,
@@ -204,6 +234,15 @@ function InviteDialog() {
       entityType: "individual",
     };
     if (data.sharesAllocated) payload.sharesAllocated = parseInt(data.sharesAllocated);
+    if (isFullyDetailed) {
+      payload.fullName = data.fullName?.trim();
+      payload.dateOfBirth = data.dateOfBirth?.trim() || null;
+      payload.nationality = data.nationality?.trim() || null;
+      payload.phoneNumber = data.phoneNumber?.trim() || null;
+      payload.nin = data.nin?.trim() || null;
+      payload.bvn = data.bvn?.trim() || null;
+      payload.residentialAddress = data.residentialAddress?.trim() || null;
+    }
     inviteMutation.mutate(payload);
   };
 
@@ -387,10 +426,94 @@ function InviteDialog() {
                 </>
               )}
 
+              {/* Mode toggle */}
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/60 border">
+                <div className="flex-1">
+                  <p className="text-xs font-medium">{detailsMode ? "Enter all personal details" : "Send invite link"}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{detailsMode ? "Full details submitted — person receives a notification email only." : "An invitation link is emailed to the person to fill in their own details."}</p>
+                </div>
+                <Button type="button" size="sm" variant="outline" className="text-xs shrink-0" onClick={() => setDetailsMode(d => !d)} data-testid="button-toggle-details-mode">
+                  {detailsMode ? "Switch to invite" : "Enter details"}
+                </Button>
+              </div>
+
+              {detailsMode && (
+                <div className="space-y-3 rounded-lg border p-3 bg-background">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Personal Details</p>
+                  <FormField control={form.control} name="fullName" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Full Legal Name <span className="text-destructive">*</span></FormLabel>
+                      <FormControl><Input placeholder="As on official ID" data-testid="input-full-name" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField control={form.control} name="dateOfBirth" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Date of Birth</FormLabel>
+                        <FormControl><Input type="date" data-testid="input-dob" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="nationality" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Nationality</FormLabel>
+                        <FormControl><Input placeholder="Nigeria" data-testid="input-nationality" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                  <FormField control={form.control} name="phoneNumber" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone Number</FormLabel>
+                      <FormControl><Input type="tel" placeholder="+234 800 000 0000" data-testid="input-person-phone" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField control={form.control} name="nin" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>NIN</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <Input type={showNin ? "text" : "password"} placeholder="11-digit NIN" maxLength={11} data-testid="input-nin" {...field} className="pr-8" />
+                            <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowNin(v => !v)}>
+                              {showNin ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                            </button>
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="bvn" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>BVN</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <Input type={showBvn ? "text" : "password"} placeholder="11-digit BVN" maxLength={11} data-testid="input-bvn" {...field} className="pr-8" />
+                            <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" onClick={() => setShowBvn(v => !v)}>
+                              {showBvn ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                            </button>
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                  <FormField control={form.control} name="residentialAddress" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Residential Address</FormLabel>
+                      <FormControl><Textarea placeholder="Full residential address" rows={2} data-testid="input-residential-address" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+              )}
+
               <DialogFooter>
                 <Button type="submit" disabled={inviteMutation.isPending} data-testid="button-send-invite">
-                  {inviteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
-                  Send Invitation
+                  {inviteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : detailsMode ? <BellRing className="h-4 w-4 mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                  {detailsMode ? "Add & Notify" : "Send Invitation"}
                 </Button>
               </DialogFooter>
             </form>
@@ -562,10 +685,90 @@ function ProfileChecklist({ person }: { person: ReadinessData["people"][0] }) {
   );
 }
 
+interface PersonDoc {
+  id: number;
+  docType: string;
+  filename: string;
+  storagePath: string;
+  createdAt: string;
+}
+
+function PersonDocUpload({ personId, onUploaded }: { personId: number; onUploaded: () => void }) {
+  const { toast } = useToast();
+  const { data: docs, refetch } = useQuery<PersonDoc[]>({
+    queryKey: ["/api/company-people", personId, "documents"],
+    queryFn: async () => {
+      const res = await fetch(`/api/company-people/${personId}/documents`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load documents");
+      return res.json();
+    },
+  });
+
+  const slots = [
+    { docType: "passport_photo", label: "Passport Photo", icon: Camera },
+    { docType: "government_id", label: "Government-Issued ID", icon: CreditCard },
+    { docType: "signature", label: "Signature Specimen", icon: PenTool },
+  ];
+
+  const uploadFile = async (file: File, docType: string) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("docType", docType);
+    const res = await fetch(`/api/company-people/${personId}/documents/upload`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: "Upload failed" }));
+      throw new Error(err.message || "Upload failed");
+    }
+    return res.json();
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t space-y-2">
+      <p className="text-xs font-medium text-muted-foreground">Supporting Documents</p>
+      <div className="grid grid-cols-1 gap-2">
+        {slots.map(({ docType, label, icon: Icon }) => {
+          const uploaded = docs?.find(d => d.docType === docType);
+          return (
+            <div key={docType} className={`flex items-center gap-2 rounded-md border px-3 py-2 ${uploaded ? "border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/20" : "border-dashed"}`}>
+              {uploaded ? <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" /> : <Icon className="h-4 w-4 text-muted-foreground shrink-0" />}
+              <span className="text-xs flex-1">{label}</span>
+              {uploaded
+                ? <span className="text-xs text-green-600 dark:text-green-400">Uploaded</span>
+                : (
+                  <label className="cursor-pointer">
+                    <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        await uploadFile(file, docType);
+                        await refetch();
+                        onUploaded();
+                        toast({ title: "Document uploaded", description: `${label} uploaded successfully.` });
+                      } catch (err: any) {
+                        toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+                      }
+                    }} />
+                    <span className="text-xs text-primary underline flex items-center gap-1"><Upload className="h-3 w-3" />Upload</span>
+                  </label>
+                )
+              }
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PeopleList() {
   const { toast } = useToast();
+  const [docUploadOpenId, setDocUploadOpenId] = useState<number | null>(null);
 
-  const { data: people, isLoading } = useQuery<CompanyPerson[]>({
+  const { data: people, isLoading, refetch: refetchPeople } = useQuery<CompanyPerson[]>({
     queryKey: ["/api/company-people"],
   });
 
@@ -699,6 +902,9 @@ function PeopleList() {
     if (person.inviteStatus === "accepted") {
       return <Badge variant="secondary" className="gap-1"><MailCheck className="h-3 w-3" /> Accepted</Badge>;
     }
+    if (person.inviteStatus === "notified") {
+      return <Badge variant="outline" className="gap-1 border-blue-300 text-blue-700 dark:border-blue-700 dark:text-blue-400"><BellRing className="h-3 w-3" /> Notified</Badge>;
+    }
     return <Badge variant="outline" className="gap-1"><Clock className="h-3 w-3" /> Pending</Badge>;
   };
 
@@ -714,7 +920,7 @@ function PeopleList() {
                     ? <Building2 className="h-4 w-4 text-primary shrink-0" />
                     : null
                   }
-                  <span className="font-medium text-sm">{person.entityType === "corporate" ? (person.corporateName || person.title || person.inviteEmail) : person.inviteEmail}</span>
+                  <span className="font-medium text-sm">{person.entityType === "corporate" ? (person.corporateName || person.title || person.inviteEmail) : (person.fullName || person.inviteEmail)}</span>
                   {person.entityType === "corporate" && (
                     <Badge variant="secondary" className="text-xs" data-testid={`badge-corporate-person-${person.id}`}>
                       {person.corporateBusinessType === "bn" ? "Business Name" : person.corporateBusinessType === "it" ? "Incorporated Trustee" : "Company"}
@@ -741,8 +947,22 @@ function PeopleList() {
                 {readinessMap.has(person.id) && (
                   <ProfileChecklist person={readinessMap.get(person.id)!} />
                 )}
+                {docUploadOpenId === person.id && person.entityType !== "corporate" && (
+                  <PersonDocUpload personId={person.id} onUploaded={() => refetchPeople()} />
+                )}
               </div>
               <div className="flex items-center gap-1">
+                {person.entityType !== "corporate" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setDocUploadOpenId(docUploadOpenId === person.id ? null : person.id)}
+                    data-testid={`button-docs-${person.id}`}
+                    title="Upload supporting documents"
+                  >
+                    {docUploadOpenId === person.id ? <ChevronUp className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
+                  </Button>
+                )}
                 {person.inviteStatus === "pending" && !readinessMap.get(person.id)?.isVerified && (
                   <Button
                     variant="ghost"

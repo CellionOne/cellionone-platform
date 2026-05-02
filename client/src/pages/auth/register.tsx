@@ -18,6 +18,7 @@ import { useState, useEffect } from "react";
 
 const registerSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
+  phone: z.string().optional(),
   password: z.string().min(8, "Password must be at least 8 characters"),
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
@@ -73,6 +74,7 @@ export default function RegisterPage() {
     resolver: zodResolver(registerSchema),
     defaultValues: {
       email: "",
+      phone: "",
       password: "",
       confirmPassword: "",
     },
@@ -89,6 +91,7 @@ export default function RegisterPage() {
       const res = await apiRequest("POST", "/api/auth/register", {
         email: data.email,
         password: data.password,
+        ...(data.phone?.trim() ? { phone: data.phone.trim() } : {}),
         ...(inviteToken ? { inviteToken } : {}),
       });
       return res.json();
@@ -227,6 +230,24 @@ export default function RegisterPage() {
                           This email must match the invitation email.
                         </p>
                       )}
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone Number <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+                      <FormControl>
+                        <Input
+                          type="tel"
+                          placeholder="+234 800 000 0000"
+                          data-testid="input-phone"
+                          {...field}
+                        />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}

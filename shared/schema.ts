@@ -70,6 +70,13 @@ export const companyPeople = pgTable("company_people", {
   kybLookupStatus: varchar("kyb_lookup_status", { length: 20 }), // null | "found" | "not_found" | "error"
   kybLookupAttemptedAt: timestamp("kyb_lookup_attempted_at"),
   autoVerifyMethod: varchar("auto_verify_method", { length: 30 }), // null | "registry" | "rep_match" | "smile_id"
+  fullName: varchar("full_name", { length: 255 }),
+  dateOfBirth: varchar("date_of_birth"),
+  nationality: varchar("nationality", { length: 100 }),
+  phoneNumber: varchar("phone_number", { length: 50 }),
+  residentialAddress: text("residential_address"),
+  ninEncrypted: varchar("nin_encrypted", { length: 500 }),
+  bvnEncrypted: varchar("bvn_encrypted", { length: 500 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

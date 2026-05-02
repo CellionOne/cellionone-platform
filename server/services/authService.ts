@@ -22,7 +22,8 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
     return { success: false, message: validation.error.errors[0].message };
   }
 
-  const { email, password, inviteToken } = validation.data;
+  const { email, password, inviteToken, phone } = validation.data;
+  const cleanPhone = phone?.trim() || undefined;
 
   const existingUser = await storage.getUserByEmail(email.toLowerCase());
   
@@ -46,20 +47,31 @@ export async function registerUser(input: RegisterInput, baseUrl: string): Promi
       verificationToken,
       verificationTokenExpiry,
       ...(inviteToken ? { pendingInviteToken: inviteToken } : {}),
+      ...(cleanPhone ? { phone: cleanPhone } : {}),
     });
     console.log(`[Auth] Re-registration for unverified account: ${email}`);
   } else {
-    // Create new user — firstName/lastName not captured at signup; populated via BVN/NIN verification
+    // Create new user — firstName/lastName populated via BVN/NIN verification later
     user = await storage.createUserWithPassword({
       email: email.toLowerCase(),
       passwordHash,
       verificationToken,
       verificationTokenExpiry,
       emailVerified: false,
+      phone: cleanPhone,
       ...(inviteToken ? { pendingInviteToken: inviteToken } : {}),
     });
 
     await storage.addUserRole(user.id, "founder");
+  }
+
+  // Persist phone to founderProfiles immediately so it shows on the personal profile page
+  if (cleanPhone) {
+    try {
+      await storage.upsertFounderProfile({ userId: user.id, phone: cleanPhone });
+    } catch (e) {
+      console.warn('[Auth] Could not save phone to founder profile:', e);
+    }
   }
 
   try {

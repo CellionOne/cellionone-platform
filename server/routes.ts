@@ -3897,7 +3897,8 @@ export async function registerRoutes(
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
       const people = await storage.getCompanyPeopleByFounder(userId);
-      if (!people.find(p => p.id === id)) return res.status(404).json({ message: "Person not found" });
+      const person = people.find(p => p.id === id);
+      if (!person) return res.status(404).json({ message: "Person not found" });
 
       const file = req.file;
       if (!file) return res.status(400).json({ message: "No file provided" });
@@ -3924,6 +3925,10 @@ export async function registerRoutes(
       const document = await storage.createDocument({
         ownerUserId: userId,
         companyPersonId: id,
+        // Propagate applicationId / companyProfileId so that existing lawyer and founder
+        // application document views (which query by applicationId) include these files.
+        ...(person.applicationId ? { applicationId: person.applicationId } : {}),
+        ...(person.companyProfileId ? { companyProfileId: person.companyProfileId } : {}),
         category: "person",
         docType: docType || "uploaded_document",
         filename: file.originalname || "uploaded_file",

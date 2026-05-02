@@ -720,20 +720,64 @@ export default function NewApplicationPage() {
   // Resume-mode submission: PATCH existing application with full wizard data, create checklist, move to draft
   const resumeCreateMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      const response = await apiRequest("PATCH", `/api/applications/${resumeApplicationId}`, {
+      const appId = resumeApplicationId!;
+
+      // Patch application fields (step 3 data + selected names + completion flag)
+      const response = await apiRequest("PATCH", `/api/applications/${appId}`, {
         businessDescription: data.businessDescription,
         registeredAddress: data.useRegisteredOffice ? undefined : data.registeredAddress,
         operatingAddress: data.operatingAddress,
         selectedNames: resumeSelectedNames.length > 0 ? resumeSelectedNames : undefined,
         completingFromNamesReview: true,
       });
-      return response.json();
+      const app = await response.json();
+
+      // Mirror create-flow: attach/create Step 4 people records against this application
+      for (const dir of directors) {
+        if (dir.personId) {
+          // Existing person record — attach to this application
+          await apiRequest("PUT", `/api/company-people/${dir.personId}`, {
+            applicationId: appId,
+          });
+        } else if (dir.inviteEmail) {
+          // New person entry — create with applicationId
+          const dirPayload: Record<string, unknown> = {
+            inviteEmail: dir.inviteEmail,
+            role: dir.role,
+            title: dir.personType === "corporate" ? (dir.corporateName || null) : (dir.fullName || null),
+            applicationId: appId,
+            deferInvite: true,
+            sharesAllocated: dir.sharesAllocated ? parseInt(dir.sharesAllocated, 10) : null,
+            shareClass: dir.shareClass || null,
+            sharePercentage: dir.sharePercentage || null,
+            entityType: dir.personType,
+          };
+          if (dir.personType === "corporate") {
+            dirPayload.corporateName = dir.corporateName || null;
+            dirPayload.corporateRcNumber = dir.corporateRcNumber || null;
+            dirPayload.corporateCountry = dir.corporateCountry || null;
+            dirPayload.corporateAuthorisedRepName = dir.authorisedRepName || null;
+          }
+          await apiRequest("POST", "/api/company-people", dirPayload);
+        }
+      }
+
+      // Handle registered office selection if chosen in step 3
+      if (data.useRegisteredOffice && data.registeredOfficeTier) {
+        await apiRequest("POST", "/api/registered-office/select", {
+          applicationId: appId,
+          tier: data.registeredOfficeTier,
+        });
+      }
+
+      return app;
     },
     onSuccess: () => {
       deleteDraft(DRAFT_ID);
       localStorage.removeItem("wizard-draft-id");
       queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/company-people"] });
       toast({ title: "Application ready", description: "Your application is saved as a draft. Please upload documents and proceed to payment." });
       navigate(`/applications/${resumeApplicationId}`);
     },

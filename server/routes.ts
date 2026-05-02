@@ -5389,7 +5389,7 @@ Status: ${order.status}</div>
 
       // Recalculate order totals if order is still pending/draft
       const [order] = await db.select().from(ordersTable).where(eq(ordersTable.id, item.orderId));
-      if (order && ["draft", "pending_payment"].includes(order.status || "")) {
+      if (order && ["draft", "pending_payment", "failed"].includes(order.status || "")) {
         const allItems = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
         // The DB update above already committed, so re-selected items reflect the new alreadyObtained value
         const billable = allItems.filter(i => !i.alreadyObtained);

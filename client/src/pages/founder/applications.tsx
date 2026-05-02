@@ -132,6 +132,20 @@ export default function FounderApplications() {
                               <ArrowRight className="h-4 w-4 ml-1" />
                             </Link>
                           </Button>
+                        ) : app.status === "names_submitted" ? (
+                          <Button variant="outline" size="sm" asChild data-testid={`button-view-names-submitted-${app.id}`}>
+                            <Link href={`/applications/${app.id}`}>
+                              View Status
+                              <ArrowRight className="h-4 w-4 ml-1" />
+                            </Link>
+                          </Button>
+                        ) : app.status === "names_reviewed" ? (
+                          <Button size="sm" asChild data-testid={`button-select-names-${app.id}`}>
+                            <Link href={`/applications/${app.id}`}>
+                              Select Names
+                              <ArrowRight className="h-4 w-4 ml-1" />
+                            </Link>
+                          </Button>
                         ) : (
                           <Button variant="outline" size="sm" asChild data-testid={`button-view-${app.id}`}>
                             <Link href={`/applications/${app.id}`}>

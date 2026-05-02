@@ -4,6 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -141,6 +142,7 @@ export default function ApplicationDetailsPage() {
   const [, setLocation] = useLocation();
   const applicationId = params?.id;
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
+  const [selectedNames, setSelectedNames] = useState<string[]>([]);
 
   const prevChecklistRef = useRef<ApplicationChecklistItem[] | null>(null);
 
@@ -346,6 +348,19 @@ export default function ApplicationDetailsPage() {
     },
   });
 
+  const continueApplicationMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("PATCH", `/api/applications/${applicationId}`, { selectedNames });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId] });
+      setLocation(`/applications/new?resume=${applicationId}`);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to save selected names. Please try again.", variant: "destructive" });
+    },
+  });
+
   const handlePayment = () => {
     if (!applicationId) return;
     const params = new URLSearchParams({ applicationId });
@@ -458,6 +473,100 @@ export default function ApplicationDetailsPage() {
           <StatusBadge status={application.status || "draft"} className="text-sm" />
         </div>
 
+        {application.status === 'names_submitted' && (
+          <Card className="border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Clock className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                Awaiting Name Availability Check
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Your name options have been submitted to a lawyer for a CAC registry availability check. You'll receive an email and in-app notification when the results are ready.
+              </p>
+              <div className="space-y-2">
+                {application.companyName1 && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground w-28">Preferred:</span>
+                    <span className="font-medium">{application.companyName1}</span>
+                  </div>
+                )}
+                {application.companyName2 && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground w-28">Alternative 1:</span>
+                    <span className="font-medium">{application.companyName2}</span>
+                  </div>
+                )}
+                {application.companyName3 && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground w-28">Alternative 2:</span>
+                    <span className="font-medium">{application.companyName3}</span>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {application.status === 'names_reviewed' && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader>
+              <CardTitle className="text-base">Name Availability Results Ready</CardTitle>
+              <CardDescription>Select your preferred available name(s) to continue your application</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {[
+                { name: application.companyName1, availability: (application as any).name1Availability },
+                { name: application.companyName2, availability: (application as any).name2Availability },
+                { name: application.companyName3, availability: (application as any).name3Availability },
+              ].filter(n => n.name).map(({ name, availability }) => (
+                <div key={name} className="flex items-center gap-3 p-3 rounded-lg border bg-background">
+                  <Checkbox
+                    id={`name-select-${name}`}
+                    checked={selectedNames.includes(name!)}
+                    onCheckedChange={(checked) => {
+                      setSelectedNames(prev =>
+                        checked ? [...prev, name!] : prev.filter(n => n !== name!)
+                      );
+                    }}
+                    disabled={availability !== "available"}
+                    data-testid={`checkbox-name-${name}`}
+                  />
+                  <label htmlFor={`name-select-${name}`} className="flex-1 flex items-center justify-between cursor-pointer">
+                    <span className="font-medium text-sm">{name}</span>
+                    <div>
+                      {availability === "available" && <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0">Available</Badge>}
+                      {availability === "unavailable" && <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-0">Unavailable</Badge>}
+                      {availability === "similar_found" && <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-0">Similar Found</Badge>}
+                      {(availability === "pending" || !availability) && <Badge variant="secondary">Pending</Badge>}
+                    </div>
+                  </label>
+                </div>
+              ))}
+              <Button
+                onClick={() => continueApplicationMutation.mutate()}
+                disabled={selectedNames.length === 0 || continueApplicationMutation.isPending}
+                className="w-full"
+                data-testid="button-continue-application"
+              >
+                {continueApplicationMutation.isPending ? (
+                  <>
+                    <LoadingSpinner size="sm" className="mr-2" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    Continue Application
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {application.status !== 'names_submitted' && application.status !== 'names_reviewed' && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Application Progress</CardTitle>
@@ -490,6 +599,7 @@ export default function ApplicationDetailsPage() {
             </div>
           </CardContent>
         </Card>
+        )}
 
         {clarifications.filter(c => c.status === "pending").length > 0 && (
           <Card className="border-orange-200 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/30">
@@ -511,6 +621,7 @@ export default function ApplicationDetailsPage() {
 
         <OfflineSyncStatus />
 
+        {application.status !== 'names_submitted' && application.status !== 'names_reviewed' && (
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             <Card>
@@ -1257,6 +1368,7 @@ export default function ApplicationDetailsPage() {
             </Card>
           </div>
         </div>
+        )}
       </div>
     </DashboardLayout>
   );

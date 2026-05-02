@@ -3,6 +3,8 @@ import { cn } from "@/lib/utils";
 
 const statusConfig: Record<string, { label: string; className: string }> = {
   draft: { label: "Draft", className: "bg-muted text-muted-foreground" },
+  names_submitted: { label: "Awaiting Name Check", className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
+  names_reviewed: { label: "Name Results Ready", className: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" },
   pending_verification: { label: "Awaiting Verification", className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
   submitted: { label: "Submitted", className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
   under_review: { label: "Under Review", className: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" },

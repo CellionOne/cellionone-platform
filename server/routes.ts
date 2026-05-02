@@ -5631,7 +5631,35 @@ export async function registerRoutes(
   app.post("/api/applications", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      
+
+      // Handle Phase 1 names-only submission (two-phase name availability workflow)
+      if (req.body.phase === "names_only") {
+        const { companyType, companyName1, companyName2, companyName3, applicationType } = req.body;
+        if (!companyType || !companyName1) {
+          return res.status(400).json({ message: "Company type and at least one name are required" });
+        }
+        const application = await storage.createApplication({
+          founderUserId: userId,
+          applicationType: applicationType || "incorporation",
+          companyType,
+          companyName1,
+          companyName2: companyName2 || undefined,
+          companyName3: companyName3 || undefined,
+          status: "names_submitted",
+          name1Availability: "pending",
+          name2Availability: companyName2 ? "pending" : undefined,
+          name3Availability: companyName3 ? "pending" : undefined,
+        });
+        await storage.createAuditLog({
+          actorUserId: userId,
+          action: "submit_names_for_check",
+          entityType: "company_application",
+          entityId: application.id.toString(),
+          ipAddress: req.ip,
+        });
+        return res.json(application);
+      }
+
       // Validate request body
       const parsed = createApplicationSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -5677,8 +5705,9 @@ export async function registerRoutes(
       const userId = getUserId(req);
       const applicationId = parseInt(req.params.id);
       
-      // Validate request body
-      const parsed = updateApplicationSchema.safeParse(req.body);
+      // Extract non-schema flags before validation
+      const { completingFromNamesReview, ...bodyToValidate } = req.body;
+      const parsed = updateApplicationSchema.safeParse(bodyToValidate);
       if (!parsed.success) {
         return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
       }
@@ -5693,10 +5722,114 @@ export async function registerRoutes(
       syncPeopleDocumentRequirements(applicationId).catch(e =>
         console.error("[PeopleDocSync] background sync error:", e)
       );
+
+      // When the founder completes the wizard after a names_reviewed check,
+      // create the standard checklist and transition status to "draft"
+      if (completingFromNamesReview && application.status === "names_reviewed") {
+        await createDefaultChecklist(applicationId, (parsed.data.operatingAddress ?? null) as Parameters<typeof createDefaultChecklist>[1]);
+        await syncChecklistFromVerifications(applicationId, application.founderUserId);
+        const draftUpdated = await storage.updateApplication(applicationId, { status: "draft" });
+        await storage.createAuditLog({
+          actorUserId: userId,
+          action: "complete_wizard_from_names_review",
+          entityType: "company_application",
+          entityId: applicationId.toString(),
+          ipAddress: req.ip,
+        });
+        return res.json(draftUpdated);
+      }
+
       res.json(updated);
     } catch (error) {
       console.error("Error updating application:", error);
       res.status(500).json({ message: "Failed to update application" });
+    }
+  });
+
+  // PATCH /api/applications/:id/name-availability — lawyer reviews name options from CAC registry
+  app.patch("/api/applications/:id/name-availability", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+
+      const roles = await getUserRoles(userId);
+      if (!roles.includes("lawyer") && !roles.includes("admin")) {
+        return res.status(403).json({ message: "Lawyer or admin access required" });
+      }
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+      if (application.status !== "names_submitted") {
+        return res.status(400).json({ message: "Application is not in names_submitted status" });
+      }
+
+      const { name1Availability, name2Availability, name3Availability } = req.body;
+      const updated = await storage.updateApplication(applicationId, {
+        name1Availability: name1Availability || undefined,
+        name2Availability: name2Availability || undefined,
+        name3Availability: name3Availability || undefined,
+        status: "names_reviewed",
+      });
+
+      // Notify the founder
+      await storage.createNotification({
+        userId: application.founderUserId,
+        type: "info",
+        title: "Name availability results ready",
+        message: `The CAC name availability check for your application is complete. Log in to select your preferred name and continue your application.`,
+        linkUrl: `/applications/${applicationId}`,
+      });
+
+      // Send email to founder
+      try {
+        const founder = await storage.getUser(application.founderUserId);
+        if (founder?.email) {
+          const emailSvc = await import("./services/emailService");
+          const { client, fromEmail } = await emailSvc.getResendClient();
+          const companyName = application.companyName1 || `Application #${applicationId}`;
+          await client.emails.send({
+            from: fromEmail,
+            to: founder.email,
+            subject: `Name Availability Results Ready — ${companyName}`,
+            html: `
+              <!DOCTYPE html>
+              <html>
+                <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+                <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
+                  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+                    <div style="text-align:center;margin-bottom:24px;">
+                      <div style="width:56px;height:56px;background:#d1fae5;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;">✓</div>
+                    </div>
+                    <h2 style="font-size:20px;font-weight:700;margin:0 0 12px;">Name Availability Results Ready</h2>
+                    <p style="color:#6b7280;margin:0 0 20px;">Hello ${founder.firstName || "there"},</p>
+                    <p style="color:#374151;margin:0 0 20px;">The CAC name availability check for <strong>${companyName}</strong> is complete. Please log in to see which names are available and continue your application.</p>
+                    <div style="text-align:center;margin:32px 0;">
+                      <a href="${process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}` : ''}/applications/${applicationId}" style="background:#059669;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">View Results &amp; Continue</a>
+                    </div>
+                    <p style="color:#9ca3af;font-size:13px;margin:0;">This email was sent by Cellion One.</p>
+                  </div>
+                </body>
+              </html>`,
+          });
+        }
+      } catch (emailError) {
+        console.error("[NameAvailability] Failed to send results email:", emailError);
+      }
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "review_name_availability",
+        entityType: "company_application",
+        entityId: applicationId.toString(),
+        ipAddress: req.ip,
+      });
+
+      return res.json(updated);
+    } catch (error) {
+      console.error("Error updating name availability:", error);
+      res.status(500).json({ message: "Failed to update name availability" });
     }
   });
 

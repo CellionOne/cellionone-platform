@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -150,6 +150,10 @@ export default function NewApplicationPage() {
   const [isLoadingAi, setIsLoadingAi] = useState(false);
   const [draftApplicationId, setDraftApplicationId] = useState<number | null>(null);
   const [sameAsRegistered, setSameAsRegistered] = useState(false);
+  const [nameCheckSubmitted, setNameCheckSubmitted] = useState(false);
+  const [submittedNameCheckAppId, setSubmittedNameCheckAppId] = useState<number | null>(null);
+  const [resumeApplicationId, setResumeApplicationId] = useState<number | null>(null);
+  const [resumeSelectedNames, setResumeSelectedNames] = useState<string[]>([]);
 
   // Fetch registered office options
   const { data: registeredOfficeOptions } = useQuery<{
@@ -295,6 +299,67 @@ export default function NewApplicationPage() {
         description: "Your previous draft has been loaded.",
       });
     }
+  }, []);
+
+  // Load existing application when ?resume=<id> is in the URL (two-phase name availability workflow)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const resumeParam = params.get("resume");
+    if (!resumeParam) return;
+    const id = parseInt(resumeParam);
+    if (isNaN(id)) return;
+    setResumeApplicationId(id);
+    setDraftApplicationId(id);
+
+    Promise.all([
+      apiRequest("GET", `/api/applications/${id}`).then(r => r.json()),
+      apiRequest("GET", `/api/company-people`).then(r => r.json()),
+    ])
+      .then(([envelope, allPeople]: [{ application: CompanyApplication } | CompanyApplication, CompanyPerson[]]) => {
+        const app: CompanyApplication = "application" in envelope ? envelope.application : envelope;
+        setFormData(prev => ({
+          ...prev,
+          applicationType: app.applicationType || prev.applicationType,
+          companyType: app.companyType || prev.companyType,
+          companyName1: app.companyName1 || prev.companyName1,
+          companyName2: app.companyName2 || prev.companyName2,
+          companyName3: app.companyName3 || prev.companyName3,
+          businessDescription: app.businessDescription || prev.businessDescription,
+          registeredAddress: (app.registeredAddress as typeof prev.registeredAddress) || prev.registeredAddress,
+          operatingAddress: (app.operatingAddress as typeof prev.operatingAddress) || prev.operatingAddress,
+        }));
+        if (app.selectedNames && app.selectedNames.length > 0) {
+          setResumeSelectedNames(app.selectedNames as string[]);
+        }
+        // Restore directors/shareholders
+        const appPeople = Array.isArray(allPeople)
+          ? allPeople.filter((p: CompanyPerson) => p.applicationId === id)
+          : [];
+        if (appPeople.length > 0) {
+          setDirectors(appPeople.map((p: CompanyPerson) => ({
+            localId: crypto.randomUUID(),
+            personId: p.id,
+            personType: (p.entityType === "corporate" ? "corporate" : "individual") as "individual" | "corporate",
+            fullName: p.entityType !== "corporate" ? (p.title || "") : "",
+            inviteEmail: p.inviteEmail || "",
+            role: p.role || "director",
+            sharesAllocated: p.sharesAllocated?.toString() || "",
+            shareClass: p.shareClass || "ordinary",
+            sharePercentage: p.sharePercentage || "",
+            corporateName: p.corporateName || "",
+            corporateRcNumber: p.corporateRcNumber || "",
+            corporateCountry: p.corporateCountry || "Nigeria",
+            authorisedRepName: p.corporateAuthorisedRepName || "",
+          })));
+        }
+        // Always start at Step 3 in resume mode (Steps 1 & 2 are read-only)
+        setCurrentStep(3);
+        toast({ title: "Resuming application", description: "Complete the remaining steps to submit your application." });
+      })
+      .catch(() => {
+        toast({ title: "Could not load application", description: "Starting fresh.", variant: "destructive" });
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Track online status
@@ -576,6 +641,8 @@ export default function NewApplicationPage() {
   };
 
   const canProceed = () => {
+    // In resume mode Steps 1 & 2 are read-only — always passable
+    if (resumeApplicationId && (currentStep === 1 || currentStep === 2)) return true;
     switch (currentStep) {
       case 1:
         return !!formData.companyType;
@@ -608,6 +675,8 @@ export default function NewApplicationPage() {
   const handleNext = () => {
     if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
+    } else if (resumeApplicationId) {
+      resumeCreateMutation.mutate(formData);
     } else {
       createMutation.mutate(formData);
     }
@@ -623,21 +692,109 @@ export default function NewApplicationPage() {
     saveDraftMutation.mutate();
   };
 
+  // Phase 1 names-only submission
+  const submitNameCheckMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/applications", {
+        phase: "names_only",
+        applicationType: formData.applicationType,
+        companyType: formData.companyType,
+        companyName1: formData.companyName1,
+        companyName2: formData.companyName2 || undefined,
+        companyName3: formData.companyName3 || undefined,
+      });
+      return response.json() as Promise<{ id: number }>;
+    },
+    onSuccess: (data) => {
+      setSubmittedNameCheckAppId(data.id);
+      setNameCheckSubmitted(true);
+      localStorage.removeItem("wizard-draft-id");
+      deleteDraft(DRAFT_ID);
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
+    },
+    onError: () => {
+      toast({ title: "Submission failed", description: "Could not submit your names. Please try again.", variant: "destructive" });
+    },
+  });
+
+  // Resume-mode submission: PATCH existing application with full wizard data, create checklist, move to draft
+  const resumeCreateMutation = useMutation({
+    mutationFn: async (data: typeof formData) => {
+      const response = await apiRequest("PATCH", `/api/applications/${resumeApplicationId}`, {
+        businessDescription: data.businessDescription,
+        registeredAddress: data.useRegisteredOffice ? undefined : data.registeredAddress,
+        operatingAddress: data.operatingAddress,
+        selectedNames: resumeSelectedNames.length > 0 ? resumeSelectedNames : undefined,
+        completingFromNamesReview: true,
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      deleteDraft(DRAFT_ID);
+      localStorage.removeItem("wizard-draft-id");
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/dashboard"] });
+      toast({ title: "Application ready", description: "Your application is saved as a draft. Please upload documents and proceed to payment." });
+      navigate(`/applications/${resumeApplicationId}`);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to save application. Please try again.", variant: "destructive" });
+    },
+  });
+
+  // Holding card — shown after Phase 1 name check submission
+  if (nameCheckSubmitted) {
+    return (
+      <DashboardLayout
+        role="founder"
+        breadcrumbs={[
+          { label: "Dashboard", href: "/founder/dashboard" },
+          { label: "Applications", href: "/founder/applications" },
+          { label: "Names Submitted" },
+        ]}
+      >
+        <div className="max-w-xl mx-auto">
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="pt-10 pb-10 text-center space-y-6">
+              <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="h-9 w-9 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold">Names Submitted for Review</h2>
+                <p className="text-muted-foreground mt-2 max-w-sm mx-auto">
+                  Your company name options have been submitted. A lawyer will check availability with the CAC registry and notify you when results are ready.
+                </p>
+              </div>
+              {submittedNameCheckAppId && (
+                <p className="text-sm text-muted-foreground">
+                  Application #{submittedNameCheckAppId} — you'll receive an email and in-app notification once results are ready.
+                </p>
+              )}
+              <Button onClick={() => navigate("/founder/applications")} data-testid="button-back-to-applications">
+                View My Applications
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout 
       role="founder" 
       breadcrumbs={[
         { label: "Dashboard", href: "/founder/dashboard" },
         { label: "Applications", href: "/founder/applications" },
-        { label: "New Application" }
+        { label: resumeApplicationId ? "Complete Registration" : "New Application" }
       ]}
     >
       <div className="max-w-3xl mx-auto space-y-8">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">New Company Registration</h1>
+            <h1 className="text-2xl font-bold">{resumeApplicationId ? "Complete Your Registration" : "New Company Registration"}</h1>
             <p className="text-muted-foreground">
-              Complete the following steps to start your company incorporation
+              {resumeApplicationId ? "Complete the remaining steps to submit your application" : "Complete the following steps to start your company incorporation"}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -686,72 +843,136 @@ export default function NewApplicationPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             {currentStep === 1 && (
-              <div className="grid gap-4">
-                {companyTypes.map((type) => (
-                  <div
-                    key={type.value}
-                    className={`p-4 rounded-lg border-2 cursor-pointer transition-all hover-elevate ${
-                      formData.companyType === type.value
-                        ? "border-primary bg-primary/5"
-                        : "border-transparent bg-muted/50"
-                    }`}
-                    onClick={() => updateFormData("companyType", type.value)}
-                    data-testid={`company-type-${type.value}`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${
-                        formData.companyType === type.value ? "bg-primary/20" : "bg-muted"
-                      }`}>
-                        <Building2 className={`h-5 w-5 ${
-                          formData.companyType === type.value ? "text-primary" : "text-muted-foreground"
-                        }`} />
+              resumeApplicationId ? (
+                <div className="space-y-4">
+                  <div className="rounded-lg border bg-muted/50 p-4">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Company structure (locked)</p>
+                    {companyTypes.filter(t => t.value === formData.companyType).map((type) => (
+                      <div key={type.value} className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                          <Building2 className="h-5 w-5 text-primary" />
+                        </div>
+                        <div>
+                          <p className="font-medium">{type.label}</p>
+                          <p className="text-sm text-muted-foreground">{type.description}</p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-medium">{type.label}</h3>
-                        <p className="text-sm text-muted-foreground">{type.description}</p>
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    <Info className="h-3.5 w-3.5 shrink-0" />
+                    Company type was locked when you submitted your names for the CAC availability check.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  {companyTypes.map((type) => (
+                    <div
+                      key={type.value}
+                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all hover-elevate ${
+                        formData.companyType === type.value
+                          ? "border-primary bg-primary/5"
+                          : "border-transparent bg-muted/50"
+                      }`}
+                      onClick={() => updateFormData("companyType", type.value)}
+                      data-testid={`company-type-${type.value}`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${
+                          formData.companyType === type.value ? "bg-primary/20" : "bg-muted"
+                        }`}>
+                          <Building2 className={`h-5 w-5 ${
+                            formData.companyType === type.value ? "text-primary" : "text-muted-foreground"
+                          }`} />
+                        </div>
+                        <div>
+                          <h3 className="font-medium">{type.label}</h3>
+                          <p className="text-sm text-muted-foreground">{type.description}</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )
             )}
 
             {currentStep === 2 && (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="companyName1">Preferred Company Name *</Label>
-                  <Input
-                    id="companyName1"
-                    placeholder="e.g., TechVentures Nigeria"
-                    value={formData.companyName1}
-                    onChange={(e) => updateFormData("companyName1", e.target.value)}
-                    data-testid="input-company-name-1"
-                  />
+              resumeApplicationId ? (
+                <div className="space-y-4">
+                  <div className="rounded-lg border bg-muted/50 p-4 space-y-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Submitted names (locked)</p>
+                    {formData.companyName1 && (
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs text-muted-foreground w-28 shrink-0 pt-0.5">Preferred:</span>
+                        <span className="font-medium text-sm">{formData.companyName1}</span>
+                      </div>
+                    )}
+                    {formData.companyName2 && (
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs text-muted-foreground w-28 shrink-0 pt-0.5">Alternative 1:</span>
+                        <span className="font-medium text-sm">{formData.companyName2}</span>
+                      </div>
+                    )}
+                    {formData.companyName3 && (
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs text-muted-foreground w-28 shrink-0 pt-0.5">Alternative 2:</span>
+                        <span className="font-medium text-sm">{formData.companyName3}</span>
+                      </div>
+                    )}
+                    {resumeSelectedNames.length > 0 && (
+                      <div className="border-t border-muted pt-3 flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-muted-foreground">Your selection:</span>
+                        {resumeSelectedNames.map(name => (
+                          <Badge key={name} className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-0 text-xs">{name}</Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    <Info className="h-3.5 w-3.5 shrink-0" />
+                    Names were submitted for a CAC availability check and cannot be edited here.
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="companyName2">Alternative Name 1 (Optional)</Label>
-                  <Input
-                    id="companyName2"
-                    placeholder="Second choice"
-                    value={formData.companyName2}
-                    onChange={(e) => updateFormData("companyName2", e.target.value)}
-                    data-testid="input-company-name-2"
-                  />
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="companyName1">Preferred Company Name *</Label>
+                    <Input
+                      id="companyName1"
+                      placeholder="e.g., TechVentures Nigeria"
+                      value={formData.companyName1}
+                      onChange={(e) => updateFormData("companyName1", e.target.value)}
+                      data-testid="input-company-name-1"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="companyName2">Alternative Name 1 (Optional)</Label>
+                    <Input
+                      id="companyName2"
+                      placeholder="Second choice"
+                      value={formData.companyName2}
+                      onChange={(e) => updateFormData("companyName2", e.target.value)}
+                      data-testid="input-company-name-2"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="companyName3">Alternative Name 2 (Optional)</Label>
+                    <Input
+                      id="companyName3"
+                      placeholder="Third choice"
+                      value={formData.companyName3}
+                      onChange={(e) => updateFormData("companyName3", e.target.value)}
+                      data-testid="input-company-name-3"
+                    />
+                  </div>
+                  <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3">
+                    <p className="text-sm text-amber-800 dark:text-amber-300 font-medium">Two-step Name Process</p>
+                    <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+                      After submitting your names, a lawyer will check their availability with the CAC registry. You'll be notified when results are ready to continue your application.
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="companyName3">Alternative Name 2 (Optional)</Label>
-                  <Input
-                    id="companyName3"
-                    placeholder="Third choice"
-                    value={formData.companyName3}
-                    onChange={(e) => updateFormData("companyName3", e.target.value)}
-                    data-testid="input-company-name-3"
-                  />
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  CAC will check name availability and register the first available option.
-                </p>
-              </div>
+              )
             )}
 
             {currentStep === 3 && (
@@ -1470,26 +1691,47 @@ export default function NewApplicationPage() {
                   )}
                   Save & Exit
                 </Button>
-                <Button
-                  type="button"
-                  onClick={handleNext}
-                  disabled={!canProceed() || createMutation.isPending}
-                  data-testid="button-next"
-                >
-                  {createMutation.isPending ? (
-                    <>
-                      <LoadingSpinner size="sm" className="mr-2" />
-                      Creating...
-                    </>
-                  ) : currentStep === 5 ? (
-                    "Create Application"
-                  ) : (
-                    <>
-                      Next
-                      <ArrowRight className="h-4 w-4 ml-2" />
-                    </>
-                  )}
-                </Button>
+                {currentStep === 2 && !resumeApplicationId ? (
+                  <Button
+                    type="button"
+                    onClick={() => submitNameCheckMutation.mutate()}
+                    disabled={!canProceed() || submitNameCheckMutation.isPending}
+                    data-testid="button-submit-name-check"
+                  >
+                    {submitNameCheckMutation.isPending ? (
+                      <>
+                        <LoadingSpinner size="sm" className="mr-2" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        Submit for Name Check
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    onClick={handleNext}
+                    disabled={!canProceed() || createMutation.isPending || resumeCreateMutation.isPending}
+                    data-testid="button-next"
+                  >
+                    {(createMutation.isPending || resumeCreateMutation.isPending) ? (
+                      <>
+                        <LoadingSpinner size="sm" className="mr-2" />
+                        Saving...
+                      </>
+                    ) : currentStep === 5 ? (
+                      resumeApplicationId ? "Complete Application" : "Create Application"
+                    ) : (
+                      <>
+                        Next
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>

@@ -211,6 +211,10 @@ export const companyApplications = pgTable("company_applications", {
   abandonedCartLastReminderAt: timestamp("abandoned_cart_last_reminder_at"),
   rcNumber: varchar("rc_number", { length: 50 }), // CAC-assigned RC number, recorded by lawyer after filing
   wizardStep: integer("wizard_step").default(1), // last step the founder was on when they saved the draft
+  name1Availability: varchar("name1_availability", { length: 20 }), // pending | available | unavailable | similar_found
+  name2Availability: varchar("name2_availability", { length: 20 }),
+  name3Availability: varchar("name3_availability", { length: 20 }),
+  selectedNames: text("selected_names").array(),
   isLegacyDraft: boolean("is_legacy_draft").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

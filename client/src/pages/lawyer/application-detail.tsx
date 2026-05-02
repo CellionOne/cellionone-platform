@@ -127,6 +127,96 @@ interface ApplicationDetailData {
   founderKyc: FounderKyc | null;
 }
 
+function NameAvailabilityReviewPanel({ applicationId, application }: { applicationId: number; application: CompanyApplication }) {
+  const { toast } = useToast();
+  const [name1Avail, setName1Avail] = useState("");
+  const [name2Avail, setName2Avail] = useState("");
+  const [name3Avail, setName3Avail] = useState("");
+
+  const availabilityOptions = [
+    { value: "available", label: "Available" },
+    { value: "unavailable", label: "Unavailable" },
+    { value: "similar_found", label: "Similar Found" },
+  ];
+
+  const saveAvailabilityMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("PATCH", `/api/applications/${applicationId}/name-availability`, {
+        name1Availability: name1Avail || undefined,
+        name2Availability: application.companyName2 ? (name2Avail || undefined) : undefined,
+        name3Availability: application.companyName3 ? (name3Avail || undefined) : undefined,
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/lawyer/applications", String(applicationId)] });
+      toast({ title: "Availability saved", description: "The founder has been notified to select their preferred name." });
+    },
+    onError: (error: any) => {
+      toast({ title: "Error", description: error.message || "Failed to save availability.", variant: "destructive" });
+    },
+  });
+
+  const canSave = !!name1Avail && (!application.companyName2 || !!name2Avail) && (!application.companyName3 || !!name3Avail);
+
+  return (
+    <Card className="border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <FileCheck className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          CAC Name Availability Review
+        </CardTitle>
+        <CardDescription>
+          Check these names against the CAC registry and record the availability for each option.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {[
+          { name: application.companyName1, label: "Preferred Name", value: name1Avail, setter: setName1Avail },
+          application.companyName2 ? { name: application.companyName2, label: "Alternative 1", value: name2Avail, setter: setName2Avail } : null,
+          application.companyName3 ? { name: application.companyName3, label: "Alternative 2", value: name3Avail, setter: setName3Avail } : null,
+        ].filter(Boolean).map((item) => (
+          <div key={item!.name} className="flex items-center gap-4 p-3 rounded-lg border bg-background">
+            <div className="flex-1">
+              <p className="text-xs text-muted-foreground">{item!.label}</p>
+              <p className="font-medium text-sm">{item!.name}</p>
+            </div>
+            <Select value={item!.value} onValueChange={item!.setter}>
+              <SelectTrigger className="w-44" data-testid={`select-availability-${item!.name}`}>
+                <SelectValue placeholder="Select result…" />
+              </SelectTrigger>
+              <SelectContent>
+                {availabilityOptions.map(opt => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ))}
+        <Button
+          onClick={() => saveAvailabilityMutation.mutate()}
+          disabled={!canSave || saveAvailabilityMutation.isPending}
+          data-testid="button-save-availability"
+        >
+          {saveAvailabilityMutation.isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Saving…
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="h-4 w-4 mr-2" />
+              Save &amp; Notify Founder
+            </>
+          )}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function LawyerApplicationDetail() {
   const [, params] = useRoute("/lawyer/applications/:id");
   const { toast } = useToast();
@@ -211,6 +301,13 @@ export default function LawyerApplicationDetail() {
             <StatusBadge status={application.status || "draft"} className="text-sm" />
           </div>
         </div>
+
+        {application.status === 'names_submitted' && (
+          <NameAvailabilityReviewPanel
+            applicationId={parseInt(applicationId!)}
+            application={application}
+          />
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="tabs-container">
           <TabsList data-testid="tabs-list">

@@ -169,22 +169,31 @@ export default function NewApplicationPage() {
     const id = parseInt(draftParam);
     if (isNaN(id)) return;
     setDraftApplicationId(id);
-    apiRequest("GET", `/api/applications/${id}`)
-      .then(r => r.json())
-      .then((data: any) => {
+
+    Promise.all([
+      apiRequest("GET", `/api/applications/${id}`).then(r => r.json()),
+      apiRequest("GET", `/api/company-people`).then(r => r.json()),
+    ])
+      .then(([envelope, allPeople]: [any, any[]]) => {
+        const app = envelope.application ?? envelope;
         setFormData(prev => ({
           ...prev,
-          applicationType: data.applicationType || prev.applicationType,
-          companyType: data.companyType || prev.companyType,
-          companyName1: data.companyName1 || prev.companyName1,
-          companyName2: data.companyName2 || prev.companyName2,
-          companyName3: data.companyName3 || prev.companyName3,
-          businessDescription: data.businessDescription || prev.businessDescription,
-          registeredAddress: data.registeredAddress || prev.registeredAddress,
-          operatingAddress: data.operatingAddress || prev.operatingAddress,
+          applicationType: app.applicationType || prev.applicationType,
+          companyType: app.companyType || prev.companyType,
+          companyName1: app.companyName1 || prev.companyName1,
+          companyName2: app.companyName2 || prev.companyName2,
+          companyName3: app.companyName3 || prev.companyName3,
+          businessDescription: app.businessDescription || prev.businessDescription,
+          registeredAddress: app.registeredAddress || prev.registeredAddress,
+          operatingAddress: app.operatingAddress || prev.operatingAddress,
         }));
-        if (data.people?.length) {
-          setDirectors(data.people.map((p: any) => ({
+
+        // Restore directors linked to this draft application
+        const draftPeople = Array.isArray(allPeople)
+          ? allPeople.filter((p: any) => p.applicationId === id)
+          : [];
+        if (draftPeople.length) {
+          setDirectors(draftPeople.map((p: any) => ({
             localId: crypto.randomUUID(),
             personId: p.id,
             personType: (p.entityType === "corporate" ? "corporate" : "individual") as "individual" | "corporate",
@@ -200,12 +209,20 @@ export default function NewApplicationPage() {
             authorisedRepName: p.corporateAuthorisedRepName || "",
           })));
         }
-        // Infer the wizard step from saved data
-        if (!data.companyType) setCurrentStep(1);
-        else if (!data.companyName1) setCurrentStep(2);
-        else if (!data.businessDescription) setCurrentStep(3);
-        else if (!data.operatingAddress?.line1) setCurrentStep(4);
+
+        // Prefer the explicitly saved step; fall back to inference from data
+        const savedStep = localStorage.getItem(`wizard-draft-step-${id}`);
+        if (savedStep) {
+          const step = parseInt(savedStep);
+          if (!isNaN(step) && step >= 1 && step <= 5) {
+            setCurrentStep(step);
+          }
+        } else if (!app.companyType) setCurrentStep(1);
+        else if (!app.companyName1) setCurrentStep(2);
+        else if (!app.businessDescription) setCurrentStep(3);
+        else if (!app.operatingAddress?.line1) setCurrentStep(4);
         else setCurrentStep(5);
+
         toast({ title: "Draft loaded", description: "Your saved draft has been restored." });
       })
       .catch(() => {
@@ -344,6 +361,9 @@ export default function NewApplicationPage() {
     },
     onSuccess: (data) => {
       setDraftApplicationId(data.id);
+      // Persist both the draft id and the current step so the wizard can reopen at the right step
+      localStorage.setItem("wizard-draft-id", String(data.id));
+      localStorage.setItem(`wizard-draft-step-${data.id}`, String(currentStep));
       queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
       toast({ title: "Draft saved", description: "Your progress has been saved. You can continue anytime from your Applications list." });
       navigate("/founder/applications");
@@ -430,7 +450,9 @@ export default function NewApplicationPage() {
       // If continuing from a saved draft, mark the old draft as legacy to avoid duplication
       if (draftApplicationId && draftApplicationId !== app.id) {
         apiRequest("PATCH", `/api/applications/${draftApplicationId}`, { isLegacyDraft: true }).catch(() => {});
+        localStorage.removeItem(`wizard-draft-step-${draftApplicationId}`);
       }
+      localStorage.removeItem("wizard-draft-id");
       deleteDraft(DRAFT_ID);
       queryClient.invalidateQueries({ queryKey: ["/api/founder/applications"] });
       queryClient.invalidateQueries({ queryKey: ["/api/founder/dashboard"] });

@@ -5574,7 +5574,10 @@ export async function registerRoutes(
   app.post("/api/applications/draft", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const { draftApplicationId, wizardStep, ...rest } = req.body;
+      const { draftApplicationId, wizardStep: rawWizardStep, ...rest } = req.body;
+      const wizardStep = rawWizardStep != null
+        ? Math.min(5, Math.max(1, parseInt(String(rawWizardStep)) || 1))
+        : undefined;
 
       if (draftApplicationId) {
         const existing = await storage.getApplication(parseInt(draftApplicationId));

@@ -57,6 +57,13 @@
       "when": 1746270000000,
       "tag": "0007_add_name_availability_to_applications",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1746356400000,
+      "tag": "0008_add_already_obtained_to_order_items",
+      "breakpoints": true
     }
   ]
 }

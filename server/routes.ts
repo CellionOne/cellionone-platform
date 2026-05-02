@@ -3203,6 +3203,33 @@ export async function registerRoutes(
               firstName = user.firstName;
               lastName = user.lastName;
             }
+          } else if (person.inviteStatus === 'notified') {
+            // "Notified" person: founder submitted details — derive readiness from stored fields
+            // and any documents uploaded via POST /api/company-people/:id/documents/upload
+            hasNin = !!person.ninEncrypted;
+            hasBvn = !!person.bvnEncrypted;
+            if (person.fullName) {
+              const nameParts = person.fullName.trim().split(/\s+/);
+              firstName = nameParts[0] ?? null;
+              lastName = nameParts.slice(1).join(' ') || null;
+            }
+            // Check for uploaded supporting documents by companyPersonId
+            const personDocs = await db
+              .select({ docType: documentFiles.docType })
+              .from(documentFiles)
+              .where(eq(documentFiles.companyPersonId, person.id));
+            hasPassportPhoto = personDocs.some(d => d.docType === 'passport_photo');
+            hasSignature = personDocs.some(d => d.docType === 'signature');
+            hasIdDocument = personDocs.some(d => d.docType === 'government_id');
+            // Compute a basic profile completion for notified persons
+            const notifiedItems = [
+              !!person.fullName, !!person.dateOfBirth, !!person.nationality,
+              !!person.phoneNumber, !!person.residentialAddress,
+              hasNin, hasBvn, hasPassportPhoto, hasSignature, hasIdDocument,
+            ];
+            const completedCount = notifiedItems.filter(Boolean).length;
+            profileCompletion = Math.round((completedCount / notifiedItems.length) * 100);
+            isProfileComplete = profileCompletion >= 80;
           }
 
           let identityExpiresAt: string | null = null;
@@ -3518,6 +3545,12 @@ export async function registerRoutes(
         }
       }
 
+      // Validate: if any personal detail fields are present, fullName must be provided
+      const hasAnyDetailField = !!(dateOfBirth || nationality || phoneNumber || residentialAddress || nin || bvn);
+      if (hasAnyDetailField && !fullName?.trim()) {
+        return res.status(400).json({ message: "Full legal name is required when submitting personal details" });
+      }
+
       // Encrypt NIN/BVN for fully-detailed individual submissions
       let ninEncrypted: string | null = null;
       let bvnEncrypted: string | null = null;
@@ -3755,7 +3788,7 @@ export async function registerRoutes(
       const { fullName, dateOfBirth, nationality, phoneNumber, residentialAddress, nin, bvn } = req.body;
       const { encryptField } = await import("./services/encryptionService");
 
-      const patch: Record<string, unknown> = {};
+      const patch: Partial<InsertCompanyPerson> = {};
       if (fullName !== undefined) patch.fullName = fullName?.trim() || null;
       if (dateOfBirth !== undefined) patch.dateOfBirth = dateOfBirth?.trim() || null;
       if (nationality !== undefined) patch.nationality = nationality?.trim() || null;
@@ -3766,7 +3799,7 @@ export async function registerRoutes(
       // If fullName is now set and inviteStatus was "pending", mark as "notified"
       if (patch.fullName && person.inviteStatus === 'pending') patch.inviteStatus = 'notified';
 
-      const updated = await storage.updateCompanyPerson(id, patch as any);
+      const updated = await storage.updateCompanyPerson(id, patch);
       await storage.createAuditLog({
         actorUserId: userId,
         action: "company_person_details_updated",

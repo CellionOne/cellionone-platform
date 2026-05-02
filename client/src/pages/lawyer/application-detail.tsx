@@ -132,6 +132,7 @@ function NameAvailabilityReviewPanel({ applicationId, application }: { applicati
   const [name1Avail, setName1Avail] = useState("");
   const [name2Avail, setName2Avail] = useState("");
   const [name3Avail, setName3Avail] = useState("");
+  const [saved, setSaved] = useState(false);
 
   const availabilityOptions = [
     { value: "available", label: "Available" },
@@ -149,8 +150,9 @@ function NameAvailabilityReviewPanel({ applicationId, application }: { applicati
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/lawyer/applications", String(applicationId)] });
+      queryClient.invalidateQueries({ queryKey: ["/api/applications", applicationId] });
       toast({ title: "Availability saved", description: "The founder has been notified to select their preferred name." });
+      setSaved(true);
     },
     onError: (error: any) => {
       toast({ title: "Error", description: error.message || "Failed to save availability.", variant: "destructive" });
@@ -158,6 +160,34 @@ function NameAvailabilityReviewPanel({ applicationId, application }: { applicati
   });
 
   const canSave = !!name1Avail && (!application.companyName2 || !!name2Avail) && (!application.companyName3 || !!name3Avail);
+
+  const nameEntries = [
+    { name: application.companyName1, label: "Preferred Name", value: name1Avail, setter: setName1Avail },
+    application.companyName2 ? { name: application.companyName2, label: "Alternative 1", value: name2Avail, setter: setName2Avail } : null,
+    application.companyName3 ? { name: application.companyName3, label: "Alternative 2", value: name3Avail, setter: setName3Avail } : null,
+  ].filter((item): item is NonNullable<typeof item> => item !== null);
+
+  if (saved) {
+    return (
+      <Card className="border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+            Name Availability Submitted
+          </CardTitle>
+          <CardDescription>Results recorded. The founder has been notified to select their preferred name.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {nameEntries.map(item => (
+            <div key={item.name} className="flex items-center justify-between text-sm p-2 rounded border bg-background">
+              <span className="font-medium">{item.name}</span>
+              <span className="text-muted-foreground capitalize">{item.value.replace("_", " ")}</span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30">
@@ -171,18 +201,14 @@ function NameAvailabilityReviewPanel({ applicationId, application }: { applicati
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {[
-          { name: application.companyName1, label: "Preferred Name", value: name1Avail, setter: setName1Avail },
-          application.companyName2 ? { name: application.companyName2, label: "Alternative 1", value: name2Avail, setter: setName2Avail } : null,
-          application.companyName3 ? { name: application.companyName3, label: "Alternative 2", value: name3Avail, setter: setName3Avail } : null,
-        ].filter(Boolean).map((item) => (
-          <div key={item!.name} className="flex items-center gap-4 p-3 rounded-lg border bg-background">
+        {nameEntries.map((item) => (
+          <div key={item.name} className="flex items-center gap-4 p-3 rounded-lg border bg-background">
             <div className="flex-1">
-              <p className="text-xs text-muted-foreground">{item!.label}</p>
-              <p className="font-medium text-sm">{item!.name}</p>
+              <p className="text-xs text-muted-foreground">{item.label}</p>
+              <p className="font-medium text-sm">{item.name}</p>
             </div>
-            <Select value={item!.value} onValueChange={item!.setter}>
-              <SelectTrigger className="w-44" data-testid={`select-availability-${item!.name}`}>
+            <Select value={item.value} onValueChange={item.setter}>
+              <SelectTrigger className="w-44" data-testid={`select-availability-${item.name}`}>
                 <SelectValue placeholder="Select result…" />
               </SelectTrigger>
               <SelectContent>

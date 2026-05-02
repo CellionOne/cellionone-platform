@@ -517,9 +517,9 @@ export default function ApplicationDetailsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {[
-                { name: application.companyName1, availability: (application as any).name1Availability },
-                { name: application.companyName2, availability: (application as any).name2Availability },
-                { name: application.companyName3, availability: (application as any).name3Availability },
+                { name: application.companyName1, availability: application.name1Availability },
+                { name: application.companyName2, availability: application.name2Availability },
+                { name: application.companyName3, availability: application.name3Availability },
               ].filter(n => n.name).map(({ name, availability }) => (
                 <div key={name} className="flex items-center gap-3 p-3 rounded-lg border bg-background">
                   <Checkbox

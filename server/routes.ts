@@ -5761,13 +5761,35 @@ export async function registerRoutes(
       if (!application) {
         return res.status(404).json({ message: "Application not found" });
       }
+
+      // Lawyers may only review applications assigned to them; admins bypass this check
+      if (roles.includes("lawyer") && !roles.includes("admin")) {
+        if (application.assignedLawyerUserId !== userId) {
+          return res.status(403).json({ message: "This application is not assigned to you" });
+        }
+      }
+
       if (application.status !== "names_submitted") {
         return res.status(400).json({ message: "Application is not in names_submitted status" });
       }
 
+      const VALID_AVAILABILITY = ["available", "unavailable", "similar_found"];
       const { name1Availability, name2Availability, name3Availability } = req.body;
+      if (name1Availability && !VALID_AVAILABILITY.includes(name1Availability)) {
+        return res.status(400).json({ message: `Invalid name1Availability value. Must be one of: ${VALID_AVAILABILITY.join(", ")}` });
+      }
+      if (name2Availability && !VALID_AVAILABILITY.includes(name2Availability)) {
+        return res.status(400).json({ message: `Invalid name2Availability value. Must be one of: ${VALID_AVAILABILITY.join(", ")}` });
+      }
+      if (name3Availability && !VALID_AVAILABILITY.includes(name3Availability)) {
+        return res.status(400).json({ message: `Invalid name3Availability value. Must be one of: ${VALID_AVAILABILITY.join(", ")}` });
+      }
+      if (!name1Availability) {
+        return res.status(400).json({ message: "name1Availability is required" });
+      }
+
       const updated = await storage.updateApplication(applicationId, {
-        name1Availability: name1Availability || undefined,
+        name1Availability: name1Availability,
         name2Availability: name2Availability || undefined,
         name3Availability: name3Availability || undefined,
         status: "names_reviewed",

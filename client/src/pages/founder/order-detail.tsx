@@ -73,6 +73,7 @@ export default function OrderDetailPage() {
       status: string;
       currency: string;
       totalAmount: number;
+      adminFeeAmount: number | null;
       totalCellionCut: number | null;
       totalLawyerNet: number | null;
       fulfilmentStatus: string | null;
@@ -239,19 +240,39 @@ export default function OrderDetailPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {items.map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-4" data-testid={`receipt-item-${item.sku}`}>
-                <div className="min-w-0">
-                  <p className="font-medium">{item.sku}</p>
-                  <p className="text-sm text-muted-foreground">Qty: {item.quantity}</p>
+            {items.map((item) => {
+              const qty = item.quantity || 1;
+              const lineTotal = item.unitPrice * qty;
+              const isIncorp = item.sku.startsWith("CAC_") || item.sku === "NGO";
+              return (
+                <div key={item.id} className="flex items-center justify-between gap-4" data-testid={`receipt-item-${item.sku}`}>
+                  <div className="min-w-0">
+                    <p className="font-medium">{item.sku}</p>
+                    {qty > 1 && isIncorp ? (
+                      <p className="text-sm text-muted-foreground">{formatNgn(item.unitPrice)} × {qty} names</p>
+                    ) : qty > 1 ? (
+                      <p className="text-sm text-muted-foreground">Qty: {qty}</p>
+                    ) : null}
+                  </div>
+                  <span className="font-medium flex-shrink-0" data-testid={`receipt-line-total-${item.sku}`}>{formatNgn(lineTotal)}</span>
                 </div>
-                <span className="font-medium flex-shrink-0">{formatNgn(item.unitPrice)}</span>
+              );
+            })}
+            <Separator />
+            <div className="flex items-center justify-between gap-4 text-sm text-muted-foreground">
+              <span>Subtotal</span>
+              <span data-testid="text-receipt-subtotal">{formatNgn(order.totalAmount)}</span>
+            </div>
+            {(order.adminFeeAmount ?? 0) > 0 && (
+              <div className="flex items-center justify-between gap-4 text-sm text-muted-foreground">
+                <span>Administration Fee (10%)</span>
+                <span data-testid="text-receipt-admin-fee">{formatNgn(order.adminFeeAmount!)}</span>
               </div>
-            ))}
+            )}
             <Separator />
             <div className="flex items-center justify-between gap-4">
               <span className="font-semibold">Total</span>
-              <span className="font-bold text-lg" data-testid="text-receipt-total">{formatNgn(order.totalAmount)}</span>
+              <span className="font-bold text-lg" data-testid="text-receipt-total">{formatNgn(order.totalAmount + (order.adminFeeAmount ?? 0))}</span>
             </div>
           </CardContent>
         </Card>

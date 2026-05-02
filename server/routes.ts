@@ -4263,6 +4263,7 @@ export async function registerRoutes(
         selectedNames = (app?.selectedNames as string[] | null) ?? [];
       }
 
+      const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
       const fmtNgn = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 0 })}`;
       const billable = items.filter(i => !i.alreadyObtained);
       const waived = items.filter(i => i.alreadyObtained);
@@ -4274,14 +4275,14 @@ export async function registerRoutes(
         const lineTotal = item.unitPrice * qty;
         const isIncorp = item.sku.startsWith("CAC_") || item.sku === "NGO";
         const namesList = isIncorp && qty > 1 && selectedNames.length > 0
-          ? `<ol style="margin:4px 0 0 0;padding-left:16px;font-size:11px;color:#555;">${selectedNames.slice(0, qty).map((n, i) => `<li>${n}</li>`).join("")}</ol>`
+          ? `<ol style="margin:4px 0 0 0;padding-left:16px;font-size:11px;color:#555;">${selectedNames.slice(0, qty).map((n) => `<li>${esc(n)}</li>`).join("")}</ol>`
           : "";
         const qtyNote = isIncorp && qty > 1
           ? `<div style="font-size:11px;color:#555;">${fmtNgn(item.unitPrice)} × ${qty} name searches</div>${namesList}`
           : qty > 1 ? `<div style="font-size:11px;color:#555;">Qty: ${qty}</div>` : "";
         return `<tr>
           <td style="padding:8px 0;border-bottom:1px solid #eee;">
-            <strong>${item.sku}</strong>${qtyNote}
+            <strong>${esc(item.sku)}</strong>${qtyNote}
           </td>
           <td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right;">${fmtNgn(lineTotal)}</td>
         </tr>`;
@@ -4290,7 +4291,7 @@ export async function registerRoutes(
       const waivedRows = waived.length > 0 ? `
         <tr><td colspan="2" style="padding:8px 0 2px 0;font-size:11px;color:#888;font-style:italic;">Waived (admin-marked as already obtained):</td></tr>
         ${waived.map(item => `<tr>
-          <td style="padding:4px 0;color:#aaa;text-decoration:line-through;font-size:12px;">${item.sku}</td>
+          <td style="padding:4px 0;color:#aaa;text-decoration:line-through;font-size:12px;">${esc(item.sku)}</td>
           <td style="padding:4px 0;color:#aaa;text-decoration:line-through;font-size:12px;text-align:right;">${fmtNgn(item.unitPrice * (item.quantity || 1))}</td>
         </tr>`).join("")}` : "";
 

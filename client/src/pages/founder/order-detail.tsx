@@ -98,11 +98,11 @@ export default function OrderDetailPage() {
   });
 
   const applicationId = data?.order.applicationId;
-  const { data: applicationData } = useQuery<{ selectedNames?: string[] }>({
+  const { data: applicationData } = useQuery<{ application?: { selectedNames?: string[] } }>({
     queryKey: ["/api/applications", applicationId],
     enabled: !!applicationId,
   });
-  const selectedNames: string[] = applicationData?.selectedNames ?? [];
+  const selectedNames: string[] = applicationData?.application?.selectedNames ?? [];
 
   const { data: serviceRequests } = useQuery<ServiceRequest[]>({
     queryKey: ["/api/founder/orders", orderId, "service-requests"],

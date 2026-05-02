@@ -143,6 +143,7 @@ export default function ApplicationDetailsPage() {
   const applicationId = params?.id;
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const [namesPreloaded, setNamesPreloaded] = useState(false);
 
   const prevChecklistRef = useRef<ApplicationChecklistItem[] | null>(null);
 
@@ -160,6 +161,17 @@ export default function ApplicationDetailsPage() {
       return isPreSubmit && hasMissing ? 5000 : false;
     },
   });
+
+  // Preload previously selected names when revisiting names_reviewed screen
+  useEffect(() => {
+    const app = data?.application;
+    if (!app || app.status !== "names_reviewed" || namesPreloaded) return;
+    const prior = (app.selectedNames as string[] | null) ?? [];
+    if (prior.length > 0) {
+      setSelectedNames(prior);
+    }
+    setNamesPreloaded(true);
+  }, [data?.application, namesPreloaded]);
 
   useEffect(() => {
     if (!data?.checklist) return;

@@ -5845,6 +5845,12 @@ export async function registerRoutes(
       if (!name1Availability) {
         return res.status(400).json({ message: "name1Availability is required" });
       }
+      if (application.companyName2 && !name2Availability) {
+        return res.status(400).json({ message: "name2Availability is required because the application has a second name option" });
+      }
+      if (application.companyName3 && !name3Availability) {
+        return res.status(400).json({ message: "name3Availability is required because the application has a third name option" });
+      }
 
       const updated = await storage.updateApplication(applicationId, {
         name1Availability: name1Availability,

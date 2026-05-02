@@ -5767,20 +5767,19 @@ export async function registerRoutes(
         }
       }
 
-      const updated = await storage.updateApplication(applicationId, parsed.data);
-      // Sync per-person document requirements after any update (idempotent)
-      syncPeopleDocumentRequirements(applicationId).catch(e =>
-        console.error("[PeopleDocSync] background sync error:", e)
-      );
-
-      // When the founder completes the wizard after a names_reviewed check,
-      // require that they have actually selected at least one available name
+      // Validate completingFromNamesReview preconditions BEFORE any writes
       if (completingFromNamesReview && application.status === "names_reviewed") {
         const currentSelectedNames = (parsed.data.selectedNames as string[] | undefined) ?? (application.selectedNames as string[] | null) ?? [];
         if (!currentSelectedNames || currentSelectedNames.length === 0) {
           return res.status(400).json({ message: "You must select at least one available name before completing your application" });
         }
       }
+
+      const updated = await storage.updateApplication(applicationId, parsed.data);
+      // Sync per-person document requirements after any update (idempotent)
+      syncPeopleDocumentRequirements(applicationId).catch(e =>
+        console.error("[PeopleDocSync] background sync error:", e)
+      );
 
       // When the founder completes the wizard after a names_reviewed check,
       // create the standard checklist and transition status to "draft"

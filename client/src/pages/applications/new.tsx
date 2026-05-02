@@ -250,9 +250,10 @@ export default function NewApplicationPage() {
       });
   }, []);
 
-  // Load draft from localStorage on mount — skip when server draft is being loaded via ?draft=
+  // Load draft from localStorage on mount — skip when server draft is being loaded via ?draft= or resume mode via ?resume=
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).has("draft")) return;
+    const search = new URLSearchParams(window.location.search);
+    if (search.has("draft") || search.has("resume")) return;
     const savedDraft = getDraft(DRAFT_ID);
     if (savedDraft && savedDraft.data) {
       let restoredAddress = formData.registeredAddress;

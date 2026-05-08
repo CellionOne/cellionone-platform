@@ -1,4 +1,5 @@
 import { storage } from '../storage';
+import { decryptField as decryptEncField, hmacField as hmacEncField, isEncryptedField as isEncField } from './encryptionService';
 import { db } from '../db';
 import { orderPayments, orders, orderItems, serviceRequests, companyApplications, users, companyPeople, productCatalog, kycVerificationRequests, addressVerificationJobs, companyProfiles, directorBiometricInvites, founderProfiles, identityVerifications, payments, type InsertFounderProfile, type InsertIdentityVerification } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
@@ -1166,10 +1167,22 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     // bvn is already encrypted in the directors array; reuse it as-is
                     profilePatch.bvnEncrypted = prefillDir.bvn;
                     lockedFields.push('bvnEncrypted');
+                    // Compute HMAC hash for Cellion-first KYC API match.
+                    // prefillDir.bvn is an encrypted value — decrypt to get plaintext.
+                    try {
+                      if (isEncField(prefillDir.bvn)) profilePatch.bvnHash = hmacEncField(decryptEncField(prefillDir.bvn));
+                    } catch (hashErr: unknown) {
+                      console.warn('[WebhookPrefill] BVN hash computation failed (non-fatal):', (hashErr as Error).message);
+                    }
                   }
                   if (prefillDir.nin) {
                     profilePatch.ninEncrypted = prefillDir.nin;
                     lockedFields.push('ninEncrypted');
+                    try {
+                      if (isEncField(prefillDir.nin)) profilePatch.ninHash = hmacEncField(decryptEncField(prefillDir.nin));
+                    } catch (hashErr: unknown) {
+                      console.warn('[WebhookPrefill] NIN hash computation failed (non-fatal):', (hashErr as Error).message);
+                    }
                   }
                   if (prefillDir.phone) {
                     profilePatch.phone = prefillDir.phone;

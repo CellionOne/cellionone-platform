@@ -12701,8 +12701,28 @@ Important guidelines:
         const lockedFields: string[] = [];
         const profilePatch: Partial<InsertFounderProfile> = { kybPrefilled: true, kybSourceCompanyProfileId: profile.id };
         if (prefillDir.name) { profilePatch.fullName = prefillDir.name; lockedFields.push('fullName'); }
-        if (prefillDir.bvn) { profilePatch.bvnEncrypted = prefillDir.bvn; lockedFields.push('bvnEncrypted'); }
-        if (prefillDir.nin) { profilePatch.ninEncrypted = prefillDir.nin; lockedFields.push('ninEncrypted'); }
+        if (prefillDir.bvn) {
+          profilePatch.bvnEncrypted = prefillDir.bvn;
+          lockedFields.push('bvnEncrypted');
+          // Also compute and store HMAC hash so the Cellion-first KYC API can match this founder.
+          // prefillDir.bvn is already encrypted — decrypt to derive plaintext for hashing.
+          try {
+            const { decryptField: dec, hmacField: hmac, isEncryptedField: isEnc } = await import('./services/encryptionService');
+            if (isEnc(prefillDir.bvn)) profilePatch.bvnHash = hmac(dec(prefillDir.bvn));
+          } catch (hashErr: unknown) {
+            console.warn('[KybPrefill] BVN hash computation failed (non-fatal):', (hashErr as Error).message);
+          }
+        }
+        if (prefillDir.nin) {
+          profilePatch.ninEncrypted = prefillDir.nin;
+          lockedFields.push('ninEncrypted');
+          try {
+            const { decryptField: dec, hmacField: hmac, isEncryptedField: isEnc } = await import('./services/encryptionService');
+            if (isEnc(prefillDir.nin)) profilePatch.ninHash = hmac(dec(prefillDir.nin));
+          } catch (hashErr: unknown) {
+            console.warn('[KybPrefill] NIN hash computation failed (non-fatal):', (hashErr as Error).message);
+          }
+        }
         if (prefillDir.phone) { profilePatch.phone = prefillDir.phone; lockedFields.push('phone'); }
         const addr = profile.registeredAddress as { line1?: string; state?: string } | null;
         if (addr?.line1) { profilePatch.addressLine1 = addr.line1; lockedFields.push('addressLine1'); }

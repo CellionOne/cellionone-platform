@@ -161,10 +161,13 @@ export async function findCellionMatch(
 
     if (!profile) return { matched: false };
 
-    // Fetch identity verification record.  We only match if the founder has a
-    // completed ("verified") identity verification row.  A profile with a hash
-    // but no verified IV means the founder stored the BVN/NIN on their profile
-    // without passing Smile ID — in that case we fall through to Smile ID.
+    // Fetch identity verification record.  We only match when:
+    //   1. The founder has a completed ("verified") IV row, AND
+    //   2. bvnNinVerified === true — confirming the BVN/NIN specifically passed a
+    //      Smile ID or KYB-pipeline check, not just a selfie/liveness flow.
+    // This prevents a founder who became "verified" via biometric only (while
+    // bvnNinVerified remains false) from being incorrectly matched by their
+    // manually-stored BVN/NIN hash.
     const [iv] = await db
       .select()
       .from(identityVerifications)
@@ -172,6 +175,7 @@ export async function findCellionMatch(
         and(
           eq(identityVerifications.founderUserId, profile.userId),
           eq(identityVerifications.status, "verified"),
+          eq(identityVerifications.bvnNinVerified, true),
         ),
       )
       .limit(1);

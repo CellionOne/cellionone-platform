@@ -157,35 +157,32 @@ export async function findCellionMatch(
     const hash = hmacField(idNumber.trim());
     const hashColumn = idType === "BVN" ? founderProfiles.bvnHash : founderProfiles.ninHash;
 
-    // Look up founder_profiles by HMAC hash
-    const [profile] = await db
-      .select()
+    // Single join query: only returns a row when BOTH conditions hold simultaneously —
+    //   (A) the HMAC hash matches a founder_profiles row, AND
+    //   (B) that founder has a verified IV with bvnNinVerified === true.
+    //
+    // This is more robust than two sequential queries because:
+    //   - It avoids false negatives in the edge case of duplicate hash rows
+    //     (the join will correctly surface the one with a verified IV).
+    //   - It requires both conditions atomically — no window between queries
+    //     where a concurrent update could cause a mismatch.
+    const [row] = await db
+      .select({ profile: founderProfiles, iv: identityVerifications })
       .from(founderProfiles)
-      .where(eq(hashColumn, hash))
-      .limit(1);
-
-    if (!profile) return { matched: false };
-
-    // Fetch identity verification record.  We only match when:
-    //   1. The founder has a completed ("verified") IV row, AND
-    //   2. bvnNinVerified === true — confirming the BVN/NIN specifically passed a
-    //      Smile ID or KYB-pipeline check, not just a selfie/liveness flow.
-    // This prevents a founder who became "verified" via biometric only (while
-    // bvnNinVerified remains false) from being incorrectly matched by their
-    // manually-stored BVN/NIN hash.
-    const [iv] = await db
-      .select()
-      .from(identityVerifications)
-      .where(
+      .innerJoin(
+        identityVerifications,
         and(
-          eq(identityVerifications.founderUserId, profile.userId),
+          eq(identityVerifications.founderUserId, founderProfiles.userId),
           eq(identityVerifications.status, "verified"),
           eq(identityVerifications.bvnNinVerified, true),
         ),
       )
+      .where(eq(hashColumn, hash))
       .limit(1);
 
-    if (!iv) return { matched: false };
+    if (!row) return { matched: false };
+
+    const { profile, iv } = row;
 
     const level = deriveVerificationLevel(iv);
     // Use the stored verifiedAt timestamp; fall back to createdAt (always set via defaultNow).

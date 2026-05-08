@@ -124,7 +124,12 @@ async function handleIdLookup(
       };
       if (cellionMatch.expiresAt) responseBody.expiresAt = cellionMatch.expiresAt;
       if (result.fullName) responseBody.fullName = result.fullName;
-      if (result.dob) responseBody.dob = result.dob;
+      if (result.dob) {
+        // Expose both field names: `dob` matches the existing Smile ID API shape;
+        // `dateOfBirth` is the explicit alias for consumers who expect it by that name.
+        responseBody.dob = result.dob;
+        responseBody.dateOfBirth = result.dob;
+      }
       if (result.phone) responseBody.phone = result.phone;
       responseBody.message = "Identity verified on the Cellion platform. No external lookup was performed.";
 

@@ -185,9 +185,19 @@ export async function findCellionMatch(
     const { profile, iv } = row;
 
     const level = deriveVerificationLevel(iv);
-    // Use the stored verifiedAt timestamp; fall back to createdAt (always set via defaultNow).
-    // Never fabricate the time with new Date() — that would misrepresent when verification occurred.
-    const verifiedAt = (iv.verifiedAt ?? iv.createdAt).toISOString();
+    // Use the stored verifiedAt timestamp; fall back to createdAt (set via defaultNow() and
+    // reliable for all modern rows).  If both are somehow null on a legacy row, log a warning
+    // and fall through to the Smile ID path rather than fabricating a timestamp or throwing.
+    const verifiedAtDate = iv.verifiedAt ?? iv.createdAt;
+    if (!verifiedAtDate) {
+      console.warn(
+        "[CellionKycMatch] IV row has null verifiedAt and createdAt for userId",
+        profile.userId,
+        "— falling through to Smile ID to avoid fabricated timestamp.",
+      );
+      return { matched: false };
+    }
+    const verifiedAt = verifiedAtDate.toISOString();
     const expiresAt = iv.expiresAt ? iv.expiresAt.toISOString() : undefined;
 
     // Build base result — no PII by default

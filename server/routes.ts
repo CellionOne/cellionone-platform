@@ -1821,7 +1821,11 @@ export async function registerRoutes(
       // NIN/BVN: skip update if the corresponding field is KYB-locked
       if (nin && typeof nin === 'string' && nin.length === 11 && !lockedFields.includes('ninEncrypted')) {
         profileData.ninEncrypted = encryptionService.encryptField(nin);
-        try { profileData.ninHash = encryptionService.hmacField(nin); } catch (_) {}
+        try {
+          profileData.ninHash = encryptionService.hmacField(nin);
+        } catch (hmacErr: unknown) {
+          console.warn('[Profile] NIN HMAC hash generation failed (non-fatal):', (hmacErr as Error).message);
+        }
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,
           targetUserId: userId,
@@ -1834,7 +1838,11 @@ export async function registerRoutes(
 
       if (bvn && typeof bvn === 'string' && bvn.length === 11 && !lockedFields.includes('bvnEncrypted')) {
         profileData.bvnEncrypted = encryptionService.encryptField(bvn);
-        try { profileData.bvnHash = encryptionService.hmacField(bvn); } catch (_) {}
+        try {
+          profileData.bvnHash = encryptionService.hmacField(bvn);
+        } catch (hmacErr: unknown) {
+          console.warn('[Profile] BVN HMAC hash generation failed (non-fatal):', (hmacErr as Error).message);
+        }
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,
           targetUserId: userId,
@@ -3575,23 +3583,16 @@ export async function registerRoutes(
       // Encrypt NIN/BVN whenever provided — even for partial-detail submissions.
       // This ensures sensitive identifiers are never lost if the founder provides them
       // but omits other mandatory fields.
+      // NOTE: These identifiers belong to the PERSON being described (a director /
+      // shareholder), NOT the submitting founder — do NOT write hashes to founderProfiles.
+      // The Cellion-first KYC API match uses founderProfiles only, so person-level
+      // BVN/NIN submitted here are intentionally excluded from the hash index.
       let ninEncrypted: string | null = null;
       let bvnEncrypted: string | null = null;
       if (nin?.trim() || bvn?.trim()) {
-        const { encryptField, hmacField } = await import("./services/encryptionService");
+        const { encryptField } = await import("./services/encryptionService");
         if (nin?.trim()) ninEncrypted = encryptField(nin.trim());
         if (bvn?.trim()) bvnEncrypted = encryptField(bvn.trim());
-
-        // Also propagate HMAC hashes to the submitting founder's own profile so the
-        // Cellion-first KYC API match can find them regardless of entry-point.
-        try {
-          const profileHashPatch: Record<string, string> = { userId };
-          if (nin?.trim()) profileHashPatch.ninHash = hmacField(nin.trim());
-          if (bvn?.trim()) profileHashPatch.bvnHash = hmacField(bvn.trim());
-          storage.upsertFounderProfile(profileHashPatch as any).catch((e: Error) =>
-            console.warn('[CompanyPeople] founderProfile hash upsert failed (non-fatal):', e.message)
-          );
-        } catch (_) {}
       }
 
       let person;

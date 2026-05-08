@@ -17,6 +17,7 @@ import * as webhookService from "../services/kycWebhookService";
 import * as smileId from "../services/smileIdService";
 import { storage } from "../storage";
 import { captureVerifiedIdentityProfile, getIdentityProfile } from "../services/identityProfileService";
+import { findCellionMatch } from "../services/cellionKycMatchService";
 
 function generateToken(): string {
   return crypto.randomBytes(48).toString("hex");
@@ -68,7 +69,70 @@ async function handleIdLookup(
   lookupFn: (id: string, ref: string) => Promise<smileId.IdLookupResult>,
 ) {
   const orgId = req.apiKeyContext!.orgId!;
+  const maskedId = maskId(idNumber);
 
+  // ── Step 1: Cellion-platform-first check ─────────────────────────────────
+  // If this BVN/NIN belongs to a founder who has already been verified on
+  // the Cellion platform, return our own record immediately.
+  // No Smile ID credit is consumed and no kycVerificationRequest row is created.
+  if (idType === "BVN" || idType === "NIN") {
+    const consentToken = typeof req.headers["x-consent-token"] === "string"
+      ? req.headers["x-consent-token"]
+      : undefined;
+
+    const cellionMatch = await findCellionMatch(
+      idType as "BVN" | "NIN",
+      idNumber,
+      consentToken,
+      String(orgId),
+      req.ip,
+      req.headers["user-agent"] as string | undefined,
+    );
+
+    if (cellionMatch.matched && cellionMatch.idLookupResult) {
+      const result = cellionMatch.idLookupResult;
+
+      // Audit log — no sensitive data, no credit deduction
+      try {
+        await storage.createAuditLog({
+          actorUserId: null,
+          action: "kyc_api_cellion_platform_match",
+          entityType: "founder_profile",
+          entityId: "platform",
+          details: {
+            orgId,
+            idType,
+            maskedId,
+            source: "cellion_platform",
+            verificationLevel: cellionMatch.verificationLevel,
+            apiKeyId: req.apiKeyContext!.apiKeyId,
+            consentTokenPresent: !!consentToken,
+            piiReturned: !!(result.fullName || result.dob || result.phone),
+          },
+        });
+      } catch (auditErr) {
+        console.error("[KYC API] Cellion-match audit log error (non-blocking):", auditErr);
+      }
+
+      const responseBody: Record<string, unknown> = {
+        verified: true,
+        idType,
+        source: "cellion_platform",
+        cellionVerified: true,
+        verificationLevel: cellionMatch.verificationLevel,
+        verifiedAt: cellionMatch.verifiedAt,
+      };
+      if (cellionMatch.expiresAt) responseBody.expiresAt = cellionMatch.expiresAt;
+      if (result.fullName) responseBody.fullName = result.fullName;
+      if (result.dob) responseBody.dob = result.dob;
+      if (result.phone) responseBody.phone = result.phone;
+      responseBody.message = "Identity verified on the Cellion platform. No external lookup was performed.";
+
+      return res.json(responseBody);
+    }
+  }
+
+  // ── Step 2: Standard path — credit check + Smile ID lookup ───────────────
   const hasCred = await billingService.hasCredits(orgId, "identity_only");
   if (!hasCred) {
     return res.status(402).json({
@@ -79,7 +143,6 @@ async function handleIdLookup(
   }
 
   const ref = `id_lookup_${orgId}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-  const maskedId = maskId(idNumber);
 
   const result = await lookupFn(idNumber, ref);
 

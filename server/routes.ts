@@ -1821,6 +1821,7 @@ export async function registerRoutes(
       // NIN/BVN: skip update if the corresponding field is KYB-locked
       if (nin && typeof nin === 'string' && nin.length === 11 && !lockedFields.includes('ninEncrypted')) {
         profileData.ninEncrypted = encryptionService.encryptField(nin);
+        try { profileData.ninHash = encryptionService.hmacField(nin); } catch (_) {}
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,
           targetUserId: userId,
@@ -1833,6 +1834,7 @@ export async function registerRoutes(
 
       if (bvn && typeof bvn === 'string' && bvn.length === 11 && !lockedFields.includes('bvnEncrypted')) {
         profileData.bvnEncrypted = encryptionService.encryptField(bvn);
+        try { profileData.bvnHash = encryptionService.hmacField(bvn); } catch (_) {}
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,
           targetUserId: userId,
@@ -2458,11 +2460,25 @@ export async function registerRoutes(
       const profileCompletion = Math.round((filled / total) * 70) + (hasDocuments ? 15 : 0) + (hasIds ? 15 : 0);
       const isProfileComplete = profileCompletion >= 85;
 
+      // Compute HMAC hashes for queryable BVN/NIN lookup (used by the public KYC API
+      // to match platform-verified founders without charging a Smile ID credit).
+      let bvnHash: string | undefined;
+      let ninHash: string | undefined;
+      try {
+        const { hmacField } = await import("./services/encryptionService");
+        bvnHash = hmacField(bvn);
+        ninHash = hmacField(nin);
+      } catch (hashErr) {
+        console.warn("[VerifyIdentity] HMAC hash generation failed (non-fatal):", hashErr);
+      }
+
       // Build properly typed profile update (no 'any' cast)
       const profileInsert: Parameters<typeof storage.upsertFounderProfile>[0] = {
         userId,
         bvnEncrypted,
         ninEncrypted,
+        ...(bvnHash ? { bvnHash } : {}),
+        ...(ninHash ? { ninHash } : {}),
         profilePopulatedFromKyc: true,
         kycPopulatedAt: now,
         lockedFields,

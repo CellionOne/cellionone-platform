@@ -29,6 +29,8 @@ export const founderProfiles = pgTable("founder_profiles", {
   idDocumentPath: varchar("id_document_path", { length: 500 }),
   passportPhotoPath: varchar("passport_photo_path", { length: 500 }),
   signaturePath: varchar("signature_path", { length: 500 }),
+  ninHash: varchar("nin_hash", { length: 64 }),
+  bvnHash: varchar("bvn_hash", { length: 64 }),
   profileCompletion: integer("profile_completion").default(0),
   isProfileComplete: boolean("is_profile_complete").default(false),
   kybPrefilled: boolean("kyb_prefilled").default(false),

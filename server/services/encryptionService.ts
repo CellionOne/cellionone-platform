@@ -59,3 +59,24 @@ export function isEncryptedField(value: string): boolean {
   const parts = value.split(':');
   return parts.length === 3 && parts[0].length === IV_LENGTH * 2 && parts[1].length === TAG_LENGTH * 2;
 }
+
+/**
+ * Compute a deterministic HMAC-SHA256 hex digest of a plaintext value using
+ * ENCRYPTION_KEY as the key.  Unlike encryptField (which uses a random IV),
+ * the output is always the same for the same input — making it safe to index
+ * and query in the database.
+ *
+ * Used exclusively to generate queryable hashes for BVN and NIN values so
+ * that the public KYC API can perform a Cellion-first match without ever
+ * storing the raw identifier.
+ */
+export function hmacField(plaintext: string): string {
+  const key = process.env.ENCRYPTION_KEY;
+  if (!key) {
+    throw new Error(
+      '[Security] ENCRYPTION_KEY environment variable is not set. ' +
+      'HMAC generation for BVN/NIN hashing requires this secret.'
+    );
+  }
+  return crypto.createHmac('sha256', key).update(plaintext, 'utf8').digest('hex');
+}

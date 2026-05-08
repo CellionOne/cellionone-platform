@@ -111,21 +111,25 @@ function consentAllowsPersonal(scope: unknown): boolean {
 
 /**
  * Log a data sharing access event (non-blocking — errors are swallowed).
+ *
+ * `dataReturned` is stored as `{ fields: string[] }` — a typed JSONB object
+ * that avoids any double-cast workaround while remaining queryable.
  */
 function logConsentAccess(
   consentId: number,
-  dataReturned: string[],
+  fields: string[],
   accessedBy: string,
   ip?: string,
   ua?: string,
 ): void {
+  const dataReturned: { fields: string[] } = { fields };
   db.insert(dataSharingAccessLogs).values({
     consentId,
     accessType: "kyc_api_lookup",
     accessedBy,
     ipAddress: ip || null,
     userAgent: ua || null,
-    dataReturned: dataReturned as unknown as Record<string, unknown>,
+    dataReturned,
   }).catch((err: unknown) => {
     console.error("[CellionKycMatch] Consent access log error (non-blocking):", err);
   });

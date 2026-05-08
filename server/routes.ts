@@ -1824,7 +1824,7 @@ export async function registerRoutes(
         try {
           profileData.ninHash = encryptionService.hmacField(nin);
         } catch (hmacErr: unknown) {
-          console.warn('[Profile] NIN HMAC hash generation failed (non-fatal):', (hmacErr as Error).message);
+          console.error('[HashWriteFailure][Profile] NIN hash write failed — Cellion-first KYC match will miss this founder until backfill runs:', (hmacErr as Error).message);
         }
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,
@@ -1841,7 +1841,7 @@ export async function registerRoutes(
         try {
           profileData.bvnHash = encryptionService.hmacField(bvn);
         } catch (hmacErr: unknown) {
-          console.warn('[Profile] BVN HMAC hash generation failed (non-fatal):', (hmacErr as Error).message);
+          console.error('[HashWriteFailure][Profile] BVN hash write failed — Cellion-first KYC match will miss this founder until backfill runs:', (hmacErr as Error).message);
         }
         await storage.logSensitiveDataAccess({
           accessorUserId: userId,
@@ -2477,7 +2477,7 @@ export async function registerRoutes(
         bvnHash = hmacField(bvn);
         ninHash = hmacField(nin);
       } catch (hashErr) {
-        console.warn("[VerifyIdentity] HMAC hash generation failed (non-fatal):", hashErr);
+        console.error("[HashWriteFailure][VerifyIdentity] BVN/NIN hash write failed — Cellion-first KYC match will miss this founder until backfill runs:", hashErr);
       }
 
       // Build properly typed profile update (no 'any' cast)
@@ -12710,7 +12710,7 @@ Important guidelines:
             const { decryptField: dec, hmacField: hmac, isEncryptedField: isEnc } = await import('./services/encryptionService');
             if (isEnc(prefillDir.bvn)) profilePatch.bvnHash = hmac(dec(prefillDir.bvn));
           } catch (hashErr: unknown) {
-            console.warn('[KybPrefill] BVN hash computation failed (non-fatal):', (hashErr as Error).message);
+            console.error('[HashWriteFailure][KybPrefill] BVN hash write failed — Cellion-first KYC match will miss this founder until backfill runs:', (hashErr as Error).message);
           }
         }
         if (prefillDir.nin) {
@@ -12720,7 +12720,7 @@ Important guidelines:
             const { decryptField: dec, hmacField: hmac, isEncryptedField: isEnc } = await import('./services/encryptionService');
             if (isEnc(prefillDir.nin)) profilePatch.ninHash = hmac(dec(prefillDir.nin));
           } catch (hashErr: unknown) {
-            console.warn('[KybPrefill] NIN hash computation failed (non-fatal):', (hashErr as Error).message);
+            console.error('[HashWriteFailure][KybPrefill] NIN hash write failed — Cellion-first KYC match will miss this founder until backfill runs:', (hashErr as Error).message);
           }
         }
         if (prefillDir.phone) { profilePatch.phone = prefillDir.phone; lockedFields.push('phone'); }

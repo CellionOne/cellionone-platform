@@ -1172,7 +1172,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     try {
                       if (isEncField(prefillDir.bvn)) profilePatch.bvnHash = hmacEncField(decryptEncField(prefillDir.bvn));
                     } catch (hashErr: unknown) {
-                      console.warn('[WebhookPrefill] BVN hash computation failed (non-fatal):', (hashErr as Error).message);
+                      console.error('[HashWriteFailure][WebhookPrefill] BVN hash write failed — Cellion-first KYC match will miss this founder until backfill runs:', (hashErr as Error).message);
                     }
                   }
                   if (prefillDir.nin) {
@@ -1181,7 +1181,7 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
                     try {
                       if (isEncField(prefillDir.nin)) profilePatch.ninHash = hmacEncField(decryptEncField(prefillDir.nin));
                     } catch (hashErr: unknown) {
-                      console.warn('[WebhookPrefill] NIN hash computation failed (non-fatal):', (hashErr as Error).message);
+                      console.error('[HashWriteFailure][WebhookPrefill] NIN hash write failed — Cellion-first KYC match will miss this founder until backfill runs:', (hashErr as Error).message);
                     }
                   }
                   if (prefillDir.phone) {

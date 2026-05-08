@@ -95,17 +95,18 @@ async function resolveConsent(
 }
 
 /**
- * Check whether a consent record's dataScope includes a given field name.
+ * Check whether a consent record's dataScope authorises personal data fields.
+ *
+ * The platform stores category-level scopes, not field-level keys.
+ * Schema: { personal: boolean, verification: boolean, company: boolean,
+ *            documents: boolean, proofOfAddress: boolean }
+ *
+ * `fullName`, `dateOfBirth`, and `phone` all fall under the "personal" category.
  */
-function scopeIncludes(scope: unknown, field: string): boolean {
-  if (Array.isArray(scope)) {
-    return (scope as string[]).includes(field) || (scope as string[]).includes("all");
-  }
-  if (scope && typeof scope === "object") {
-    const obj = scope as Record<string, boolean>;
-    return !!(obj[field] || obj["all"]);
-  }
-  return false;
+function consentAllowsPersonal(scope: unknown): boolean {
+  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return false;
+  const obj = scope as Record<string, unknown>;
+  return obj["personal"] === true || obj["all"] === true;
 }
 
 /**
@@ -183,28 +184,31 @@ export async function findCellionMatch(
     if (!iv) return { matched: false };
 
     const level = deriveVerificationLevel(iv);
-    const verifiedAt = iv.verifiedAt ? iv.verifiedAt.toISOString() : new Date().toISOString();
+    // Use the stored verifiedAt timestamp; fall back to createdAt (always set via defaultNow).
+    // Never fabricate the time with new Date() — that would misrepresent when verification occurred.
+    const verifiedAt = (iv.verifiedAt ?? iv.createdAt).toISOString();
     const expiresAt = iv.expiresAt ? iv.expiresAt.toISOString() : undefined;
 
     // Build base result — no PII by default
     const result: IdLookupResult = { verified: true };
 
-    // Attempt to expose personal data fields if a valid consent token was given
+    // Attempt to expose personal data fields if a valid consent token was given.
+    // The platform stores category scopes (personal / verification / company / documents /
+    // proofOfAddress).  fullName, dateOfBirth and phone are all in the "personal" category.
     if (consentToken) {
       const consent = await resolveConsent(consentToken, profile.userId);
-      if (consent) {
+      if (consent && consentAllowsPersonal(consent.dataScope)) {
         const dataReturned: string[] = [];
-        const scope = consent.dataScope;
 
-        if (scopeIncludes(scope, "fullName") && profile.fullName) {
+        if (profile.fullName) {
           result.fullName = profile.fullName;
           dataReturned.push("fullName");
         }
-        if (scopeIncludes(scope, "dateOfBirth") && profile.dateOfBirth) {
+        if (profile.dateOfBirth) {
           result.dob = profile.dateOfBirth;
           dataReturned.push("dateOfBirth");
         }
-        if (scopeIncludes(scope, "phone") && profile.phone) {
+        if (profile.phone) {
           result.phone = profile.phone;
           dataReturned.push("phone");
         }

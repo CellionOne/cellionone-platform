@@ -3578,9 +3578,20 @@ export async function registerRoutes(
       let ninEncrypted: string | null = null;
       let bvnEncrypted: string | null = null;
       if (nin?.trim() || bvn?.trim()) {
-        const { encryptField } = await import("./services/encryptionService");
+        const { encryptField, hmacField } = await import("./services/encryptionService");
         if (nin?.trim()) ninEncrypted = encryptField(nin.trim());
         if (bvn?.trim()) bvnEncrypted = encryptField(bvn.trim());
+
+        // Also propagate HMAC hashes to the submitting founder's own profile so the
+        // Cellion-first KYC API match can find them regardless of entry-point.
+        try {
+          const profileHashPatch: Record<string, string> = { userId };
+          if (nin?.trim()) profileHashPatch.ninHash = hmacField(nin.trim());
+          if (bvn?.trim()) profileHashPatch.bvnHash = hmacField(bvn.trim());
+          storage.upsertFounderProfile(profileHashPatch as any).catch((e: Error) =>
+            console.warn('[CompanyPeople] founderProfile hash upsert failed (non-fatal):', e.message)
+          );
+        } catch (_) {}
       }
 
       let person;

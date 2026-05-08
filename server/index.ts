@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
+import { backfillBvnNinHashes } from "./services/bvnNinHashBackfill";
 import { startSubscriptionScheduler } from "./services/subscriptionScheduler";
 import { runComplianceDeadlineCheck } from "./services/complianceScheduler";
 import { runLegacyDraftCleanup, runAbandonedCartCheck } from "./services/abandonedCartScheduler";
@@ -239,6 +240,7 @@ httpServer.listen(
 (async () => {
   try {
     await seedDatabase();
+    await backfillBvnNinHashes();
     await registerRoutes(httpServer, app);
 
     app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

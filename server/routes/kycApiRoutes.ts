@@ -96,7 +96,7 @@ async function handleIdLookup(
       try {
         await storage.createAuditLog({
           actorUserId: null,
-          action: "kyc_api_cellion_platform_match",
+          action: "kyc_api_cellion_match",
           entityType: "founder_profile",
           entityId: "platform",
           details: {

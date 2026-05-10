@@ -186,7 +186,21 @@ export default function AdminUsers() {
       }
       return res.json();
     },
-    onSuccess: (data: any, { userId }) => {
+    onSuccess: (
+      data: {
+        success: boolean;
+        objectPath: string;
+        checklistResolvedCount: number;
+        profile: {
+          hasSignature: boolean;
+          hasPassportPhoto: boolean;
+          hasIdDocument: boolean;
+          profileCompletion: number | null;
+          isProfileComplete: boolean;
+        };
+      },
+      { userId }
+    ) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users", userId, "profile"] });
       setSigConfirmFile(null);
       const resolved = data?.checklistResolvedCount ?? 0;

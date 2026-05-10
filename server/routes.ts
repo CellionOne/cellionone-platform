@@ -10091,11 +10091,22 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 },
   });
+  // Multer error handler for the signature endpoint — surfaces LIMIT_FILE_SIZE as 413.
+  function adminSigUploadMiddleware(req: any, res: any, next: any) {
+    adminSigUpload.single("signature")(req, res, (err: any) => {
+      if (err && err.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({ message: "File must be 5 MB or smaller" });
+      }
+      if (err) return res.status(400).json({ message: err.message || "File upload error" });
+      next();
+    });
+  }
+
   app.post(
     "/api/admin/users/:userId/profile/signature",
     isAuthenticated,
     requireRole("admin"),
-    adminSigUpload.single("signature"),
+    adminSigUploadMiddleware,
     async (req: any, res) => {
       try {
         const { userId } = req.params;

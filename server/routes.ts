@@ -9846,6 +9846,298 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     }
   });
 
+  // ============== ADMIN: FOUNDER PROFILE MANAGEMENT ==============
+
+  // GET /api/admin/users/:userId/profile — fetch founder profile with masked BVN/NIN indicators
+  app.get("/api/admin/users/:userId/profile", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      const adminId = getUserId(req);
+
+      const [user, profile] = await Promise.all([
+        storage.getUser(userId),
+        storage.getFounderProfile(userId),
+      ]);
+
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      await storage.logSensitiveDataAccess({
+        accessorUserId: adminId,
+        targetUserId: userId,
+        dataType: "founder_profile_view",
+        action: "view",
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"] as string | undefined,
+      });
+
+      res.json({
+        userId: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        profile: profile
+          ? {
+              fullName: profile.fullName,
+              phone: profile.phone,
+              dateOfBirth: profile.dateOfBirth,
+              nationality: profile.nationality,
+              gender: profile.gender,
+              occupation: profile.occupation,
+              addressLine1: profile.addressLine1,
+              city: profile.city,
+              state: profile.state,
+              country: profile.country,
+              idType: profile.idType,
+              hasBvn: !!profile.bvnEncrypted,
+              hasNin: !!profile.ninEncrypted,
+              hasPassportPhoto: !!profile.passportPhotoPath,
+              hasIdDocument: !!profile.idDocumentPath,
+              hasSignature: !!profile.signaturePath,
+              profileCompletion: profile.profileCompletion,
+              isProfileComplete: profile.isProfileComplete,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.error("[Admin] Error fetching user profile:", error);
+      res.status(500).json({ message: "Failed to fetch user profile" });
+    }
+  });
+
+  // PATCH /api/admin/users/:userId/profile/identity — set BVN and/or NIN on a founder profile
+  app.patch("/api/admin/users/:userId/profile/identity", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      const adminId = getUserId(req);
+
+      const parsed = z.object({
+        bvn: z.string().regex(/^\d{11}$/, "BVN must be exactly 11 digits").optional(),
+        nin: z.string().regex(/^\d{11}$/, "NIN must be exactly 11 digits").optional(),
+      }).refine((d) => d.bvn || d.nin, { message: "At least one of bvn or nin is required" })
+        .safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const encSvc = await import("./services/encryptionService");
+      const profileData: any = { userId };
+      const updated: string[] = [];
+
+      if (parsed.data.bvn) {
+        profileData.bvnEncrypted = encSvc.encryptField(parsed.data.bvn);
+        try { profileData.bvnHash = encSvc.hmacField(parsed.data.bvn); } catch {}
+        await storage.logSensitiveDataAccess({
+          accessorUserId: adminId,
+          targetUserId: userId,
+          dataType: "bvn",
+          action: "admin_write",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"] as string | undefined,
+        });
+        updated.push("bvn");
+      }
+
+      if (parsed.data.nin) {
+        profileData.ninEncrypted = encSvc.encryptField(parsed.data.nin);
+        try { profileData.ninHash = encSvc.hmacField(parsed.data.nin); } catch {}
+        await storage.logSensitiveDataAccess({
+          accessorUserId: adminId,
+          targetUserId: userId,
+          dataType: "nin",
+          action: "admin_write",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"] as string | undefined,
+        });
+        updated.push("nin");
+      }
+
+      await storage.upsertFounderProfile(profileData);
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_identity_set",
+        entityType: "founder_profile",
+        entityId: userId,
+        details: { updated, targetUserEmail: user.email },
+        ipAddress: req.ip,
+      });
+
+      res.json({ success: true, updated });
+    } catch (error) {
+      console.error("[Admin] Error setting identity:", error);
+      res.status(500).json({ message: "Failed to set identity data" });
+    }
+  });
+
+  // POST /api/admin/users/:userId/profile/documents — upload personal document on behalf of a founder
+  const adminProfileDocUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+  });
+  app.post(
+    "/api/admin/users/:userId/profile/documents",
+    isAuthenticated,
+    requireRole("admin"),
+    adminProfileDocUpload.single("file"),
+    async (req: any, res) => {
+      try {
+        const { userId } = req.params;
+        const adminId = getUserId(req);
+        const docType = req.body?.docType;
+        const file = req.file;
+
+        const validDocTypes = ["passport_photo", "signature", "id_document"];
+        if (!docType || !validDocTypes.includes(docType)) {
+          return res.status(400).json({ message: "Invalid document type. Use: passport_photo, id_document, or signature" });
+        }
+        if (!file) return res.status(400).json({ message: "No file provided" });
+
+        const allowedMime = ["image/jpeg", "image/png", "image/jpg", "application/pdf"];
+        if (!allowedMime.includes(file.mimetype)) {
+          return res.status(400).json({ message: "Only JPEG, PNG, and PDF files are allowed" });
+        }
+
+        const user = await storage.getUser(userId);
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        const { default: nodeFetch } = await import("node-fetch");
+        const objectStorage = new ObjectStorageService();
+        const uploadURL = await objectStorage.getObjectEntityUploadURL();
+        const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+
+        const uploadResponse = await nodeFetch(uploadURL, {
+          method: "PUT",
+          body: file.buffer,
+          headers: {
+            "Content-Type": file.mimetype,
+            "Content-Length": String(file.buffer.length),
+          },
+        });
+        if (!uploadResponse.ok) {
+          throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
+        }
+
+        const pathField =
+          docType === "passport_photo" ? "passportPhotoPath"
+          : docType === "signature" ? "signaturePath"
+          : "idDocumentPath";
+
+        await storage.upsertFounderProfile({ userId, [pathField]: objectPath });
+
+        await storage.createAuditLog({
+          actorUserId: adminId,
+          action: "admin_document_upload",
+          entityType: "founder_profile",
+          entityId: userId,
+          details: { docType, targetUserEmail: user.email, filename: file.originalname },
+          ipAddress: req.ip,
+        });
+
+        res.json({ success: true, objectPath, docType });
+      } catch (error: any) {
+        console.error("[Admin] Error uploading profile document:", error);
+        res.status(500).json({ message: "Upload failed. Please try again." });
+      }
+    }
+  );
+
+  // POST /api/admin/applications/create-for-founder — create an application on behalf of a founder
+  app.post("/api/admin/applications/create-for-founder", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+
+      const parsed = z.object({
+        founderUserId: z.string().min(1),
+        companyType: z.enum(["LTD", "PLC", "LLP", "BN", "NGO", "UNLIMITED"]),
+        companyName1: z.string().min(1).max(255),
+        companyName2: z.string().max(255).optional().nullable(),
+        companyName3: z.string().max(255).optional().nullable(),
+      }).safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
+      }
+
+      const { founderUserId, companyType, companyName1, companyName2, companyName3 } = parsed.data;
+
+      const founder = await storage.getUser(founderUserId);
+      if (!founder) return res.status(404).json({ message: "Founder user not found" });
+
+      const application = await storage.createApplication({
+        founderUserId,
+        applicationType: "incorporation",
+        status: "names_submitted",
+        companyType,
+        companyName1,
+        companyName2: companyName2 || null,
+        companyName3: companyName3 || null,
+        wizardStep: 2,
+      });
+
+      await createDefaultChecklist(application.id);
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_create_for_founder",
+        entityType: "company_application",
+        entityId: application.id.toString(),
+        details: { founderUserId, founderEmail: founder.email, companyName1, companyType },
+        ipAddress: req.ip,
+      });
+
+      // Notify the founder by email (best-effort)
+      try {
+        const emailSvc = await import("./services/emailService");
+        const { client: resendClient, fromEmail } = await emailSvc.getResendClient();
+        const baseUrl = emailSvc.getSiteBaseUrl(req);
+        const appUrl = `${baseUrl}/applications/${application.id}`;
+        const firstName = (founder.firstName || "there").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const safeName1 = companyName1.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+        await resendClient.emails.send({
+          from: fromEmail,
+          to: founder.email,
+          subject: `Your ${safeName1} incorporation application has been created`,
+          html: `<!DOCTYPE html><html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
+  <div style="max-width:600px;margin:0 auto;background:white;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,.1);">
+    <div style="text-align:center;margin-bottom:32px;">
+      <div style="display:inline-block;background:#16a34a;padding:10px 20px;border-radius:8px;">
+        <span style="color:white;font-size:22px;font-weight:bold;">Cellion One</span>
+      </div>
+    </div>
+    <h2 style="color:#18181b;font-size:20px;margin-bottom:12px;">Hi ${firstName},</h2>
+    <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:20px;">
+      Your company registration application for <strong>${safeName1}</strong> (${companyType}) has been created on your behalf by our team. Your name choices have been submitted for CAC availability checking.
+    </p>
+    <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:28px;">
+      The next step is to log in, review the application details, and proceed to payment to begin the registration process.
+    </p>
+    <div style="text-align:center;margin-bottom:32px;">
+      <a href="${appUrl}" style="display:inline-block;background:#16a34a;color:white;font-size:16px;font-weight:600;padding:14px 32px;border-radius:6px;text-decoration:none;">Review &amp; Pay</a>
+    </div>
+    <p style="color:#71717a;font-size:13px;word-break:break-all;margin-bottom:32px;">${appUrl}</p>
+    <hr style="border:none;border-top:1px solid #e4e4e7;margin:0 0 24px 0;">
+    <p style="color:#a1a1aa;font-size:12px;text-align:center;margin:0;">&copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.</p>
+  </div>
+</body></html>`,
+        });
+      } catch (emailErr) {
+        console.error("[Admin] Failed to send founder notification email:", emailErr);
+      }
+
+      res.status(201).json(application);
+    } catch (error) {
+      console.error("[Admin] Error creating application for founder:", error);
+      res.status(500).json({ message: "Failed to create application" });
+    }
+  });
+
   // ============== LAWYER BANK DETAILS & PAYOUT LEDGER ==============
 
   const bankDetailsSchema = z.object({

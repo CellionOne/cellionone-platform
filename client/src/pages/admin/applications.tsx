@@ -34,6 +34,8 @@ import {
   ArrowLeftRight,
   Pencil,
   MailCheck,
+  Plus,
+  Upload,
 } from "lucide-react";
 import {
   Dialog,
@@ -131,6 +133,21 @@ export default function AdminApplications() {
   const [payoutsExpanded, setPayoutsExpanded] = useState(false);
   const [lawyerFeeNaira, setLawyerFeeNaira] = useState<string>("");
 
+  // Create Application for Founder dialog state
+  const [createAppOpen, setCreateAppOpen] = useState(false);
+  const [createFounderUserId, setCreateFounderUserId] = useState("");
+  const [createCompanyType, setCreateCompanyType] = useState("LTD");
+  const [createCompanyName1, setCreateCompanyName1] = useState("");
+  const [createCompanyName2, setCreateCompanyName2] = useState("");
+  const [createCompanyName3, setCreateCompanyName3] = useState("");
+
+  // Upload Document for Application dialog state
+  const [uploadDocOpen, setUploadDocOpen] = useState(false);
+  const [uploadDocApp, setUploadDocApp] = useState<ApplicationWithLawyer | null>(null);
+  const [uploadDocChecklistItemId, setUploadDocChecklistItemId] = useState("");
+  const [uploadDocType, setUploadDocType] = useState("uploaded_document");
+  const [uploadDocFile, setUploadDocFile] = useState<File | null>(null);
+
   // Edit Profile dialog state
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [editProfileApp, setEditProfileApp] = useState<ApplicationWithLawyer | null>(null);
@@ -225,6 +242,83 @@ export default function AdminApplications() {
       } catch { return null; }
     },
     enabled: bankDispatchOpen && !!appCompanyProfile?.id,
+  });
+
+  // Fetch all platform users for the Create Application founder picker
+  const { data: allUsers = [] } = useQuery<{ id: string; email: string; firstName: string | null; lastName: string | null }[]>({
+    queryKey: ["/api/admin/users"],
+    enabled: createAppOpen,
+  });
+
+  // Fetch checklist items for the selected application when Upload Doc dialog is open
+  const { data: uploadDocChecklist = [] } = useQuery<{ id: number; key: string; label: string; status: string }[]>({
+    queryKey: ["/api/admin/applications", uploadDocApp?.id, "detail"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/applications/${uploadDocApp!.id}`, { credentials: "include" });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.checklistItems ?? [];
+    },
+    enabled: uploadDocOpen && !!uploadDocApp?.id,
+  });
+
+  // Create Application for Founder mutation
+  const createAppMutation = useMutation({
+    mutationFn: async (data: { founderUserId: string; companyType: string; companyName1: string; companyName2?: string; companyName3?: string }) => {
+      const res = await apiRequest("POST", "/api/admin/applications/create-for-founder", data);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to create application");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/applications"] });
+      setCreateAppOpen(false);
+      setCreateFounderUserId("");
+      setCreateCompanyName1("");
+      setCreateCompanyName2("");
+      setCreateCompanyName3("");
+      setCreateCompanyType("LTD");
+      toast({ title: "Application created", description: "The founder has been notified by email." });
+    },
+    onError: (e: Error) => {
+      toast({ title: "Failed to create application", description: e.message, variant: "destructive" });
+    },
+  });
+
+  // Upload document to application checklist mutation
+  const uploadDocMutation = useMutation({
+    mutationFn: async ({ appId, file, checklistItemId, docType }: { appId: number; file: File; checklistItemId?: string; docType: string }) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      if (checklistItemId) formData.append("checklistItemId", checklistItemId);
+      formData.append("docType", docType);
+      formData.append("category", "company");
+      const res = await fetch(`/api/applications/${appId}/documents/upload`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Upload failed");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/applications"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/applications", uploadDocApp?.id, "detail"] });
+      setUploadDocFile(null);
+      setUploadDocChecklistItemId("");
+      setUploadDocType("uploaded_document");
+      setUploadDocOpen(false);
+      setUploadDocApp(null);
+      toast({ title: "Document uploaded", description: "Checklist item marked as provided. Lawyer notified if assigned." });
+    },
+    onError: (e: Error) => {
+      toast({ title: "Upload failed", description: e.message, variant: "destructive" });
+    },
   });
 
   // Pre-populate the lawyer fee input when payment data loads or the action changes
@@ -504,9 +598,19 @@ export default function AdminApplications() {
       breadcrumbs={[{ label: "Dashboard", href: "/admin/dashboard" }, { label: "Applications" }]}
     >
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">All Applications</h1>
-          <p className="text-muted-foreground">View and manage all platform applications</p>
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">All Applications</h1>
+            <p className="text-muted-foreground">View and manage all platform applications</p>
+          </div>
+          <Button
+            onClick={() => setCreateAppOpen(true)}
+            className="shrink-0"
+            data-testid="button-create-app-for-founder"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Create for Founder
+          </Button>
         </div>
 
         {/* ── Abandoned Carts Panel ── */}
@@ -1012,6 +1116,21 @@ export default function AdminApplications() {
                               Resend Link
                             </Button>
                           )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setUploadDocApp(app);
+                              setUploadDocChecklistItemId("");
+                              setUploadDocType("uploaded_document");
+                              setUploadDocFile(null);
+                              setUploadDocOpen(true);
+                            }}
+                            data-testid={`button-upload-doc-${app.id}`}
+                          >
+                            <Upload className="h-4 w-4 mr-1" />
+                            Upload Doc
+                          </Button>
                         </>
                       )}
                     </div>
@@ -1440,6 +1559,210 @@ export default function AdminApplications() {
               data-testid="button-save-bank-details"
             >
               {bankDetailsMutation.isPending ? <LoadingSpinner size="sm" /> : "Save & Create Recipient"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Application for Founder Dialog */}
+      <Dialog open={createAppOpen} onOpenChange={(open) => { setCreateAppOpen(open); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Create Application for Founder</DialogTitle>
+            <DialogDescription>
+              Create a new incorporation application on behalf of a platform founder. They will be notified by email.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="create-founder-select">Founder <span className="text-destructive">*</span></Label>
+              <Select value={createFounderUserId} onValueChange={setCreateFounderUserId}>
+                <SelectTrigger data-testid="select-create-founder">
+                  <SelectValue placeholder="Select a user…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {allUsers.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.firstName && u.lastName ? `${u.firstName} ${u.lastName} — ` : ""}{u.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Company Type <span className="text-destructive">*</span></Label>
+              <Select value={createCompanyType} onValueChange={setCreateCompanyType}>
+                <SelectTrigger data-testid="select-create-company-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="LTD">Private Limited (LTD)</SelectItem>
+                  <SelectItem value="PLC">Public Limited (PLC)</SelectItem>
+                  <SelectItem value="LLP">Limited Liability Partnership (LLP)</SelectItem>
+                  <SelectItem value="BN">Business Name (BN)</SelectItem>
+                  <SelectItem value="NGO">Non-Governmental Organisation (NGO)</SelectItem>
+                  <SelectItem value="UNLIMITED">Unlimited Company</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="create-name1">Preferred Company Name <span className="text-destructive">*</span></Label>
+              <Input
+                id="create-name1"
+                value={createCompanyName1}
+                onChange={(e) => setCreateCompanyName1(e.target.value)}
+                placeholder="First choice company name"
+                data-testid="input-create-name1"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="create-name2">Second Choice <span className="text-xs text-muted-foreground">(optional)</span></Label>
+              <Input
+                id="create-name2"
+                value={createCompanyName2}
+                onChange={(e) => setCreateCompanyName2(e.target.value)}
+                placeholder="Alternative name"
+                data-testid="input-create-name2"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="create-name3">Third Choice <span className="text-xs text-muted-foreground">(optional)</span></Label>
+              <Input
+                id="create-name3"
+                value={createCompanyName3}
+                onChange={(e) => setCreateCompanyName3(e.target.value)}
+                placeholder="Third alternative name"
+                data-testid="input-create-name3"
+              />
+            </div>
+            <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
+              The application will be created in "names submitted" status. The founder will receive an email with a link to review and pay. This action is audit-logged.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateAppOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (createFounderUserId && createCompanyName1.trim()) {
+                  createAppMutation.mutate({
+                    founderUserId: createFounderUserId,
+                    companyType: createCompanyType,
+                    companyName1: createCompanyName1.trim(),
+                    companyName2: createCompanyName2.trim() || undefined,
+                    companyName3: createCompanyName3.trim() || undefined,
+                  });
+                }
+              }}
+              disabled={createAppMutation.isPending || !createFounderUserId || !createCompanyName1.trim()}
+              data-testid="button-confirm-create-app"
+            >
+              {createAppMutation.isPending ? <LoadingSpinner size="sm" /> : (
+                <><Plus className="h-4 w-4 mr-2" />Create Application</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload Document to Application Dialog */}
+      <Dialog open={uploadDocOpen} onOpenChange={(open) => { setUploadDocOpen(open); if (!open) { setUploadDocApp(null); setUploadDocFile(null); setUploadDocChecklistItemId(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Upload Document</DialogTitle>
+            <DialogDescription>
+              Upload a file for "{uploadDocApp?.companyName1 || `Application #${uploadDocApp?.id}`}" on behalf of the founder. If a lawyer is assigned, they will be notified automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Checklist Item <span className="text-xs text-muted-foreground">(optional)</span></Label>
+              <Select value={uploadDocChecklistItemId} onValueChange={setUploadDocChecklistItemId}>
+                <SelectTrigger data-testid="select-checklist-item">
+                  <SelectValue placeholder="Select checklist item to fulfill…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No specific checklist item</SelectItem>
+                  {uploadDocChecklist.map((item) => (
+                    <SelectItem key={item.id} value={String(item.id)}>
+                      {item.label}
+                      {item.status !== "missing" ? ` (${item.status})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Selecting an item marks it as "provided" and resets any rejection.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Document Type</Label>
+              <Select value={uploadDocType} onValueChange={setUploadDocType}>
+                <SelectTrigger data-testid="select-doc-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="uploaded_document">General Document</SelectItem>
+                  <SelectItem value="passport_photo">Passport Photo</SelectItem>
+                  <SelectItem value="id_document">Government ID</SelectItem>
+                  <SelectItem value="address_proof">Proof of Address</SelectItem>
+                  <SelectItem value="cac_form">CAC Form</SelectItem>
+                  <SelectItem value="director_id">Director ID</SelectItem>
+                  <SelectItem value="shareholder_form">Shareholder Form</SelectItem>
+                  <SelectItem value="memorandum">Memorandum of Association</SelectItem>
+                  <SelectItem value="articles">Articles of Association</SelectItem>
+                  <SelectItem value="stamped_certificate">Stamped Certificate</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>File <span className="text-destructive">*</span></Label>
+              <div
+                className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => {
+                  const input = document.createElement("input");
+                  input.type = "file";
+                  input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
+                  input.onchange = (e) => {
+                    const file = (e.target as HTMLInputElement).files?.[0];
+                    if (file) setUploadDocFile(file);
+                  };
+                  input.click();
+                }}
+                data-testid="dropzone-upload-doc"
+              >
+                {uploadDocFile ? (
+                  <div className="flex items-center justify-center gap-2 text-sm">
+                    <CheckCircle2 className="h-5 w-5 text-green-600" />
+                    <span className="font-medium">{uploadDocFile.name}</span>
+                    <span className="text-muted-foreground">({(uploadDocFile.size / 1024).toFixed(1)} KB)</span>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
+                    <p className="text-sm font-medium">Click to select a file</p>
+                    <p className="text-xs text-muted-foreground">PDF, JPEG, PNG, DOC, DOCX — max 10 MB</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUploadDocOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (uploadDocApp && uploadDocFile) {
+                  uploadDocMutation.mutate({
+                    appId: uploadDocApp.id,
+                    file: uploadDocFile,
+                    checklistItemId: uploadDocChecklistItemId && uploadDocChecklistItemId !== "none" ? uploadDocChecklistItemId : undefined,
+                    docType: uploadDocType,
+                  });
+                }
+              }}
+              disabled={uploadDocMutation.isPending || !uploadDocFile}
+              data-testid="button-confirm-upload-doc"
+            >
+              {uploadDocMutation.isPending ? <LoadingSpinner size="sm" /> : (
+                <><Upload className="h-4 w-4 mr-2" />Upload</>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

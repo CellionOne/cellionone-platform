@@ -161,7 +161,7 @@ async function sendDispatchEmail(
   bankName: string,
   company: DispatchCompanyProfile,
   baseUrl: string,
-  instruction?: { id: number; founderUserId: string; submittedAt: Date | null; status: string } | null
+  instruction?: { id: number; founderUserId: string; submittedAt: Date | null; status: string; founderName?: string | null } | null
 ) {
   try {
     const { client, fromEmail } = await getResendClient();
@@ -338,6 +338,10 @@ async function sendDispatchEmail(
               <td style="padding: 4px 8px; color: #555;">Instruction ID</td>
               <td style="padding: 4px 8px; font-weight: 500;">#${instruction.id}</td>
             </tr>
+            ${instruction.founderName ? `<tr>
+              <td style="padding: 4px 8px; color: #555;">Founder</td>
+              <td style="padding: 4px 8px; font-weight: 500;">${instruction.founderName}</td>
+            </tr>` : ""}
             <tr>
               <td style="padding: 4px 8px; color: #555;">Submitted</td>
               <td style="padding: 4px 8px; font-weight: 500;">${instruction.submittedAt ? new Date(instruction.submittedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "—"}</td>
@@ -1722,13 +1726,21 @@ export function registerBankPortalRoutes(app: Express): void {
         });
       }
 
+      // Fetch founder name for instruction email section
+      let founderName: string | null = null;
+      if (profile.founderId) {
+        const [fp] = await db.select({ fullName: founderProfiles.fullName })
+          .from(founderProfiles).where(eq(founderProfiles.userId, profile.founderId));
+        founderName = fp?.fullName ?? null;
+      }
+
       const profileWithChecklist = { ...profile, checklistItems: checklistRows, founderIdentityVerifiedAt, founderIdentitySource, founderSelfieUrl };
 
       // If no emails array but has legacy contactEmail, use that
       const emailsToSend = emails.length > 0 ? emails : (partner.contactEmail ? [{ label: "Contact", address: partner.contactEmail }] : []);
 
       const baseUrl = getSiteBaseUrl(req);
-      await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl, activeInstruction);
+      await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl, { ...activeInstruction, founderName });
 
       const dispatch = await storage.createBankCompanyDispatch({
         companyProfileId,
@@ -2016,11 +2028,19 @@ export function registerBankPortalRoutes(app: Express): void {
         });
       }
 
+      // Fetch founder name for instruction email section
+      let founderFullName: string | null = null;
+      {
+        const [fp] = await db.select({ fullName: founderProfiles.fullName })
+          .from(founderProfiles).where(eq(founderProfiles.userId, userId));
+        founderFullName = fp?.fullName ?? null;
+      }
+
       const profileWithChecklist = { ...profile, checklistItems: checklistRows, founderIdentityVerifiedAt, founderIdentitySource, founderSelfieUrl };
       const emailsToSend = emails.length > 0 ? emails : (partner.contactEmail ? [{ label: "Contact", address: partner.contactEmail }] : []);
 
       const baseUrl = getSiteBaseUrl(req);
-      await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl, activeInstruction);
+      await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl, { ...activeInstruction, founderName: founderFullName });
 
       const dispatch = await storage.createBankCompanyDispatch({
         companyProfileId: profileId,

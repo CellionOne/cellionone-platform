@@ -416,62 +416,69 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                     <p className="text-sm">No partner banks are available at this time.</p>
                     <p className="text-xs mt-1">Contact Cellion support for assistance.</p>
                   </div>
-                ) : (
-                  <div className="divide-y">
-                    {bankPartnersQuery.data!.map(bank => {
-                      const previousDispatch = dispatchedByBankId[bank.id];
-                      const sentDate = previousDispatch
-                        ? new Date(previousDispatch.sentAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
-                        : null;
-                      const instruction = instructionByBankId[bank.id];
-                      const hasInstruction = !!instruction;
-                      const isSubmitting = createInstructionMutation.isPending && createInstructionMutation.variables === bank.id;
+                ) : (() => {
+                    const banksWithInstructions = bankPartnersQuery.data!.filter(b => !!instructionByBankId[b.id]);
+                    if (banksWithInstructions.length === 0) {
                       return (
-                        <div
-                          key={bank.id}
-                          className="flex items-center justify-between py-3 first:pt-0 last:pb-0 gap-3"
-                          data-testid={`bank-option-${bank.id}`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
-                              <Landmark className="h-4 w-4 text-muted-foreground" />
-                            </div>
-                            <div>
-                              <p className="text-sm font-medium">{bank.name}</p>
-                              {sentDate ? (
-                                <p className="text-xs text-green-600 dark:text-green-400">Dossier sent on {sentDate}</p>
-                              ) : hasInstruction ? (
-                                <p className="text-xs text-blue-600 dark:text-blue-400">Instruction on file — ready to dispatch</p>
-                              ) : (
-                                <p className="text-xs text-muted-foreground">Submit an instruction to send dossier</p>
-                              )}
-                            </div>
-                          </div>
-                          {hasInstruction ? (
-                            <Button
-                              size="sm"
-                              variant={sentDate ? "outline" : "default"}
-                              onClick={() => handleSelectBank(bank)}
-                              data-testid={`button-select-bank-${bank.id}`}
-                            >
-                              {sentDate ? "Send Again" : "Send Dossier"}
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => createInstructionMutation.mutate(bank.id)}
-                              disabled={isSubmitting}
-                              data-testid={`button-submit-instruction-${bank.id}`}
-                            >
-                              {isSubmitting ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Submitting…</> : "Submit Instruction"}
-                            </Button>
-                          )}
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-4 text-center space-y-2" data-testid="panel-no-instructions">
+                          <Landmark className="h-8 w-8 mx-auto text-amber-500 opacity-70" />
+                          <p className="text-sm font-medium text-amber-800 dark:text-amber-200">No bank account instruction on file</p>
+                          <p className="text-xs text-amber-700 dark:text-amber-300">
+                            Before you can send your company dossier to a bank partner, you must first submit a bank account opening instruction through the service request flow.
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-2 border-amber-400 text-amber-800 dark:text-amber-200 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900"
+                            onClick={() => { setDialogOpen(false); window.location.href = "/founder/service-request?service=BANK_ACCOUNT"; }}
+                            data-testid="button-go-to-bank-account-flow"
+                          >
+                            Open Bank Account →
+                          </Button>
                         </div>
                       );
-                    })}
-                  </div>
-                )}
+                    }
+                    return (
+                      <div className="divide-y">
+                        {banksWithInstructions.map(bank => {
+                          const previousDispatch = dispatchedByBankId[bank.id];
+                          const sentDate = previousDispatch
+                            ? new Date(previousDispatch.sentAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                            : null;
+                          return (
+                            <div
+                              key={bank.id}
+                              className="flex items-center justify-between py-3 first:pt-0 last:pb-0 gap-3"
+                              data-testid={`bank-option-${bank.id}`}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                                  <Landmark className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium">{bank.name}</p>
+                                  {sentDate ? (
+                                    <p className="text-xs text-green-600 dark:text-green-400">Dossier sent on {sentDate}</p>
+                                  ) : (
+                                    <p className="text-xs text-blue-600 dark:text-blue-400">Instruction on file — ready to dispatch</p>
+                                  )}
+                                </div>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant={sentDate ? "outline" : "default"}
+                                onClick={() => handleSelectBank(bank)}
+                                data-testid={`button-select-bank-${bank.id}`}
+                              >
+                                {sentDate ? "Send Again" : "Send Dossier"}
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()
+                }
               </div>
             </>
           )}

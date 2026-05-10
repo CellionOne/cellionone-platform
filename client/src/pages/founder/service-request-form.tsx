@@ -68,7 +68,7 @@ const DOC_TYPES = [
   { value: "additional_certificate", label: "Additional Industry Certificate" },
 ];
 
-const serviceProfileFormSchema = z.object({
+const serviceProfileFormSchemaBase = z.object({
   category: z.string().min(1, "Business category is required"),
   cacRegistrationType: z.string().min(1, "Registration type is required"),
   sector: z.string().optional().default(""),
@@ -91,6 +91,8 @@ const serviceProfileFormSchema = z.object({
   contactPersonEmail: z.string().optional().default(""),
   contactPersonMobile: z.string().optional().default(""),
 });
+
+const serviceProfileFormSchema = serviceProfileFormSchemaBase;
 
 type ServiceProfileFormData = z.infer<typeof serviceProfileFormSchema>;
 
@@ -244,13 +246,15 @@ export default function ServiceRequestFormPage() {
       if (serviceType === "BANK_ACCOUNT") {
         const bpId = form.getValues("bankPartnerId");
         if (bpId && verifiedProfileId) {
-          try {
-            await apiRequest("POST", "/api/founder/bank-account-instructions", {
-              companyProfileId: verifiedProfileId,
-              bankPartnerId: bpId,
-            });
+          const instrRes = await apiRequest("POST", "/api/founder/bank-account-instructions", {
+            companyProfileId: verifiedProfileId,
+            bankPartnerId: bpId,
+          });
+          if (!instrRes.ok) {
+            const err = await instrRes.json().catch(() => ({ error: "Unknown error" }));
+            toast({ title: "Bank instruction not saved", description: err.error || "Failed to record bank account instruction. Please try again.", variant: "destructive" });
+          } else {
             queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", verifiedProfileId, "bank-account-instructions"] });
-          } catch {
           }
         }
       }
@@ -329,6 +333,10 @@ export default function ServiceRequestFormPage() {
   };
 
   const onSubmitCompanyDetails = (data: ServiceProfileFormData) => {
+    if (serviceType === "BANK_ACCOUNT" && !data.bankPartnerId) {
+      form.setError("bankPartnerId", { type: "manual", message: "Please select a bank partner to proceed." });
+      return;
+    }
     saveMutation.mutate(data);
   };
 

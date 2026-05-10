@@ -10062,32 +10062,36 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           await storage.upsertFounderProfile({ userId, profileCompletion, isProfileComplete });
         }
 
-        // Auto-resolve signature checklist items across the founder's active applications
+        // Auto-resolve signature checklist items across the founder's active applications.
+        // Uses a precise key pattern: exact "signature" OR the canonical people_req_<id>_signature form.
+        // Errors are propagated so the caller knows the checklist was NOT updated.
+        let checklistResolved = false;
+        let checklistResolvedCount = 0;
+        let checklistError: string | undefined;
         if (docType === "signature") {
-          try {
-            const founderApps = await storage.getApplicationsByFounder(userId);
-            const activeApps = founderApps.filter(
-              (a) => !["completed", "rejected", "cancelled"].includes(a.status ?? "")
+          const sigKeyPattern = /^people_req_\d+_signature$/;
+          const founderApps = await storage.getApplicationsByFounder(userId);
+          const activeApps = founderApps.filter(
+            (a) => !["completed", "rejected", "cancelled"].includes(a.status ?? "")
+          );
+          for (const app of activeApps) {
+            const items = await storage.getChecklistItems(app.id);
+            const sigItems = items.filter(
+              (i) =>
+                (i.key === "signature" || sigKeyPattern.test(i.key)) &&
+                (i.status === "missing" || i.status === "rejected")
             );
-            for (const app of activeApps) {
-              const items = await storage.getChecklistItems(app.id);
-              const sigItems = items.filter(
-                (i) =>
-                  (i.key === "signature" || i.key.endsWith("_signature")) &&
-                  (i.status === "missing" || i.status === "rejected")
-              );
-              for (const item of sigItems) {
-                await storage.updateChecklistItem(item.id, {
-                  status: "provided",
-                  isAutoResolved: false,
-                  source: "manual_upload",
-                  reviewerNotes: `Signature uploaded by admin (${adminId}) on behalf of founder`,
-                });
-              }
+            for (const item of sigItems) {
+              await storage.updateChecklistItem(item.id, {
+                status: "provided",
+                isAutoResolved: false,
+                source: "manual_upload",
+                reviewerNotes: `Signature uploaded by admin (${adminId}) on behalf of founder`,
+              });
+              checklistResolvedCount++;
             }
-          } catch (sigErr) {
-            console.error("[Admin] Error auto-resolving signature checklist items:", sigErr);
           }
+          checklistResolved = true;
         }
 
         await storage.logSensitiveDataAccess({
@@ -10108,7 +10112,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           ipAddress: req.ip,
         });
 
-        res.json({ success: true, objectPath, docType });
+        res.json({ success: true, objectPath, docType, checklistResolved, checklistResolvedCount });
       } catch (error: any) {
         console.error("[Admin] Error uploading profile document:", error);
         res.status(500).json({ message: "Upload failed. Please try again." });

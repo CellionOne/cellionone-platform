@@ -156,10 +156,17 @@ export default function AdminUsers() {
       }
       return res.json();
     },
-    onSuccess: (_, { userId }) => {
+    onSuccess: (data: any, { userId, docType }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users", userId, "profile"] });
       setUploadingDocType(null);
-      toast({ title: "Document uploaded", description: "Founder profile document saved successfully." });
+      if (docType === "signature" && data?.checklistResolved && data?.checklistResolvedCount > 0) {
+        toast({
+          title: "Signature uploaded",
+          description: `Signature saved and ${data.checklistResolvedCount} checklist item${data.checklistResolvedCount === 1 ? "" : "s"} advanced to "provided".`,
+        });
+      } else {
+        toast({ title: "Document uploaded", description: "Founder profile document saved successfully." });
+      }
     },
     onError: (e: Error) => {
       setUploadingDocType(null);

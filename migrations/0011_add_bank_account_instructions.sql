@@ -25,3 +25,9 @@ CREATE INDEX IF NOT EXISTS "idx_bank_account_instructions_bank"
 ALTER TABLE "bank_company_dispatches"
   ADD COLUMN IF NOT EXISTS "founder_instruction_id" INTEGER
   REFERENCES "bank_account_instructions"("id") ON DELETE SET NULL;
+
+-- Partial unique index: at most one active (pending/dispatched) instruction per company+bank pair.
+-- Prevents race-condition duplicates while still allowing a cancelled instruction to be re-created.
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_bai_one_active_per_company_bank"
+  ON "bank_account_instructions" ("company_profile_id", "bank_partner_id")
+  WHERE status IN ('pending', 'dispatched');

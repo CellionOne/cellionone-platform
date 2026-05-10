@@ -259,10 +259,14 @@ export default function ServiceRequestFormPage() {
           });
           if (!instrRes.ok) {
             const err = await instrRes.json().catch(() => ({ error: "Unknown error" }));
+            // Hard block: consent instruction must be recorded before the flow advances
             toast({ title: "Bank instruction not saved", description: err.error || "Failed to record bank account instruction. Please try again.", variant: "destructive" });
-          } else {
-            queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", verifiedProfileId, "bank-account-instructions"] });
+            return;
           }
+          queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", verifiedProfileId, "bank-account-instructions"] });
+        } else if (!verifiedProfileId) {
+          toast({ title: "No verified company found", description: "A verified company profile is required to submit a bank account instruction. Please contact support.", variant: "destructive" });
+          return;
         }
       }
 

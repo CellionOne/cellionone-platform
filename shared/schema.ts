@@ -2015,8 +2015,10 @@ export type InsertBankPortalUser = z.infer<typeof insertBankPortalUserSchema>;
 // Must exist (status pending or dispatched) before any dossier dispatch is allowed.
 export const bankAccountInstructions = pgTable("bank_account_instructions", {
   id: serial("id").primaryKey(),
+  // founderUserId references the Replit-managed auth user — no Drizzle FK because the
+  // users table is external to this schema (managed by the auth layer).
   founderUserId: varchar("founder_user_id", { length: 255 }).notNull(),
-  companyProfileId: integer("company_profile_id").notNull(),
+  companyProfileId: integer("company_profile_id").notNull().references(() => companyProfiles.id, { onDelete: "cascade" }),
   bankPartnerId: integer("bank_partner_id").notNull().references(() => bankPartners.id),
   status: varchar("status", { length: 50 }).notNull().default("pending"), // pending | dispatched | cancelled
   notes: text("notes"),

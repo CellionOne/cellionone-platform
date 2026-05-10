@@ -117,6 +117,8 @@ export default function ServiceRequestFormPage() {
   const [step, setStep] = useState(1);
   const [profileId, setProfileId] = useState<number | null>(editProfileId ? parseInt(editProfileId) : null);
   const [uploadingDocType, setUploadingDocType] = useState<string | null>(null);
+  // For BANK_ACCOUNT without cpId in URL: let founder pick which verified company
+  const [manualCpId, setManualCpId] = useState<number | null>(null);
 
   const { data: orderData, isLoading: orderLoading } = useQuery<any>({
     queryKey: ["/api/founder/orders", orderId],
@@ -148,12 +150,13 @@ export default function ServiceRequestFormPage() {
   });
 
   // Use the explicit cpId from the URL when provided (e.g. from checklist/dashboard links).
-  // Fall back to finding the first verified existing-company profile only when no cpId is in the URL.
+  // Fall back to a manually selected company (via selector) or the first verified company found.
   const cpIdFromUrl = cpIdParam ? parseInt(cpIdParam, 10) : null;
+  const verifiedProfiles = companyProfilesQuery.data?.filter(p => p.existingCompanyStatus === "verified") ?? [];
   const verifiedProfileId: number | null =
-    cpIdFromUrl && !isNaN(cpIdFromUrl)
+    (cpIdFromUrl && !isNaN(cpIdFromUrl))
       ? cpIdFromUrl
-      : (companyProfilesQuery.data?.find(p => p.existingCompanyStatus === "verified")?.id ?? null);
+      : (manualCpId ?? verifiedProfiles[0]?.id ?? null);
 
   const { data: profileDetail, isLoading: detailLoading } = useQuery<any>({
     queryKey: ["/api/founder/service-profiles", profileId],
@@ -624,11 +627,43 @@ export default function ServiceRequestFormPage() {
                 <p className="text-sm font-medium text-muted-foreground">Bank Details</p>
 
                 {serviceType === "BANK_ACCOUNT" && (
-                  <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-3 py-2.5">
-                    <Landmark className="h-4 w-4 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
-                    <p className="text-xs text-blue-700 dark:text-blue-300">
-                      Select a Cellion bank partner below. Your bank account instruction will be recorded when you save — you can then send your verified company dossier to the bank from your Document Vault.
-                    </p>
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-3 py-2.5 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <Landmark className="h-4 w-4 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                      <p className="text-xs text-blue-700 dark:text-blue-300">
+                        Select a Cellion bank partner below. Your bank account instruction will be recorded when you save — you can then send your verified company dossier to the bank from your Document Vault.
+                      </p>
+                    </div>
+                    {/* Company selector: only shown when cpId is not in the URL */}
+                    {!cpIdParam && !companyProfilesQuery.isLoading && verifiedProfiles.length > 1 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-blue-700 dark:text-blue-300 shrink-0">Company:</span>
+                        <Select
+                          value={String(verifiedProfileId ?? "")}
+                          onValueChange={val => setManualCpId(Number(val))}
+                          data-testid="select-company-for-instruction"
+                        >
+                          <SelectTrigger className="h-7 text-xs" data-testid="trigger-company-for-instruction">
+                            <SelectValue placeholder="Select company…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {verifiedProfiles.map(p => (
+                              <SelectItem key={p.id} value={String(p.id)}>{p.companyName}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {!cpIdParam && !companyProfilesQuery.isLoading && verifiedProfiles.length === 1 && (
+                      <p className="text-xs text-blue-600 dark:text-blue-400">
+                        Company: <span className="font-medium">{verifiedProfiles[0].companyName}</span>
+                      </p>
+                    )}
+                    {!cpIdParam && !companyProfilesQuery.isLoading && verifiedProfiles.length === 0 && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                        No verified company found. Please verify your company first before submitting a bank account instruction.
+                      </p>
+                    )}
                   </div>
                 )}
 

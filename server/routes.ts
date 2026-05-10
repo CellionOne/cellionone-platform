@@ -10153,10 +10153,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           await storage.upsertFounderProfile({ userId, profileCompletion, isProfileComplete });
         }
 
-        // Auto-resolve signature checklist items across the founder's active applications.
-        // Key pattern: "signature" (standalone) | "people_req_<id>_signature" (per-person canonical form).
-        // This runs synchronously so any DB failure returns a 500 rather than silent success.
-        const sigKeyPattern = /^people_req_\d+_signature$/;
+        // Auto-resolve the founder-level signature checklist item only.
+        // Only key === "signature" is touched; people_req_*_signature keys belong to
+        // director/shareholder token flows and must NOT be resolved here.
+        // Runs synchronously so DB failures surface as 500 rather than silent partial-success.
         const founderApps = await storage.getApplicationsByFounder(userId);
         const activeApps = founderApps.filter(
           (a) => !["completed", "rejected", "cancelled"].includes(a.status ?? "")
@@ -10165,9 +10165,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         for (const app of activeApps) {
           const items = await storage.getChecklistItems(app.id);
           const sigItems = items.filter(
-            (i) =>
-              (i.key === "signature" || sigKeyPattern.test(i.key)) &&
-              (i.status === "missing" || i.status === "rejected")
+            (i) => i.key === "signature" && (i.status === "missing" || i.status === "rejected")
           );
           for (const item of sigItems) {
             await storage.updateChecklistItem(item.id, {
@@ -10198,7 +10196,20 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           ipAddress: req.ip,
         });
 
-        res.json({ success: true, objectPath, checklistResolvedCount });
+        // Re-fetch profile after completion recompute to include summary fields in response.
+        const updatedProfile = await storage.getFounderProfile(userId);
+        res.json({
+          success: true,
+          objectPath,
+          checklistResolvedCount,
+          profile: {
+            hasSignature: !!updatedProfile?.signaturePath,
+            hasPassportPhoto: !!updatedProfile?.passportPhotoPath,
+            hasIdDocument: !!updatedProfile?.idDocumentPath,
+            profileCompletion: updatedProfile?.profileCompletion ?? null,
+            isProfileComplete: updatedProfile?.isProfileComplete ?? false,
+          },
+        });
       } catch (error: any) {
         console.error("[Admin] Error uploading founder signature:", error);
         res.status(500).json({ message: "Signature upload failed. Please try again." });

@@ -5,7 +5,10 @@
 
 CREATE TABLE IF NOT EXISTS "bank_account_instructions" (
   "id" SERIAL PRIMARY KEY,
-  "founder_user_id" TEXT NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  -- founder_user_id is the Replit Auth user ID (string). No FK to users table
+  -- because the users table is managed externally by the auth layer and is not
+  -- guaranteed to exist in all environments. Integrity is enforced at app level.
+  "founder_user_id" TEXT NOT NULL,
   "company_profile_id" INTEGER NOT NULL REFERENCES "company_profiles"("id") ON DELETE CASCADE,
   "bank_partner_id" INTEGER NOT NULL REFERENCES "bank_partners"("id") ON DELETE CASCADE,
   "status" TEXT NOT NULL DEFAULT 'pending',

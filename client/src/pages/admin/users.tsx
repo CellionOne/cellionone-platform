@@ -73,8 +73,18 @@ interface AdminUserProfile {
   } | null;
 }
 
+interface BankInstruction {
+  id: number;
+  bankName: string;
+  bankPartnerId: number;
+  companyName?: string | null;
+  companyProfileId: number;
+  status: string;
+  submittedAt: string | null;
+}
+
 function BankInstructionsTab({ userId }: { userId: string | null }) {
-  const { data, isLoading } = useQuery<any[]>({
+  const { data, isLoading } = useQuery<BankInstruction[]>({
     queryKey: ["/api/admin/users", userId, "bank-account-instructions"],
     queryFn: async () => {
       const res = await fetch(`/api/admin/users/${userId}/bank-account-instructions`, { credentials: "include" });
@@ -98,7 +108,7 @@ function BankInstructionsTab({ userId }: { userId: string | null }) {
         </div>
       ) : (
         <div className="divide-y rounded-lg border">
-          {data.map((instr: any) => (
+          {data.map((instr: BankInstruction) => (
             <div key={instr.id} className="flex items-center justify-between px-4 py-3 first:rounded-t-lg last:rounded-b-lg gap-3" data-testid={`row-bank-instruction-${instr.id}`}>
               <div className="flex items-center gap-3 min-w-0">
                 <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">

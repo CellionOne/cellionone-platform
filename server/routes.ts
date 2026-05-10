@@ -10062,6 +10062,34 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           await storage.upsertFounderProfile({ userId, profileCompletion, isProfileComplete });
         }
 
+        // Auto-resolve signature checklist items across the founder's active applications
+        if (docType === "signature") {
+          try {
+            const founderApps = await storage.getApplicationsByFounder(userId);
+            const activeApps = founderApps.filter(
+              (a) => !["completed", "rejected", "cancelled"].includes(a.status ?? "")
+            );
+            for (const app of activeApps) {
+              const items = await storage.getChecklistItems(app.id);
+              const sigItems = items.filter(
+                (i) =>
+                  (i.key === "signature" || i.key.endsWith("_signature")) &&
+                  (i.status === "missing" || i.status === "rejected")
+              );
+              for (const item of sigItems) {
+                await storage.updateChecklistItem(item.id, {
+                  status: "provided",
+                  isAutoResolved: false,
+                  source: "manual_upload",
+                  reviewerNotes: `Signature uploaded by admin (${adminId}) on behalf of founder`,
+                });
+              }
+            }
+          } catch (sigErr) {
+            console.error("[Admin] Error auto-resolving signature checklist items:", sigErr);
+          }
+        }
+
         await storage.logSensitiveDataAccess({
           accessorUserId: adminId,
           targetUserId: userId,

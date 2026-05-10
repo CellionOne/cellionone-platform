@@ -12,7 +12,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import {
   Building2,
   Search,
@@ -290,15 +290,17 @@ export default function AdminApplications() {
   // Upload document to application checklist mutation
   const uploadDocMutation = useMutation({
     mutationFn: async ({ appId, file, checklistItemId, docType }: { appId: number; file: File; checklistItemId?: string; docType: string }) => {
+      const csrf = await getCsrfToken();
       const formData = new FormData();
       formData.append("file", file);
       if (checklistItemId) formData.append("checklistItemId", checklistItemId);
       formData.append("docType", docType);
       formData.append("category", "company");
-      const res = await fetch(`/api/applications/${appId}/documents/upload`, {
+      const res = await fetch(`/api/admin/applications/${appId}/documents/upload`, {
         method: "POST",
         body: formData,
         credentials: "include",
+        headers: { "X-CSRF-Token": csrf },
       });
       if (!res.ok) {
         const err = await res.json();
@@ -1674,24 +1676,34 @@ export default function AdminApplications() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Checklist Item <span className="text-xs text-muted-foreground">(optional)</span></Label>
-              <Select value={uploadDocChecklistItemId} onValueChange={setUploadDocChecklistItemId}>
-                <SelectTrigger data-testid="select-checklist-item">
-                  <SelectValue placeholder="Select checklist item to fulfill…" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No specific checklist item</SelectItem>
-                  {uploadDocChecklist.map((item) => (
-                    <SelectItem key={item.id} value={String(item.id)}>
-                      {item.label}
-                      {item.status !== "missing" ? ` (${item.status})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">Selecting an item marks it as "provided" and resets any rejection.</p>
-            </div>
+            {(() => {
+              const uploadableItems = uploadDocChecklist.filter(
+                (i) => !i.status || i.status === "missing" || i.status === "rejected"
+              );
+              return uploadableItems.length === 0 && uploadDocChecklist.length > 0 ? (
+                <p className="text-sm text-center text-muted-foreground py-4">
+                  All checklist items are already provided or accepted. No upload needed.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label>Checklist Item <span className="text-destructive text-xs">*</span></Label>
+                  <Select value={uploadDocChecklistItemId} onValueChange={setUploadDocChecklistItemId}>
+                    <SelectTrigger data-testid="select-checklist-item">
+                      <SelectValue placeholder="Select a missing or rejected item…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uploadableItems.map((item) => (
+                        <SelectItem key={item.id} value={String(item.id)}>
+                          {item.label}
+                          {item.status === "rejected" ? " (rejected)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Only missing or rejected items are shown. Uploading marks the item as "provided".</p>
+                </div>
+              );
+            })()}
             <div className="space-y-1.5">
               <Label>Document Type</Label>
               <Select value={uploadDocType} onValueChange={setUploadDocType}>
@@ -1748,16 +1760,16 @@ export default function AdminApplications() {
             <Button variant="outline" onClick={() => setUploadDocOpen(false)}>Cancel</Button>
             <Button
               onClick={() => {
-                if (uploadDocApp && uploadDocFile) {
+                if (uploadDocApp && uploadDocFile && uploadDocChecklistItemId) {
                   uploadDocMutation.mutate({
                     appId: uploadDocApp.id,
                     file: uploadDocFile,
-                    checklistItemId: uploadDocChecklistItemId && uploadDocChecklistItemId !== "none" ? uploadDocChecklistItemId : undefined,
+                    checklistItemId: uploadDocChecklistItemId,
                     docType: uploadDocType,
                   });
                 }
               }}
-              disabled={uploadDocMutation.isPending || !uploadDocFile}
+              disabled={uploadDocMutation.isPending || !uploadDocFile || !uploadDocChecklistItemId}
               data-testid="button-confirm-upload-doc"
             >
               {uploadDocMutation.isPending ? <LoadingSpinner size="sm" /> : (

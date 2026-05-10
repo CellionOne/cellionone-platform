@@ -9957,6 +9957,23 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       await storage.upsertFounderProfile(profileData);
 
+      // Recompute profileCompletion/isProfileComplete so the indicator stays current
+      const fullProfile = await storage.getFounderProfile(userId);
+      if (fullProfile) {
+        const completionFields = [
+          fullProfile.fullName, fullProfile.phone, fullProfile.dateOfBirth, fullProfile.nationality,
+          fullProfile.gender, fullProfile.occupation, fullProfile.addressLine1, fullProfile.city,
+          fullProfile.state, fullProfile.country, fullProfile.idType,
+        ];
+        const filled = completionFields.filter(Boolean).length;
+        const total = completionFields.length;
+        const hasDocuments = !!(fullProfile.passportPhotoPath && fullProfile.signaturePath && fullProfile.idDocumentPath);
+        const hasIds = !!(fullProfile.bvnEncrypted || fullProfile.ninEncrypted);
+        const profileCompletion = Math.round((filled / total) * 70) + (hasDocuments ? 15 : 0) + (hasIds ? 15 : 0);
+        const isProfileComplete = profileCompletion >= 85;
+        await storage.upsertFounderProfile({ userId, profileCompletion, isProfileComplete });
+      }
+
       await storage.createAuditLog({
         actorUserId: adminId,
         action: "admin_identity_set",
@@ -10027,6 +10044,23 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           : "idDocumentPath";
 
         await storage.upsertFounderProfile({ userId, [pathField]: objectPath });
+
+        // Recompute profileCompletion/isProfileComplete after doc write
+        const fullProfile = await storage.getFounderProfile(userId);
+        if (fullProfile) {
+          const completionFields = [
+            fullProfile.fullName, fullProfile.phone, fullProfile.dateOfBirth, fullProfile.nationality,
+            fullProfile.gender, fullProfile.occupation, fullProfile.addressLine1, fullProfile.city,
+            fullProfile.state, fullProfile.country, fullProfile.idType,
+          ];
+          const filled = completionFields.filter(Boolean).length;
+          const total = completionFields.length;
+          const hasDocuments = !!(fullProfile.passportPhotoPath && fullProfile.signaturePath && fullProfile.idDocumentPath);
+          const hasIds = !!(fullProfile.bvnEncrypted || fullProfile.ninEncrypted);
+          const profileCompletion = Math.round((filled / total) * 70) + (hasDocuments ? 15 : 0) + (hasIds ? 15 : 0);
+          const isProfileComplete = profileCompletion >= 85;
+          await storage.upsertFounderProfile({ userId, profileCompletion, isProfileComplete });
+        }
 
         await storage.logSensitiveDataAccess({
           accessorUserId: adminId,

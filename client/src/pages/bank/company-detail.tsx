@@ -80,7 +80,7 @@ type Company = {
   cellionCertRef?: string;
   dispatchedAt?: string;
   founderInstructionId?: number | null;
-  founderInstruction?: { id: number; submittedAt: string | null; status: string } | null;
+  founderInstruction?: { id: number; submittedAt: string | null; status: string; bankName?: string | null } | null;
   bankDocuments?: BankDocument[];
   platformPeople?: PlatformPerson[];
   founderProfile?: FounderProfileData | null;
@@ -968,6 +968,12 @@ export default function BankCompanyDetailPage() {
                 <p className="text-sm">
                   <span className="text-muted-foreground">Instruction submitted: </span>
                   <span className="font-medium">{format(new Date(company.founderInstruction.submittedAt), "d MMM yyyy")}</span>
+                </p>
+              )}
+              {(company.founderInstruction?.bankName || company.bankName) && (
+                <p className="text-sm">
+                  <span className="text-muted-foreground">Bank selected: </span>
+                  <span className="font-medium">{company.founderInstruction?.bankName || company.bankName}</span>
                 </p>
               )}
             </CardContent>

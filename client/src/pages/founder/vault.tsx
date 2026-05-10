@@ -412,7 +412,7 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                             size="sm"
                             variant="outline"
                             className="mt-2 border-amber-400 text-amber-800 dark:text-amber-200 dark:border-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900"
-                            onClick={() => { setDialogOpen(false); window.location.href = "/founder/service-request?service=BANK_ACCOUNT"; }}
+                            onClick={() => { setDialogOpen(false); window.location.href = `/founder/service-request?service=BANK_ACCOUNT&cpId=${group.profileId}`; }}
                             data-testid="button-go-to-bank-account-flow"
                           >
                             Open Bank Account →

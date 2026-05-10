@@ -135,7 +135,7 @@ export default function ServiceRequestFormPage() {
   });
 
   interface BankPartner { id: number; name: string; }
-  interface CompanyProfile { id: number; companyName: string; status: string; }
+  interface CompanyProfile { id: number; companyName: string; status?: string; existingCompanyStatus?: string; }
 
   const bankPartnersQuery = useQuery<BankPartner[]>({
     queryKey: ["/api/founder/bank-partners"],
@@ -148,10 +148,12 @@ export default function ServiceRequestFormPage() {
   });
 
   // Use the explicit cpId from the URL when provided (e.g. from checklist/dashboard links).
-  // Fall back to finding the first verified existing-company profile only when no cpId is passed.
-  const verifiedProfileId: number | null = cpIdParam
-    ? Number(cpIdParam)
-    : (companyProfilesQuery.data?.find(p => p.existingCompanyStatus === "verified")?.id ?? null);
+  // Fall back to finding the first verified existing-company profile only when no cpId is in the URL.
+  const cpIdFromUrl = cpIdParam ? parseInt(cpIdParam, 10) : null;
+  const verifiedProfileId: number | null =
+    cpIdFromUrl && !isNaN(cpIdFromUrl)
+      ? cpIdFromUrl
+      : (companyProfilesQuery.data?.find(p => p.existingCompanyStatus === "verified")?.id ?? null);
 
   const { data: profileDetail, isLoading: detailLoading } = useQuery<any>({
     queryKey: ["/api/founder/service-profiles", profileId],

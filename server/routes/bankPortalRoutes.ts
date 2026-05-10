@@ -1014,12 +1014,17 @@ export function registerBankPortalRoutes(app: Express): void {
       }
 
       // Enrich with founder instruction details if dispatch has one
-      let founderInstruction: { id: number; submittedAt: Date | null; status: string } | null = null;
+      let founderInstruction: { id: number; submittedAt: Date | null; status: string; bankName?: string | null } | null = null;
       const dispatchInstructionId = dispatches[0]?.founderInstructionId ?? null;
       if (dispatchInstructionId) {
         const instr = await storage.getBankAccountInstruction(dispatchInstructionId);
         if (instr) {
-          founderInstruction = { id: instr.id, submittedAt: instr.submittedAt, status: instr.status };
+          let instrBankName: string | null = null;
+          if (instr.bankPartnerId) {
+            const bp = await storage.getBankPartner(instr.bankPartnerId);
+            instrBankName = bp?.name ?? null;
+          }
+          founderInstruction = { id: instr.id, submittedAt: instr.submittedAt, status: instr.status, bankName: instrBankName };
         }
       }
 

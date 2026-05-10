@@ -87,6 +87,8 @@ export default function AdminUsers() {
 
   // Document upload state
   const [uploadingDocType, setUploadingDocType] = useState<string | null>(null);
+  // Signature upload confirmation state
+  const [sigConfirmFile, setSigConfirmFile] = useState<File | null>(null);
 
   const { data: users, isLoading } = useQuery<UserWithRole[]>({
     queryKey: ["/api/admin/users"],
@@ -156,21 +158,48 @@ export default function AdminUsers() {
       }
       return res.json();
     },
-    onSuccess: (data: any, { userId, docType }) => {
+    onSuccess: (_, { userId }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users", userId, "profile"] });
       setUploadingDocType(null);
-      if (docType === "signature" && data?.checklistResolved && data?.checklistResolvedCount > 0) {
-        toast({
-          title: "Signature uploaded",
-          description: `Signature saved and ${data.checklistResolvedCount} checklist item${data.checklistResolvedCount === 1 ? "" : "s"} advanced to "provided".`,
-        });
-      } else {
-        toast({ title: "Document uploaded", description: "Founder profile document saved successfully." });
-      }
+      toast({ title: "Document uploaded", description: "Founder profile document saved successfully." });
     },
     onError: (e: Error) => {
       setUploadingDocType(null);
       toast({ title: "Upload failed", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const sigUploadMutation = useMutation({
+    mutationFn: async ({ userId, file }: { userId: string; file: File }) => {
+      const csrf = await getCsrfToken();
+      const formData = new FormData();
+      formData.append("signature", file);
+      const res = await fetch(`/api/admin/users/${userId}/profile/signature`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+        headers: { "X-CSRF-Token": csrf },
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Signature upload failed");
+      }
+      return res.json();
+    },
+    onSuccess: (data: any, { userId }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users", userId, "profile"] });
+      setSigConfirmFile(null);
+      const resolved = data?.checklistResolvedCount ?? 0;
+      toast({
+        title: "Signature uploaded",
+        description: resolved > 0
+          ? `Signature saved and ${resolved} checklist item${resolved === 1 ? "" : "s"} advanced to "provided".`
+          : "Signature specimen saved to founder profile.",
+      });
+    },
+    onError: (e: Error) => {
+      setSigConfirmFile(null);
+      toast({ title: "Signature upload failed", description: e.message, variant: "destructive" });
     },
   });
 
@@ -180,6 +209,7 @@ export default function AdminUsers() {
     setNin("");
     setUploadingDocType(null);
     setIdentityConfirm(null);
+    setSigConfirmFile(null);
     setProfileDialogOpen(true);
   }
 
@@ -187,6 +217,7 @@ export default function AdminUsers() {
     setProfileDialogOpen(false);
     setSelectedUserId(null);
     setIdentityConfirm(null);
+    setSigConfirmFile(null);
   }
 
   function handleFileSelect(docType: string) {
@@ -199,6 +230,17 @@ export default function AdminUsers() {
         setUploadingDocType(docType);
         docUploadMutation.mutate({ userId: selectedUserId, docType, file });
       }
+    };
+    input.click();
+  }
+
+  function handleSignatureFileSelect() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/jpeg,image/png,application/pdf";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) setSigConfirmFile(file);
     };
     input.click();
   }
@@ -540,7 +582,6 @@ export default function AdminUsers() {
                 {[
                   { key: "passport_photo", label: "Passport Photo", icon: Image, hasDoc: p?.hasPassportPhoto },
                   { key: "id_document", label: "Government ID Document", icon: FileText, hasDoc: p?.hasIdDocument },
-                  { key: "signature", label: "Signature Specimen", icon: PenLine, hasDoc: p?.hasSignature },
                 ].map(({ key, label, icon: Icon, hasDoc }) => (
                   <div
                     key={key}
@@ -581,12 +622,94 @@ export default function AdminUsers() {
                   </div>
                 ))}
 
+                {/* Signature Specimen — dedicated upload path with confirmation */}
+                <div
+                  className="flex items-center justify-between rounded-lg border p-3"
+                  data-testid="doc-row-signature"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`h-9 w-9 rounded-lg flex items-center justify-center ${p?.hasSignature ? "bg-green-100 dark:bg-green-950" : "bg-muted"}`}>
+                      {p?.hasSignature ? (
+                        <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                      ) : (
+                        <PenLine className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Signature Specimen</p>
+                      <p className="text-xs text-muted-foreground">
+                        {p?.hasSignature ? "On file — upload to replace. Also advances any missing checklist items." : "Not yet uploaded — will also unblock submission gate."}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant={p?.hasSignature ? "ghost" : "outline"}
+                    size="sm"
+                    onClick={handleSignatureFileSelect}
+                    disabled={sigUploadMutation.isPending}
+                    data-testid="button-upload-signature"
+                  >
+                    {sigUploadMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 mr-1.5" />
+                        {p?.hasSignature ? "Replace" : "Upload Signature"}
+                      </>
+                    )}
+                  </Button>
+                </div>
+
                 <p className="text-xs text-muted-foreground">
                   Accepted formats: JPEG, PNG, PDF. Max 5 MB per file. All uploads are audit-logged.
                 </p>
               </TabsContent>
             </Tabs>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Signature upload confirmation dialog */}
+      <Dialog open={!!sigConfirmFile} onOpenChange={(open) => { if (!open) setSigConfirmFile(null); }}>
+        <DialogContent className="max-w-sm" data-testid="dialog-signature-confirm">
+          <DialogHeader>
+            <DialogTitle>Upload Signature Specimen</DialogTitle>
+            <DialogDescription>
+              You are about to upload a signature specimen on behalf of this founder. Any checklist items requiring a signature across their active applications will be automatically advanced to "provided". This action is audit-logged.
+            </DialogDescription>
+          </DialogHeader>
+          {sigConfirmFile && (
+            <div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+              <p className="font-medium truncate">{sigConfirmFile.name}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{(sigConfirmFile.size / 1024).toFixed(1)} KB</p>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSigConfirmFile(null)}
+              disabled={sigUploadMutation.isPending}
+              data-testid="button-sig-confirm-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (sigConfirmFile && selectedUserId) {
+                  sigUploadMutation.mutate({ userId: selectedUserId, file: sigConfirmFile });
+                }
+              }}
+              disabled={sigUploadMutation.isPending}
+              data-testid="button-sig-confirm-proceed"
+            >
+              {sigUploadMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+              ) : null}
+              Confirm Upload
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </DashboardLayout>

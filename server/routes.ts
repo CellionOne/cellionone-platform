@@ -10007,9 +10007,9 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         const docType = req.body?.docType;
         const file = req.file;
 
-        const validDocTypes = ["passport_photo", "signature", "id_document"];
+        const validDocTypes = ["passport_photo", "id_document"];
         if (!docType || !validDocTypes.includes(docType)) {
-          return res.status(400).json({ message: "Invalid document type. Use: passport_photo, id_document, or signature" });
+          return res.status(400).json({ message: "Invalid document type. Use: passport_photo or id_document" });
         }
         if (!file) return res.status(400).json({ message: "No file provided" });
 
@@ -10038,10 +10038,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
         }
 
-        const pathField =
-          docType === "passport_photo" ? "passportPhotoPath"
-          : docType === "signature" ? "signaturePath"
-          : "idDocumentPath";
+        const pathField = docType === "passport_photo" ? "passportPhotoPath" : "idDocumentPath";
 
         await storage.upsertFounderProfile({ userId, [pathField]: objectPath });
 
@@ -10062,38 +10059,6 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           await storage.upsertFounderProfile({ userId, profileCompletion, isProfileComplete });
         }
 
-        // Auto-resolve signature checklist items across the founder's active applications.
-        // Uses a precise key pattern: exact "signature" OR the canonical people_req_<id>_signature form.
-        // Errors are propagated so the caller knows the checklist was NOT updated.
-        let checklistResolved = false;
-        let checklistResolvedCount = 0;
-        let checklistError: string | undefined;
-        if (docType === "signature") {
-          const sigKeyPattern = /^people_req_\d+_signature$/;
-          const founderApps = await storage.getApplicationsByFounder(userId);
-          const activeApps = founderApps.filter(
-            (a) => !["completed", "rejected", "cancelled"].includes(a.status ?? "")
-          );
-          for (const app of activeApps) {
-            const items = await storage.getChecklistItems(app.id);
-            const sigItems = items.filter(
-              (i) =>
-                (i.key === "signature" || sigKeyPattern.test(i.key)) &&
-                (i.status === "missing" || i.status === "rejected")
-            );
-            for (const item of sigItems) {
-              await storage.updateChecklistItem(item.id, {
-                status: "provided",
-                isAutoResolved: false,
-                source: "manual_upload",
-                reviewerNotes: `Signature uploaded by admin (${adminId}) on behalf of founder`,
-              });
-              checklistResolvedCount++;
-            }
-          }
-          checklistResolved = true;
-        }
-
         await storage.logSensitiveDataAccess({
           accessorUserId: adminId,
           targetUserId: userId,
@@ -10112,10 +10077,131 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           ipAddress: req.ip,
         });
 
-        res.json({ success: true, objectPath, docType, checklistResolved, checklistResolvedCount });
+        res.json({ success: true, objectPath, docType });
       } catch (error: any) {
         console.error("[Admin] Error uploading profile document:", error);
         res.status(500).json({ message: "Upload failed. Please try again." });
+      }
+    }
+  );
+
+  // POST /api/admin/users/:userId/profile/signature — upload signature specimen on behalf of a founder
+  // Dedicated endpoint with its own audit action, sensitive-access action, and checklist auto-resolve.
+  const adminSigUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+  });
+  app.post(
+    "/api/admin/users/:userId/profile/signature",
+    isAuthenticated,
+    requireRole("admin"),
+    adminSigUpload.single("signature"),
+    async (req: any, res) => {
+      try {
+        const { userId } = req.params;
+        const adminId = getUserId(req);
+        const file = req.file;
+
+        if (!file) return res.status(400).json({ message: "No file provided" });
+
+        const allowedMime = ["image/jpeg", "image/png", "image/jpg", "application/pdf"];
+        const fileExt = (file.originalname || "").split(".").pop()?.toLowerCase();
+        const allowedExt = ["jpg", "jpeg", "png", "pdf"];
+        if (!allowedMime.includes(file.mimetype) || !allowedExt.includes(fileExt ?? "")) {
+          return res.status(400).json({ message: "Only JPEG, PNG, and PDF files are allowed" });
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          return res.status(400).json({ message: "File must be 5 MB or smaller" });
+        }
+
+        const user = await storage.getUser(userId);
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        const { default: nodeFetch } = await import("node-fetch");
+        const objectStorage = new ObjectStorageService();
+        const uploadURL = await objectStorage.getObjectEntityUploadURL();
+        const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+
+        const uploadResponse = await nodeFetch(uploadURL, {
+          method: "PUT",
+          body: file.buffer,
+          headers: {
+            "Content-Type": file.mimetype,
+            "Content-Length": String(file.buffer.length),
+          },
+        });
+        if (!uploadResponse.ok) {
+          throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
+        }
+
+        await storage.upsertFounderProfile({ userId, signaturePath: objectPath });
+
+        // Recompute profileCompletion/isProfileComplete
+        const fullProfile = await storage.getFounderProfile(userId);
+        if (fullProfile) {
+          const completionFields = [
+            fullProfile.fullName, fullProfile.phone, fullProfile.dateOfBirth, fullProfile.nationality,
+            fullProfile.gender, fullProfile.occupation, fullProfile.addressLine1, fullProfile.city,
+            fullProfile.state, fullProfile.country, fullProfile.idType,
+          ];
+          const filled = completionFields.filter(Boolean).length;
+          const total = completionFields.length;
+          const hasDocuments = !!(fullProfile.passportPhotoPath && fullProfile.signaturePath && fullProfile.idDocumentPath);
+          const hasIds = !!(fullProfile.bvnEncrypted || fullProfile.ninEncrypted);
+          const profileCompletion = Math.round((filled / total) * 70) + (hasDocuments ? 15 : 0) + (hasIds ? 15 : 0);
+          const isProfileComplete = profileCompletion >= 85;
+          await storage.upsertFounderProfile({ userId, profileCompletion, isProfileComplete });
+        }
+
+        // Auto-resolve signature checklist items across the founder's active applications.
+        // Key pattern: "signature" (standalone) | "people_req_<id>_signature" (per-person canonical form).
+        // This runs synchronously so any DB failure returns a 500 rather than silent success.
+        const sigKeyPattern = /^people_req_\d+_signature$/;
+        const founderApps = await storage.getApplicationsByFounder(userId);
+        const activeApps = founderApps.filter(
+          (a) => !["completed", "rejected", "cancelled"].includes(a.status ?? "")
+        );
+        let checklistResolvedCount = 0;
+        for (const app of activeApps) {
+          const items = await storage.getChecklistItems(app.id);
+          const sigItems = items.filter(
+            (i) =>
+              (i.key === "signature" || sigKeyPattern.test(i.key)) &&
+              (i.status === "missing" || i.status === "rejected")
+          );
+          for (const item of sigItems) {
+            await storage.updateChecklistItem(item.id, {
+              status: "provided",
+              isAutoResolved: false,
+              source: "manual_upload",
+              reviewerNotes: `Signature uploaded by admin (${adminId}) on behalf of founder`,
+            });
+            checklistResolvedCount++;
+          }
+        }
+
+        await storage.logSensitiveDataAccess({
+          accessorUserId: adminId,
+          targetUserId: userId,
+          dataType: "profile_document:signature",
+          action: "admin_signature_upload",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"] as string | undefined,
+        });
+
+        await storage.createAuditLog({
+          actorUserId: adminId,
+          action: "admin_upload_signature",
+          entityType: "founder_profile",
+          entityId: userId,
+          details: { targetUserEmail: user.email, filename: file.originalname, checklistResolvedCount },
+          ipAddress: req.ip,
+        });
+
+        res.json({ success: true, objectPath, checklistResolvedCount });
+      } catch (error: any) {
+        console.error("[Admin] Error uploading founder signature:", error);
+        res.status(500).json({ message: "Signature upload failed. Please try again." });
       }
     }
   );

@@ -1892,11 +1892,14 @@ export function registerBankPortalRoutes(app: Express): void {
         notes: z.string().max(1000).optional(),
       }).parse(req.body);
 
-      // Verify the company profile belongs to this founder
-      const [profile] = await db.select({ id: companyProfiles.id, founderId: companyProfiles.founderId, companyName: companyProfiles.companyName })
+      // Verify the company profile belongs to this founder and is verified
+      const [profile] = await db.select({ id: companyProfiles.id, founderId: companyProfiles.founderId, companyName: companyProfiles.companyName, existingCompanyStatus: companyProfiles.existingCompanyStatus })
         .from(companyProfiles).where(eq(companyProfiles.id, companyProfileId));
       if (!profile) return res.status(404).json({ error: "Company profile not found" });
       if (profile.founderId !== userId) return res.status(403).json({ error: "Forbidden" });
+      if (profile.existingCompanyStatus !== "verified") {
+        return res.status(409).json({ error: "Bank account instructions can only be created for verified companies. Please complete company verification first." });
+      }
 
       const partner = await storage.getBankPartner(bankPartnerId);
       if (!partner || !partner.isActive) return res.status(404).json({ error: "Bank partner not found or inactive" });

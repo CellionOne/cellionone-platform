@@ -34,3 +34,16 @@ ALTER TABLE "bank_company_dispatches"
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_bai_one_active_per_company_bank"
   ON "bank_account_instructions" ("company_profile_id", "bank_partner_id")
   WHERE status IN ('pending', 'dispatched');
+
+-- DB-level guard on status values (idempotent: ignored if constraint already exists).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'chk_bai_status' AND conrelid = 'bank_account_instructions'::regclass
+  ) THEN
+    ALTER TABLE "bank_account_instructions"
+      ADD CONSTRAINT "chk_bai_status"
+      CHECK (status IN ('pending', 'dispatched', 'cancelled'));
+  END IF;
+END $$;

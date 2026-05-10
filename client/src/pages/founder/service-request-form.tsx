@@ -113,6 +113,7 @@ export default function ServiceRequestFormPage() {
   const editProfileId = params.get("profileId");
   const serviceType = params.get("service");
   const orderId = params.get("orderId");
+  const cpIdParam = params.get("cpId");
   const [step, setStep] = useState(1);
   const [profileId, setProfileId] = useState<number | null>(editProfileId ? parseInt(editProfileId) : null);
   const [uploadingDocType, setUploadingDocType] = useState<string | null>(null);
@@ -143,10 +144,14 @@ export default function ServiceRequestFormPage() {
 
   const companyProfilesQuery = useQuery<CompanyProfile[]>({
     queryKey: ["/api/founder/company-profiles"],
-    enabled: serviceType === "BANK_ACCOUNT",
+    enabled: serviceType === "BANK_ACCOUNT" && !cpIdParam,
   });
 
-  const verifiedProfileId = companyProfilesQuery.data?.find(p => p.status === "verified")?.id ?? null;
+  // Use the explicit cpId from the URL when provided (e.g. from checklist/dashboard links).
+  // Fall back to finding the first verified existing-company profile only when no cpId is passed.
+  const verifiedProfileId: number | null = cpIdParam
+    ? Number(cpIdParam)
+    : (companyProfilesQuery.data?.find(p => p.existingCompanyStatus === "verified")?.id ?? null);
 
   const { data: profileDetail, isLoading: detailLoading } = useQuery<any>({
     queryKey: ["/api/founder/service-profiles", profileId],

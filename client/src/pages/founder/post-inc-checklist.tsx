@@ -257,7 +257,7 @@ export default function PostIncChecklistPage() {
                       Open a corporate bank account at our partner banks. Fee varies by bank — our team will contact you with options and pricing after you submit your interest.
                     </p>
                     <div className="mt-3">
-                      <Link href="/founder/service-request?service=BANK_ACCOUNT">
+                      <Link href={`/founder/service-request?service=BANK_ACCOUNT&cpId=${effectiveProfileId}`}>
                         <Button size="sm" variant="outline" data-testid="button-request-bank-account">
                           <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
                           Request Bank Account Opening

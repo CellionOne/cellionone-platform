@@ -137,7 +137,7 @@ export default function FounderDashboard() {
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" className="h-7 border-green-300 text-green-800 dark:text-green-300" asChild data-testid="button-open-bank-account">
-                  <Link href="/founder/service-request?service=BANK_ACCOUNT">Open Bank Account</Link>
+                  <Link href={`/founder/service-request?service=BANK_ACCOUNT&cpId=${verifiedExistingCompany.id}`}>Open Bank Account</Link>
                 </Button>
                 <Button size="sm" variant="ghost" className="h-7" asChild data-testid="button-view-post-inc">
                   <Link href="/founder/post-inc-checklist">View Post-Incorporation Tasks</Link>

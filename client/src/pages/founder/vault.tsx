@@ -122,24 +122,6 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
     enabled: isVerified,
   });
 
-  const createInstructionMutation = useMutation({
-    mutationFn: (bankPartnerId: number) =>
-      apiRequest("POST", "/api/founder/bank-account-instructions", {
-        companyProfileId: group.profileId,
-        bankPartnerId,
-      }).then(r => r.json()),
-    onSuccess: (data: InstructionRecord & { alreadyExisted?: boolean }) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", group.profileId, "bank-account-instructions"] });
-      toast({
-        title: data.alreadyExisted ? "Instruction already on file" : "Bank account instruction submitted",
-        description: `Your instruction to open an account with ${data.bankName} has been recorded. You can now send your dossier.`,
-      });
-    },
-    onError: (err: Error) => {
-      toast({ title: "Failed to submit instruction", description: err.message, variant: "destructive" });
-    },
-  });
-
   const dispatchMutation = useMutation({
     mutationFn: () =>
       apiRequest("POST", `/api/founder/company-profiles/${group.profileId}/bank-dispatch`, {

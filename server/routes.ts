@@ -10125,23 +10125,23 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
         }
 
-        // Create the document file record
+        // Create the document file record using the canonical storage method
+        // so it appears in all portals (lawyer vault, bank dossier, admin docs tab)
+        // exactly like a founder upload.
         const category = reqCategory || "filing";
-        const [docFile] = await db
-          .insert(documentFiles)
-          .values({
-            applicationId,
-            uploadedByUserId: adminId,
-            docType: docType.trim(),
-            category,
-            filePath: objectPath,
-            fileName: file.originalname,
-            fileSize: file.buffer.length,
-            mimeType: file.mimetype,
-            status: "pending",
-            qualityStatus: "pending",
-          })
-          .returning();
+        const autoShareWithLawyer = application.assignedLawyerUserId ? true : null;
+        const docFile = await storage.createDocument({
+          ownerUserId: adminId,
+          applicationId,
+          category,
+          docType: docType.trim(),
+          filename: file.originalname || "uploaded_file",
+          storagePath: objectPath,
+          mimeType: file.mimetype,
+          sizeBytes: file.buffer.length,
+          isSensitive: true,
+          shareWithLawyer: autoShareWithLawyer,
+        });
 
         // Mark the checklist item as "provided", preserve source
         const uploadSource = targetItem.source === "people_requirement" ? "people_requirement" : "manual_upload";
@@ -10151,6 +10151,17 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           source: uploadSource,
         });
 
+        // Notify the assigned lawyer if one is present
+        if (autoShareWithLawyer && application.assignedLawyerUserId) {
+          await storage.createNotification({
+            userId: application.assignedLawyerUserId,
+            type: "info",
+            title: "New document ready for review",
+            message: `Admin has uploaded a document for ${application.companyName1 || `Application #${applicationId}`}. Review the Documents tab.`,
+            linkUrl: `/lawyer/applications/${applicationId}`,
+          });
+        }
+
         await storage.createAuditLog({
           actorUserId: adminId,
           action: "admin_checklist_document_upload",
@@ -10158,7 +10169,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           entityId: String(applicationId),
           details: {
             checklistItemId: parseInt(checklistItemId),
-            checklistItemName: targetItem.name,
+            checklistItemLabel: targetItem.label,
             docType: docType.trim(),
             filename: file.originalname,
             previousStatus: targetItem.status || "missing",

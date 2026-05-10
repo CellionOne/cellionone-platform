@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { EmptyState } from "@/components/empty-state";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, queryClient, getCsrfToken } from "@/lib/queryClient";
 import {
   Users,
   MoreVertical,
@@ -140,6 +140,7 @@ export default function AdminUsers() {
 
   const docUploadMutation = useMutation({
     mutationFn: async ({ userId, docType, file }: { userId: string; docType: string; file: File }) => {
+      const csrf = await getCsrfToken();
       const formData = new FormData();
       formData.append("file", file);
       formData.append("docType", docType);
@@ -147,6 +148,7 @@ export default function AdminUsers() {
         method: "POST",
         body: formData,
         credentials: "include",
+        headers: { "X-CSRF-Token": csrf },
       });
       if (!res.ok) {
         const err = await res.json();

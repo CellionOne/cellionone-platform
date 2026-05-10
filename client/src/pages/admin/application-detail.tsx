@@ -697,7 +697,7 @@ function AdminChecklistUploadDialog({
                 <SelectContent>
                   {uploadableItems.map((item) => (
                     <SelectItem key={item.id} value={String(item.id)}>
-                      <span>{item.name}</span>
+                      <span>{item.label}</span>
                       <span className="ml-2 text-xs text-muted-foreground capitalize">
                         ({item.status || "missing"})
                       </span>

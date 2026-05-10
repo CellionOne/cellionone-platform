@@ -607,6 +607,160 @@ function formatNgn(kobo: number) {
 
 const ADD_ON_SKUS_SET = new Set(["TIN", "SCUML", "TM", "OFFICE_ONLY", "OFFICE_PLUS_MAIL", "ADD_DIR", "BANK_ACCOUNT"]);
 
+function AdminChecklistUploadDialog({
+  open,
+  onOpenChange,
+  applicationId,
+  checklistItems,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  applicationId: number;
+  checklistItems: ApplicationChecklistItem[];
+}) {
+  const { toast } = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [selectedItemId, setSelectedItemId] = useState("");
+  const [docType, setDocType] = useState("");
+  const [category, setCategory] = useState("filing");
+  const [uploading, setUploading] = useState(false);
+
+  // Only show items that still need action
+  const uploadableItems = checklistItems.filter(
+    (i) => !i.status || i.status === "missing" || i.status === "rejected"
+  );
+
+  function resetForm() {
+    setSelectedItemId("");
+    setDocType("");
+    setCategory("filing");
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  const handleUpload = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) return toast({ title: "Please select a file", variant: "destructive" });
+    if (!selectedItemId) return toast({ title: "Please select a checklist item", variant: "destructive" });
+    if (!docType.trim()) return toast({ title: "Please enter a document name", variant: "destructive" });
+
+    setUploading(true);
+    try {
+      const csrf = await getCsrfToken();
+      const form = new FormData();
+      form.append("file", file);
+      form.append("checklistItemId", selectedItemId);
+      form.append("docType", docType.trim());
+      form.append("category", category);
+
+      const res = await fetch(`/api/admin/applications/${applicationId}/documents/upload`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "X-CSRF-Token": csrf },
+        body: form,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as any).message || "Upload failed");
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/applications", applicationId, "documents"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/applications", applicationId] });
+      toast({ title: "Document uploaded", description: "Checklist item marked as provided." });
+      resetForm();
+      onOpenChange(false);
+    } catch (err: any) {
+      toast({ title: err.message || "Upload failed", variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) resetForm(); onOpenChange(v); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Upload Document to Checklist</DialogTitle>
+        </DialogHeader>
+        {uploadableItems.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">
+            All checklist items are accepted or provided. No upload needed.
+          </p>
+        ) : (
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Checklist Item</Label>
+              <Select value={selectedItemId} onValueChange={setSelectedItemId}>
+                <SelectTrigger data-testid="select-admin-checklist-item">
+                  <SelectValue placeholder="Select a missing / rejected item…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {uploadableItems.map((item) => (
+                    <SelectItem key={item.id} value={String(item.id)}>
+                      <span>{item.name}</span>
+                      <span className="ml-2 text-xs text-muted-foreground capitalize">
+                        ({item.status || "missing"})
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Document Name</Label>
+              <Input
+                placeholder="e.g. Certified True Copy, Board Resolution"
+                value={docType}
+                onChange={(e) => setDocType(e.target.value)}
+                data-testid="input-admin-checklist-doc-type"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Category</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger data-testid="select-admin-checklist-doc-category">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="identity">Identity</SelectItem>
+                  <SelectItem value="company">Company</SelectItem>
+                  <SelectItem value="filing">Filing</SelectItem>
+                  <SelectItem value="stamped_originals">Stamped Originals</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>File</Label>
+              <Input
+                type="file"
+                ref={fileRef}
+                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                data-testid="input-admin-checklist-doc-file"
+              />
+              <p className="text-xs text-muted-foreground">PDF, JPEG, PNG, DOC, DOCX · max 10 MB</p>
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { resetForm(); onOpenChange(false); }}>
+            Cancel
+          </Button>
+          {uploadableItems.length > 0 && (
+            <Button
+              onClick={handleUpload}
+              disabled={uploading}
+              data-testid="button-admin-checklist-upload-confirm"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+              Upload
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function BillingTab({ applicationId }: { applicationId: number }) {
   const { toast } = useToast();
 
@@ -795,6 +949,7 @@ export default function AdminApplicationDetail() {
   const { id } = useParams<{ id: string }>();
   const applicationId = parseInt(id || "0");
   const { toast } = useToast();
+  const [checklistUploadOpen, setChecklistUploadOpen] = useState(false);
 
   const { data, isLoading, error } = useQuery<AdminAppDetail>({
     queryKey: ["/api/admin/applications", applicationId],
@@ -1114,7 +1269,28 @@ export default function AdminApplicationDetail() {
           </TabsContent>
 
           {/* ── Documents ── */}
-          <TabsContent value="documents" className="mt-4">
+          <TabsContent value="documents" className="mt-4 space-y-4">
+            {/* Admin upload action */}
+            {checklistItems.some((i) => !i.status || i.status === "missing" || i.status === "rejected") && (
+              <div className="flex items-center justify-between rounded-lg border border-dashed p-3">
+                <div>
+                  <p className="text-sm font-medium">Upload to Checklist</p>
+                  <p className="text-xs text-muted-foreground">
+                    {checklistItems.filter((i) => !i.status || i.status === "missing" || i.status === "rejected").length} item(s) still missing or rejected
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setChecklistUploadOpen(true)}
+                  data-testid="button-admin-upload-checklist-doc"
+                >
+                  <Upload className="h-4 w-4 mr-1.5" />
+                  Upload Document
+                </Button>
+              </div>
+            )}
+
             {docsLoading ? (
               <div className="flex justify-center py-12">
                 <LoadingSpinner />
@@ -1131,6 +1307,13 @@ export default function AdminApplicationDetail() {
                 ))}
               </div>
             )}
+
+            <AdminChecklistUploadDialog
+              open={checklistUploadOpen}
+              onOpenChange={setChecklistUploadOpen}
+              applicationId={applicationId}
+              checklistItems={checklistItems}
+            />
           </TabsContent>
 
           {/* ── Billing ── */}

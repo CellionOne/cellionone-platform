@@ -9929,7 +9929,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       if (parsed.data.bvn) {
         profileData.bvnEncrypted = encSvc.encryptField(parsed.data.bvn);
-        try { profileData.bvnHash = encSvc.hmacField(parsed.data.bvn); } catch {}
+        try { profileData.bvnHash = encSvc.hmacField(parsed.data.bvn); } catch (hashErr) { console.error("[Admin] BVN hash compute error:", hashErr); }
         await storage.logSensitiveDataAccess({
           accessorUserId: adminId,
           targetUserId: userId,
@@ -9943,7 +9943,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       if (parsed.data.nin) {
         profileData.ninEncrypted = encSvc.encryptField(parsed.data.nin);
-        try { profileData.ninHash = encSvc.hmacField(parsed.data.nin); } catch {}
+        try { profileData.ninHash = encSvc.hmacField(parsed.data.nin); } catch (hashErr) { console.error("[Admin] NIN hash compute error:", hashErr); }
         await storage.logSensitiveDataAccess({
           accessorUserId: adminId,
           targetUserId: userId,
@@ -10028,6 +10028,15 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
         await storage.upsertFounderProfile({ userId, [pathField]: objectPath });
 
+        await storage.logSensitiveDataAccess({
+          accessorUserId: adminId,
+          targetUserId: userId,
+          dataType: `profile_document:${docType}`,
+          action: "admin_write",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"] as string | undefined,
+        });
+
         await storage.createAuditLog({
           actorUserId: adminId,
           action: "admin_document_upload",
@@ -10040,6 +10049,126 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         res.json({ success: true, objectPath, docType });
       } catch (error: any) {
         console.error("[Admin] Error uploading profile document:", error);
+        res.status(500).json({ message: "Upload failed. Please try again." });
+      }
+    }
+  );
+
+  // POST /api/admin/applications/:id/documents/upload — admin uploads a document against a checklist item
+  // Only allows uploading to items whose current status is "missing" or "rejected".
+  const adminAppDocUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+  });
+  app.post(
+    "/api/admin/applications/:id/documents/upload",
+    isAuthenticated,
+    requireRole("admin"),
+    adminAppDocUpload.single("file"),
+    async (req: any, res) => {
+      try {
+        const adminId = getUserId(req);
+        const applicationId = parseInt(req.params.id);
+        const { checklistItemId, docType, category: reqCategory } = req.body;
+        const file = req.file;
+
+        if (!file) return res.status(400).json({ message: "No file provided" });
+        if (!docType?.trim()) return res.status(400).json({ message: "docType is required" });
+        if (!checklistItemId) return res.status(400).json({ message: "checklistItemId is required" });
+
+        const application = await storage.getApplication(applicationId);
+        if (!application) return res.status(404).json({ message: "Application not found" });
+
+        // Validate the checklist item belongs to this application
+        const checklistItems = await storage.getChecklistItems(applicationId);
+        const targetItem = checklistItems.find((i) => i.id === parseInt(checklistItemId));
+        if (!targetItem) {
+          return res.status(400).json({ message: "Checklist item does not belong to this application" });
+        }
+
+        // Only allow upload for missing or rejected items
+        const uploadableStatuses = ["missing", "rejected"];
+        if (!uploadableStatuses.includes(targetItem.status || "missing")) {
+          return res.status(400).json({
+            message: `Cannot upload to a checklist item with status "${targetItem.status}". Only missing or rejected items may be updated.`,
+          });
+        }
+
+        const allowedMime = [
+          "application/pdf",
+          "application/x-pdf",
+          "application/msword",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "image/jpeg",
+          "image/jpg",
+          "image/png",
+        ];
+        const allowedExtensions = [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"];
+        const fileExt = path.extname(file.originalname || "").toLowerCase();
+        if (!allowedMime.includes(file.mimetype) && !allowedExtensions.includes(fileExt)) {
+          return res.status(400).json({ message: "File type not allowed. Upload PDF, JPEG, PNG, DOC or DOCX." });
+        }
+
+        const objectStorage = new ObjectStorageService();
+        const uploadURL = await objectStorage.getObjectEntityUploadURL();
+        const objectPath = objectStorage.normalizeObjectEntityPath(uploadURL);
+
+        const uploadResponse = await fetch(uploadURL, {
+          method: "PUT",
+          body: file.buffer,
+          headers: {
+            "Content-Type": file.mimetype,
+            "Content-Length": String(file.buffer.length),
+          },
+        });
+        if (!uploadResponse.ok) {
+          throw new Error(`Object storage upload failed: ${uploadResponse.status}`);
+        }
+
+        // Create the document file record
+        const category = reqCategory || "filing";
+        const [docFile] = await db
+          .insert(documentFiles)
+          .values({
+            applicationId,
+            uploadedByUserId: adminId,
+            docType: docType.trim(),
+            category,
+            filePath: objectPath,
+            fileName: file.originalname,
+            fileSize: file.buffer.length,
+            mimeType: file.mimetype,
+            status: "pending",
+            qualityStatus: "pending",
+          })
+          .returning();
+
+        // Mark the checklist item as "provided", preserve source
+        const uploadSource = targetItem.source === "people_requirement" ? "people_requirement" : "manual_upload";
+        await storage.updateChecklistItem(parseInt(checklistItemId), {
+          status: "provided",
+          isAutoResolved: false,
+          source: uploadSource,
+        });
+
+        await storage.createAuditLog({
+          actorUserId: adminId,
+          action: "admin_checklist_document_upload",
+          entityType: "application",
+          entityId: String(applicationId),
+          details: {
+            checklistItemId: parseInt(checklistItemId),
+            checklistItemName: targetItem.name,
+            docType: docType.trim(),
+            filename: file.originalname,
+            previousStatus: targetItem.status || "missing",
+          },
+          ipAddress: req.ip,
+        });
+
+        res.json({ success: true, document: docFile, checklistItemId: parseInt(checklistItemId) });
+      } catch (error: any) {
+        console.error("[Admin] Error uploading application document:", error);
         res.status(500).json({ message: "Upload failed. Please try again." });
       }
     }

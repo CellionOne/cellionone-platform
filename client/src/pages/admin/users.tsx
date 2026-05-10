@@ -82,6 +82,8 @@ export default function AdminUsers() {
   // Identity (BVN/NIN) form state
   const [bvn, setBvn] = useState("");
   const [nin, setNin] = useState("");
+  // Confirmation step: holds the validated values pending user confirmation
+  const [identityConfirm, setIdentityConfirm] = useState<{ bvn?: string; nin?: string } | null>(null);
 
   // Document upload state
   const [uploadingDocType, setUploadingDocType] = useState<string | null>(null);
@@ -168,12 +170,14 @@ export default function AdminUsers() {
     setBvn("");
     setNin("");
     setUploadingDocType(null);
+    setIdentityConfirm(null);
     setProfileDialogOpen(true);
   }
 
   function closeProfileDialog() {
     setProfileDialogOpen(false);
     setSelectedUserId(null);
+    setIdentityConfirm(null);
   }
 
   function handleFileSelect(docType: string) {
@@ -190,6 +194,7 @@ export default function AdminUsers() {
     input.click();
   }
 
+  // Step 1: validate inputs and show confirmation dialog
   function handleIdentitySave() {
     if (!selectedUserId) return;
     const b = bvn.trim();
@@ -206,7 +211,17 @@ export default function AdminUsers() {
       toast({ title: "Invalid NIN", description: "NIN must be exactly 11 digits.", variant: "destructive" });
       return;
     }
-    identityMutation.mutate({ userId: selectedUserId, bvn: b || undefined, nin: n || undefined });
+    // Show confirmation before writing — this is a sensitive data write
+    setIdentityConfirm({ bvn: b || undefined, nin: n || undefined });
+  }
+
+  // Step 2: user confirmed — execute the write
+  function handleIdentityConfirmed() {
+    if (!selectedUserId || !identityConfirm) return;
+    identityMutation.mutate(
+      { userId: selectedUserId, bvn: identityConfirm.bvn, nin: identityConfirm.nin },
+      { onSettled: () => setIdentityConfirm(null) },
+    );
   }
 
   const getRoleBadgeVariant = (role: string) => {
@@ -343,6 +358,59 @@ export default function AdminUsers() {
         )}
       </div>
 
+      {/* BVN/NIN Write Confirmation Dialog */}
+      <Dialog open={!!identityConfirm} onOpenChange={(open) => { if (!open) setIdentityConfirm(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Identity Data Write</DialogTitle>
+            <DialogDescription>
+              You are about to write sensitive identity data to this founder's encrypted profile. This action is audit-logged and cannot be undone from the UI.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm font-medium">Data to be written:</p>
+            <div className="rounded-md border bg-muted/40 divide-y text-sm">
+              {identityConfirm?.bvn && (
+                <div className="flex justify-between px-3 py-2">
+                  <span className="text-muted-foreground">BVN</span>
+                  <span className="font-mono font-medium">
+                    {identityConfirm.bvn.slice(0, 3)}••••{identityConfirm.bvn.slice(-2)}
+                  </span>
+                </div>
+              )}
+              {identityConfirm?.nin && (
+                <div className="flex justify-between px-3 py-2">
+                  <span className="text-muted-foreground">NIN</span>
+                  <span className="font-mono font-medium">
+                    {identityConfirm.nin.slice(0, 3)}••••{identityConfirm.nin.slice(-2)}
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Values will be AES-256-GCM encrypted before storage. The full values will not be viewable after save.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIdentityConfirm(null)}
+              disabled={identityMutation.isPending}
+              data-testid="button-identity-confirm-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleIdentityConfirmed}
+              disabled={identityMutation.isPending}
+              data-testid="button-identity-confirm-proceed"
+            >
+              {identityMutation.isPending ? <LoadingSpinner size="sm" /> : "Confirm & Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Manage Profile Dialog */}
       <Dialog open={profileDialogOpen} onOpenChange={(open) => { if (!open) closeProfileDialog(); }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -449,7 +517,7 @@ export default function AdminUsers() {
                     disabled={identityMutation.isPending || (!bvn.trim() && !nin.trim())}
                     data-testid="button-save-identity"
                   >
-                    {identityMutation.isPending ? <LoadingSpinner size="sm" /> : "Save Identity Data"}
+                    Save Identity Data
                   </Button>
                 </DialogFooter>
               </TabsContent>

@@ -7,7 +7,7 @@ import { isAuthenticated } from "../replit_integrations/auth";
 import { getResendClient, ADMIN_NOTIFICATION_EMAIL, getSiteBaseUrl } from "../services/emailService";
 import { db } from "../db";
 import { eq, desc, and, inArray, isNotNull } from "drizzle-orm";
-import { bankPartners, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications, documentFiles, founderProfiles, companyPeople, users } from "@shared/schema";
+import { bankPartners, bankAccountInstructions, bankCompanyDispatches, bankDocumentRequests, companyProfiles, profileChecklistItems, identityVerifications, documentFiles, founderProfiles, companyPeople, users } from "@shared/schema";
 import { ObjectStorageService } from "../replit_integrations/object_storage";
 import { isEncryptedField, decryptField } from "../services/encryptionService";
 
@@ -160,7 +160,8 @@ async function sendDispatchEmail(
   emails: { label: string; address: string }[],
   bankName: string,
   company: DispatchCompanyProfile,
-  baseUrl: string
+  baseUrl: string,
+  instruction?: { id: number; founderUserId: string; submittedAt: Date | null; status: string } | null
 ) {
   try {
     const { client, fromEmail } = await getResendClient();
@@ -325,6 +326,28 @@ async function sendDispatchEmail(
             <tr><td style="padding:4px 0;color:#666;">Verification Source</td><td style="padding:4px 0;">${company.founderIdentitySource === "kyb_pipeline" ? "KYB Pipeline (BVN/NIN + Biometric)" : (company.founderIdentitySource || "—")}</td></tr>
             ${company.founderSelfieUrl ? `<tr><td style="padding:4px 0;color:#666;">Biometric Selfie</td><td style="padding:4px 0;"><a href="${company.founderSelfieUrl}" style="color:#1e3a5f;">View Photo ↗</a></td></tr>` : ""}
           </table>
+        </div>` : ""}
+
+        <!-- Founder Bank Account Instruction -->
+        ${instruction ? `
+        <div style="border: 1px solid #e2e8f0; border-top: none; background: #f0fff4; padding: 20px;">
+          <h2 style="color: #166534; font-size: 17px; margin-top: 0;">✓ Instruction on File</h2>
+          <p style="margin: 0 0 8px; color: #15803d; font-weight: 600;">The founder explicitly instructed Cellion One to engage ${bankName} for corporate account opening.</p>
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr>
+              <td style="padding: 4px 8px; color: #555;">Instruction ID</td>
+              <td style="padding: 4px 8px; font-weight: 500;">#${instruction.id}</td>
+            </tr>
+            <tr>
+              <td style="padding: 4px 8px; color: #555;">Submitted</td>
+              <td style="padding: 4px 8px; font-weight: 500;">${instruction.submittedAt ? new Date(instruction.submittedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : "—"}</td>
+            </tr>
+            <tr>
+              <td style="padding: 4px 8px; color: #555;">Bank Selected</td>
+              <td style="padding: 4px 8px; font-weight: 500;">${bankName}</td>
+            </tr>
+          </table>
+          <p style="margin: 8px 0 0; font-size: 12px; color: #666;">This instruction is maintained on the Cellion One platform and serves as evidence of the founder's consent to share verified data with your institution.</p>
         </div>` : ""}
 
         <!-- Certificate Reference -->
@@ -986,12 +1009,24 @@ export function registerBankPortalRoutes(app: Express): void {
         });
       }
 
+      // Enrich with founder instruction details if dispatch has one
+      let founderInstruction: { id: number; submittedAt: Date | null; status: string } | null = null;
+      const dispatchInstructionId = dispatches[0]?.founderInstructionId ?? null;
+      if (dispatchInstructionId) {
+        const instr = await storage.getBankAccountInstruction(dispatchInstructionId);
+        if (instr) {
+          founderInstruction = { id: instr.id, submittedAt: instr.submittedAt, status: instr.status };
+        }
+      }
+
       res.json({
         ...profile,
         tinNumber: resolvedTinNumber,
         directors: finalDirectors,
         checklistItems: checklistRows,
         dispatchedAt: dispatches[0]?.sentAt,
+        founderInstructionId: dispatchInstructionId,
+        founderInstruction,
         bankDocuments,
         platformPeople,
         founderProfile,
@@ -1677,19 +1712,35 @@ export function registerBankPortalRoutes(app: Express): void {
         }
       }
 
+      // Gate: require a confirmed founder instruction for this company+bank
+      const instructions = await storage.listBankAccountInstructions({ companyProfileId, bankPartnerId });
+      const activeInstruction = instructions.find(i => i.status === "pending" || i.status === "dispatched");
+      if (!activeInstruction) {
+        return res.status(409).json({
+          error: "No founder bank account instruction on file for this company and bank. The founder must submit a bank account instruction first.",
+          code: "NO_FOUNDER_INSTRUCTION",
+        });
+      }
+
       const profileWithChecklist = { ...profile, checklistItems: checklistRows, founderIdentityVerifiedAt, founderIdentitySource, founderSelfieUrl };
 
       // If no emails array but has legacy contactEmail, use that
       const emailsToSend = emails.length > 0 ? emails : (partner.contactEmail ? [{ label: "Contact", address: partner.contactEmail }] : []);
 
       const baseUrl = getSiteBaseUrl(req);
-      await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl);
+      await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl, activeInstruction);
 
       const dispatch = await storage.createBankCompanyDispatch({
         companyProfileId,
         bankPartnerId,
         sentByUserId: adminUserId,
+        founderInstructionId: activeInstruction.id,
       });
+
+      // Mark instruction as dispatched
+      if (activeInstruction.status === "pending") {
+        await storage.updateBankAccountInstruction(activeInstruction.id, { status: "dispatched" });
+      }
 
       const directorIds = decryptDirectorIds(Array.isArray(profile.directors) ? (profile.directors as { name?: string; bvn?: string; nin?: string }[]) : []);
       await storage.createAuditLog({
@@ -1697,7 +1748,7 @@ export function registerBankPortalRoutes(app: Express): void {
         action: "admin_bank_dispatch_sent",
         entityType: "bank_company_dispatch",
         entityId: String(dispatch.id),
-        details: { companyProfileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName, directorIds },
+        details: { companyProfileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName, directorIds, founderInstructionId: activeInstruction.id },
       });
 
       res.status(201).json(dispatch);
@@ -1812,6 +1863,104 @@ export function registerBankPortalRoutes(app: Express): void {
     }
   });
 
+  // POST /api/founder/bank-account-instructions — create a bank account instruction
+  app.post("/api/founder/bank-account-instructions", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      const userId = await getFounderUserId(req);
+      if (!userId) return res.status(403).json({ error: "Forbidden" });
+
+      const { companyProfileId, bankPartnerId, notes } = z.object({
+        companyProfileId: z.number().int().positive(),
+        bankPartnerId: z.number().int().positive(),
+        notes: z.string().max(1000).optional(),
+      }).parse(req.body);
+
+      // Verify the company profile belongs to this founder
+      const [profile] = await db.select({ id: companyProfiles.id, founderId: companyProfiles.founderId, companyName: companyProfiles.companyName })
+        .from(companyProfiles).where(eq(companyProfiles.id, companyProfileId));
+      if (!profile) return res.status(404).json({ error: "Company profile not found" });
+      if (profile.founderId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      const partner = await storage.getBankPartner(bankPartnerId);
+      if (!partner || !partner.isActive) return res.status(404).json({ error: "Bank partner not found or inactive" });
+
+      // Idempotency: if a pending/dispatched instruction already exists for this company+bank, return it
+      const existing = await storage.listBankAccountInstructions({ founderUserId: userId, companyProfileId, bankPartnerId });
+      const active = existing.find(i => i.status === "pending" || i.status === "dispatched");
+      if (active) {
+        return res.json({ ...active, bankName: partner.name, alreadyExisted: true });
+      }
+
+      const instruction = await storage.createBankAccountInstruction({
+        founderUserId: userId,
+        companyProfileId,
+        bankPartnerId,
+        status: "pending",
+        notes: notes || null,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: userId,
+        action: "founder_bank_account_instruction_created",
+        entityType: "bank_account_instruction",
+        entityId: String(instruction.id),
+        details: { companyProfileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName },
+      });
+
+      res.status(201).json({ ...instruction, bankName: partner.name });
+    } catch (e: any) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/founder/company-profiles/:id/bank-account-instructions — list instructions for a company
+  app.get("/api/founder/company-profiles/:id/bank-account-instructions", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      const userId = await getFounderUserId(req);
+      if (!userId) return res.status(403).json({ error: "Forbidden" });
+
+      const profileId = parseInt(req.params.id, 10);
+      if (isNaN(profileId)) return res.status(400).json({ error: "Invalid profile ID" });
+
+      const [profile] = await db.select({ id: companyProfiles.id, founderId: companyProfiles.founderId })
+        .from(companyProfiles).where(eq(companyProfiles.id, profileId));
+      if (!profile) return res.status(404).json({ error: "Profile not found" });
+      if (profile.founderId !== userId) return res.status(403).json({ error: "Forbidden" });
+
+      const instructions = await storage.listBankAccountInstructions({ founderUserId: userId, companyProfileId: profileId });
+      const allPartners = await storage.listBankPartners();
+      const partnerMap = new Map(allPartners.map(p => [p.id, p.name]));
+
+      res.json(instructions.map(i => ({ ...i, bankName: partnerMap.get(i.bankPartnerId) || `Bank #${i.bankPartnerId}` })));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/admin/users/:userId/bank-account-instructions — admin view of a founder's instructions
+  app.get("/api/admin/users/:userId/bank-account-instructions", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const { userId } = req.params;
+      const instructions = await storage.listBankAccountInstructions({ founderUserId: userId });
+      const allPartners = await storage.listBankPartners();
+      const partnerMap = new Map(allPartners.map(p => [p.id, p.name]));
+      const allProfiles = await db.select({ id: companyProfiles.id, companyName: companyProfiles.companyName })
+        .from(companyProfiles).where(eq(companyProfiles.founderId, userId));
+      const profileMap = new Map(allProfiles.map(p => [p.id, p.companyName]));
+
+      res.json(instructions.map(i => ({
+        ...i,
+        bankName: partnerMap.get(i.bankPartnerId) || `Bank #${i.bankPartnerId}`,
+        companyName: profileMap.get(i.companyProfileId) || `Company #${i.companyProfileId}`,
+      })));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // POST /api/founder/company-profiles/:id/bank-dispatch — founder-initiated dossier dispatch
   app.post("/api/founder/company-profiles/:id/bank-dispatch", isAuthenticated, async (req: Request, res: Response) => {
     try {
@@ -1857,17 +2006,33 @@ export function registerBankPortalRoutes(app: Express): void {
         founderSelfieUrl = idVRecord.selfieUrl ?? null;
       }
 
+      // Gate: require a confirmed founder instruction for this company+bank
+      const instructions = await storage.listBankAccountInstructions({ founderUserId: userId, companyProfileId: profileId, bankPartnerId });
+      const activeInstruction = instructions.find(i => i.status === "pending" || i.status === "dispatched");
+      if (!activeInstruction) {
+        return res.status(409).json({
+          error: "You must submit a bank account instruction before dispatching your dossier to this bank.",
+          code: "NO_FOUNDER_INSTRUCTION",
+        });
+      }
+
       const profileWithChecklist = { ...profile, checklistItems: checklistRows, founderIdentityVerifiedAt, founderIdentitySource, founderSelfieUrl };
       const emailsToSend = emails.length > 0 ? emails : (partner.contactEmail ? [{ label: "Contact", address: partner.contactEmail }] : []);
 
       const baseUrl = getSiteBaseUrl(req);
-      await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl);
+      await sendDispatchEmail(emailsToSend, partner.name, profileWithChecklist, baseUrl, activeInstruction);
 
       const dispatch = await storage.createBankCompanyDispatch({
         companyProfileId: profileId,
         bankPartnerId,
         sentByUserId: userId,
+        founderInstructionId: activeInstruction.id,
       });
+
+      // Mark instruction as dispatched
+      if (activeInstruction.status === "pending") {
+        await storage.updateBankAccountInstruction(activeInstruction.id, { status: "dispatched" });
+      }
 
       const directorIds = decryptDirectorIds(Array.isArray(profile.directors) ? (profile.directors as { name?: string; bvn?: string; nin?: string }[]) : []);
       await storage.createAuditLog({
@@ -1875,7 +2040,7 @@ export function registerBankPortalRoutes(app: Express): void {
         action: "founder_bank_dispatch_sent",
         entityType: "bank_company_dispatch",
         entityId: String(dispatch.id),
-        details: { companyProfileId: profileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName, directorIds },
+        details: { companyProfileId: profileId, bankPartnerId, bankName: partner.name, companyName: profile.companyName, directorIds, founderInstructionId: activeInstruction.id },
       });
 
       res.status(201).json({ ...dispatch, bankName: partner.name });

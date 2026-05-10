@@ -109,6 +109,37 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
     enabled: isVerified,
   });
 
+  interface InstructionRecord {
+    id: number;
+    bankPartnerId: number;
+    bankName: string;
+    status: string;
+    submittedAt: string;
+  }
+
+  const instructionsQuery = useQuery<InstructionRecord[]>({
+    queryKey: ["/api/founder/company-profiles", group.profileId, "bank-account-instructions"],
+    enabled: isVerified,
+  });
+
+  const createInstructionMutation = useMutation({
+    mutationFn: (bankPartnerId: number) =>
+      apiRequest("POST", "/api/founder/bank-account-instructions", {
+        companyProfileId: group.profileId,
+        bankPartnerId,
+      }).then(r => r.json()),
+    onSuccess: (data: InstructionRecord & { alreadyExisted?: boolean }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", group.profileId, "bank-account-instructions"] });
+      toast({
+        title: data.alreadyExisted ? "Instruction already on file" : "Bank account instruction submitted",
+        description: `Your instruction to open an account with ${data.bankName} has been recorded. You can now send your dossier.`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to submit instruction", description: err.message, variant: "destructive" });
+    },
+  });
+
   const dispatchMutation = useMutation({
     mutationFn: () =>
       apiRequest("POST", `/api/founder/company-profiles/${group.profileId}/bank-dispatch`, {
@@ -116,6 +147,7 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", group.profileId, "dispatches"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", group.profileId, "bank-account-instructions"] });
       toast({
         title: "Dossier sent",
         description: `Your verified company dossier has been sent to ${selectedBank?.name}.`,
@@ -181,6 +213,13 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
   const dispatchedByBankId: Record<number, DispatchRecord> = {};
   for (const d of dispatchesQuery.data || []) {
     if (!dispatchedByBankId[d.bankPartnerId]) dispatchedByBankId[d.bankPartnerId] = d;
+  }
+
+  const instructionByBankId: Record<number, InstructionRecord> = {};
+  for (const i of instructionsQuery.data || []) {
+    if ((i.status === "pending" || i.status === "dispatched") && !instructionByBankId[i.bankPartnerId]) {
+      instructionByBankId[i.bankPartnerId] = i;
+    }
   }
 
   const uploadedDocs = STANDARD_VAULT_DOCS.filter(
@@ -384,6 +423,9 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                       const sentDate = previousDispatch
                         ? new Date(previousDispatch.sentAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
                         : null;
+                      const instruction = instructionByBankId[bank.id];
+                      const hasInstruction = !!instruction;
+                      const isSubmitting = createInstructionMutation.isPending && createInstructionMutation.variables === bank.id;
                       return (
                         <div
                           key={bank.id}
@@ -397,20 +439,34 @@ function CompanyDocumentsSection({ group }: { group: CompanyDocumentGroup }) {
                             <div>
                               <p className="text-sm font-medium">{bank.name}</p>
                               {sentDate ? (
-                                <p className="text-xs text-green-600 dark:text-green-400">Already sent on {sentDate}</p>
+                                <p className="text-xs text-green-600 dark:text-green-400">Dossier sent on {sentDate}</p>
+                              ) : hasInstruction ? (
+                                <p className="text-xs text-blue-600 dark:text-blue-400">Instruction on file — ready to dispatch</p>
                               ) : (
-                                <p className="text-xs text-muted-foreground">Not yet sent</p>
+                                <p className="text-xs text-muted-foreground">Submit an instruction to send dossier</p>
                               )}
                             </div>
                           </div>
-                          <Button
-                            size="sm"
-                            variant={sentDate ? "outline" : "default"}
-                            onClick={() => handleSelectBank(bank)}
-                            data-testid={`button-select-bank-${bank.id}`}
-                          >
-                            {sentDate ? "Send Dossier Again" : "Send Dossier"}
-                          </Button>
+                          {hasInstruction ? (
+                            <Button
+                              size="sm"
+                              variant={sentDate ? "outline" : "default"}
+                              onClick={() => handleSelectBank(bank)}
+                              data-testid={`button-select-bank-${bank.id}`}
+                            >
+                              {sentDate ? "Send Again" : "Send Dossier"}
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => createInstructionMutation.mutate(bank.id)}
+                              disabled={isSubmitting}
+                              data-testid={`button-submit-instruction-${bank.id}`}
+                            >
+                              {isSubmitting ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Submitting…</> : "Submit Instruction"}
+                            </Button>
+                          )}
                         </div>
                       );
                     })}

@@ -20,7 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Building2, User, FileText, Upload, Loader2, CheckCircle2,
-  ArrowLeft, ArrowRight, Trash2, Download, AlertCircle,
+  ArrowLeft, ArrowRight, Trash2, Download, AlertCircle, Landmark,
 } from "lucide-react";
 
 const NIGERIAN_STATES = [
@@ -80,6 +80,7 @@ const serviceProfileFormSchema = z.object({
   headOfficeAddress: z.string().optional().default(""),
   state: z.string().optional().default(""),
   bankName: z.string().optional().default(""),
+  bankPartnerId: z.number().optional(),
   accountNumber: z.string().optional().default(""),
   accountName: z.string().optional().default(""),
   organizationPhone: z.string().optional().default(""),
@@ -130,6 +131,21 @@ export default function ServiceRequestFormPage() {
     queryKey: ["/api/founder/service-profiles"],
   });
 
+  interface BankPartner { id: number; name: string; }
+  interface CompanyProfile { id: number; companyName: string; status: string; }
+
+  const bankPartnersQuery = useQuery<BankPartner[]>({
+    queryKey: ["/api/founder/bank-partners"],
+    enabled: serviceType === "BANK_ACCOUNT",
+  });
+
+  const companyProfilesQuery = useQuery<CompanyProfile[]>({
+    queryKey: ["/api/founder/company-profiles"],
+    enabled: serviceType === "BANK_ACCOUNT",
+  });
+
+  const verifiedProfileId = companyProfilesQuery.data?.find(p => p.status === "verified")?.id ?? null;
+
   const { data: profileDetail, isLoading: detailLoading } = useQuery<any>({
     queryKey: ["/api/founder/service-profiles", profileId],
     enabled: !!profileId,
@@ -151,6 +167,7 @@ export default function ServiceRequestFormPage() {
       headOfficeAddress: "",
       state: "",
       bankName: "",
+      bankPartnerId: undefined,
       accountNumber: "",
       accountName: "",
       organizationPhone: "",
@@ -223,6 +240,20 @@ export default function ServiceRequestFormPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/founder/service-profiles", savedProfileId] });
 
       await linkProfileToServiceRequests(savedProfileId);
+
+      if (serviceType === "BANK_ACCOUNT") {
+        const bpId = form.getValues("bankPartnerId");
+        if (bpId && verifiedProfileId) {
+          try {
+            await apiRequest("POST", "/api/founder/bank-account-instructions", {
+              companyProfileId: verifiedProfileId,
+              bankPartnerId: bpId,
+            });
+            queryClient.invalidateQueries({ queryKey: ["/api/founder/company-profiles", verifiedProfileId, "bank-account-instructions"] });
+          } catch {
+          }
+        }
+      }
 
       toast({ title: "Company details saved", description: "Your company information has been saved successfully." });
       setStep(3);
@@ -573,16 +604,51 @@ export default function ServiceRequestFormPage() {
                 <Separator />
                 <p className="text-sm font-medium text-muted-foreground">Bank Details</p>
 
+                {serviceType === "BANK_ACCOUNT" && (
+                  <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 px-3 py-2.5">
+                    <Landmark className="h-4 w-4 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                      Select a Cellion bank partner below. Your bank account instruction will be recorded when you save — you can then send your verified company dossier to the bank from your Document Vault.
+                    </p>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <FormField control={form.control} name="bankName" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Bank</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Bank Name" {...field} data-testid="input-bank" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
+                  {serviceType === "BANK_ACCOUNT" ? (
+                    <FormField control={form.control} name="bankPartnerId" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Bank Partner</FormLabel>
+                        <FormControl>
+                          <Select
+                            value={field.value ? String(field.value) : ""}
+                            onValueChange={val => field.onChange(Number(val))}
+                            disabled={bankPartnersQuery.isLoading}
+                            data-testid="select-bank-partner"
+                          >
+                            <SelectTrigger data-testid="trigger-bank-partner">
+                              <SelectValue placeholder={bankPartnersQuery.isLoading ? "Loading…" : "Select a bank partner"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(bankPartnersQuery.data || []).map(bp => (
+                                <SelectItem key={bp.id} value={String(bp.id)}>{bp.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  ) : (
+                    <FormField control={form.control} name="bankName" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Bank</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Bank Name" {...field} data-testid="input-bank" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  )}
 
                   <FormField control={form.control} name="accountNumber" render={({ field }) => (
                     <FormItem>

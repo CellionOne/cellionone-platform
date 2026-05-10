@@ -22,6 +22,7 @@ import {
   Image,
   PenLine,
   Loader2,
+  Building2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -70,6 +71,68 @@ interface AdminUserProfile {
     profileCompletion: number | null;
     isProfileComplete: boolean | null;
   } | null;
+}
+
+function BankInstructionsTab({ userId }: { userId: string | null }) {
+  const { data, isLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/users", userId, "bank-account-instructions"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/users/${userId}/bank-account-instructions`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: !!userId,
+  });
+
+  return (
+    <TabsContent value="bank-instructions" className="space-y-4 pt-4">
+      <p className="text-sm text-muted-foreground">
+        Bank account instructions submitted by this founder. Each instruction authorises Cellion to dispatch a company dossier to the named bank partner.
+      </p>
+      {isLoading ? (
+        <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+      ) : !data || data.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground gap-2">
+          <Building2 className="h-8 w-8 opacity-40" />
+          <p className="text-sm">No bank account instructions on file.</p>
+        </div>
+      ) : (
+        <div className="divide-y rounded-lg border">
+          {data.map((instr: any) => (
+            <div key={instr.id} className="flex items-center justify-between px-4 py-3 first:rounded-t-lg last:rounded-b-lg gap-3" data-testid={`row-bank-instruction-${instr.id}`}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{instr.bankName}</p>
+                  {instr.companyName && (
+                    <p className="text-xs text-muted-foreground truncate">Company: {instr.companyName}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Submitted {instr.submittedAt ? new Date(instr.submittedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                  </p>
+                </div>
+              </div>
+              <Badge
+                variant="outline"
+                className={
+                  instr.status === "dispatched"
+                    ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300 shrink-0"
+                    : instr.status === "cancelled"
+                    ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 shrink-0"
+                    : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 shrink-0"
+                }
+                data-testid={`badge-instruction-status-${instr.id}`}
+              >
+                {instr.status === "dispatched" ? "Dispatched" : instr.status === "cancelled" ? "Cancelled" : "Pending"}
+              </Badge>
+            </div>
+          ))}
+        </div>
+      )}
+    </TabsContent>
+  );
 }
 
 export default function AdminUsers() {
@@ -503,6 +566,10 @@ export default function AdminUsers() {
                   <FileText className="h-4 w-4 mr-2" />
                   Documents
                 </TabsTrigger>
+                <TabsTrigger value="bank-instructions" className="flex-1" data-testid="tab-bank-instructions">
+                  <Building2 className="h-4 w-4 mr-2" />
+                  Bank
+                </TabsTrigger>
               </TabsList>
 
               {/* Identity Tab */}
@@ -678,6 +745,10 @@ export default function AdminUsers() {
                   Accepted formats: JPEG, PNG, PDF. Max 5 MB per file. All uploads are audit-logged.
                 </p>
               </TabsContent>
+
+              {/* Bank Account Instructions Tab */}
+              <BankInstructionsTab userId={selectedUserId} />
+
             </Tabs>
           )}
         </DialogContent>

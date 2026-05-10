@@ -52,6 +52,7 @@ import {
   procurementInvoiceItems, type ProcurementInvoiceItem, type InsertProcurementInvoiceItem,
   bankPartners, type BankPartner, type InsertBankPartner,
   bankPortalUsers, type BankPortalUser, type InsertBankPortalUser,
+  bankAccountInstructions, type BankAccountInstruction, type InsertBankAccountInstruction,
   bankCompanyDispatches, type BankCompanyDispatch, type InsertBankCompanyDispatch,
   bankDocumentRequests, type BankDocumentRequest, type InsertBankDocumentRequest,
   lawyerDocumentRequests, type LawyerDocumentRequest, type InsertLawyerDocumentRequest,
@@ -434,6 +435,12 @@ export interface IStorage {
   getBankPortalUsersByBankId(bankPartnerId: number): Promise<BankPortalUser[]>;
   updateBankPortalUser(id: number, data: Partial<InsertBankPortalUser>): Promise<BankPortalUser | undefined>;
   deleteBankPortalUser(id: number): Promise<void>;
+
+  // Bank Account Instructions
+  createBankAccountInstruction(data: InsertBankAccountInstruction): Promise<BankAccountInstruction>;
+  getBankAccountInstruction(id: number): Promise<BankAccountInstruction | undefined>;
+  listBankAccountInstructions(filters?: { founderUserId?: string; companyProfileId?: number; bankPartnerId?: number }): Promise<BankAccountInstruction[]>;
+  updateBankAccountInstruction(id: number, data: Partial<InsertBankAccountInstruction>): Promise<BankAccountInstruction | undefined>;
 
   // Bank Company Dispatches
   createBankCompanyDispatch(data: InsertBankCompanyDispatch): Promise<BankCompanyDispatch>;
@@ -2168,6 +2175,33 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBankPortalUser(id: number): Promise<void> {
     await db.delete(bankPortalUsers).where(eq(bankPortalUsers.id, id));
+  }
+
+  // Bank Account Instructions
+  async createBankAccountInstruction(data: InsertBankAccountInstruction): Promise<BankAccountInstruction> {
+    const [instruction] = await db.insert(bankAccountInstructions).values(data).returning();
+    return instruction;
+  }
+
+  async getBankAccountInstruction(id: number): Promise<BankAccountInstruction | undefined> {
+    const [instruction] = await db.select().from(bankAccountInstructions).where(eq(bankAccountInstructions.id, id));
+    return instruction;
+  }
+
+  async listBankAccountInstructions(filters?: { founderUserId?: string; companyProfileId?: number; bankPartnerId?: number }): Promise<BankAccountInstruction[]> {
+    const conditions = [];
+    if (filters?.founderUserId) conditions.push(eq(bankAccountInstructions.founderUserId, filters.founderUserId));
+    if (filters?.companyProfileId) conditions.push(eq(bankAccountInstructions.companyProfileId, filters.companyProfileId));
+    if (filters?.bankPartnerId) conditions.push(eq(bankAccountInstructions.bankPartnerId, filters.bankPartnerId));
+    if (conditions.length > 0) {
+      return db.select().from(bankAccountInstructions).where(and(...conditions)).orderBy(desc(bankAccountInstructions.submittedAt));
+    }
+    return db.select().from(bankAccountInstructions).orderBy(desc(bankAccountInstructions.submittedAt));
+  }
+
+  async updateBankAccountInstruction(id: number, data: Partial<InsertBankAccountInstruction>): Promise<BankAccountInstruction | undefined> {
+    const [instruction] = await db.update(bankAccountInstructions).set(data).where(eq(bankAccountInstructions.id, id)).returning();
+    return instruction;
   }
 
   // Bank Company Dispatches

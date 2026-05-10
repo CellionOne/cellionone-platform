@@ -2010,12 +2010,34 @@ export const insertBankPortalUserSchema = createInsertSchema(bankPortalUsers).om
 export type BankPortalUser = typeof bankPortalUsers.$inferSelect;
 export type InsertBankPortalUser = z.infer<typeof insertBankPortalUserSchema>;
 
+// ============== BANK ACCOUNT INSTRUCTIONS ==============
+// A founder's explicit instruction to open a bank account with a specific partner.
+// Must exist (status pending or dispatched) before any dossier dispatch is allowed.
+export const bankAccountInstructions = pgTable("bank_account_instructions", {
+  id: serial("id").primaryKey(),
+  founderUserId: varchar("founder_user_id", { length: 255 }).notNull(),
+  companyProfileId: integer("company_profile_id").notNull(),
+  bankPartnerId: integer("bank_partner_id").notNull().references(() => bankPartners.id),
+  status: varchar("status", { length: 50 }).notNull().default("pending"), // pending | dispatched | cancelled
+  notes: text("notes"),
+  submittedAt: timestamp("submitted_at").defaultNow(),
+}, (table) => [
+  index("idx_bai_founder").on(table.founderUserId),
+  index("idx_bai_company").on(table.companyProfileId),
+  index("idx_bai_bank").on(table.bankPartnerId),
+]);
+
+export const insertBankAccountInstructionSchema = createInsertSchema(bankAccountInstructions).omit({ id: true, submittedAt: true });
+export type BankAccountInstruction = typeof bankAccountInstructions.$inferSelect;
+export type InsertBankAccountInstruction = z.infer<typeof insertBankAccountInstructionSchema>;
+
 // ============== BANK COMPANY DISPATCHES ==============
 export const bankCompanyDispatches = pgTable("bank_company_dispatches", {
   id: serial("id").primaryKey(),
   companyProfileId: integer("company_profile_id").notNull(),
   bankPartnerId: integer("bank_partner_id").notNull().references(() => bankPartners.id),
   sentByUserId: varchar("sent_by_user_id").notNull(),
+  founderInstructionId: integer("founder_instruction_id").references(() => bankAccountInstructions.id),
   sentAt: timestamp("sent_at").defaultNow(),
 }, (table) => [
   index("idx_bank_dispatches_company").on(table.companyProfileId),

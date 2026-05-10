@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import {
   Building2, ArrowLeft, LogOut, Loader2, CheckCircle, XCircle, Clock,
-  FileText, User, MapPin, Send, AlertCircle, Users, ShieldCheck, UserCircle, Download
+  FileText, User, MapPin, Send, AlertCircle, Users, ShieldCheck, UserCircle, Download, Landmark,
 } from "lucide-react";
 import { format } from "date-fns";
 import {
@@ -79,6 +79,8 @@ type Company = {
   kybVerified?: boolean;
   cellionCertRef?: string;
   dispatchedAt?: string;
+  founderInstructionId?: number | null;
+  founderInstruction?: { id: number; submittedAt: string | null; status: string } | null;
   bankDocuments?: BankDocument[];
   platformPeople?: PlatformPerson[];
   founderProfile?: FounderProfileData | null;
@@ -935,6 +937,39 @@ export default function BankCompanyDetailPage() {
                   </div>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Founder Instruction on File */}
+        {company.founderInstructionId && (
+          <Card data-testid="card-instruction-on-file">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Landmark className="h-4 w-4 text-primary" />
+                Bank Account Instruction
+              </CardTitle>
+              <CardDescription>
+                This dossier was dispatched in response to a formal bank account opening instruction from the founder.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+                <p className="text-sm text-green-700 dark:text-green-300 font-medium">Instruction on file (ref #{company.founderInstructionId})</p>
+              </div>
+              {company.founderProfile?.fullName && (
+                <p className="text-sm">
+                  <span className="text-muted-foreground">Founder: </span>
+                  <span className="font-medium">{company.founderProfile.fullName}</span>
+                </p>
+              )}
+              {company.founderInstruction?.submittedAt && (
+                <p className="text-sm">
+                  <span className="text-muted-foreground">Instruction submitted: </span>
+                  <span className="font-medium">{format(new Date(company.founderInstruction.submittedAt), "d MMM yyyy")}</span>
+                </p>
+              )}
             </CardContent>
           </Card>
         )}

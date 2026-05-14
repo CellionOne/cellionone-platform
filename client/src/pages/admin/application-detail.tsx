@@ -1066,7 +1066,7 @@ export default function AdminApplicationDetail() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge status={application.status || "draft"} />
-            {application.paymentState === "unpaid" && (
+            {(application.paymentState === "unpaid" || ["draft","names_submitted","names_reviewed","pending_verification","submitted","under_review"].includes(application.status || "")) && (
               <Button
                 size="sm"
                 variant="outline"

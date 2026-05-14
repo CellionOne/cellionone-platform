@@ -54,12 +54,16 @@ interface BankPartnerBasic { id: number; name: string; }
 
 interface WizardDirector {
   localId: string;
+  personType: "individual" | "corporate";
   fullName: string;
   email: string;
   role: string;
   sharesAllocated: string;
   shareClass: string;
   sharePercentage: string;
+  corporateName: string;
+  corporateRcNumber: string;
+  corporateCountry: string;
 }
 
 const NIGERIAN_STATES = [
@@ -163,11 +167,18 @@ export default function AdminApplications() {
   const [createCompanyName3, setCreateCompanyName3] = useState("");
   const [createBusinessDesc, setCreateBusinessDesc] = useState("");
   const [createDirectors, setCreateDirectors] = useState<WizardDirector[]>([]);
+  const [newDirPersonType, setNewDirPersonType] = useState<"individual" | "corporate">("individual");
   const [newDirName, setNewDirName] = useState("");
   const [newDirEmail, setNewDirEmail] = useState("");
   const [newDirRole, setNewDirRole] = useState("director_and_shareholder");
   const [newDirShares, setNewDirShares] = useState("");
   const [newDirShareClass, setNewDirShareClass] = useState("ordinary");
+  const [newDirCorporateName, setNewDirCorporateName] = useState("");
+  const [newDirCorporateRcNumber, setNewDirCorporateRcNumber] = useState("");
+  const [newDirCorporateCountry, setNewDirCorporateCountry] = useState("Nigeria");
+  const [wizardUploadFile, setWizardUploadFile] = useState<File | null>(null);
+  const [wizardUploadDocType, setWizardUploadDocType] = useState("id_document");
+  const [wizardUploadedFiles, setWizardUploadedFiles] = useState<{ name: string; docType: string }[]>([]);
   const [createRegLine1, setCreateRegLine1] = useState("");
   const [createRegCity, setCreateRegCity] = useState("");
   const [createRegState, setCreateRegState] = useState("Lagos");
@@ -308,11 +319,18 @@ export default function AdminApplications() {
     setCreateCompanyName3("");
     setCreateBusinessDesc("");
     setCreateDirectors([]);
+    setNewDirPersonType("individual");
     setNewDirName("");
     setNewDirEmail("");
     setNewDirRole("director_and_shareholder");
     setNewDirShares("");
     setNewDirShareClass("ordinary");
+    setNewDirCorporateName("");
+    setNewDirCorporateRcNumber("");
+    setNewDirCorporateCountry("Nigeria");
+    setWizardUploadFile(null);
+    setWizardUploadDocType("id_document");
+    setWizardUploadedFiles([]);
     setCreateRegLine1("");
     setCreateRegCity("");
     setCreateRegState("Lagos");
@@ -358,6 +376,38 @@ export default function AdminApplications() {
     },
     onError: (e: Error) => {
       toast({ title: "Failed to send payment link", description: e.message, variant: "destructive" });
+    },
+  });
+
+  // Wizard document upload mutation (step 6)
+  const wizardUploadMutation = useMutation({
+    mutationFn: async ({ file, docType }: { file: File; docType: string }) => {
+      const csrf = await getCsrfToken();
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("docType", docType);
+      formData.append("category", "company");
+      const res = await fetch(`/api/admin/applications/${createdAppId}/documents/upload`, {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrf },
+        credentials: "include",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as any).message || "Upload failed");
+      }
+      return res.json();
+    },
+    onSuccess: (_, vars) => {
+      setWizardUploadedFiles((prev) => [...prev, { name: vars.file.name, docType: vars.docType }]);
+      setWizardUploadFile(null);
+      setWizardUploadDocType("id_document");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/applications", createdAppId] });
+      toast({ title: "Document uploaded" });
+    },
+    onError: (e: Error) => {
+      toast({ title: "Upload failed", description: e.message, variant: "destructive" });
     },
   });
 
@@ -1645,15 +1695,20 @@ export default function AdminApplications() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {createWizardStep <= 5 ? `Create Application for Founder — Step ${createWizardStep} of 5` : "Application Created"}
+              {createWizardStep <= 5
+                ? `Create Application for Founder — Step ${createWizardStep} of 5`
+                : createWizardStep === 6
+                  ? "Upload Supporting Documents (Optional)"
+                  : "Application Created"}
             </DialogTitle>
             <DialogDescription>
               {createWizardStep === 1 && "Select the founder and company type."}
               {createWizardStep === 2 && "Enter the company name choices for CAC availability checking."}
               {createWizardStep === 3 && "Describe the company's business activities."}
-              {createWizardStep === 4 && "Add at least one director or shareholder to the application."}
-              {createWizardStep === 5 && "Provide the registered and operating addresses."}
-              {createWizardStep === 6 && "The application has been set up. Send the founder a payment link to complete checkout."}
+              {createWizardStep === 4 && "Add at least one director. Shareholders who are not directors can also be added."}
+              {createWizardStep === 5 && "Provide the registered and operating addresses, then create the application."}
+              {createWizardStep === 6 && "Upload any initial documents to the application's file store. You can skip this and upload later."}
+              {createWizardStep === 7 && "The application has been set up. Send the founder a payment link to complete checkout."}
             </DialogDescription>
           </DialogHeader>
 
@@ -1758,135 +1813,160 @@ export default function AdminApplications() {
           )}
 
           {/* ── Step 4: Directors & Shareholders ── */}
-          {createWizardStep === 4 && (
-            <div className="space-y-4 py-2">
-              {createDirectors.length > 0 && (
-                <div className="space-y-2">
-                  {createDirectors.map((d) => (
-                    <div key={d.localId} className="flex items-start justify-between gap-3 rounded-lg border p-3">
-                      <div className="min-w-0">
-                        <p className="font-medium text-sm">{d.fullName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {d.email || "no email"} &bull; {d.role.replace(/_/g, " ")}
-                          {d.sharesAllocated ? ` · ${parseInt(d.sharesAllocated).toLocaleString()} shares (${d.shareClass})` : ""}
-                        </p>
+          {createWizardStep === 4 && (() => {
+            const hasDirector = createDirectors.some((d) => d.role === "director" || d.role === "director_and_shareholder");
+            return (
+              <div className="space-y-4 py-2">
+                {createDirectors.length > 0 && (
+                  <div className="space-y-2">
+                    {createDirectors.map((d) => (
+                      <div key={d.localId} className="flex items-start justify-between gap-3 rounded-lg border p-3">
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm">
+                            {d.personType === "corporate" ? d.corporateName : d.fullName}
+                            {d.personType === "corporate" && (
+                              <span className="ml-1.5 text-xs bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 rounded px-1.5 py-0.5">Corporate</span>
+                            )}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {d.personType === "corporate"
+                              ? `Rep: ${d.fullName} · RC: ${d.corporateRcNumber || "—"} · ${d.corporateCountry}`
+                              : (d.email || "no email")}
+                            {" · "}{d.role.replace(/_/g, " ")}
+                            {d.sharesAllocated ? ` · ${parseInt(d.sharesAllocated).toLocaleString()} shares (${d.shareClass})` : ""}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost" size="sm"
+                          className="h-7 w-7 p-0 text-destructive hover:text-destructive shrink-0"
+                          onClick={() => setCreateDirectors((prev) => prev.filter((x) => x.localId !== d.localId))}
+                          data-testid={`button-remove-director-${d.localId}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0 text-destructive hover:text-destructive shrink-0"
-                        onClick={() => setCreateDirectors((prev) => prev.filter((x) => x.localId !== d.localId))}
-                        data-testid={`button-remove-director-${d.localId}`}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add person form */}
+                <div className="rounded-lg border p-4 space-y-3 bg-muted/20">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">Add Person</p>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant={newDirPersonType === "individual" ? "default" : "outline"} className="h-7 text-xs"
+                        onClick={() => setNewDirPersonType("individual")} data-testid="button-person-type-individual">Individual</Button>
+                      <Button size="sm" variant={newDirPersonType === "corporate" ? "default" : "outline"} className="h-7 text-xs"
+                        onClick={() => setNewDirPersonType("corporate")} data-testid="button-person-type-corporate">Corporate Entity</Button>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
 
-              {/* Add director form */}
-              <div className="rounded-lg border p-4 space-y-3 bg-muted/20">
-                <p className="text-sm font-medium">Add Person</p>
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Full Name <span className="text-destructive">*</span></Label>
-                    <Input
-                      value={newDirName}
-                      onChange={(e) => setNewDirName(e.target.value)}
-                      placeholder="Full legal name"
-                      className="h-8 text-sm"
-                      data-testid="input-new-director-name"
-                    />
+                  {newDirPersonType === "individual" ? (
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Full Name <span className="text-destructive">*</span></Label>
+                        <Input value={newDirName} onChange={(e) => setNewDirName(e.target.value)} placeholder="Full legal name" className="h-8 text-sm" data-testid="input-new-director-name" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Email <span className="text-muted-foreground">(optional)</span></Label>
+                        <Input value={newDirEmail} onChange={(e) => setNewDirEmail(e.target.value)} placeholder="email@example.com" type="email" className="h-8 text-sm" data-testid="input-new-director-email" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Company Name <span className="text-destructive">*</span></Label>
+                          <Input value={newDirCorporateName} onChange={(e) => setNewDirCorporateName(e.target.value)} placeholder="Registered company name" className="h-8 text-sm" data-testid="input-new-corporate-name" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">RC / BN Number</Label>
+                          <Input value={newDirCorporateRcNumber} onChange={(e) => setNewDirCorporateRcNumber(e.target.value)} placeholder="e.g. RC123456" className="h-8 text-sm" data-testid="input-new-corporate-rcnumber" />
+                        </div>
+                      </div>
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Country of Incorporation</Label>
+                          <Input value={newDirCorporateCountry} onChange={(e) => setNewDirCorporateCountry(e.target.value)} placeholder="Nigeria" className="h-8 text-sm" data-testid="input-new-corporate-country" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Authorised Rep Name <span className="text-destructive">*</span></Label>
+                          <Input value={newDirName} onChange={(e) => setNewDirName(e.target.value)} placeholder="Rep's full name" className="h-8 text-sm" data-testid="input-new-corporate-rep-name" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Role</Label>
+                      <Select value={newDirRole} onValueChange={setNewDirRole}>
+                        <SelectTrigger className="h-8 text-sm" data-testid="select-new-director-role"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="director">Director only</SelectItem>
+                          <SelectItem value="shareholder">Shareholder only</SelectItem>
+                          <SelectItem value="director_and_shareholder">Director &amp; Shareholder</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Shares Allocated</Label>
+                      <Input value={newDirShares} onChange={(e) => setNewDirShares(e.target.value)} placeholder="e.g. 500000" type="number" className="h-8 text-sm" data-testid="input-new-director-shares" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Share Class</Label>
+                      <Select value={newDirShareClass} onValueChange={setNewDirShareClass}>
+                        <SelectTrigger className="h-8 text-sm" data-testid="select-new-director-share-class"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ordinary">Ordinary</SelectItem>
+                          <SelectItem value="preference">Preference</SelectItem>
+                          <SelectItem value="deferred">Deferred</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Email <span className="text-muted-foreground">(optional)</span></Label>
-                    <Input
-                      value={newDirEmail}
-                      onChange={(e) => setNewDirEmail(e.target.value)}
-                      placeholder="email@example.com"
-                      type="email"
-                      className="h-8 text-sm"
-                      data-testid="input-new-director-email"
-                    />
-                  </div>
+
+                  <Button
+                    size="sm" variant="secondary" className="w-full"
+                    onClick={() => {
+                      const validIndividual = newDirPersonType === "individual" && newDirName.trim();
+                      const validCorporate = newDirPersonType === "corporate" && newDirCorporateName.trim() && newDirName.trim();
+                      if (!validIndividual && !validCorporate) return;
+                      setCreateDirectors((prev) => [
+                        ...prev,
+                        {
+                          localId: Math.random().toString(36).slice(2),
+                          personType: newDirPersonType,
+                          fullName: newDirName.trim(),
+                          email: newDirEmail.trim(),
+                          role: newDirRole,
+                          sharesAllocated: newDirShares,
+                          shareClass: newDirShareClass,
+                          sharePercentage: "",
+                          corporateName: newDirCorporateName.trim(),
+                          corporateRcNumber: newDirCorporateRcNumber.trim(),
+                          corporateCountry: newDirCorporateCountry.trim() || "Nigeria",
+                        },
+                      ]);
+                      setNewDirName(""); setNewDirEmail(""); setNewDirShares("");
+                      setNewDirRole("director_and_shareholder"); setNewDirShareClass("ordinary");
+                      setNewDirCorporateName(""); setNewDirCorporateRcNumber(""); setNewDirCorporateCountry("Nigeria");
+                    }}
+                    disabled={newDirPersonType === "individual" ? !newDirName.trim() : (!newDirCorporateName.trim() || !newDirName.trim())}
+                    data-testid="button-add-director"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1.5" />Add to Application
+                  </Button>
                 </div>
-                <div className="grid sm:grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Role</Label>
-                    <Select value={newDirRole} onValueChange={setNewDirRole}>
-                      <SelectTrigger className="h-8 text-sm" data-testid="select-new-director-role">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="director">Director only</SelectItem>
-                        <SelectItem value="shareholder">Shareholder only</SelectItem>
-                        <SelectItem value="director_and_shareholder">Director &amp; Shareholder</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Shares Allocated</Label>
-                    <Input
-                      value={newDirShares}
-                      onChange={(e) => setNewDirShares(e.target.value)}
-                      placeholder="e.g. 500000"
-                      type="number"
-                      className="h-8 text-sm"
-                      data-testid="input-new-director-shares"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Share Class</Label>
-                    <Select value={newDirShareClass} onValueChange={setNewDirShareClass}>
-                      <SelectTrigger className="h-8 text-sm" data-testid="select-new-director-share-class">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ordinary">Ordinary</SelectItem>
-                        <SelectItem value="preference">Preference</SelectItem>
-                        <SelectItem value="deferred">Deferred</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => {
-                    if (!newDirName.trim()) return;
-                    setCreateDirectors((prev) => [
-                      ...prev,
-                      {
-                        localId: Math.random().toString(36).slice(2),
-                        fullName: newDirName.trim(),
-                        email: newDirEmail.trim(),
-                        role: newDirRole,
-                        sharesAllocated: newDirShares,
-                        shareClass: newDirShareClass,
-                        sharePercentage: "",
-                      },
-                    ]);
-                    setNewDirName("");
-                    setNewDirEmail("");
-                    setNewDirShares("");
-                    setNewDirRole("director_and_shareholder");
-                    setNewDirShareClass("ordinary");
-                  }}
-                  disabled={!newDirName.trim()}
-                  data-testid="button-add-director"
-                >
-                  <Plus className="h-3.5 w-3.5 mr-1.5" />
-                  Add to Application
-                </Button>
+
+                {!hasDirector && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    At least one person with a director role is required to proceed.
+                  </p>
+                )}
               </div>
-
-              {createDirectors.length === 0 && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">At least one director or shareholder is required to proceed.</p>
-              )}
-            </div>
-          )}
+            );
+          })()}
 
           {/* ── Step 5: Addresses ── */}
           {createWizardStep === 5 && (
@@ -1965,8 +2045,62 @@ export default function AdminApplications() {
             </div>
           )}
 
-          {/* ── Step 6: Done ── */}
+          {/* ── Step 6: Optional document upload ── */}
           {createWizardStep === 6 && createdAppId && (
+            <div className="space-y-4 py-2">
+              {wizardUploadedFiles.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Uploaded</p>
+                  {wizardUploadedFiles.map((f, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm rounded border px-3 py-2">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                      <span className="truncate">{f.name}</span>
+                      <span className="text-xs text-muted-foreground shrink-0">({f.docType.replace(/_/g, " ")})</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="rounded-lg border p-4 space-y-3 bg-muted/20">
+                <p className="text-sm font-medium">Upload a Document</p>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Document Type</Label>
+                  <Select value={wizardUploadDocType} onValueChange={setWizardUploadDocType}>
+                    <SelectTrigger className="h-8 text-sm" data-testid="select-wizard-upload-doctype"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="id_document">ID Document</SelectItem>
+                      <SelectItem value="passport">Passport</SelectItem>
+                      <SelectItem value="utility_bill">Utility Bill</SelectItem>
+                      <SelectItem value="cac_form">CAC Form</SelectItem>
+                      <SelectItem value="memorandum">Memorandum &amp; Articles</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">File</Label>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={(e) => setWizardUploadFile(e.target.files?.[0] ?? null)}
+                    className="block w-full text-sm text-muted-foreground file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-muted file:text-foreground hover:file:bg-muted/80"
+                    data-testid="input-wizard-upload-file"
+                  />
+                </div>
+                <Button
+                  size="sm" className="w-full"
+                  onClick={() => { if (wizardUploadFile) wizardUploadMutation.mutate({ file: wizardUploadFile, docType: wizardUploadDocType }); }}
+                  disabled={!wizardUploadFile || wizardUploadMutation.isPending}
+                  data-testid="button-wizard-upload"
+                >
+                  {wizardUploadMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+                  Upload Document
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 7: Done ── */}
+          {createWizardStep === 7 && createdAppId && (
             <div className="py-4 space-y-4">
               <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30 p-4 flex items-start gap-3">
                 <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
@@ -1979,35 +2113,29 @@ export default function AdminApplications() {
               </div>
               <div className="rounded-lg border p-4 space-y-3">
                 <p className="text-sm font-medium">Send Payment Link</p>
-                <p className="text-xs text-muted-foreground">
-                  Email the founder a direct link to complete payment for application #{createdAppId}.
-                </p>
+                <p className="text-xs text-muted-foreground">Email the founder a direct link to complete payment for application #{createdAppId}.</p>
                 <Button
                   className="w-full"
                   onClick={() => sendPaymentLinkMutation.mutate(createdAppId!)}
                   disabled={sendPaymentLinkMutation.isPending}
                   data-testid="button-send-payment-link-wizard"
                 >
-                  {sendPaymentLinkMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4 mr-2" />
-                  )}
+                  {sendPaymentLinkMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
                   Send Payment Link to Founder
                 </Button>
               </div>
               <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
-                You can also send a payment link later from the application detail page.
+                You can also send a payment link at any time from the application detail page.
               </div>
             </div>
           )}
 
           <DialogFooter className="gap-2 flex-row-reverse sm:flex-row">
+            {/* Back (steps 2–5 only, before creation) */}
             {createWizardStep > 1 && createWizardStep <= 5 && (
-              <Button variant="outline" onClick={() => setCreateWizardStep((s) => s - 1)} data-testid="button-wizard-back">
-                Back
-              </Button>
+              <Button variant="outline" onClick={() => setCreateWizardStep((s) => s - 1)} data-testid="button-wizard-back">Back</Button>
             )}
+            {/* Next (steps 1–4) */}
             {createWizardStep < 5 && (
               <Button
                 onClick={() => setCreateWizardStep((s) => s + 1)}
@@ -2015,13 +2143,12 @@ export default function AdminApplications() {
                   (createWizardStep === 1 && !createFounderUserId) ||
                   (createWizardStep === 2 && !createCompanyName1.trim()) ||
                   (createWizardStep === 3 && createBusinessDesc.trim().length < 10) ||
-                  (createWizardStep === 4 && createDirectors.length === 0)
+                  (createWizardStep === 4 && !createDirectors.some((d) => d.role === "director" || d.role === "director_and_shareholder"))
                 }
                 data-testid="button-wizard-next"
-              >
-                Next
-              </Button>
+              >Next</Button>
             )}
+            {/* Create Application (step 5) */}
             {createWizardStep === 5 && (
               <Button
                 onClick={() => {
@@ -2041,34 +2168,41 @@ export default function AdminApplications() {
                         ? { line1: createRegLine1.trim(), city: createRegCity.trim(), state: createRegState, country: "Nigeria" }
                         : undefined,
                     people: createDirectors.map((d) => ({
-                      fullName: d.fullName,
+                      entityType: d.personType,
+                      fullName: d.personType === "individual" ? d.fullName : undefined,
+                      corporateName: d.personType === "corporate" ? d.corporateName : undefined,
+                      corporateRcNumber: d.personType === "corporate" ? d.corporateRcNumber : undefined,
+                      corporateCountry: d.personType === "corporate" ? d.corporateCountry : undefined,
+                      authorisedRepName: d.personType === "corporate" ? d.fullName : undefined,
                       email: d.email || undefined,
                       role: d.role,
                       sharesAllocated: d.sharesAllocated ? parseInt(d.sharesAllocated) : undefined,
                       shareClass: d.shareClass || undefined,
-                      sharePercentage: d.sharePercentage || undefined,
                     })),
                   });
                 }}
                 disabled={createAppMutation.isPending}
                 data-testid="button-wizard-create"
               >
-                {createAppMutation.isPending ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Creating…</>
-                ) : (
-                  <><Plus className="h-4 w-4 mr-2" />Create Application</>
-                )}
+                {createAppMutation.isPending
+                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Creating…</>
+                  : <><Plus className="h-4 w-4 mr-2" />Create Application</>}
               </Button>
             )}
+            {/* Skip / Finish uploads (step 6) */}
             {createWizardStep === 6 && (
-              <Button variant="outline" onClick={() => { resetCreateWizard(); setCreateAppOpen(false); }} data-testid="button-wizard-close">
-                Close
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => setCreateWizardStep(7)} data-testid="button-wizard-skip-uploads">Skip</Button>
+                <Button onClick={() => setCreateWizardStep(7)} disabled={wizardUploadMutation.isPending} data-testid="button-wizard-finish-uploads">Finish</Button>
+              </>
             )}
+            {/* Close (step 7 — done) */}
+            {createWizardStep === 7 && (
+              <Button variant="outline" onClick={() => { resetCreateWizard(); setCreateAppOpen(false); }} data-testid="button-wizard-close">Close</Button>
+            )}
+            {/* Cancel (pre-creation only) */}
             {createWizardStep <= 5 && (
-              <Button variant="ghost" onClick={() => { resetCreateWizard(); setCreateAppOpen(false); }} className="text-muted-foreground" data-testid="button-wizard-cancel">
-                Cancel
-              </Button>
+              <Button variant="ghost" onClick={() => { resetCreateWizard(); setCreateAppOpen(false); }} className="text-muted-foreground" data-testid="button-wizard-cancel">Cancel</Button>
             )}
           </DialogFooter>
         </DialogContent>

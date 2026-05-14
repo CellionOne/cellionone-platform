@@ -10427,18 +10427,26 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       // Insert company_people rows for each director/shareholder provided
       if (people && people.length > 0) {
+        const hasDirector = people.some((p: any) => p.role === "director" || p.role === "director_and_shareholder");
+        if (!hasDirector) {
+          return res.status(400).json({ message: "At least one person with a director role is required." });
+        }
         for (const person of people) {
+          const isCorporate = person.entityType === "corporate";
           await db.insert(companyPeople).values({
             applicationId: application.id,
             founderId: founderUserId,
             inviteEmail: person.email || null,
             inviteStatus: "pending",
             role: person.role || "director",
-            fullName: person.fullName,
+            fullName: isCorporate ? (person.authorisedRepName || null) : (person.fullName || null),
             sharesAllocated: person.sharesAllocated || null,
             shareClass: person.shareClass || "ordinary",
             sharePercentage: person.sharePercentage || null,
-            entityType: "individual",
+            entityType: isCorporate ? "corporate" : "individual",
+            corporateName: isCorporate ? (person.corporateName || null) : null,
+            corporateRcNumber: isCorporate ? (person.corporateRcNumber || null) : null,
+            corporateCountry: isCorporate ? (person.corporateCountry || null) : null,
           });
         }
       }

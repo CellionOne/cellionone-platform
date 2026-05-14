@@ -45,6 +45,7 @@ import {
   MailCheck,
   CreditCard,
   PackageCheck,
+  Send,
 } from "lucide-react";
 
 interface AdminAppDetail {
@@ -977,6 +978,12 @@ export default function AdminApplicationDetail() {
     onError: (err: any) => toast({ title: err?.message || "Failed to resend link", variant: "destructive" }),
   });
 
+  const sendPaymentLinkMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/admin/applications/${applicationId}/send-payment-link`, {}),
+    onSuccess: () => toast({ title: "Payment link sent", description: "The founder has been emailed a checkout link." }),
+    onError: (err: any) => toast({ title: err?.message || "Failed to send payment link", variant: "destructive" }),
+  });
+
   if (isLoading) {
     return (
       <DashboardLayout>
@@ -1057,7 +1064,25 @@ export default function AdminApplicationDetail() {
               </p>
             </div>
           </div>
-          <StatusBadge status={application.status || "draft"} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <StatusBadge status={application.status || "draft"} />
+            {application.paymentState === "unpaid" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => sendPaymentLinkMutation.mutate()}
+                disabled={sendPaymentLinkMutation.isPending}
+                data-testid="button-send-payment-link-detail"
+              >
+                {sendPaymentLinkMutation.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                Send Payment Link
+              </Button>
+            )}
+          </div>
         </div>
 
         <Tabs defaultValue="overview">

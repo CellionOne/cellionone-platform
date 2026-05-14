@@ -36,6 +36,7 @@ import {
   MailCheck,
   Plus,
   Upload,
+  Trash2,
 } from "lucide-react";
 import {
   Dialog,
@@ -50,6 +51,24 @@ import { Separator } from "@/components/ui/separator";
 import type { CompanyApplication, LawyerProfile, PayoutLedger } from "@shared/schema";
 
 interface BankPartnerBasic { id: number; name: string; }
+
+interface WizardDirector {
+  localId: string;
+  fullName: string;
+  email: string;
+  role: string;
+  sharesAllocated: string;
+  shareClass: string;
+  sharePercentage: string;
+}
+
+const NIGERIAN_STATES = [
+  "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue", "Borno",
+  "Cross River", "Delta", "Ebonyi", "Edo", "Ekiti", "Enugu", "FCT", "Gombe", "Imo",
+  "Jigawa", "Kaduna", "Kano", "Katsina", "Kebbi", "Kogi", "Kwara", "Lagos", "Nasarawa",
+  "Niger", "Ogun", "Ondo", "Osun", "Oyo", "Plateau", "Rivers", "Sokoto", "Taraba",
+  "Yobe", "Zamfara",
+];
 
 interface ApplicationWithLawyer extends CompanyApplication {
   lawyerName?: string;
@@ -133,13 +152,29 @@ export default function AdminApplications() {
   const [payoutsExpanded, setPayoutsExpanded] = useState(false);
   const [lawyerFeeNaira, setLawyerFeeNaira] = useState<string>("");
 
-  // Create Application for Founder dialog state
+  // Create Application for Founder wizard state
   const [createAppOpen, setCreateAppOpen] = useState(false);
+  const [createWizardStep, setCreateWizardStep] = useState(1);
+  const [createdAppId, setCreatedAppId] = useState<number | null>(null);
   const [createFounderUserId, setCreateFounderUserId] = useState("");
   const [createCompanyType, setCreateCompanyType] = useState("LTD");
   const [createCompanyName1, setCreateCompanyName1] = useState("");
   const [createCompanyName2, setCreateCompanyName2] = useState("");
   const [createCompanyName3, setCreateCompanyName3] = useState("");
+  const [createBusinessDesc, setCreateBusinessDesc] = useState("");
+  const [createDirectors, setCreateDirectors] = useState<WizardDirector[]>([]);
+  const [newDirName, setNewDirName] = useState("");
+  const [newDirEmail, setNewDirEmail] = useState("");
+  const [newDirRole, setNewDirRole] = useState("director_and_shareholder");
+  const [newDirShares, setNewDirShares] = useState("");
+  const [newDirShareClass, setNewDirShareClass] = useState("ordinary");
+  const [createRegLine1, setCreateRegLine1] = useState("");
+  const [createRegCity, setCreateRegCity] = useState("");
+  const [createRegState, setCreateRegState] = useState("Lagos");
+  const [createSameAddress, setCreateSameAddress] = useState(true);
+  const [createOpsLine1, setCreateOpsLine1] = useState("");
+  const [createOpsCity, setCreateOpsCity] = useState("");
+  const [createOpsState, setCreateOpsState] = useState("Lagos");
 
   // Upload Document for Application dialog state
   const [uploadDocOpen, setUploadDocOpen] = useState(false);
@@ -262,9 +297,34 @@ export default function AdminApplications() {
     enabled: uploadDocOpen && !!uploadDocApp?.id,
   });
 
+  // Reset all wizard state
+  function resetCreateWizard() {
+    setCreateWizardStep(1);
+    setCreatedAppId(null);
+    setCreateFounderUserId("");
+    setCreateCompanyType("LTD");
+    setCreateCompanyName1("");
+    setCreateCompanyName2("");
+    setCreateCompanyName3("");
+    setCreateBusinessDesc("");
+    setCreateDirectors([]);
+    setNewDirName("");
+    setNewDirEmail("");
+    setNewDirRole("director_and_shareholder");
+    setNewDirShares("");
+    setNewDirShareClass("ordinary");
+    setCreateRegLine1("");
+    setCreateRegCity("");
+    setCreateRegState("Lagos");
+    setCreateSameAddress(true);
+    setCreateOpsLine1("");
+    setCreateOpsCity("");
+    setCreateOpsState("Lagos");
+  }
+
   // Create Application for Founder mutation
   const createAppMutation = useMutation({
-    mutationFn: async (data: { founderUserId: string; companyType: string; companyName1: string; companyName2?: string; companyName3?: string }) => {
+    mutationFn: async (data: Record<string, any>) => {
       const res = await apiRequest("POST", "/api/admin/applications/create-for-founder", data);
       if (!res.ok) {
         const err = await res.json();
@@ -272,18 +332,32 @@ export default function AdminApplications() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/applications"] });
-      setCreateAppOpen(false);
-      setCreateFounderUserId("");
-      setCreateCompanyName1("");
-      setCreateCompanyName2("");
-      setCreateCompanyName3("");
-      setCreateCompanyType("LTD");
+      setCreatedAppId(data.id);
+      setCreateWizardStep(6);
       toast({ title: "Application created", description: "The founder has been notified by email." });
     },
     onError: (e: Error) => {
       toast({ title: "Failed to create application", description: e.message, variant: "destructive" });
+    },
+  });
+
+  // Send payment link mutation
+  const sendPaymentLinkMutation = useMutation({
+    mutationFn: async (appId: number) => {
+      const res = await apiRequest("POST", `/api/admin/applications/${appId}/send-payment-link`, {});
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Failed to send payment link");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Payment link sent", description: "The founder has been emailed a checkout link." });
+    },
+    onError: (e: Error) => {
+      toast({ title: "Failed to send payment link", description: e.message, variant: "destructive" });
     },
   });
 
@@ -1566,102 +1640,436 @@ export default function AdminApplications() {
         </DialogContent>
       </Dialog>
 
-      {/* Create Application for Founder Dialog */}
-      <Dialog open={createAppOpen} onOpenChange={(open) => { setCreateAppOpen(open); }}>
-        <DialogContent className="max-w-lg">
+      {/* ── Create Application for Founder — Multi-Step Wizard ── */}
+      <Dialog open={createAppOpen} onOpenChange={(open) => { if (!open) resetCreateWizard(); setCreateAppOpen(open); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create Application for Founder</DialogTitle>
+            <DialogTitle>
+              {createWizardStep <= 5 ? `Create Application for Founder — Step ${createWizardStep} of 5` : "Application Created"}
+            </DialogTitle>
             <DialogDescription>
-              Create a new incorporation application on behalf of a platform founder. They will be notified by email.
+              {createWizardStep === 1 && "Select the founder and company type."}
+              {createWizardStep === 2 && "Enter the company name choices for CAC availability checking."}
+              {createWizardStep === 3 && "Describe the company's business activities."}
+              {createWizardStep === 4 && "Add at least one director or shareholder to the application."}
+              {createWizardStep === 5 && "Provide the registered and operating addresses."}
+              {createWizardStep === 6 && "The application has been set up. Send the founder a payment link to complete checkout."}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="create-founder-select">Founder <span className="text-destructive">*</span></Label>
-              <Select value={createFounderUserId} onValueChange={setCreateFounderUserId}>
-                <SelectTrigger data-testid="select-create-founder">
-                  <SelectValue placeholder="Select a user…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allUsers.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.firstName && u.lastName ? `${u.firstName} ${u.lastName} — ` : ""}{u.email}
-                    </SelectItem>
+
+          {/* Step progress bar */}
+          {createWizardStep <= 5 && (
+            <div className="flex gap-1 my-1">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <div
+                  key={s}
+                  className={`h-1.5 flex-1 rounded-full transition-colors ${s <= createWizardStep ? "bg-primary" : "bg-muted"}`}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* ── Step 1: Founder + Company Type ── */}
+          {createWizardStep === 1 && (
+            <div className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <Label>Founder <span className="text-destructive">*</span></Label>
+                <Select value={createFounderUserId} onValueChange={setCreateFounderUserId}>
+                  <SelectTrigger data-testid="select-create-founder">
+                    <SelectValue placeholder="Select a user…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.firstName && u.lastName ? `${u.firstName} ${u.lastName} — ` : ""}{u.email}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Company Type <span className="text-destructive">*</span></Label>
+                <Select value={createCompanyType} onValueChange={setCreateCompanyType}>
+                  <SelectTrigger data-testid="select-create-company-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="LTD">Private Limited (LTD)</SelectItem>
+                    <SelectItem value="PLC">Public Limited (PLC)</SelectItem>
+                    <SelectItem value="LLP">Limited Liability Partnership (LLP)</SelectItem>
+                    <SelectItem value="BN">Business Name (BN)</SelectItem>
+                    <SelectItem value="NGO">Non-Governmental Organisation (NGO)</SelectItem>
+                    <SelectItem value="UNLIMITED">Unlimited Company</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 2: Company Names ── */}
+          {createWizardStep === 2 && (
+            <div className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <Label>Preferred Name <span className="text-destructive">*</span></Label>
+                <Input
+                  value={createCompanyName1}
+                  onChange={(e) => setCreateCompanyName1(e.target.value)}
+                  placeholder="First choice company name"
+                  data-testid="input-create-name1"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Second Choice <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                <Input
+                  value={createCompanyName2}
+                  onChange={(e) => setCreateCompanyName2(e.target.value)}
+                  placeholder="Alternative name"
+                  data-testid="input-create-name2"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Third Choice <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                <Input
+                  value={createCompanyName3}
+                  onChange={(e) => setCreateCompanyName3(e.target.value)}
+                  placeholder="Third alternative name"
+                  data-testid="input-create-name3"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Names will be submitted for CAC availability checking after payment.</p>
+            </div>
+          )}
+
+          {/* ── Step 3: Business Description ── */}
+          {createWizardStep === 3 && (
+            <div className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <Label>Business Description <span className="text-destructive">*</span></Label>
+                <Textarea
+                  value={createBusinessDesc}
+                  onChange={(e) => setCreateBusinessDesc(e.target.value)}
+                  placeholder="Describe what the company does, its main activities and sector…"
+                  rows={6}
+                  data-testid="textarea-create-business-desc"
+                />
+                <p className="text-xs text-muted-foreground">{createBusinessDesc.length} characters — aim for at least 50.</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 4: Directors & Shareholders ── */}
+          {createWizardStep === 4 && (
+            <div className="space-y-4 py-2">
+              {createDirectors.length > 0 && (
+                <div className="space-y-2">
+                  {createDirectors.map((d) => (
+                    <div key={d.localId} className="flex items-start justify-between gap-3 rounded-lg border p-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm">{d.fullName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {d.email || "no email"} &bull; {d.role.replace(/_/g, " ")}
+                          {d.sharesAllocated ? ` · ${parseInt(d.sharesAllocated).toLocaleString()} shares (${d.shareClass})` : ""}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-destructive hover:text-destructive shrink-0"
+                        onClick={() => setCreateDirectors((prev) => prev.filter((x) => x.localId !== d.localId))}
+                        data-testid={`button-remove-director-${d.localId}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   ))}
-                </SelectContent>
-              </Select>
+                </div>
+              )}
+
+              {/* Add director form */}
+              <div className="rounded-lg border p-4 space-y-3 bg-muted/20">
+                <p className="text-sm font-medium">Add Person</p>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Full Name <span className="text-destructive">*</span></Label>
+                    <Input
+                      value={newDirName}
+                      onChange={(e) => setNewDirName(e.target.value)}
+                      placeholder="Full legal name"
+                      className="h-8 text-sm"
+                      data-testid="input-new-director-name"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Email <span className="text-muted-foreground">(optional)</span></Label>
+                    <Input
+                      value={newDirEmail}
+                      onChange={(e) => setNewDirEmail(e.target.value)}
+                      placeholder="email@example.com"
+                      type="email"
+                      className="h-8 text-sm"
+                      data-testid="input-new-director-email"
+                    />
+                  </div>
+                </div>
+                <div className="grid sm:grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Role</Label>
+                    <Select value={newDirRole} onValueChange={setNewDirRole}>
+                      <SelectTrigger className="h-8 text-sm" data-testid="select-new-director-role">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="director">Director only</SelectItem>
+                        <SelectItem value="shareholder">Shareholder only</SelectItem>
+                        <SelectItem value="director_and_shareholder">Director &amp; Shareholder</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Shares Allocated</Label>
+                    <Input
+                      value={newDirShares}
+                      onChange={(e) => setNewDirShares(e.target.value)}
+                      placeholder="e.g. 500000"
+                      type="number"
+                      className="h-8 text-sm"
+                      data-testid="input-new-director-shares"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Share Class</Label>
+                    <Select value={newDirShareClass} onValueChange={setNewDirShareClass}>
+                      <SelectTrigger className="h-8 text-sm" data-testid="select-new-director-share-class">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ordinary">Ordinary</SelectItem>
+                        <SelectItem value="preference">Preference</SelectItem>
+                        <SelectItem value="deferred">Deferred</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    if (!newDirName.trim()) return;
+                    setCreateDirectors((prev) => [
+                      ...prev,
+                      {
+                        localId: Math.random().toString(36).slice(2),
+                        fullName: newDirName.trim(),
+                        email: newDirEmail.trim(),
+                        role: newDirRole,
+                        sharesAllocated: newDirShares,
+                        shareClass: newDirShareClass,
+                        sharePercentage: "",
+                      },
+                    ]);
+                    setNewDirName("");
+                    setNewDirEmail("");
+                    setNewDirShares("");
+                    setNewDirRole("director_and_shareholder");
+                    setNewDirShareClass("ordinary");
+                  }}
+                  disabled={!newDirName.trim()}
+                  data-testid="button-add-director"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1.5" />
+                  Add to Application
+                </Button>
+              </div>
+
+              {createDirectors.length === 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">At least one director or shareholder is required to proceed.</p>
+              )}
             </div>
-            <div className="space-y-1.5">
-              <Label>Company Type <span className="text-destructive">*</span></Label>
-              <Select value={createCompanyType} onValueChange={setCreateCompanyType}>
-                <SelectTrigger data-testid="select-create-company-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="LTD">Private Limited (LTD)</SelectItem>
-                  <SelectItem value="PLC">Public Limited (PLC)</SelectItem>
-                  <SelectItem value="LLP">Limited Liability Partnership (LLP)</SelectItem>
-                  <SelectItem value="BN">Business Name (BN)</SelectItem>
-                  <SelectItem value="NGO">Non-Governmental Organisation (NGO)</SelectItem>
-                  <SelectItem value="UNLIMITED">Unlimited Company</SelectItem>
-                </SelectContent>
-              </Select>
+          )}
+
+          {/* ── Step 5: Addresses ── */}
+          {createWizardStep === 5 && (
+            <div className="space-y-4 py-2">
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Registered Address</p>
+                <Input
+                  value={createRegLine1}
+                  onChange={(e) => setCreateRegLine1(e.target.value)}
+                  placeholder="Street address"
+                  data-testid="input-create-reg-line1"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    value={createRegCity}
+                    onChange={(e) => setCreateRegCity(e.target.value)}
+                    placeholder="City"
+                    data-testid="input-create-reg-city"
+                  />
+                  <Select value={createRegState} onValueChange={setCreateRegState}>
+                    <SelectTrigger data-testid="select-create-reg-state">
+                      <SelectValue placeholder="State" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {NIGERIAN_STATES.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="same-address"
+                  checked={createSameAddress}
+                  onChange={(e) => setCreateSameAddress(e.target.checked)}
+                  className="h-4 w-4 rounded border-input accent-primary"
+                  data-testid="checkbox-same-address"
+                />
+                <label htmlFor="same-address" className="text-sm cursor-pointer select-none">
+                  Operating address same as registered address
+                </label>
+              </div>
+
+              {!createSameAddress && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium">Operating Address</p>
+                  <Input
+                    value={createOpsLine1}
+                    onChange={(e) => setCreateOpsLine1(e.target.value)}
+                    placeholder="Street address"
+                    data-testid="input-create-ops-line1"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      value={createOpsCity}
+                      onChange={(e) => setCreateOpsCity(e.target.value)}
+                      placeholder="City"
+                      data-testid="input-create-ops-city"
+                    />
+                    <Select value={createOpsState} onValueChange={setCreateOpsState}>
+                      <SelectTrigger data-testid="select-create-ops-state">
+                        <SelectValue placeholder="State" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {NIGERIAN_STATES.map((s) => (
+                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="create-name1">Preferred Company Name <span className="text-destructive">*</span></Label>
-              <Input
-                id="create-name1"
-                value={createCompanyName1}
-                onChange={(e) => setCreateCompanyName1(e.target.value)}
-                placeholder="First choice company name"
-                data-testid="input-create-name1"
-              />
+          )}
+
+          {/* ── Step 6: Done ── */}
+          {createWizardStep === 6 && createdAppId && (
+            <div className="py-4 space-y-4">
+              <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30 p-4 flex items-start gap-3">
+                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium text-green-800 dark:text-green-300">Application #{createdAppId} created successfully</p>
+                  <p className="text-sm text-green-700 dark:text-green-400 mt-1">
+                    The founder has been notified by email. Use the button below to send them a direct checkout link.
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-lg border p-4 space-y-3">
+                <p className="text-sm font-medium">Send Payment Link</p>
+                <p className="text-xs text-muted-foreground">
+                  Email the founder a direct link to complete payment for application #{createdAppId}.
+                </p>
+                <Button
+                  className="w-full"
+                  onClick={() => sendPaymentLinkMutation.mutate(createdAppId!)}
+                  disabled={sendPaymentLinkMutation.isPending}
+                  data-testid="button-send-payment-link-wizard"
+                >
+                  {sendPaymentLinkMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4 mr-2" />
+                  )}
+                  Send Payment Link to Founder
+                </Button>
+              </div>
+              <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+                You can also send a payment link later from the application detail page.
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="create-name2">Second Choice <span className="text-xs text-muted-foreground">(optional)</span></Label>
-              <Input
-                id="create-name2"
-                value={createCompanyName2}
-                onChange={(e) => setCreateCompanyName2(e.target.value)}
-                placeholder="Alternative name"
-                data-testid="input-create-name2"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="create-name3">Third Choice <span className="text-xs text-muted-foreground">(optional)</span></Label>
-              <Input
-                id="create-name3"
-                value={createCompanyName3}
-                onChange={(e) => setCreateCompanyName3(e.target.value)}
-                placeholder="Third alternative name"
-                data-testid="input-create-name3"
-              />
-            </div>
-            <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-800 dark:text-blue-300">
-              The application will be created in "names submitted" status. The founder will receive an email with a link to review and pay. This action is audit-logged.
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateAppOpen(false)}>Cancel</Button>
-            <Button
-              onClick={() => {
-                if (createFounderUserId && createCompanyName1.trim()) {
+          )}
+
+          <DialogFooter className="gap-2 flex-row-reverse sm:flex-row">
+            {createWizardStep > 1 && createWizardStep <= 5 && (
+              <Button variant="outline" onClick={() => setCreateWizardStep((s) => s - 1)} data-testid="button-wizard-back">
+                Back
+              </Button>
+            )}
+            {createWizardStep < 5 && (
+              <Button
+                onClick={() => setCreateWizardStep((s) => s + 1)}
+                disabled={
+                  (createWizardStep === 1 && !createFounderUserId) ||
+                  (createWizardStep === 2 && !createCompanyName1.trim()) ||
+                  (createWizardStep === 3 && createBusinessDesc.trim().length < 10) ||
+                  (createWizardStep === 4 && createDirectors.length === 0)
+                }
+                data-testid="button-wizard-next"
+              >
+                Next
+              </Button>
+            )}
+            {createWizardStep === 5 && (
+              <Button
+                onClick={() => {
                   createAppMutation.mutate({
                     founderUserId: createFounderUserId,
                     companyType: createCompanyType,
                     companyName1: createCompanyName1.trim(),
                     companyName2: createCompanyName2.trim() || undefined,
                     companyName3: createCompanyName3.trim() || undefined,
+                    businessDescription: createBusinessDesc.trim() || undefined,
+                    registeredAddress: createRegLine1.trim()
+                      ? { line1: createRegLine1.trim(), city: createRegCity.trim(), state: createRegState, country: "Nigeria" }
+                      : undefined,
+                    operatingAddress: !createSameAddress && createOpsLine1.trim()
+                      ? { line1: createOpsLine1.trim(), city: createOpsCity.trim(), state: createOpsState, country: "Nigeria" }
+                      : createRegLine1.trim()
+                        ? { line1: createRegLine1.trim(), city: createRegCity.trim(), state: createRegState, country: "Nigeria" }
+                        : undefined,
+                    people: createDirectors.map((d) => ({
+                      fullName: d.fullName,
+                      email: d.email || undefined,
+                      role: d.role,
+                      sharesAllocated: d.sharesAllocated ? parseInt(d.sharesAllocated) : undefined,
+                      shareClass: d.shareClass || undefined,
+                      sharePercentage: d.sharePercentage || undefined,
+                    })),
                   });
-                }
-              }}
-              disabled={createAppMutation.isPending || !createFounderUserId || !createCompanyName1.trim()}
-              data-testid="button-confirm-create-app"
-            >
-              {createAppMutation.isPending ? <LoadingSpinner size="sm" /> : (
-                <><Plus className="h-4 w-4 mr-2" />Create Application</>
-              )}
-            </Button>
+                }}
+                disabled={createAppMutation.isPending}
+                data-testid="button-wizard-create"
+              >
+                {createAppMutation.isPending ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Creating…</>
+                ) : (
+                  <><Plus className="h-4 w-4 mr-2" />Create Application</>
+                )}
+              </Button>
+            )}
+            {createWizardStep === 6 && (
+              <Button variant="outline" onClick={() => { resetCreateWizard(); setCreateAppOpen(false); }} data-testid="button-wizard-close">
+                Close
+              </Button>
+            )}
+            {createWizardStep <= 5 && (
+              <Button variant="ghost" onClick={() => { resetCreateWizard(); setCreateAppOpen(false); }} className="text-muted-foreground" data-testid="button-wizard-cancel">
+                Cancel
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

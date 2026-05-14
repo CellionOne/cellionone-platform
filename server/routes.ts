@@ -10370,16 +10370,44 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         companyName1: z.string().min(1).max(255),
         companyName2: z.string().max(255).optional().nullable(),
         companyName3: z.string().max(255).optional().nullable(),
+        businessDescription: z.string().optional().nullable(),
+        registeredAddress: z.object({
+          line1: z.string().optional(),
+          line2: z.string().optional(),
+          city: z.string().optional(),
+          state: z.string().optional(),
+          postalCode: z.string().optional(),
+          country: z.string().optional(),
+        }).optional().nullable(),
+        operatingAddress: z.object({
+          line1: z.string().optional(),
+          line2: z.string().optional(),
+          city: z.string().optional(),
+          state: z.string().optional(),
+          postalCode: z.string().optional(),
+          country: z.string().optional(),
+        }).optional().nullable(),
+        people: z.array(z.object({
+          fullName: z.string().min(1),
+          email: z.string().email().optional().nullable(),
+          role: z.string().default("director"),
+          sharesAllocated: z.number().optional().nullable(),
+          shareClass: z.string().optional().nullable(),
+          sharePercentage: z.string().optional().nullable(),
+        })).optional().nullable(),
       }).safeParse(req.body);
 
       if (!parsed.success) {
         return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
       }
 
-      const { founderUserId, companyType, companyName1, companyName2, companyName3 } = parsed.data;
+      const { founderUserId, companyType, companyName1, companyName2, companyName3,
+              businessDescription, registeredAddress, operatingAddress, people } = parsed.data;
 
       const founder = await storage.getUser(founderUserId);
       if (!founder) return res.status(404).json({ message: "Founder user not found" });
+
+      const hasFullData = !!(people && people.length > 0);
 
       const application = await storage.createApplication({
         founderUserId,
@@ -10389,17 +10417,38 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         companyName1,
         companyName2: companyName2 || null,
         companyName3: companyName3 || null,
-        wizardStep: 2,
+        businessDescription: businessDescription || null,
+        registeredAddress: registeredAddress || undefined,
+        operatingAddress: operatingAddress || undefined,
+        wizardStep: hasFullData ? 5 : 2,
       });
 
       await createDefaultChecklist(application.id);
+
+      // Insert company_people rows for each director/shareholder provided
+      if (people && people.length > 0) {
+        for (const person of people) {
+          await db.insert(companyPeople).values({
+            applicationId: application.id,
+            founderId: founderUserId,
+            inviteEmail: person.email || null,
+            inviteStatus: "pending",
+            role: person.role || "director",
+            fullName: person.fullName,
+            sharesAllocated: person.sharesAllocated || null,
+            shareClass: person.shareClass || "ordinary",
+            sharePercentage: person.sharePercentage || null,
+            entityType: "individual",
+          });
+        }
+      }
 
       await storage.createAuditLog({
         actorUserId: adminId,
         action: "admin_create_for_founder",
         entityType: "company_application",
         entityId: application.id.toString(),
-        details: { founderUserId, founderEmail: founder.email, companyName1, companyType },
+        details: { founderUserId, founderEmail: founder.email, companyName1, companyType, peopleCount: people?.length ?? 0 },
         ipAddress: req.ip,
       });
 
@@ -10408,14 +10457,14 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         const emailSvc = await import("./services/emailService");
         const { client: resendClient, fromEmail } = await emailSvc.getResendClient();
         const baseUrl = emailSvc.getSiteBaseUrl(req);
-        const appUrl = `${baseUrl}/applications/${application.id}`;
+        const checkoutUrl = `${baseUrl}/founder/checkout?applicationId=${application.id}`;
         const firstName = (founder.firstName || "there").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         const safeName1 = companyName1.replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
         await resendClient.emails.send({
           from: fromEmail,
           to: founder.email,
-          subject: `Your ${safeName1} incorporation application has been created`,
+          subject: `Your ${safeName1} incorporation application is ready — please proceed to payment`,
           html: `<!DOCTYPE html><html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
@@ -10427,15 +10476,15 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     </div>
     <h2 style="color:#18181b;font-size:20px;margin-bottom:12px;">Hi ${firstName},</h2>
     <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:20px;">
-      Your company registration application for <strong>${safeName1}</strong> (${companyType}) has been created on your behalf by our team. Your name choices have been submitted for CAC availability checking.
+      Your company registration application for <strong>${safeName1}</strong> (${companyType}) has been fully prepared on your behalf by our team.
     </p>
     <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:28px;">
-      The next step is to log in, review the application details, and proceed to payment to begin the registration process.
+      Please click below to proceed to payment and begin the incorporation process.
     </p>
     <div style="text-align:center;margin-bottom:32px;">
-      <a href="${appUrl}" style="display:inline-block;background:#16a34a;color:white;font-size:16px;font-weight:600;padding:14px 32px;border-radius:6px;text-decoration:none;">Review &amp; Pay</a>
+      <a href="${checkoutUrl}" style="display:inline-block;background:#16a34a;color:white;font-size:16px;font-weight:600;padding:14px 32px;border-radius:6px;text-decoration:none;">Proceed to Payment</a>
     </div>
-    <p style="color:#71717a;font-size:13px;word-break:break-all;margin-bottom:32px;">${appUrl}</p>
+    <p style="color:#71717a;font-size:13px;word-break:break-all;margin-bottom:32px;">${checkoutUrl}</p>
     <hr style="border:none;border-top:1px solid #e4e4e7;margin:0 0 24px 0;">
     <p style="color:#a1a1aa;font-size:12px;text-align:center;margin:0;">&copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.</p>
   </div>
@@ -10449,6 +10498,73 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
     } catch (error) {
       console.error("[Admin] Error creating application for founder:", error);
       res.status(500).json({ message: "Failed to create application" });
+    }
+  });
+
+  // POST /api/admin/applications/:id/send-payment-link — email founder a direct checkout link
+  app.post("/api/admin/applications/:id/send-payment-link", isAuthenticated, requireRole("admin"), async (req: any, res) => {
+    try {
+      const adminId = getUserId(req);
+      const applicationId = parseInt(req.params.id, 10);
+      if (isNaN(applicationId)) return res.status(400).json({ message: "Invalid application ID" });
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const founder = await storage.getUser(application.founderUserId);
+      if (!founder) return res.status(404).json({ message: "Founder user not found" });
+
+      const emailSvc = await import("./services/emailService");
+      const { client: resendClient, fromEmail } = await emailSvc.getResendClient();
+      const baseUrl = emailSvc.getSiteBaseUrl(req);
+      const checkoutUrl = `${baseUrl}/founder/checkout?applicationId=${applicationId}`;
+      const firstName = (founder.firstName || "there").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const safeName1 = (application.companyName1 || "your company").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const companyType = application.companyType || "LTD";
+
+      await resendClient.emails.send({
+        from: fromEmail,
+        to: founder.email,
+        subject: `Action required: Complete payment for ${safeName1} registration`,
+        html: `<!DOCTYPE html><html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
+  <div style="max-width:600px;margin:0 auto;background:white;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,.1);">
+    <div style="text-align:center;margin-bottom:32px;">
+      <div style="display:inline-block;background:#16a34a;padding:10px 20px;border-radius:8px;">
+        <span style="color:white;font-size:22px;font-weight:bold;">Cellion One</span>
+      </div>
+    </div>
+    <h2 style="color:#18181b;font-size:20px;margin-bottom:12px;">Hi ${firstName},</h2>
+    <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:20px;">
+      Your company registration application for <strong>${safeName1}</strong> (${companyType}) is ready for payment.
+    </p>
+    <p style="color:#52525b;font-size:16px;line-height:1.6;margin-bottom:28px;">
+      Please complete payment to begin the CAC incorporation process. Click the button below to proceed:
+    </p>
+    <div style="text-align:center;margin-bottom:32px;">
+      <a href="${checkoutUrl}" style="display:inline-block;background:#16a34a;color:white;font-size:16px;font-weight:600;padding:14px 32px;border-radius:6px;text-decoration:none;">Complete Payment</a>
+    </div>
+    <p style="color:#71717a;font-size:13px;word-break:break-all;margin-bottom:32px;">${checkoutUrl}</p>
+    <hr style="border:none;border-top:1px solid #e4e4e7;margin:0 0 24px 0;">
+    <p style="color:#a1a1aa;font-size:12px;text-align:center;margin:0;">&copy; ${new Date().getFullYear()} Cellion Platforms Nigeria Limited. All rights reserved.</p>
+  </div>
+</body></html>`,
+      });
+
+      await storage.createAuditLog({
+        actorUserId: adminId,
+        action: "admin_send_payment_link",
+        entityType: "company_application",
+        entityId: applicationId.toString(),
+        details: { founderEmail: founder.email, checkoutUrl },
+        ipAddress: req.ip,
+      });
+
+      res.json({ message: "Payment link sent successfully", checkoutUrl });
+    } catch (error) {
+      console.error("[Admin] Error sending payment link:", error);
+      res.status(500).json({ message: "Failed to send payment link" });
     }
   });
 

@@ -178,6 +178,7 @@ export default function AdminApplications() {
   const [newDirCorporateCountry, setNewDirCorporateCountry] = useState("Nigeria");
   const [wizardUploadFile, setWizardUploadFile] = useState<File | null>(null);
   const [wizardUploadDocType, setWizardUploadDocType] = useState("id_document");
+  const [wizardUploadChecklistItemId, setWizardUploadChecklistItemId] = useState("");
   const [wizardUploadedFiles, setWizardUploadedFiles] = useState<{ name: string; docType: string }[]>([]);
   const [createRegLine1, setCreateRegLine1] = useState("");
   const [createRegCity, setCreateRegCity] = useState("");
@@ -330,6 +331,7 @@ export default function AdminApplications() {
     setNewDirCorporateCountry("Nigeria");
     setWizardUploadFile(null);
     setWizardUploadDocType("id_document");
+    setWizardUploadChecklistItemId("");
     setWizardUploadedFiles([]);
     setCreateRegLine1("");
     setCreateRegCity("");
@@ -379,14 +381,28 @@ export default function AdminApplications() {
     },
   });
 
+  // Fetch checklist items for the newly created app (used in wizard step 6)
+  const { data: wizardChecklistItems = [] } = useQuery<{ id: number; label: string; status: string | null }[]>({
+    queryKey: ["/api/admin/applications", createdAppId, "checklist"],
+    queryFn: async () => {
+      if (!createdAppId) return [];
+      const res = await fetch(`/api/admin/applications/${createdAppId}/checklist`, { credentials: "include" });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.checklistItems ?? data ?? [];
+    },
+    enabled: !!createdAppId && createWizardStep === 6,
+  });
+
   // Wizard document upload mutation (step 6)
   const wizardUploadMutation = useMutation({
-    mutationFn: async ({ file, docType }: { file: File; docType: string }) => {
+    mutationFn: async ({ file, docType, checklistItemId }: { file: File; docType: string; checklistItemId: string }) => {
       const csrf = await getCsrfToken();
       const formData = new FormData();
       formData.append("file", file);
       formData.append("docType", docType);
       formData.append("category", "company");
+      formData.append("checklistItemId", checklistItemId);
       const res = await fetch(`/api/admin/applications/${createdAppId}/documents/upload`, {
         method: "POST",
         headers: { "X-CSRF-Token": csrf },
@@ -402,8 +418,9 @@ export default function AdminApplications() {
     onSuccess: (_, vars) => {
       setWizardUploadedFiles((prev) => [...prev, { name: vars.file.name, docType: vars.docType }]);
       setWizardUploadFile(null);
+      setWizardUploadChecklistItemId("");
       setWizardUploadDocType("id_document");
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/applications", createdAppId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/applications", createdAppId, "checklist"] });
       toast({ title: "Document uploaded" });
     },
     onError: (e: Error) => {
@@ -2046,58 +2063,88 @@ export default function AdminApplications() {
           )}
 
           {/* ── Step 6: Optional document upload ── */}
-          {createWizardStep === 6 && createdAppId && (
-            <div className="space-y-4 py-2">
-              {wizardUploadedFiles.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Uploaded</p>
-                  {wizardUploadedFiles.map((f, i) => (
-                    <div key={i} className="flex items-center gap-2 text-sm rounded border px-3 py-2">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
-                      <span className="truncate">{f.name}</span>
-                      <span className="text-xs text-muted-foreground shrink-0">({f.docType.replace(/_/g, " ")})</span>
-                    </div>
-                  ))}
+          {createWizardStep === 6 && createdAppId && (() => {
+            const uploadableItems = wizardChecklistItems.filter(
+              (i) => !i.status || i.status === "missing" || i.status === "rejected"
+            );
+            return (
+              <div className="space-y-4 py-2">
+                {wizardUploadedFiles.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Uploaded this session</p>
+                    {wizardUploadedFiles.map((f, i) => (
+                      <div key={i} className="flex items-center gap-2 text-sm rounded border px-3 py-2">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                        <span className="truncate">{f.name}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">({f.docType.replace(/_/g, " ")})</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="rounded-lg border p-4 space-y-3 bg-muted/20">
+                  <p className="text-sm font-medium">Upload a Document</p>
+                  {uploadableItems.length === 0 && wizardChecklistItems.length > 0 ? (
+                    <p className="text-xs text-muted-foreground py-2 text-center">All checklist items are already provided. No upload needed.</p>
+                  ) : (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Checklist Item <span className="text-destructive">*</span></Label>
+                        <Select value={wizardUploadChecklistItemId} onValueChange={setWizardUploadChecklistItemId}>
+                          <SelectTrigger className="h-8 text-sm" data-testid="select-wizard-checklist-item"><SelectValue placeholder="Select item to upload for…" /></SelectTrigger>
+                          <SelectContent>
+                            {uploadableItems.map((item) => (
+                              <SelectItem key={item.id} value={String(item.id)}>{item.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Document Type</Label>
+                        <Select value={wizardUploadDocType} onValueChange={setWizardUploadDocType}>
+                          <SelectTrigger className="h-8 text-sm" data-testid="select-wizard-upload-doctype"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="id_document">ID Document</SelectItem>
+                            <SelectItem value="passport">Passport</SelectItem>
+                            <SelectItem value="utility_bill">Utility Bill</SelectItem>
+                            <SelectItem value="cac_form">CAC Form</SelectItem>
+                            <SelectItem value="memorandum">Memorandum &amp; Articles</SelectItem>
+                            <SelectItem value="other">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">File</Label>
+                        <input
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                          onChange={(e) => setWizardUploadFile(e.target.files?.[0] ?? null)}
+                          className="block w-full text-sm text-muted-foreground file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-muted file:text-foreground hover:file:bg-muted/80"
+                          data-testid="input-wizard-upload-file"
+                        />
+                      </div>
+                      <Button
+                        size="sm" className="w-full"
+                        onClick={() => {
+                          if (wizardUploadFile && wizardUploadChecklistItemId) {
+                            wizardUploadMutation.mutate({
+                              file: wizardUploadFile,
+                              docType: wizardUploadDocType,
+                              checklistItemId: wizardUploadChecklistItemId,
+                            });
+                          }
+                        }}
+                        disabled={!wizardUploadFile || !wizardUploadChecklistItemId || wizardUploadMutation.isPending}
+                        data-testid="button-wizard-upload"
+                      >
+                        {wizardUploadMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+                        Upload Document
+                      </Button>
+                    </>
+                  )}
                 </div>
-              )}
-              <div className="rounded-lg border p-4 space-y-3 bg-muted/20">
-                <p className="text-sm font-medium">Upload a Document</p>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Document Type</Label>
-                  <Select value={wizardUploadDocType} onValueChange={setWizardUploadDocType}>
-                    <SelectTrigger className="h-8 text-sm" data-testid="select-wizard-upload-doctype"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="id_document">ID Document</SelectItem>
-                      <SelectItem value="passport">Passport</SelectItem>
-                      <SelectItem value="utility_bill">Utility Bill</SelectItem>
-                      <SelectItem value="cac_form">CAC Form</SelectItem>
-                      <SelectItem value="memorandum">Memorandum &amp; Articles</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">File</Label>
-                  <input
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    onChange={(e) => setWizardUploadFile(e.target.files?.[0] ?? null)}
-                    className="block w-full text-sm text-muted-foreground file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-muted file:text-foreground hover:file:bg-muted/80"
-                    data-testid="input-wizard-upload-file"
-                  />
-                </div>
-                <Button
-                  size="sm" className="w-full"
-                  onClick={() => { if (wizardUploadFile) wizardUploadMutation.mutate({ file: wizardUploadFile, docType: wizardUploadDocType }); }}
-                  disabled={!wizardUploadFile || wizardUploadMutation.isPending}
-                  data-testid="button-wizard-upload"
-                >
-                  {wizardUploadMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
-                  Upload Document
-                </Button>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ── Step 7: Done ── */}
           {createWizardStep === 7 && createdAppId && (

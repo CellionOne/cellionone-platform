@@ -10388,7 +10388,12 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           country: z.string().optional(),
         }).optional().nullable(),
         people: z.array(z.object({
-          fullName: z.string().min(1),
+          entityType: z.enum(["individual", "corporate"]).optional().default("individual"),
+          fullName: z.string().min(1).optional().nullable(),
+          corporateName: z.string().optional().nullable(),
+          corporateRcNumber: z.string().optional().nullable(),
+          corporateCountry: z.string().optional().nullable(),
+          authorisedRepName: z.string().optional().nullable(),
           email: z.string().email().optional().nullable(),
           role: z.string().default("director"),
           sharesAllocated: z.number().optional().nullable(),
@@ -10406,6 +10411,23 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       const founder = await storage.getUser(founderUserId);
       if (!founder) return res.status(404).json({ message: "Founder user not found" });
+
+      // Validate people BEFORE creating the application to avoid orphaned records
+      if (people && people.length > 0) {
+        const hasDirector = people.some((p) => p.role === "director" || p.role === "director_and_shareholder");
+        if (!hasDirector) {
+          return res.status(400).json({ message: "At least one person with a director role is required." });
+        }
+        for (const p of people) {
+          const isCorp = p.entityType === "corporate";
+          if (isCorp && !p.corporateName?.trim()) {
+            return res.status(400).json({ message: "corporateName is required for corporate entities." });
+          }
+          if (!isCorp && !p.fullName?.trim()) {
+            return res.status(400).json({ message: "fullName is required for individual persons." });
+          }
+        }
+      }
 
       const hasFullData = !!(people && people.length > 0);
 
@@ -10425,12 +10447,8 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       await createDefaultChecklist(application.id);
 
-      // Insert company_people rows for each director/shareholder provided
+      // Insert company_people rows
       if (people && people.length > 0) {
-        const hasDirector = people.some((p: any) => p.role === "director" || p.role === "director_and_shareholder");
-        if (!hasDirector) {
-          return res.status(400).json({ message: "At least one person with a director role is required." });
-        }
         for (const person of people) {
           const isCorporate = person.entityType === "corporate";
           await db.insert(companyPeople).values({
@@ -10518,6 +10536,11 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       const application = await storage.getApplication(applicationId);
       if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const payableStatuses = ["names_submitted", "names_reviewed", "pending_verification", "submitted", "under_review"];
+      if (!payableStatuses.includes(application.status || "")) {
+        return res.status(400).json({ message: `Cannot send a payment link for an application with status "${application.status}".` });
+      }
 
       const founder = await storage.getUser(application.founderUserId);
       if (!founder) return res.status(404).json({ message: "Founder user not found" });

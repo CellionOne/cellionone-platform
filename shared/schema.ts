@@ -225,6 +225,8 @@ export const companyApplications = pgTable("company_applications", {
   name3Availability: varchar("name3_availability", { length: 20 }),
   selectedNames: text("selected_names").array(),
   isLegacyDraft: boolean("is_legacy_draft").default(false),
+  rejectionReason: text("rejection_reason"),     // G4: CAC rejection reason set by lawyer
+  rejectedAt: timestamp("rejected_at"),           // G4: timestamp of rejection
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

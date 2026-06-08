@@ -748,8 +748,46 @@ export default function ApplicationDetailsPage() {
                 );
               })}
             </div>
+            {/* G1: Key dates below the timeline */}
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground mt-2">
+              {application.createdAt && (
+                <span>Created: {new Date(application.createdAt).toLocaleDateString("en-GB")}</span>
+              )}
+              {application.submittedAt && (
+                <span>Submitted: {new Date(application.submittedAt).toLocaleDateString("en-GB")}</span>
+              )}
+              {application.completedAt && (
+                <span>Completed: {new Date(application.completedAt).toLocaleDateString("en-GB")}</span>
+              )}
+              {(application as any).rejectedAt && (
+                <span className="text-destructive">Rejected: {new Date((application as any).rejectedAt).toLocaleDateString("en-GB")}</span>
+              )}
+            </div>
           </CardContent>
         </Card>
+        )}
+
+        {/* G4: CAC Rejection Banner */}
+        {application.status === "rejected" && (
+          <Card className="border-destructive/40 bg-destructive/5" data-testid="card-rejection-banner">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2 text-destructive">
+                <XCircle className="h-5 w-5" />
+                Application Rejected
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(application as any).rejectionReason && (
+                <div className="rounded-md border border-destructive/20 bg-background p-3">
+                  <p className="text-sm font-medium text-destructive mb-1">Reason</p>
+                  <p className="text-sm">{(application as any).rejectionReason}</p>
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground">
+                Your application was rejected by the Corporate Affairs Commission. Please contact your Cellion One lawyer to discuss next steps — in many cases, a corrected re-submission can be made.
+              </p>
+            </CardContent>
+          </Card>
         )}
 
         {clarifications.filter(c => c.status === "pending").length > 0 && (
@@ -1274,6 +1312,11 @@ export default function ApplicationDetailsPage() {
                       <div className="flex items-center justify-between font-semibold" data-testid="fee-line-total">
                         <span>Estimated Total</span>
                         <span>₦{(estimatedTotal / 100).toLocaleString()}</span>
+                      </div>
+                      {/* G2: Stamp duty notice */}
+                      <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-2.5 text-xs text-blue-800 dark:text-blue-200 mt-1" data-testid="stamp-duty-notice">
+                        <span className="font-medium">Stamp Duty:</span> The CAC collects stamp duty directly at ₦3,000 (flat) for standard incorporation.
+                        This is paid to the Federal Inland Revenue Service (FIRS) and is not included in the above total — it is settled by your Cellion One lawyer during filing.
                       </div>
                     </div>
 

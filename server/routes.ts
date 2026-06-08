@@ -81,6 +81,7 @@ const statusUpdateSchema = z.object({
     "filed", "pending_originals", "courier_in_transit", "completed", "rejected"
   ]),
   rcNumber: z.string().trim().min(1).optional(),
+  rejectionReason: z.string().trim().optional(), // G4: CAC rejection reason
 });
 
 const aiSuggestSchema = z.object({
@@ -265,7 +266,7 @@ async function syncDirectorVerification(personUserId: string): Promise<void> {
 // Seed default feature flags
 async function seedFeatureFlags() {
   const defaultFlags = [
-    { key: "enable_tin_registration", description: "Enable TIN registration feature", isEnabled: false },
+    { key: "enable_tin_registration", description: "Enable TIN registration feature", isEnabled: true },
     { key: "enable_bank_referrals", description: "Enable bank account opening referrals", isEnabled: false },
     { key: "enable_registered_address_service", description: "Enable virtual registered address service", isEnabled: false },
     { key: "enable_mail_forwarding", description: "Enable mail forwarding for virtual addresses", isEnabled: false },
@@ -8512,8 +8513,8 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
       }
       
-      const { status, rcNumber } = parsed.data;
-      
+      const { status, rcNumber, rejectionReason } = parsed.data;
+
       const application = await storage.getApplication(applicationId);
       if (!application || application.assignedLawyerUserId !== userId) {
         return res.status(403).json({ message: "Access denied" });
@@ -8521,10 +8522,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       // Server-side stage transition guard — prevents skipping or reversing stages
       const allowedTransitions: Record<string, string[]> = {
-        submitted:               ["under_review"],
-        under_review:            ["filed"],
-        clarification_requested: ["under_review"],
-        filed:                   ["pending_originals"],
+        submitted:               ["under_review", "rejected"],
+        under_review:            ["filed", "rejected"],
+        clarification_requested: ["under_review", "rejected"],
+        filed:                   ["pending_originals", "rejected"],
         pending_originals:       ["courier_in_transit"],
         courier_in_transit:      ["completed"],
       };
@@ -8541,20 +8542,40 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "RC Number is required when marking an application as filed or completed." });
       }
 
-      const updateData: { status: string; rcNumber?: string; completedAt?: Date } = { status };
+      const updateData: { status: string; rcNumber?: string; completedAt?: Date; rejectionReason?: string; rejectedAt?: Date } = { status };
       if (rcNumber) updateData.rcNumber = rcNumber;
       if (status === "completed") updateData.completedAt = new Date();
+      if (status === "rejected") {
+        if (!rejectionReason) return res.status(400).json({ message: "rejectionReason is required when rejecting an application" });
+        updateData.rejectionReason = rejectionReason;
+        updateData.rejectedAt = new Date();
+      }
 
       const updated = await storage.updateApplication(applicationId, updateData);
-      
+
       await storage.createAuditLog({
         actorUserId: userId,
         action: "change_status",
         entityType: "company_application",
         entityId: applicationId.toString(),
-        details: { newStatus: status, rcNumber: effectiveRcNumber },
+        details: { newStatus: status, rcNumber: effectiveRcNumber, rejectionReason },
         ipAddress: req.ip,
       });
+
+      // G4: Notify founder on rejection
+      if (status === "rejected" && application.founderUserId) {
+        (async () => {
+          try {
+            await storage.createNotification({
+              userId: application.founderUserId,
+              type: "error",
+              title: "CAC Application Rejected",
+              message: `Your company registration application has been rejected. Reason: ${rejectionReason}. Please contact your Cellion One lawyer for next steps.`,
+              linkUrl: `/applications/${applicationId}`,
+            });
+          } catch { /* non-blocking */ }
+        })();
+      }
 
       // When a company application reaches "completed", auto-populate the Verified Entities Registry
       if (status === "completed") {
@@ -8563,7 +8584,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           console.error("[Routes] Failed to add company to verified registry:", err)
         );
       }
-      
+
       res.json(updated);
     } catch (error) {
       console.error("Error updating status:", error);

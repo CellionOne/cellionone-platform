@@ -7419,6 +7419,105 @@ Status: ${order.status}</div>
     }
   });
 
+  // ============== DIRECTOR / SHAREHOLDER CONSENT (B4) ==============
+  // Token-based, no login required.
+  // The inviteToken from companyPeople is reused as the consent token.
+
+  // GET /api/director-consent/:token — return person + application info
+  app.get("/api/director-consent/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const person = await storage.getCompanyPersonByInviteToken(token);
+      if (!person) return res.status(404).json({ message: "Invalid or expired consent link" });
+      if (person.inviteStatus === "accepted") {
+        return res.status(410).json({ message: "Consent has already been submitted" });
+      }
+
+      const application = await storage.getApplication(person.applicationId!);
+      const companyName = application?.companyName1 || "the company";
+
+      res.json({
+        personId: person.id,
+        fullName: person.fullName,
+        role: person.role,
+        companyName,
+        applicationId: person.applicationId,
+      });
+    } catch (error) {
+      console.error("[DirectorConsent] GET error:", error);
+      res.status(500).json({ message: "Failed to validate consent link" });
+    }
+  });
+
+  // POST /api/director-consent/:token — save signature + consent, mark accepted
+  app.post("/api/director-consent/:token", async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      const { signatureDataUrl, consentToAct, consentToDisclosure, consentText } = req.body;
+
+      const person = await storage.getCompanyPersonByInviteToken(token);
+      if (!person) return res.status(404).json({ message: "Invalid or expired consent link" });
+      if (person.inviteStatus === "accepted") {
+        return res.status(410).json({ message: "Consent has already been submitted" });
+      }
+
+      if (!signatureDataUrl || typeof signatureDataUrl !== "string") {
+        return res.status(400).json({ message: "signatureDataUrl is required" });
+      }
+      if (!signatureDataUrl.startsWith("data:image/png;base64,")) {
+        return res.status(400).json({ message: "signatureDataUrl must be a PNG data URL" });
+      }
+      if (signatureDataUrl.length > 280_000) {
+        return res.status(400).json({ message: "Signature image too large" });
+      }
+      if (!consentToAct) {
+        return res.status(400).json({ message: "You must consent to act as director/shareholder" });
+      }
+
+      const ip = req.ip?.substring(0, 50) ?? null;
+      const ua = req.headers["user-agent"]?.substring(0, 500) ?? null;
+
+      const [sig] = await db.insert(signaturesTable).values({
+        companyPersonId: person.id,
+        applicationId: person.applicationId ?? null,
+        signatureContext: "director_consent",
+        signatureDataUrl,
+        whiteBackground: true,
+        ipAddress: ip,
+        userAgent: ua,
+        consentAccepted: true,
+        consentText: consentText ?? "I consent to act as director/shareholder and to disclosure of my personal information to the CAC.",
+        isVerified: false,
+      }).returning();
+
+      // Mark person as accepted
+      await db.update(companyPeople)
+        .set({ inviteStatus: "accepted", updatedAt: new Date() })
+        .where(eq(companyPeople.id, person.id));
+
+      // Fire-and-forget: notify founder
+      (async () => {
+        try {
+          const application = await storage.getApplication(person.applicationId!);
+          if (application?.founderUserId) {
+            await storage.createNotification({
+              userId: application.founderUserId,
+              type: "success",
+              title: "Director consent received",
+              message: `${person.fullName || "A director"} has signed the consent form for ${application.companyName1 || "your company"}.`,
+              linkUrl: `/applications/${person.applicationId}`,
+            });
+          }
+        } catch { /* non-blocking */ }
+      })();
+
+      res.status(201).json({ signatureId: sig.id, signedAt: sig.signedAt });
+    } catch (error) {
+      console.error("[DirectorConsent] POST error:", error);
+      res.status(500).json({ message: "Failed to submit consent" });
+    }
+  });
+
   // ============== LEGAL AI ROUTES ==============
   // AI SAFETY GUARDRAILS:
   // - AI outputs are labeled as suggestions requiring human review

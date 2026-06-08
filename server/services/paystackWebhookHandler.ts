@@ -5,7 +5,7 @@ import { orderPayments, orders, orderItems, serviceRequests, companyApplications
 import { eq, and } from 'drizzle-orm';
 import { invalidateCieOrgTierCache } from '../routes/cieApiRoutes';
 import { verifyWebhookSignature, verifyTransaction } from './paystackPaymentService';
-import { sendNewOrderNotificationEmail, sendLawyerPayoutConfirmationEmail, ADMIN_NOTIFICATION_EMAIL } from './emailService';
+import { sendNewOrderNotificationEmail, sendLawyerPayoutConfirmationEmail, sendPaymentReceiptEmail, ADMIN_NOTIFICATION_EMAIL } from './emailService';
 import type { ServiceType, RegisteredOfficeTier } from '../config/priceBook';
 import { createCandidate, submitBusinessAddressVerification } from './youverifyService';
 import { upsertVerifiedIndividualByUserId } from './verifiedEntityService';
@@ -471,19 +471,35 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
         console.log(`[Paystack Webhook] payments record synced for application ${order.applicationId}: lawyerFee=${lawyerFeeKobo} kobo`);
       } catch (paymentSyncErr) {
         console.error(`[Paystack Webhook] Failed to sync payments record for application ${order.applicationId}:`, paymentSyncErr);
+        // Fire-and-forget retry with exponential backoff so the webhook returns quickly.
+        // If all retries fail, alert admin by email so it can be resolved manually.
+        syncPaymentsLedgerWithRetry({
+          applicationId: order.applicationId!,
+          orderId: order.id,
+          founderId: order.founderId,
+          paystackReference: reference,
+          amountTotalKobo: order.totalAmount,
+          lawyerFeeKobo: order.totalLawyerNet ?? 0,
+          wasSplitAtCheckout: reference.startsWith('celion_split_'),
+          paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+        }).catch(() => { /* already logged inside */ });
       }
 
-      // Dispatch deferred invitations for draft company people linked to this application
+      // A4: Post-payment — send reminders to directors/shareholders who haven't verified yet.
+      // Invites are now sent immediately at person creation; this is a payment-confirmation reminder.
       try {
-        const draftPeople = await db.select().from(companyPeople).where(
+        const unverifiedPeople = await db.select().from(companyPeople).where(
           and(
             eq(companyPeople.applicationId, order.applicationId),
-            eq(companyPeople.inviteStatus, 'draft'),
+            eq(companyPeople.isVerified, false),
           )
         );
 
-        if (draftPeople.length > 0) {
-          const crypto = await import('crypto');
+        const pendingReminders = unverifiedPeople.filter(p =>
+          p.inviteStatus === 'pending' && p.inviteEmail && p.inviteToken
+        );
+
+        if (pendingReminders.length > 0) {
           const emailSvc = await import('./emailService');
           const { client: resend, fromEmail } = await emailSvc.getResendClient();
           const founderUser = await storage.getUser(order.founderId);
@@ -492,40 +508,34 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
             ? `https://${process.env.REPLIT_DEV_DOMAIN}`
             : `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
 
-          for (const person of draftPeople) {
-            const inviteToken = crypto.randomBytes(32).toString('hex');
-            await db.update(companyPeople)
-              .set({ inviteStatus: 'pending', inviteToken, inviteSentAt: new Date() })
-              .where(eq(companyPeople.id, person.id));
-
+          for (const person of pendingReminders) {
             const roleLabel = person.role === 'director_shareholder'
               ? 'Director & Shareholder'
               : person.role.charAt(0).toUpperCase() + person.role.slice(1);
 
-            await resend.emails.send({
+            resend.emails.send({
               from: fromEmail,
               to: person.inviteEmail!.toLowerCase().trim(),
-              subject: `You've been invited as a ${roleLabel} on Cellion One`,
+              subject: `Reminder: Please complete your verification — ${founderName}'s company`,
               html: `
                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-                  <h2>Company Director/Shareholder Invitation</h2>
-                  <p>${founderName} has invited you to join as a <strong>${roleLabel}</strong> for their company on Cellion One.</p>
-                  <p>The incorporation payment has been confirmed. Please complete your profile by clicking below:</p>
-                  <p><a href="${appUrl}/invite/${inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept Invitation</a></p>
-                  <p>If the button doesn't work, copy and paste this URL:<br/>${appUrl}/invite/${inviteToken}</p>
+                  <h2>Verification Reminder</h2>
+                  <p>The incorporation payment for ${founderName}'s company has been confirmed.</p>
+                  <p>You were previously invited as a <strong>${roleLabel}</strong> but have not yet completed your verification. Please do so now to avoid delaying the incorporation process:</p>
+                  <p><a href="${appUrl}/invite/${person.inviteToken}" style="background: #1a8a5c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Complete Verification</a></p>
                   <hr style="margin: 24px 0;" />
-                  <p style="color: #666; font-size: 12px;">This invitation was sent from Cellion One. If you didn't expect this, you can ignore this email.</p>
+                  <p style="color: #666; font-size: 12px;">This is a reminder from Cellion One. If you didn't expect this, please contact service@cellionone.com.</p>
                 </div>
               `,
             }).catch((emailErr: any) => {
-              console.warn(`[Paystack Webhook] Failed to send deferred invite to ${person.inviteEmail}:`, emailErr?.message);
+              console.warn(`[Paystack Webhook] Failed to send reminder to ${person.inviteEmail}:`, emailErr?.message);
             });
           }
 
-          console.log(`[Paystack Webhook] Dispatched ${draftPeople.length} deferred invitation(s) for application ${order.applicationId}`);
+          console.log(`[Paystack Webhook] Sent ${pendingReminders.length} post-payment reminder(s) for application ${order.applicationId}`);
         }
-      } catch (inviteErr) {
-        console.error(`[Paystack Webhook] Error dispatching deferred invitations for application ${order.applicationId}:`, inviteErr);
+      } catch (reminderErr) {
+        console.error(`[Paystack Webhook] Error sending post-payment reminders for application ${order.applicationId}:`, reminderErr);
       }
 
       // Auto-submit Youverify field-agent address verification if this order
@@ -1538,6 +1548,41 @@ async function handleSplitOrderSuccess(data: PaystackWebhookEvent['data'], rawPa
       totalAmount: order.totalAmount,
       items: itemDetails,
     });
+
+    // A5: Send itemised payment receipt to founder
+    if (founder?.email) {
+      const founderName = `${founder.firstName || ''} ${founder.lastName || ''}`.trim() || founder.email;
+      const [appRecord] = order.applicationId
+        ? await db.select({ companyName1: companyApplications.companyName1, referenceNumber: companyApplications.referenceNumber })
+            .from(companyApplications).where(eq(companyApplications.id, order.applicationId))
+        : [null];
+      const companyName = appRecord?.companyName1 || 'Your Company';
+      const appRef = appRecord?.referenceNumber || `ORD-${order.id}`;
+
+      // Build line items: individual SKU items + 10% admin fee
+      const skuLineItems = itemDetails.map(i => ({
+        description: i.name,
+        amountKobo: i.unitPrice,
+      }));
+      const adminFeeKobo = order.totalAmount - skuLineItems.reduce((s, i) => s + i.amountKobo, 0);
+      if (adminFeeKobo > 0) {
+        skuLineItems.push({ description: 'Administration Fee (10%)', amountKobo: adminFeeKobo });
+      }
+
+      sendPaymentReceiptEmail({
+        to: founder.email,
+        founderName,
+        receiptNumber: `CELL-${order.id}-${Date.now().toString(36).toUpperCase()}`,
+        applicationRef: appRef,
+        companyName,
+        lineItems: skuLineItems,
+        totalAmountKobo: order.totalAmount,
+        paymentDate: data.paid_at ? new Date(data.paid_at) : new Date(),
+        paystackRef: reference,
+      }).catch((receiptErr: Error) => {
+        console.error(`[Paystack Webhook] Failed to send payment receipt to ${founder.email}:`, receiptErr.message);
+      });
+    }
   } catch (emailErr) {
     console.error(`[Paystack Webhook] Failed to send admin order notification email:`, emailErr);
   }
@@ -2444,6 +2489,96 @@ export async function runExistingCompanyVerificationPipeline(profileId: number):
     await db.update(companyProfiles)
       .set({ existingCompanyStatus: 'under_review', verificationReport: errorReport as typeof companyProfiles.$inferSelect['verificationReport'], updatedAt: new Date() })
       .where(eq(companyProfiles.id, profile.id));
+  }
+}
+
+// ── A1: Ledger sync retry with exponential backoff + admin alert on exhaustion ──
+
+interface LedgerSyncParams {
+  applicationId: number;
+  orderId: number;
+  founderId: string;
+  paystackReference: string;
+  amountTotalKobo: number;
+  lawyerFeeKobo: number;
+  wasSplitAtCheckout: boolean;
+  paidAt: Date;
+}
+
+async function syncPaymentsLedgerWithRetry(params: LedgerSyncParams): Promise<void> {
+  const MAX_ATTEMPTS = 5;
+  const BASE_DELAY_MS = 60_000; // 60 seconds
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // Exponential backoff: 60s, 120s, 240s, 480s, 960s
+    const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    try {
+      const [existingPayment] = await db.select().from(payments)
+        .where(eq(payments.applicationId, params.applicationId));
+
+      if (existingPayment) {
+        const updatedBreakdown = {
+          ...((existingPayment.breakdownJson as object) || {}),
+          lawyerFee: params.lawyerFeeKobo,
+        };
+        await db.update(payments).set({
+          breakdownJson: updatedBreakdown,
+          amountTotalKobo: params.amountTotalKobo,
+          status: 'paid',
+          paidAt: params.paidAt,
+          wasSplitAtCheckout: params.wasSplitAtCheckout,
+        }).where(eq(payments.id, existingPayment.id));
+      } else {
+        await db.insert(payments).values({
+          applicationId: params.applicationId,
+          amountTotalKobo: params.amountTotalKobo,
+          currency: 'NGN',
+          provider: 'paystack',
+          status: 'paid',
+          paidAt: params.paidAt,
+          paystackReference: params.paystackReference,
+          breakdownJson: { lawyerFee: params.lawyerFeeKobo },
+          wasSplitAtCheckout: params.wasSplitAtCheckout,
+        });
+      }
+
+      console.log(`[LedgerRetry] payments record synced on attempt ${attempt} for application ${params.applicationId}`);
+      return;
+    } catch (err) {
+      console.error(`[LedgerRetry] Attempt ${attempt}/${MAX_ATTEMPTS} failed for application ${params.applicationId}:`, err);
+      if (attempt === MAX_ATTEMPTS) {
+        // All retries exhausted — alert admin so it can be manually resolved
+        try {
+          const { getResendClient } = await import('./emailService');
+          const { client, fromEmail } = await getResendClient();
+          const adminEmail = process.env.ADMIN_ALERT_EMAIL || 'service@cellionone.com';
+          await client.emails.send({
+            from: fromEmail,
+            to: adminEmail,
+            subject: `[URGENT] Ledger sync failed after ${MAX_ATTEMPTS} retries — App #${params.applicationId}`,
+            html: `
+              <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;">
+                <h2 style="color:#dc2626;">Ledger Sync Failure — Manual Action Required</h2>
+                <p>The payments ledger could not be synced after ${MAX_ATTEMPTS} attempts. This must be resolved manually to ensure the admin ledger is accurate.</p>
+                <table style="width:100%;border-collapse:collapse;">
+                  <tr><td style="padding:8px;font-weight:bold;">Application ID</td><td style="padding:8px;">${params.applicationId}</td></tr>
+                  <tr><td style="padding:8px;font-weight:bold;">Order ID</td><td style="padding:8px;">${params.orderId}</td></tr>
+                  <tr><td style="padding:8px;font-weight:bold;">Founder ID</td><td style="padding:8px;">${params.founderId}</td></tr>
+                  <tr><td style="padding:8px;font-weight:bold;">Paystack Reference</td><td style="padding:8px;">${params.paystackReference}</td></tr>
+                  <tr><td style="padding:8px;font-weight:bold;">Amount</td><td style="padding:8px;">₦${(params.amountTotalKobo / 100).toLocaleString()}</td></tr>
+                  <tr><td style="padding:8px;font-weight:bold;">Paid At</td><td style="padding:8px;">${params.paidAt.toISOString()}</td></tr>
+                </table>
+                <p style="color:#dc2626;font-weight:bold;">Please manually sync this payment record in the admin dashboard.</p>
+              </div>`,
+          });
+          console.error(`[LedgerRetry] Admin alert sent — all ${MAX_ATTEMPTS} retries exhausted for app ${params.applicationId}`);
+        } catch (alertErr) {
+          console.error('[LedgerRetry] Failed to send admin alert email:', alertErr);
+        }
+      }
+    }
   }
 }
 

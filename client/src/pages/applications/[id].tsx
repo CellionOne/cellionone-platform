@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRoute, Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -141,6 +142,7 @@ export default function ApplicationDetailsPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const applicationId = params?.id;
+  const { user: currentUser } = useAuth();
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const [namesPreloaded, setNamesPreloaded] = useState(false);
@@ -451,8 +453,10 @@ export default function ApplicationDetailsPage() {
 
   const currentStatusIndex = statusTimeline.findIndex(s => s.status === application.status);
 
+  const isKycComplete = !!currentUser?.isIdentityVerified;
   const canSubmit = application.status === "draft" &&
     !hasMissingRequired &&
+    isKycComplete &&
     payment?.status === "success";
 
   return (
@@ -1219,6 +1223,27 @@ export default function ApplicationDetailsPage() {
               </Card>
             )}
 
+            {application.status === "draft" && !isKycComplete && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                      Identity Verification Required
+                    </p>
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      You must complete KYC verification before submitting your application. This typically takes 5–10 minutes.
+                    </p>
+                    <Link href="/founder/identity">
+                      <Button size="sm" variant="outline" className="border-amber-400 text-amber-800 hover:bg-amber-100 dark:text-amber-200">
+                        Complete Verification →
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {application.status === "draft" && (
               <Card>
                 <CardHeader>
@@ -1226,6 +1251,16 @@ export default function ApplicationDetailsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      {isKycComplete ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 text-amber-500" />
+                      )}
+                      <span className={isKycComplete ? "text-green-600" : "text-amber-600"}>
+                        Identity verification complete
+                      </span>
+                    </div>
                     <div className="flex items-center gap-2 text-sm">
                       {progress === 100 ? (
                         <CheckCircle2 className="h-4 w-4 text-green-600" />
@@ -1251,6 +1286,7 @@ export default function ApplicationDetailsPage() {
                       disabled={!canSubmit || submitMutation.isPending}
                       onClick={() => submitMutation.mutate()}
                       data-testid="button-submit-application"
+                      title={!isKycComplete ? "Complete identity verification to submit" : undefined}
                     >
                       {submitMutation.isPending ? <LoadingSpinner size="sm" /> : "Submit Application"}
                     </Button>

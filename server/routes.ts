@@ -3444,7 +3444,9 @@ export async function registerRoutes(
 
       const cryptoMod = await import("crypto");
       const inviteToken = cryptoMod.randomBytes(32).toString('hex');
-      const isDraft = !!deferInvite;
+      // A4: Invites always fire immediately — deferInvite is no longer used.
+      // Post-payment send is a reminder-only (handled in paystackWebhookHandler).
+      const isDraft = false;
 
       // ── Auto-verify cascade for corporate/BN entities ─────────────────────────
       let autoVerified = false;
@@ -6356,12 +6358,13 @@ Status: ${order.status}</div>
         ...assignFields,
       });
 
-      // Notify the founder
+      // A3: Notify founder that names have been reviewed
+      const reviewedCompanyName = application.companyName1 || `Application #${applicationId}`;
       await storage.createNotification({
         userId: application.founderUserId,
-        type: "info",
-        title: "Name availability results ready",
-        message: `The CAC name availability check for your application is complete. Log in to select your preferred name and continue your application.`,
+        type: "success",
+        title: "Your company name has been reviewed",
+        message: `The CAC name availability check for "${reviewedCompanyName}" is complete. Log in to see which names are available and continue your application.`,
         linkUrl: `/applications/${applicationId}`,
       });
 
@@ -6420,14 +6423,26 @@ Status: ${order.status}</div>
     try {
       const userId = getUserId(req);
       const applicationId = parseInt(req.params.id);
-      
+
       const application = await storage.getApplication(applicationId);
       if (!application || application.founderUserId !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       if (application.status !== "draft") {
         return res.status(400).json({ message: "Application already submitted" });
+      }
+
+      // A2: KYC hard gate — founder must have completed identity verification before submitting
+      const [founderUser] = await db.select({ isIdentityVerified: usersTable.isIdentityVerified })
+        .from(usersTable).where(eq(usersTable.id, userId));
+      if (!founderUser?.isIdentityVerified) {
+        return res.status(403).json({
+          error: "KYC_REQUIRED",
+          message: "You must complete identity verification before submitting your application.",
+          kycStatus: "incomplete",
+          redirectTo: "/founder/identity",
+        });
       }
 
       // Final sync of per-person document requirements before submission

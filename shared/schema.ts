@@ -1566,6 +1566,101 @@ export const apiUsageSummary = pgTable("api_usage_summary", {
 
 export type ApiUsageSummary = typeof apiUsageSummary.$inferSelect;
 
+// ============== BUREAU / CLEARLEDGER — Credit Scoring Engine ==============
+
+export const bureauProfiles = pgTable("bureau_profiles", {
+  id: serial("id").primaryKey(),
+  clearledgerId: varchar("clearledger_id", { length: 20 }).unique().notNull(),
+  bvnHash: varchar("bvn_hash", { length: 64 }).unique(),
+  ninHash: varchar("nin_hash", { length: 64 }),
+  // Composite score + sub-scores
+  score: integer("score"),
+  scoreBand: varchar("score_band", { length: 20 }),
+  scoreCalculatedAt: timestamp("score_calculated_at", { withTimezone: true }),
+  scoreIdentity: integer("score_identity"),
+  scoreCashFlow: integer("score_cash_flow"),
+  scoreInvestment: integer("score_investment"),
+  scoreObligation: integer("score_obligation"),
+  scoreStability: integer("score_stability"),
+  // State
+  profileStage: varchar("profile_stage", { length: 20 }).default("CREATED"),
+  dataRichness: varchar("data_richness", { length: 10 }).default("LOW"),
+  // Data source flags
+  hasKycVerified: boolean("has_kyc_verified").default(false),
+  hasBankData: boolean("has_bank_data").default(false),
+  hasCapitalMarkets: boolean("has_capital_markets").default(false),
+  hasObligationData: boolean("has_obligation_data").default(false),
+  hasCacVerified: boolean("has_cac_verified").default(false),
+  // Flag arrays
+  positiveFlags: text("positive_flags").array().default([]),
+  negativeFlags: text("negative_flags").array().default([]),
+  // Cached recommendation
+  recommendation: jsonb("recommendation"),
+  consentGrantedAt: timestamp("consent_granted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("idx_bureau_profiles_bvn_hash").on(table.bvnHash),
+  index("idx_bureau_profiles_nin_hash").on(table.ninHash),
+]);
+
+export type BureauProfile = typeof bureauProfiles.$inferSelect;
+
+export const bureauEvents = pgTable("bureau_events", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profile_id").notNull().references(() => bureauProfiles.id, { onDelete: "cascade" }),
+  sourceApiKeyId: integer("source_api_key_id").references(() => kycApiKeys.id, { onDelete: "set null" }),
+  eventType: varchar("event_type", { length: 50 }).notNull(),
+  eventCategory: varchar("event_category", { length: 20 }).notNull(),
+  payload: jsonb("payload").notNull().default({}),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("idx_bureau_events_profile").on(table.profileId),
+  index("idx_bureau_events_category").on(table.profileId, table.eventCategory),
+  index("idx_bureau_events_occurred").on(table.profileId, table.occurredAt),
+]);
+
+export type BureauEvent = typeof bureauEvents.$inferSelect;
+
+export const bureauQueries = pgTable("bureau_queries", {
+  id: serial("id").primaryKey(),
+  apiKeyId: integer("api_key_id").notNull().references(() => kycApiKeys.id, { onDelete: "restrict" }),
+  environment: varchar("environment", { length: 10 }).notNull(),
+  queryType: varchar("query_type", { length: 30 }).notNull(),
+  identifierHash: varchar("identifier_hash", { length: 64 }).notNull(),
+  profileFound: boolean("profile_found").notNull(),
+  scoreReturned: integer("score_returned"),
+  bandReturned: varchar("band_returned", { length: 20 }),
+  billable: boolean("billable").default(true),
+  unitCostNgn: integer("unit_cost_ngn"),
+  consumerReference: varchar("consumer_reference", { length: 200 }),
+  queriedAt: timestamp("queried_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("idx_bureau_queries_key").on(table.apiKeyId),
+  index("idx_bureau_queries_hash").on(table.identifierHash),
+]);
+
+export type BureauQuery = typeof bureauQueries.$inferSelect;
+
+export const bureauScoreHistory = pgTable("bureau_score_history", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profile_id").notNull().references(() => bureauProfiles.id, { onDelete: "cascade" }),
+  score: integer("score").notNull(),
+  scoreBand: varchar("score_band", { length: 20 }).notNull(),
+  scoreIdentity: integer("score_identity"),
+  scoreCashFlow: integer("score_cash_flow"),
+  scoreInvestment: integer("score_investment"),
+  scoreObligation: integer("score_obligation"),
+  scoreStability: integer("score_stability"),
+  dataSources: text("data_sources").array(),
+  calculatedAt: timestamp("calculated_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("idx_bureau_score_history_profile").on(table.profileId, table.calculatedAt),
+]);
+
+export type BureauScoreHistory = typeof bureauScoreHistory.$inferSelect;
+
 // ============== KYC WEBHOOK CONFIGS ==============
 export const kycWebhookConfigs = pgTable("kyc_webhook_configs", {
   id: serial("id").primaryKey(),

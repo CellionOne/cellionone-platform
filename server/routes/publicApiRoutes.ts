@@ -23,7 +23,7 @@ export function registerPublicApiRoutes(app: Express): void {
           escrow: { status: "operational", endpoints: 6 },
           intelligence: { status: "operational", endpoints: 1 },
           formation: { status: "operational", endpoints: 2 },
-          bureau: { status: "coming_soon", endpoints: 0 },
+          bureau: { status: "operational", endpoints: 3 },
         },
       },
       timestamp: new Date().toISOString(),

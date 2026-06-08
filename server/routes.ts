@@ -30,7 +30,9 @@ import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
 import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
 import { registerPublicApiRoutes } from "./routes/publicApiRoutes";
 import { registerFormationApiRoutes } from "./routes/formationApiRoutes";
+import { registerBureauApiRoutes } from "./routes/bureauApiRoutes";
 import { apiUsageTrackerMiddleware } from "./middleware/apiUsageTracker";
+import * as bureauProfileService from "./services/bureauProfileService";
 import { syncChecklistFromVerifications, syncPeopleDocumentRequirements, syncAllApplicationsForVerifiedUser, getDocSlugsForPerson } from "./services/checklistSyncService";
 
 // Maximum number of Smile ID error results for a given RC number before we
@@ -2933,6 +2935,29 @@ export async function registerRoutes(
             const { upsertVerifiedIndividualByUserId } = await import('./services/verifiedEntityService');
             await upsertVerifiedIndividualByUserId(invite.founderUserId);
             console.log(`[BiometricCallback] Founder identity verified for user ${invite.founderUserId}`);
+
+            // Bureau hook — fire-and-forget: record identity event on ClearLedger profile
+            (async () => {
+              try {
+                const [fp] = await db.select({ bvnHash: founderProfiles.bvnHash, ninHash: founderProfiles.ninHash })
+                  .from(founderProfiles).where(eq(founderProfiles.userId, invite.founderUserId)).limit(1);
+                const idHash = fp?.bvnHash ?? fp?.ninHash;
+                const idType = fp?.bvnHash ? "bvn" : "nin";
+                if (idHash) {
+                  const bureauProfile = await bureauProfileService.createOrGetProfileByHash(idType, idHash);
+                  await bureauProfileService.recordEvent(
+                    bureauProfile.id,
+                    "identity",
+                    "liveness_passed",
+                    { smile_job_id: smileJobId, source_app: "cellion_one" },
+                    new Date(),
+                  );
+                }
+              } catch (bureauErr) {
+                console.error("[Bureau hook] KYC completion error:", bureauErr);
+              }
+            })();
+
             // Sync checklist for all draft applications belonging to this founder
             const founderApps = await storage.getApplicationsByFounder(invite.founderUserId);
             for (const fa of founderApps) {
@@ -8592,6 +8617,34 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         addCompanyToVerifiedRegistry(appWithRc).catch((err) =>
           console.error("[Routes] Failed to add company to verified registry:", err)
         );
+      }
+
+      // Bureau hook — fire-and-forget: record company_registered formation event when RC is assigned
+      if ((status === "filed" || status === "completed") && effectiveRcNumber && application.founderUserId) {
+        (async () => {
+          try {
+            const [fp] = await db.select({ bvnHash: founderProfiles.bvnHash, ninHash: founderProfiles.ninHash })
+              .from(founderProfiles).where(eq(founderProfiles.userId, application.founderUserId)).limit(1);
+            const idHash = fp?.bvnHash ?? fp?.ninHash;
+            const idType = fp?.bvnHash ? "bvn" : "nin";
+            if (idHash) {
+              const bureauProfile = await bureauProfileService.createOrGetProfileByHash(idType, idHash);
+              await bureauProfileService.recordEvent(
+                bureauProfile.id,
+                "formation",
+                "company_registered",
+                {
+                  rc_number: effectiveRcNumber,
+                  business_name: application.companyName1 ?? "Unknown",
+                  source_app: "cellion_one",
+                },
+                new Date(),
+              );
+            }
+          } catch (bureauErr) {
+            console.error("[Bureau hook] Registration hook error:", bureauErr);
+          }
+        })();
       }
 
       res.json(updated);
@@ -15945,6 +15998,9 @@ For questions, contact: service@cellionone.com
 
   // ============== FORMATION PUBLIC API ROUTES (v1) ==============
   registerFormationApiRoutes(app);
+
+  // ============== BUREAU / CLEARLEDGER API ROUTES (v1 + internal) ==============
+  registerBureauApiRoutes(app);
 
   // ============== BANK PORTAL ROUTES ==============
   registerBankPortalRoutes(app);

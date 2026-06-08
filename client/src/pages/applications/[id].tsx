@@ -41,6 +41,8 @@ import {
   Navigation,
   AlertTriangle,
   Send,
+  Download,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import type { CompanyApplication, ApplicationChecklistItem, Payment, ClarificationRequest } from "@shared/schema";
@@ -136,6 +138,79 @@ const statusTimeline = [
   { status: "courier_in_transit", label: "In Transit", icon: Truck },
   { status: "completed", label: "Completed", icon: CheckCircle2 },
 ];
+
+const CAC_DOC_TYPES = [
+  { type: "statement_of_compliance", label: "Statement of Compliance" },
+  { type: "statement_of_capital", label: "Statement of Capital" },
+  { type: "director_consent", label: "Director Consent to Act" },
+  { type: "board_resolution", label: "Board Resolution" },
+  { type: "specimen_signatures", label: "Specimen Signature Cards" },
+  { type: "share_certificates", label: "Share Certificates" },
+];
+
+function CacDocumentsCard({ applicationId }: { applicationId: string }) {
+  const { toast } = useToast();
+  const [generating, setGenerating] = useState<string | null>(null);
+
+  const download = async (docType: string, label: string) => {
+    setGenerating(docType);
+    try {
+      const res = await fetch(`/api/applications/${applicationId}/cac-documents/${docType}`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to generate document");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${label.replace(/\s+/g, "_")}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setGenerating(null);
+    }
+  };
+
+  return (
+    <Card data-testid="card-cac-documents">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <FileText className="h-4 w-4" />
+          CAC Statutory Documents
+        </CardTitle>
+        <CardDescription>
+          Generate pre-filled PDF forms for company registration. Download, print, and sign before submission.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {CAC_DOC_TYPES.map(({ type, label }) => (
+          <div key={type} className="flex items-center justify-between py-1.5">
+            <span className="text-sm">{label}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => download(type, label)}
+              disabled={generating === type}
+              data-testid={`btn-generate-${type}`}
+            >
+              {generating === type ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Generating…</>
+              ) : (
+                <><Download className="h-3.5 w-3.5 mr-1.5" />Download</>
+              )}
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function ApplicationDetailsPage() {
   const [, params] = useRoute("/applications/:id");
@@ -1388,6 +1463,8 @@ export default function ApplicationDetailsPage() {
                 </CardContent>
               </Card>
             )}
+
+            <CacDocumentsCard applicationId={applicationId || ""} />
 
             <Card>
               <CardHeader>

@@ -14183,6 +14183,78 @@ Important guidelines:
     }
   });
 
+  // ============== CAC STATUTORY DOCUMENT GENERATORS (Block C) ==============
+  // GET  /api/applications/:id/cac-documents — list available doc types + readiness
+  // POST /api/applications/:id/cac-documents/:docType — generate + stream PDF
+
+  const CAC_DOC_TYPES = ["statement_of_compliance", "statement_of_capital", "director_consent", "board_resolution", "specimen_signatures", "share_certificates"] as const;
+
+  app.get("/api/applications/:id/cac-documents", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      if (application.founderUserId !== userId) {
+        const isLawyerOrAdmin = ["lawyer", "admin"].includes((req.user as any)?.role);
+        if (!isLawyerOrAdmin) return res.status(403).json({ message: "Access denied" });
+      }
+      const people = await storage.getCompanyPeople(applicationId);
+      const directors = people.filter(p => p.role === "director" || p.role === "director_shareholder");
+      const shareholders = people.filter(p => p.role === "shareholder" || p.role === "director_shareholder");
+
+      const { CAC_DOC_LABELS } = await import("./services/cacDocumentService");
+      const docs = CAC_DOC_TYPES.map(t => ({
+        type: t,
+        label: CAC_DOC_LABELS[t],
+        available: true,
+        warnings:
+          (t === "director_consent" || t === "board_resolution" || t === "specimen_signatures") && directors.length === 0
+            ? ["No directors found"] :
+          (t === "statement_of_capital" || t === "share_certificates") && shareholders.length === 0
+            ? ["No shareholders found"] : [],
+      }));
+      res.json({ docs, companyName: application.companyName1 });
+    } catch (error) {
+      console.error("[CacDocs] list error:", error);
+      res.status(500).json({ message: "Failed to list CAC documents" });
+    }
+  });
+
+  app.post("/api/applications/:id/cac-documents/:docType", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      const docType = req.params.docType as string;
+
+      if (!(CAC_DOC_TYPES as readonly string[]).includes(docType)) {
+        return res.status(400).json({ message: "Unknown document type" });
+      }
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      if (application.founderUserId !== userId) {
+        const isLawyerOrAdmin = ["lawyer", "admin"].includes((req.user as any)?.role);
+        if (!isLawyerOrAdmin) return res.status(403).json({ message: "Access denied" });
+      }
+
+      const people = await storage.getCompanyPeople(applicationId);
+      const { generateCacDocument, CAC_DOC_LABELS } = await import("./services/cacDocumentService");
+
+      const pdfBuffer = await generateCacDocument(docType as any, application, people);
+      const safeCompanyName = (application.companyName1 || "company").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const filename = `${safeCompanyName}_${docType}_${Date.now()}.pdf`;
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", pdfBuffer.length);
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("[CacDocs] generate error:", error);
+      res.status(500).json({ message: "Failed to generate document" });
+    }
+  });
+
   app.post("/api/founder/company-profiles/:id/compliance/generate", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);

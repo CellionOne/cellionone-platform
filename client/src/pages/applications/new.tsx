@@ -60,9 +60,34 @@ interface DirectorEntry {
 
 const companyTypes = [
   { value: "LTD", label: "Private Limited Company (LTD)", description: "Most common for small to medium businesses" },
+  { value: "SMC", label: "Single Member Company (SMC)", description: "For solo founders — one shareholder, full limited liability" },
   { value: "PLC", label: "Public Limited Company (PLC)", description: "For companies planning to go public" },
   { value: "LLP", label: "Limited Liability Partnership (LLP)", description: "For professional service firms" },
   { value: "Sole_Proprietorship", label: "Business Name (Sole Proprietorship)", description: "For individual business owners" },
+];
+
+// E2: Regulated industry keywords — CAC requires additional licences/approvals
+const REGULATED_KEYWORDS = [
+  "bank", "banking", "microfinance", "mortgage", "finance", "financial", "investment",
+  "insurance", "assurance", "pension", "capital market", "stockbroker", "asset management",
+  "telecoms", "telecom", "telecommunications", "wireless", "spectrum",
+  "petroleum", "oil", "gas", "downstream", "upstream",
+  "pharmaceutical", "pharmacy", "drug", "hospital", "healthcare", "medical",
+  "aviation", "airline", "airport",
+  "casino", "gaming", "lottery", "betting",
+  "mining", "solid mineral",
+];
+
+// E3: Restricted/reserved words in company names per CAC regulations
+const RESTRICTED_NAME_WORDS = [
+  "federal", "national", "government", "state", "municipal", "royal", "imperial",
+  "central", "cooperative society", "building society",
+  "bank", "banking", "savings and loan", "mortgage",
+  "insurance", "assurance", "re-insurance",
+  "trust", "trustee",
+  "stock exchange", "securities",
+  "chartered", "institute", "council", "commission", "authority",
+  "nigeria", "nigerian",
 ];
 
 const nigerianStates = [
@@ -940,6 +965,16 @@ export default function NewApplicationPage() {
                       </div>
                     </div>
                   ))}
+                  {/* E1: SMC notice when Single Member Company selected */}
+                  {formData.companyType === "SMC" && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 p-3 mt-2" data-testid="smc-notice">
+                      <p className="text-sm font-medium text-blue-900 dark:text-blue-100">Single Member Company (SMC)</p>
+                      <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">
+                        Under CAMA 2020, a Single Member Company may be incorporated with only one shareholder.
+                        You will be the sole director and shareholder. All shares must be allocated 100% to one person in Step 4.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )
             )}
@@ -1013,6 +1048,25 @@ export default function NewApplicationPage() {
                       data-testid="input-company-name-3"
                     />
                   </div>
+                  {/* E3: Restricted name pre-check */}
+                  {(() => {
+                    const allNames = [formData.companyName1, formData.companyName2, formData.companyName3]
+                      .filter(Boolean).map(n => n!.toLowerCase());
+                    const flagged = RESTRICTED_NAME_WORDS.filter(word =>
+                      allNames.some(name => name.includes(word.toLowerCase()))
+                    );
+                    if (flagged.length === 0) return null;
+                    return (
+                      <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30 p-3" data-testid="restricted-name-warning">
+                        <p className="text-sm font-medium text-red-900 dark:text-red-100">Restricted Name Warning</p>
+                        <p className="text-sm text-red-800 dark:text-red-200 mt-1">
+                          One or more of your proposed names contains a word that is restricted or requires special approval under CAC regulations: <strong>{flagged.join(", ")}</strong>.
+                          CAC may reject names containing these words unless you have the necessary licence or approval. You can still proceed, but consider choosing a different name.
+                        </p>
+                      </div>
+                    );
+                  })()}
+
                   <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3">
                     <p className="text-sm text-amber-800 dark:text-amber-300 font-medium">Two-step Name Process</p>
                     <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
@@ -1076,6 +1130,24 @@ export default function NewApplicationPage() {
                     </CardContent>
                   </Card>
                 )}
+
+                {/* E2: Regulated industry warning */}
+                {(() => {
+                  const desc = formData.businessDescription.toLowerCase();
+                  const matched = REGULATED_KEYWORDS.filter(k => desc.includes(k));
+                  if (matched.length === 0) return null;
+                  return (
+                    <div className="rounded-lg border border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/30 p-3" data-testid="regulated-industry-warning">
+                      <p className="text-sm font-medium text-orange-900 dark:text-orange-100">Regulated Industry Detected</p>
+                      <p className="text-sm text-orange-800 dark:text-orange-200 mt-1">
+                        Your business description suggests activity in a regulated sector (<strong>{matched.slice(0, 3).join(", ")}</strong>
+                        {matched.length > 3 ? `, +${matched.length - 3} more` : ""}).
+                        These industries require additional licences or approvals from sector regulators (CBN, NAICOM, NCC, DPR, etc.) before operations can begin.
+                        Your Cellion One lawyer can advise on the specific requirements.
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

@@ -2957,6 +2957,7 @@ function ExecutionTab({
     application_reviewed: "I have reviewed the application and confirm it meets all CAC requirements.",
     cac_filed: "I have filed this application with the Corporate Affairs Commission.",
     originals_received: "I have received the stamped original documents from CAC.",
+    witness_attestation: "I attest as witness that the directors and shareholders named in this application have personally signed the relevant consent and execution documents in my presence, and that to the best of my knowledge the signatures are genuine.",
   };
 
   return (
@@ -2992,6 +2993,7 @@ function ExecutionTab({
                     <SelectItem value="application_reviewed">Application Reviewed</SelectItem>
                     <SelectItem value="cac_filed">Filed with CAC</SelectItem>
                     <SelectItem value="originals_received">Originals Received</SelectItem>
+                    <SelectItem value="witness_attestation">Witness Attestation</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

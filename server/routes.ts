@@ -91,7 +91,7 @@ const aiSuggestSchema = z.object({
 
 // New validation schemas for enhancement features
 const executionDeclarationSchema = z.object({
-  declarationType: z.enum(["document_verified", "application_reviewed", "cac_filed", "originals_received"]),
+  declarationType: z.enum(["document_verified", "application_reviewed", "cac_filed", "originals_received", "witness_attestation"]),
 });
 
 const documentQualitySchema = z.object({

@@ -44,6 +44,8 @@ function requireCieTier(minTier: CieTier) {
 
 // Shared auth middleware for all CIE endpoints (skips KYC billing check)
 const cieAuth = authenticateApiKey("cie:read", { skipBillingCheck: true });
+// Intelligence alias auth — same behaviour, different scope string
+const intelligenceAuth = authenticateApiKey("intelligence:read", { skipBillingCheck: true });
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -82,6 +84,36 @@ export function registerCieApiRoutes(app: Express): void {
         });
       }
 
+      return res.json({
+        available: true,
+        asiIndex: pulse.asiIndex != null ? pulse.asiIndex / 100 : null,
+        asiDailyChangePct: pulse.asiChange != null ? pulse.asiChange / 10000 : null,
+        brentCrudeUsd: pulse.brentCrudeUsdCents != null ? pulse.brentCrudeUsdCents / 100 : null,
+        ngnPerUsd: pulse.ngnPerUsd != null ? pulse.ngnPerUsd / 100 : null,
+        source: pulse.source ?? "manual",
+        updatedAt: pulse.updatedAt,
+        commentary: pulse.commentary ?? null,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Internal error";
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // GET /api/v1/intelligence/pulse
+  // Alias for /api/v1/cie/pulse — intelligence:read scope
+  // ──────────────────────────────────────────────────────────────────────────
+  app.get("/api/v1/intelligence/pulse", intelligenceAuth, async (req: ApiKeyRequest, res: Response) => {
+    try {
+      const pulse = await storage.getLatestCieMarketPulse();
+      if (!pulse) {
+        return res.json({
+          available: false,
+          commentary: null,
+          message: "Market pulse data not yet populated. Check back after the next scheduled update.",
+        });
+      }
       return res.json({
         available: true,
         asiIndex: pulse.asiIndex != null ? pulse.asiIndex / 100 : null,

@@ -1547,6 +1547,25 @@ export const kycApiUsageLogs = pgTable("kyc_api_usage_logs", {
 export const insertKycApiUsageLogSchema = createInsertSchema(kycApiUsageLogs).omit({ id: true, createdAt: true });
 export type KycApiUsageLog = typeof kycApiUsageLogs.$inferSelect;
 
+// ============== API USAGE SUMMARY (monthly rollup per key / module / endpoint) ==============
+export const apiUsageSummary = pgTable("api_usage_summary", {
+  id: serial("id").primaryKey(),
+  apiKeyId: integer("api_key_id").notNull().references(() => kycApiKeys.id, { onDelete: "cascade" }),
+  periodYear: integer("period_year").notNull(),
+  periodMonth: integer("period_month").notNull(),
+  module: varchar("module", { length: 50 }).notNull(),
+  endpoint: varchar("endpoint", { length: 150 }).notNull(),
+  requestCount: integer("request_count").notNull().default(0),
+  errorCount: integer("error_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  uniqueIndex("uq_api_usage_summary").on(table.apiKeyId, table.periodYear, table.periodMonth, table.module, table.endpoint),
+  index("idx_api_usage_key_period").on(table.apiKeyId, table.periodYear, table.periodMonth),
+]);
+
+export type ApiUsageSummary = typeof apiUsageSummary.$inferSelect;
+
 // ============== KYC WEBHOOK CONFIGS ==============
 export const kycWebhookConfigs = pgTable("kyc_webhook_configs", {
   id: serial("id").primaryKey(),

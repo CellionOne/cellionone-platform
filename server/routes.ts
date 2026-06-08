@@ -28,6 +28,9 @@ import { registerCieApiRoutes } from "./routes/cieApiRoutes";
 import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
 import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
+import { registerPublicApiRoutes } from "./routes/publicApiRoutes";
+import { registerFormationApiRoutes } from "./routes/formationApiRoutes";
+import { apiUsageTrackerMiddleware } from "./middleware/apiUsageTracker";
 import { syncChecklistFromVerifications, syncPeopleDocumentRequirements, syncAllApplicationsForVerifiedUser, getDocSlugsForPerson } from "./services/checklistSyncService";
 
 // Maximum number of Smile ID error results for a given RC number before we
@@ -15904,6 +15907,12 @@ For questions, contact: service@cellionone.com
     }
   });
 
+  // ============== PUBLIC API ROUTES (no auth) ==============
+  registerPublicApiRoutes(app);
+
+  // ============== API USAGE TRACKER (fire-and-forget rollup for /api/v1/*) ==============
+  app.use("/api/v1", apiUsageTrackerMiddleware);
+
   // ============== KYC SERVICE ROUTES ==============
   registerKycServiceRoutes(app);
 
@@ -15933,6 +15942,9 @@ For questions, contact: service@cellionone.com
 
   // ============== CIE PORTAL SESSION ROUTES ==============
   registerCiePortalRoutes(app);
+
+  // ============== FORMATION PUBLIC API ROUTES (v1) ==============
+  registerFormationApiRoutes(app);
 
   // ============== BANK PORTAL ROUTES ==============
   registerBankPortalRoutes(app);

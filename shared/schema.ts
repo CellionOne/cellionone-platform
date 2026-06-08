@@ -2770,3 +2770,76 @@ export const insertCorporateDocUploadTokenSchema = createInsertSchema(corporateD
 export type CorporateDocUploadToken = typeof corporateDocUploadTokens.$inferSelect;
 export type InsertCorporateDocUploadToken = z.infer<typeof insertCorporateDocUploadTokenSchema>;
 
+
+// ============== SIGNATURES ==============
+export const signatures = pgTable("signatures", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id"),                                   // founder or director user id
+  companyPersonId: integer("company_person_id").references(() => companyPeople.id),
+  applicationId: integer("application_id").references(() => companyApplications.id),
+  signatureContext: varchar("signature_context", { length: 50 }).notNull(), // "founder" | "director_consent" | "witness"
+  signatureDataUrl: text("signature_data_url").notNull(),        // base64 PNG data URL
+  whiteBackground: boolean("white_background").default(true),
+  ipAddress: varchar("ip_address", { length: 50 }),
+  userAgent: text("user_agent"),
+  signedAt: timestamp("signed_at", { withTimezone: true }).defaultNow(),
+  consentAccepted: boolean("consent_accepted").default(false),
+  consentText: text("consent_text"),
+  isVerified: boolean("is_verified").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_signatures_user").on(table.userId),
+  index("idx_signatures_application").on(table.applicationId),
+  index("idx_signatures_person").on(table.companyPersonId),
+  index("idx_signatures_context").on(table.signatureContext),
+]);
+
+export const insertSignatureSchema = createInsertSchema(signatures).omit({ id: true, createdAt: true });
+export type Signature = typeof signatures.$inferSelect;
+export type InsertSignature = z.infer<typeof insertSignatureSchema>;
+
+// ============== BOARD RESOLUTION SIGNATURES ==============
+export const boardResolutionSignatures = pgTable("board_resolution_signatures", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull().references(() => companyApplications.id),
+  companyPersonId: integer("company_person_id").notNull().references(() => companyPeople.id),
+  signatureId: integer("signature_id").references(() => signatures.id),
+  role: varchar("role", { length: 50 }).notNull(),              // "director" | "chairman" | "secretary"
+  declarationText: text("declaration_text"),
+  signedAt: timestamp("signed_at", { withTimezone: true }),
+  ipAddress: varchar("ip_address", { length: 50 }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_board_res_sigs_application").on(table.applicationId),
+  index("idx_board_res_sigs_person").on(table.companyPersonId),
+]);
+
+export const insertBoardResolutionSignatureSchema = createInsertSchema(boardResolutionSignatures).omit({ id: true, createdAt: true });
+export type BoardResolutionSignature = typeof boardResolutionSignatures.$inferSelect;
+export type InsertBoardResolutionSignature = z.infer<typeof insertBoardResolutionSignatureSchema>;
+
+// ============== SHAREHOLDER CONFIRMATIONS ==============
+export const shareholderConfirmations = pgTable("shareholder_confirmations", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull().references(() => companyApplications.id),
+  companyPersonId: integer("company_person_id").notNull().references(() => companyPeople.id),
+  signatureId: integer("signature_id").references(() => signatures.id),
+  confirmedSharesAllocated: integer("confirmed_shares_allocated"),
+  confirmedShareClass: varchar("confirmed_share_class", { length: 50 }),
+  confirmedSharePercentage: varchar("confirmed_share_percentage", { length: 20 }),
+  pscDeclarationAccepted: boolean("psc_declaration_accepted").default(false),
+  capitalPaidUpDeclarationAccepted: boolean("capital_paid_up_declaration_accepted").default(false),
+  consentToken: varchar("consent_token", { length: 128 }).unique(),
+  tokenExpiresAt: timestamp("token_expires_at"),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  ipAddress: varchar("ip_address", { length: 50 }),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  index("idx_shareholder_conf_application").on(table.applicationId),
+  index("idx_shareholder_conf_person").on(table.companyPersonId),
+  index("idx_shareholder_conf_token").on(table.consentToken),
+]);
+
+export const insertShareholderConfirmationSchema = createInsertSchema(shareholderConfirmations).omit({ id: true, createdAt: true });
+export type ShareholderConfirmation = typeof shareholderConfirmations.$inferSelect;
+export type InsertShareholderConfirmation = z.infer<typeof insertShareholderConfirmationSchema>;

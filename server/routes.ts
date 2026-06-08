@@ -28,6 +28,9 @@ import { registerCieApiRoutes } from "./routes/cieApiRoutes";
 import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
 import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
+import { registerPublicApiRoutes } from "./routes/publicApiRoutes";
+import { registerFormationApiRoutes } from "./routes/formationApiRoutes";
+import { registerCieIntelligenceRoutes } from "./routes/cieApiRoutes";
 import { syncChecklistFromVerifications, syncPeopleDocumentRequirements, syncAllApplicationsForVerifiedUser, getDocSlugsForPerson } from "./services/checklistSyncService";
 
 // Maximum number of Smile ID error results for a given RC number before we
@@ -15927,6 +15930,8 @@ For questions, contact: service@cellionone.com
 
   // ============== CIE PUBLIC API ROUTES (v1) ==============
   registerCieApiRoutes(app);
+  registerPublicApiRoutes(app);
+  registerFormationApiRoutes(app);
 
   // ============== CIE SUBSCRIPTION BILLING ROUTES ==============
   registerCieBillingRoutes(app);

@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, lawyerDocumentRequests, corporateDocUploadTokens, type CompanyPerson, type InsertCompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, lawyerDocumentRequests, corporateDocUploadTokens, signatures as signaturesTable, shareholderConfirmations as shareholderConfirmationsTable, type CompanyPerson, type InsertCompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne, inArray, sql } from "drizzle-orm";
 import * as services from "./services";
@@ -5787,6 +5787,65 @@ Status: ${order.status}</div>
     } catch (error) {
       console.error("Error fetching identity verification:", error);
       res.status(500).json({ message: "Failed to fetch identity verification" });
+    }
+  });
+
+  // B3: Founder signature capture — called after KYC biometric step
+  app.post("/api/founder/signature", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { signatureDataUrl, applicationId, consentAccepted, consentText } = req.body;
+
+      if (!signatureDataUrl || typeof signatureDataUrl !== "string") {
+        return res.status(400).json({ message: "signatureDataUrl is required" });
+      }
+      if (!signatureDataUrl.startsWith("data:image/png;base64,")) {
+        return res.status(400).json({ message: "signatureDataUrl must be a PNG data URL" });
+      }
+      // Rough size guard: ~200KB base64 limit
+      if (signatureDataUrl.length > 280_000) {
+        return res.status(400).json({ message: "Signature image too large" });
+      }
+
+      const [record] = await db.insert(signaturesTable).values({
+        userId,
+        applicationId: applicationId ? Number(applicationId) : null,
+        signatureContext: "founder",
+        signatureDataUrl,
+        whiteBackground: true,
+        ipAddress: req.ip?.substring(0, 50) ?? null,
+        userAgent: req.headers["user-agent"]?.substring(0, 500) ?? null,
+        consentAccepted: !!consentAccepted,
+        consentText: consentText ?? null,
+        isVerified: false,
+      }).returning();
+
+      res.status(201).json({ id: record.id, signedAt: record.signedAt });
+    } catch (error) {
+      console.error("Error saving founder signature:", error);
+      res.status(500).json({ message: "Failed to save signature" });
+    }
+  });
+
+  // B3: Retrieve latest founder signature
+  app.get("/api/founder/signature", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const [record] = await db
+        .select({ id: signaturesTable.id, signedAt: signaturesTable.signedAt })
+        .from(signaturesTable)
+        .where(
+          and(
+            eq(signaturesTable.userId, userId),
+            eq(signaturesTable.signatureContext, "founder")
+          )
+        )
+        .orderBy(desc(signaturesTable.signedAt))
+        .limit(1);
+      res.json(record ?? null);
+    } catch (error) {
+      console.error("Error fetching founder signature:", error);
+      res.status(500).json({ message: "Failed to fetch signature" });
     }
   });
 

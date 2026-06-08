@@ -14,7 +14,8 @@ import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CelionLogo } from "@/components/celion-logo";
 import { usePageMeta } from "@/hooks/use-page-meta";
-import { Loader2, ShieldCheck, CheckCircle2, Lock, Info } from "lucide-react";
+import { Loader2, ShieldCheck, CheckCircle2, Lock, Info, PenLine } from "lucide-react";
+import { SignaturePad } from "@/components/SignaturePad";
 
 const verifySchema = z.object({
   bvn: z
@@ -50,6 +51,8 @@ export default function VerifyIdentityPage() {
   const searchString = useSearch();
   const { toast } = useToast();
   const [verified, setVerified] = useState(false);
+  const [showSignature, setShowSignature] = useState(false);
+  const [signatureSaved, setSignatureSaved] = useState(false);
   const [verifiedName, setVerifiedName] = useState<string | null>(null);
   const [inviteAccepted, setInviteAccepted] = useState(false);
 
@@ -98,6 +101,7 @@ export default function VerifyIdentityPage() {
       setVerifiedName(data.profile?.fullName ?? null);
       setInviteAccepted(inviteAccepted);
       setVerified(true);
+      setShowSignature(true);
       toast({ title: "Identity verified!", description: "Your profile has been updated with government-verified data." });
     },
     onError: (error: any) => {
@@ -129,6 +133,26 @@ export default function VerifyIdentityPage() {
     }
   };
 
+  const saveSignatureMutation = useMutation({
+    mutationFn: async (signatureDataUrl: string) => {
+      const res = await apiRequest("POST", "/api/founder/signature", {
+        signatureDataUrl,
+        consentAccepted: true,
+        consentText: "I consent to this signature being used for CAC registration documents.",
+      });
+      if (!res.ok) throw new Error("Failed to save signature");
+      return res.json();
+    },
+    onSuccess: () => {
+      setSignatureSaved(true);
+      setShowSignature(false);
+    },
+    onError: () => {
+      // Non-blocking — signature can be captured later
+      setShowSignature(false);
+    },
+  });
+
   const onSubmit = (data: VerifyForm) => verifyMutation.mutate(data);
 
   return (
@@ -143,7 +167,39 @@ export default function VerifyIdentityPage() {
       </nav>
 
       <div className="flex-1 flex items-center justify-center px-4 pt-20 pb-8">
-        {verified ? (
+        {verified && showSignature ? (
+          <Card className="w-full max-w-lg" data-testid="card-signature-capture">
+            <CardHeader className="space-y-2 text-center">
+              <div className="mx-auto w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mb-2">
+                <PenLine className="h-6 w-6 text-primary" />
+              </div>
+              <CardTitle className="text-2xl font-bold">Add Your Signature</CardTitle>
+              <CardDescription>
+                Draw your signature below. It will be used on CAC registration documents, printed on a white background as required by the Corporate Affairs Commission.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <SignaturePad
+                label="Your Signature"
+                required
+                onSave={(dataUrl) => saveSignatureMutation.mutate(dataUrl)}
+                onClear={() => {}}
+                width={480}
+                height={160}
+              />
+              <p className="text-xs text-muted-foreground text-center">
+                Draw your signature in the box above, then click <strong>Save Signature</strong>.
+              </p>
+              <button
+                type="button"
+                className="w-full text-sm text-muted-foreground hover:text-foreground hover:underline"
+                onClick={() => setShowSignature(false)}
+              >
+                Skip — I'll add my signature later
+              </button>
+            </CardContent>
+          </Card>
+        ) : verified ? (
           <Card className="w-full max-w-md text-center" data-testid="card-identity-verified">
             <CardHeader className="space-y-4">
               <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
@@ -166,6 +222,12 @@ export default function VerifyIdentityPage() {
                 <Lock className="h-4 w-4" />
                 Your name and date of birth have been locked from government records
               </div>
+              {signatureSaved && (
+                <div className="flex items-center justify-center gap-2 text-sm text-green-600 font-medium">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Signature saved
+                </div>
+              )}
               <Button
                 className="w-full"
                 onClick={handleContinue}

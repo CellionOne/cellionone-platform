@@ -11,7 +11,7 @@ export const founderProfiles = pgTable("founder_profiles", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").notNull().unique(),
   fullName: varchar("full_name", { length: 255 }),
-  phone: varchar("phone", { length: 50 }),
+  phone: varchar("phone", { length: 20 }),
   dateOfBirth: varchar("date_of_birth"),
   nationality: varchar("nationality", { length: 100 }),
   gender: varchar("gender", { length: 20 }),

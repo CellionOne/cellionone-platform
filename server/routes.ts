@@ -6123,7 +6123,7 @@ Status: ${order.status}</div>
       const userId = getUserId(req);
       const { draftApplicationId, wizardStep: rawWizardStep, ...rest } = req.body;
       const wizardStep = rawWizardStep != null
-        ? Math.min(5, Math.max(1, parseInt(String(rawWizardStep)) || 1))
+        ? Math.min(6, Math.max(1, parseInt(String(rawWizardStep)) || 1))
         : undefined;
 
       if (draftApplicationId) {

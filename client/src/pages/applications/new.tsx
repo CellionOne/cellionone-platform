@@ -40,6 +40,7 @@ const steps = [
   { id: 3, title: "Business Details", description: "Describe your business activities" },
   { id: 4, title: "Directors & Shareholders", description: "Declare your team members" },
   { id: 5, title: "Address", description: "Registered office address" },
+  { id: 6, title: "Company Secretary", description: "Appoint or invite a company secretary" },
 ];
 
 interface DirectorEntry {
@@ -134,6 +135,10 @@ export default function NewApplicationPage() {
   // D2/D3: PSC and capital declarations — keyed by director localId
   const [pscDeclarations, setPscDeclarations] = useState<Record<string, boolean>>({});
   const [capitalDeclarations, setCapitalDeclarations] = useState<Record<string, boolean>>({});
+  // F1: Company Secretary step
+  const [secretaryMode, setSecretaryMode] = useState<"skip" | "appoint" | "invite">("skip");
+  const [secretaryName, setSecretaryName] = useState("");
+  const [secretaryEmail, setSecretaryEmail] = useState("");
   const [newDirector, setNewDirector] = useState<Omit<DirectorEntry, "localId">>({
     personType: "individual",
     fullName: "",
@@ -557,7 +562,27 @@ export default function NewApplicationPage() {
           await apiRequest("POST", "/api/company-people", dirPayload);
         }
       }
-      
+
+      // F1: Save company secretary if provided
+      if (secretaryMode === "invite" && secretaryEmail) {
+        await apiRequest("POST", "/api/company-people", {
+          inviteEmail: secretaryEmail,
+          role: "secretary",
+          title: secretaryName || null,
+          applicationId: app.id,
+          deferInvite: true,
+        });
+      } else if (secretaryMode === "appoint" && secretaryEmail) {
+        // Appoint an existing member — add them as secretary too
+        await apiRequest("POST", "/api/company-people", {
+          inviteEmail: secretaryEmail,
+          role: "secretary",
+          title: secretaryName || null,
+          applicationId: app.id,
+          deferInvite: true,
+        });
+      }
+
       return app;
     },
     onSuccess: async (app) => {
@@ -696,13 +721,16 @@ export default function NewApplicationPage() {
         }
         return !!formData.registeredAddress.country && !!formData.registeredAddress.line1 && !!formData.registeredAddress.city && !!formData.registeredAddress.state && hasOperatingAddress;
       }
+      case 6:
+        // Secretary is optional for LTD/SMC under CAMA 2020 (required for PLC)
+        return true;
       default:
         return false;
     }
   };
 
   const handleNext = () => {
-    if (currentStep < 5) {
+    if (currentStep < 6) {
       setCurrentStep(currentStep + 1);
     } else if (resumeApplicationId) {
       resumeCreateMutation.mutate(formData);
@@ -1835,6 +1863,107 @@ export default function NewApplicationPage() {
               </div>
             )}
 
+            {/* F1: Company Secretary step */}
+            {currentStep === 6 && (
+              <div className="space-y-6" data-testid="step-secretary">
+                <div className="rounded-lg border bg-muted/30 p-4 flex items-start gap-3 text-sm">
+                  <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-muted-foreground">
+                      Under CAMA 2020, a Public Limited Company (PLC) must have a company secretary.
+                      For Private Limited Companies (LTD/SMC), appointing a secretary is optional but recommended for good governance.
+                    </p>
+                    {formData.companyType === "PLC" && (
+                      <p className="text-destructive text-xs mt-1 font-medium">Required for PLC — you must appoint a company secretary.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  {[
+                    { value: "skip" as const, label: "Skip for now", description: "I'll appoint a company secretary after incorporation." },
+                    { value: "appoint" as const, label: "Appoint an existing member", description: "One of the declared directors will also serve as company secretary." },
+                    { value: "invite" as const, label: "Invite a new person", description: "Send an invitation email to an external company secretary." },
+                  ].map(opt => (
+                    <div
+                      key={opt.value}
+                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                        secretaryMode === opt.value ? "border-primary bg-primary/5" : "border-transparent bg-muted/50"
+                      }`}
+                      onClick={() => setSecretaryMode(opt.value)}
+                      data-testid={`secretary-mode-${opt.value}`}
+                    >
+                      <p className="font-medium text-sm">{opt.label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {secretaryMode === "appoint" && (
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <p className="text-sm font-medium">Select from declared team members</p>
+                    {directors.filter(d => d.role !== "secretary").length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No team members declared yet. Please go back to Step 4 to add directors first.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {directors.filter(d => d.role !== "secretary").map(d => (
+                          <div
+                            key={d.localId}
+                            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${
+                              secretaryName === (d.fullName || d.inviteEmail || "") ? "border-primary bg-primary/5" : ""
+                            }`}
+                            onClick={() => {
+                              setSecretaryName(d.fullName || d.inviteEmail || "");
+                              setSecretaryEmail(d.inviteEmail || "");
+                            }}
+                            data-testid={`appoint-secretary-${d.localId}`}
+                          >
+                            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                              <Users className="h-3.5 w-3.5 text-primary" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium">{d.personType === "corporate" ? d.corporateName : (d.fullName || d.inviteEmail)}</p>
+                              <p className="text-xs text-muted-foreground capitalize">{d.role.replace(/_/g, " ")}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {secretaryMode === "invite" && (
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <p className="text-sm font-medium">Company Secretary Details</p>
+                    <div className="space-y-2">
+                      <Label htmlFor="secretary-name">Full Name</Label>
+                      <Input
+                        id="secretary-name"
+                        placeholder="e.g., Adaeze Okonkwo"
+                        value={secretaryName}
+                        onChange={e => setSecretaryName(e.target.value)}
+                        data-testid="input-secretary-name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="secretary-email">Email Address</Label>
+                      <Input
+                        id="secretary-email"
+                        type="email"
+                        placeholder="secretary@example.com"
+                        value={secretaryEmail}
+                        onChange={e => setSecretaryEmail(e.target.value)}
+                        data-testid="input-secretary-email"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      An invitation email will be sent after incorporation payment is confirmed.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center justify-between pt-4">
               <Button
                 type="button"
@@ -1893,7 +2022,7 @@ export default function NewApplicationPage() {
                         <LoadingSpinner size="sm" className="mr-2" />
                         Saving...
                       </>
-                    ) : currentStep === 5 ? (
+                    ) : currentStep === 6 ? (
                       resumeApplicationId ? "Complete Application" : "Create Application"
                     ) : (
                       <>

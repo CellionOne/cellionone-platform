@@ -5894,6 +5894,12 @@ Status: ${order.status}</div>
     { key: "tin_cert", label: "TIN Certificate" },
     { key: "proof_address", label: "Proof of Operating Address" },
     { key: "director_id", label: "Director(s) Government-Issued ID" },
+    // H1: Statutory documents for bank dossier
+    { key: "statement_of_capital", label: "Statement of Capital & Shareholdings" },
+    { key: "board_resolution", label: "Board Resolution" },
+    { key: "director_consent", label: "Director Consent to Act Forms" },
+    { key: "specimen_signatures", label: "Specimen Signature Cards" },
+    { key: "share_certificates", label: "Share Certificates" },
   ];
   const VAULT_DOC_LABEL: Record<string, string> = Object.fromEntries(VAULT_DOC_SLOTS.map(s => [s.key, s.label]));
 
@@ -13445,6 +13451,12 @@ Important guidelines:
         { key: "tin_cert", label: "TIN Certificate", required: true },
         { key: "proof_address", label: "Proof of Business Address", required: true },
         { key: "director_id", label: "Director(s) Government-Issued ID", required: true },
+        // H1: Statutory documents required by banks for account opening
+        { key: "statement_of_capital", label: "Statement of Capital & Shareholdings", required: true },
+        { key: "board_resolution", label: "Board Resolution (to open account)", required: true },
+        { key: "director_consent", label: "Director Consent to Act Forms", required: false },
+        { key: "specimen_signatures", label: "Specimen Signature Cards", required: true },
+        { key: "share_certificates", label: "Share Certificates", required: false },
       ];
       for (const doc of EXISTING_CO_DOCS) {
         await db.insert(profileChecklistItems).values({

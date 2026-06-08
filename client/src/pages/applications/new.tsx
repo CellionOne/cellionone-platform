@@ -106,6 +106,9 @@ export default function NewApplicationPage() {
   const [online, setOnline] = useState(isOnline());
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [directors, setDirectors] = useState<DirectorEntry[]>([]);
+  // D2/D3: PSC and capital declarations — keyed by director localId
+  const [pscDeclarations, setPscDeclarations] = useState<Record<string, boolean>>({});
+  const [capitalDeclarations, setCapitalDeclarations] = useState<Record<string, boolean>>({});
   const [newDirector, setNewDirector] = useState<Omit<DirectorEntry, "localId">>({
     personType: "individual",
     fullName: "",
@@ -1396,6 +1399,57 @@ export default function NewApplicationPage() {
                     No team members added yet. You can add them later from your dashboard if preferred.
                   </p>
                 )}
+
+                {/* D2/D3: PSC and Capital Declarations for shareholders ≥25% */}
+                {(() => {
+                  const pscShareholders = directors.filter(d =>
+                    ["shareholder", "director_shareholder"].includes(d.role) &&
+                    parseFloat(d.sharePercentage || "0") >= 25
+                  );
+                  if (pscShareholders.length === 0) return null;
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-4 space-y-4" data-testid="psc-declarations-section">
+                      <div>
+                        <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">PSC &amp; Capital Declarations Required</p>
+                        <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                          The following shareholders hold ≥25% and must complete PSC and capital declarations before you can proceed to registration.
+                          These will be sent to each shareholder for confirmation; the founder can also complete on their behalf.
+                        </p>
+                      </div>
+                      {pscShareholders.map(sh => (
+                        <div key={sh.localId} className="space-y-2 border-t border-amber-200 dark:border-amber-700 pt-3">
+                          <p className="text-sm font-medium">{sh.personType === "corporate" ? sh.corporateName : (sh.fullName || sh.inviteEmail)} ({sh.sharePercentage}%)</p>
+                          <div className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              id={`psc-${sh.localId}`}
+                              checked={!!pscDeclarations[sh.localId]}
+                              onChange={e => setPscDeclarations(prev => ({ ...prev, [sh.localId]: e.target.checked }))}
+                              className="mt-0.5"
+                              data-testid={`checkbox-psc-${sh.localId}`}
+                            />
+                            <label htmlFor={`psc-${sh.localId}`} className="text-xs leading-snug cursor-pointer text-amber-900 dark:text-amber-100">
+                              I confirm this person is a <strong>Person with Significant Control (PSC)</strong> and consent to their details being entered in the PSC register as required by CAMA 2020.
+                            </label>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              id={`capital-${sh.localId}`}
+                              checked={!!capitalDeclarations[sh.localId]}
+                              onChange={e => setCapitalDeclarations(prev => ({ ...prev, [sh.localId]: e.target.checked }))}
+                              className="mt-0.5"
+                              data-testid={`checkbox-capital-${sh.localId}`}
+                            />
+                            <label htmlFor={`capital-${sh.localId}`} className="text-xs leading-snug cursor-pointer text-amber-900 dark:text-amber-100">
+                              I confirm at least <strong>25% of the nominal share value</strong> allocated to this person has been or will be paid up on allotment (CAMA 2020, s.124).
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

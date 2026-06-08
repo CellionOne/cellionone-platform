@@ -212,6 +212,64 @@ function CacDocumentsCard({ applicationId }: { applicationId: string }) {
   );
 }
 
+function ShareholderConfirmCard({ applicationId }: { applicationId: string }) {
+  const { toast } = useToast();
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const res = await fetch(`/api/applications/${applicationId}/shareholder-confirmation-invites`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to send invites");
+      }
+      const data = await res.json();
+      toast({ title: `Sent ${data.totalSent} confirmation email${data.totalSent !== 1 ? "s" : ""}` });
+      setSent(true);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Card data-testid="card-shareholder-confirm">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Users className="h-4 w-4" />
+          Shareholder Confirmations
+        </CardTitle>
+        <CardDescription>
+          Send each shareholder a link to confirm their share allocation and complete PSC and capital declarations.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button
+          variant={sent ? "outline" : "default"}
+          size="sm"
+          onClick={handleSend}
+          disabled={sending || sent}
+          data-testid="btn-send-shareholder-invites"
+        >
+          {sending ? (
+            <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Sending…</>
+          ) : sent ? (
+            <><CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />Invites Sent</>
+          ) : (
+            "Send Confirmation Invites"
+          )}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ApplicationDetailsPage() {
   const [, params] = useRoute("/applications/:id");
   const { toast } = useToast();
@@ -1465,6 +1523,7 @@ export default function ApplicationDetailsPage() {
             )}
 
             <CacDocumentsCard applicationId={applicationId || ""} />
+            <ShareholderConfirmCard applicationId={applicationId || ""} />
 
             <Card>
               <CardHeader>

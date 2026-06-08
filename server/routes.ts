@@ -7518,6 +7518,201 @@ Status: ${order.status}</div>
     }
   });
 
+  // ============== SHAREHOLDER CONFIRMATIONS (D1) ==============
+
+  // POST /api/applications/:id/shareholder-confirmation-invites
+  // Authenticated (founder): creates/refreshes confirmation records with tokens, sends emails
+  app.post("/api/applications/:id/shareholder-confirmation-invites", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      if (application.founderUserId !== userId) return res.status(403).json({ message: "Access denied" });
+
+      const people = await storage.getCompanyPeople(applicationId);
+      const shareholders = people.filter(p =>
+        ["shareholder", "director_shareholder"].includes(p.role) && p.inviteEmail
+      );
+      if (shareholders.length === 0) {
+        return res.status(400).json({ message: "No shareholders with email addresses found" });
+      }
+
+      const crypto = await import("crypto");
+      const { getSiteBaseUrl, getResendClient } = await import("./services/emailService");
+      const baseUrl = getSiteBaseUrl(req);
+      let { client: resend, fromEmail } = await getResendClient();
+      const companyName = application.companyName1 || "the company";
+
+      const results: { personId: number; email: string; sent: boolean }[] = [];
+
+      for (const sh of shareholders) {
+        const token = crypto.default.randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+        // Upsert: one confirmation record per person per application
+        const [existing] = await db
+          .select({ id: shareholderConfirmationsTable.id })
+          .from(shareholderConfirmationsTable)
+          .where(
+            and(
+              eq(shareholderConfirmationsTable.applicationId, applicationId),
+              eq(shareholderConfirmationsTable.companyPersonId, sh.id)
+            )
+          )
+          .limit(1);
+
+        if (existing) {
+          await db.update(shareholderConfirmationsTable)
+            .set({ consentToken: token, tokenExpiresAt: expiresAt, confirmedAt: null })
+            .where(eq(shareholderConfirmationsTable.id, existing.id));
+        } else {
+          await db.insert(shareholderConfirmationsTable).values({
+            applicationId,
+            companyPersonId: sh.id,
+            confirmedSharesAllocated: sh.sharesAllocated,
+            confirmedShareClass: sh.shareClass,
+            confirmedSharePercentage: sh.sharePercentage,
+            consentToken: token,
+            tokenExpiresAt: expiresAt,
+          });
+        }
+
+        let sent = false;
+        try {
+          const confirmUrl = `${baseUrl}/shareholder-confirm/${token}`;
+          await resend.emails.send({
+            from: fromEmail,
+            to: sh.inviteEmail!.toLowerCase().trim(),
+            subject: `Please confirm your shareholding — ${companyName}`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #1a8a5c;">Shareholder Confirmation Required</h2>
+                <p>Dear ${sh.fullName || sh.inviteEmail},</p>
+                <p>You have been allocated shares in <strong>${companyName}</strong> on Cellion One:</p>
+                <ul>
+                  <li><strong>Shares Allocated:</strong> ${sh.sharesAllocated?.toLocaleString() ?? "—"}</li>
+                  <li><strong>Share Class:</strong> ${sh.shareClass || "Ordinary"}</li>
+                  <li><strong>Share Percentage:</strong> ${sh.sharePercentage || "—"}</li>
+                </ul>
+                <p>Please confirm your shareholding and complete your PSC (Persons with Significant Control) declaration by clicking the button below:</p>
+                <p style="margin: 24px 0;">
+                  <a href="${confirmUrl}" style="background: #1a8a5c; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Confirm My Shareholding</a>
+                </p>
+                <p>This link expires in 7 days. If the button doesn't work, paste this URL into your browser:<br/>${confirmUrl}</p>
+                <hr style="margin: 24px 0;" />
+                <p style="color: #666; font-size: 12px;">This email was sent on behalf of the founder via Cellion One. If you did not expect this, please ignore it.</p>
+              </div>
+            `,
+          });
+          sent = true;
+        } catch (emailErr: any) {
+          console.warn("[ShareholderConfirm] Email failed for person", sh.id, emailErr?.message);
+        }
+        results.push({ personId: sh.id, email: sh.inviteEmail!, sent });
+      }
+
+      res.json({ results, totalSent: results.filter(r => r.sent).length });
+    } catch (error) {
+      console.error("[ShareholderConfirm] invite error:", error);
+      res.status(500).json({ message: "Failed to send confirmation invites" });
+    }
+  });
+
+  // GET /api/shareholder-confirm/:token — public: validate token, return confirmation data
+  app.get("/api/shareholder-confirm/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const [record] = await db
+        .select()
+        .from(shareholderConfirmationsTable)
+        .where(eq(shareholderConfirmationsTable.consentToken, token))
+        .limit(1);
+
+      if (!record) return res.status(404).json({ message: "Invalid or expired confirmation link" });
+      if (record.confirmedAt) return res.status(410).json({ message: "This shareholding has already been confirmed" });
+      if (record.tokenExpiresAt && new Date() > record.tokenExpiresAt) {
+        return res.status(410).json({ message: "This confirmation link has expired. Please ask the founder to resend it." });
+      }
+
+      const [person] = await db
+        .select({ fullName: companyPeople.fullName, inviteEmail: companyPeople.inviteEmail, role: companyPeople.role })
+        .from(companyPeople)
+        .where(eq(companyPeople.id, record.companyPersonId))
+        .limit(1);
+
+      const application = await storage.getApplication(record.applicationId);
+
+      res.json({
+        confirmationId: record.id,
+        personName: person?.fullName,
+        role: person?.role,
+        companyName: application?.companyName1,
+        sharesAllocated: record.confirmedSharesAllocated,
+        shareClass: record.confirmedShareClass,
+        sharePercentage: record.confirmedSharePercentage,
+      });
+    } catch (error) {
+      console.error("[ShareholderConfirm] GET error:", error);
+      res.status(500).json({ message: "Failed to validate confirmation link" });
+    }
+  });
+
+  // POST /api/shareholder-confirm/:token — public: save PSC + capital declarations
+  app.post("/api/shareholder-confirm/:token", async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      const { pscDeclarationAccepted, capitalPaidUpDeclarationAccepted } = req.body;
+
+      const [record] = await db
+        .select()
+        .from(shareholderConfirmationsTable)
+        .where(eq(shareholderConfirmationsTable.consentToken, token))
+        .limit(1);
+
+      if (!record) return res.status(404).json({ message: "Invalid or expired confirmation link" });
+      if (record.confirmedAt) return res.status(410).json({ message: "Already confirmed" });
+      if (record.tokenExpiresAt && new Date() > record.tokenExpiresAt) {
+        return res.status(410).json({ message: "Confirmation link expired" });
+      }
+
+      await db.update(shareholderConfirmationsTable)
+        .set({
+          pscDeclarationAccepted: !!pscDeclarationAccepted,
+          capitalPaidUpDeclarationAccepted: !!capitalPaidUpDeclarationAccepted,
+          confirmedAt: new Date(),
+          ipAddress: req.ip?.substring(0, 50) ?? null,
+        })
+        .where(eq(shareholderConfirmationsTable.id, record.id));
+
+      // Fire-and-forget: notify founder
+      (async () => {
+        try {
+          const [person] = await db
+            .select({ fullName: companyPeople.fullName })
+            .from(companyPeople)
+            .where(eq(companyPeople.id, record.companyPersonId))
+            .limit(1);
+          const application = await storage.getApplication(record.applicationId);
+          if (application?.founderUserId) {
+            await storage.createNotification({
+              userId: application.founderUserId,
+              type: "success",
+              title: "Shareholder confirmation received",
+              message: `${person?.fullName || "A shareholder"} has confirmed their shareholding in ${application.companyName1 || "your company"}.`,
+              linkUrl: `/applications/${record.applicationId}`,
+            });
+          }
+        } catch { /* non-blocking */ }
+      })();
+
+      res.json({ confirmed: true });
+    } catch (error) {
+      console.error("[ShareholderConfirm] POST error:", error);
+      res.status(500).json({ message: "Failed to save confirmation" });
+    }
+  });
+
   // ============== LEGAL AI ROUTES ==============
   // AI SAFETY GUARDRAILS:
   // - AI outputs are labeled as suggestions requiring human review

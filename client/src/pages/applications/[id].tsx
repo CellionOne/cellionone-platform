@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRoute, Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/use-auth";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,8 @@ import {
   Navigation,
   AlertTriangle,
   Send,
+  Download,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import type { CompanyApplication, ApplicationChecklistItem, Payment, ClarificationRequest } from "@shared/schema";
@@ -136,11 +139,143 @@ const statusTimeline = [
   { status: "completed", label: "Completed", icon: CheckCircle2 },
 ];
 
+const CAC_DOC_TYPES = [
+  { type: "statement_of_compliance", label: "Statement of Compliance" },
+  { type: "statement_of_capital", label: "Statement of Capital" },
+  { type: "director_consent", label: "Director Consent to Act" },
+  { type: "board_resolution", label: "Board Resolution" },
+  { type: "specimen_signatures", label: "Specimen Signature Cards" },
+  { type: "share_certificates", label: "Share Certificates" },
+];
+
+function CacDocumentsCard({ applicationId }: { applicationId: string }) {
+  const { toast } = useToast();
+  const [generating, setGenerating] = useState<string | null>(null);
+
+  const download = async (docType: string, label: string) => {
+    setGenerating(docType);
+    try {
+      const res = await fetch(`/api/applications/${applicationId}/cac-documents/${docType}`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to generate document");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${label.replace(/\s+/g, "_")}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setGenerating(null);
+    }
+  };
+
+  return (
+    <Card data-testid="card-cac-documents">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <FileText className="h-4 w-4" />
+          CAC Statutory Documents
+        </CardTitle>
+        <CardDescription>
+          Generate pre-filled PDF forms for company registration. Download, print, and sign before submission.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {CAC_DOC_TYPES.map(({ type, label }) => (
+          <div key={type} className="flex items-center justify-between py-1.5">
+            <span className="text-sm">{label}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => download(type, label)}
+              disabled={generating === type}
+              data-testid={`btn-generate-${type}`}
+            >
+              {generating === type ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Generating…</>
+              ) : (
+                <><Download className="h-3.5 w-3.5 mr-1.5" />Download</>
+              )}
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ShareholderConfirmCard({ applicationId }: { applicationId: string }) {
+  const { toast } = useToast();
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const res = await fetch(`/api/applications/${applicationId}/shareholder-confirmation-invites`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to send invites");
+      }
+      const data = await res.json();
+      toast({ title: `Sent ${data.totalSent} confirmation email${data.totalSent !== 1 ? "s" : ""}` });
+      setSent(true);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Card data-testid="card-shareholder-confirm">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Users className="h-4 w-4" />
+          Shareholder Confirmations
+        </CardTitle>
+        <CardDescription>
+          Send each shareholder a link to confirm their share allocation and complete PSC and capital declarations.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button
+          variant={sent ? "outline" : "default"}
+          size="sm"
+          onClick={handleSend}
+          disabled={sending || sent}
+          data-testid="btn-send-shareholder-invites"
+        >
+          {sending ? (
+            <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Sending…</>
+          ) : sent ? (
+            <><CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />Invites Sent</>
+          ) : (
+            "Send Confirmation Invites"
+          )}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ApplicationDetailsPage() {
   const [, params] = useRoute("/applications/:id");
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const applicationId = params?.id;
+  const { user: currentUser } = useAuth();
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const [namesPreloaded, setNamesPreloaded] = useState(false);
@@ -451,8 +586,10 @@ export default function ApplicationDetailsPage() {
 
   const currentStatusIndex = statusTimeline.findIndex(s => s.status === application.status);
 
+  const isKycComplete = !!currentUser?.isIdentityVerified;
   const canSubmit = application.status === "draft" &&
     !hasMissingRequired &&
+    isKycComplete &&
     payment?.status === "success";
 
   return (
@@ -611,8 +748,46 @@ export default function ApplicationDetailsPage() {
                 );
               })}
             </div>
+            {/* G1: Key dates below the timeline */}
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground mt-2">
+              {application.createdAt && (
+                <span>Created: {new Date(application.createdAt).toLocaleDateString("en-GB")}</span>
+              )}
+              {application.submittedAt && (
+                <span>Submitted: {new Date(application.submittedAt).toLocaleDateString("en-GB")}</span>
+              )}
+              {application.completedAt && (
+                <span>Completed: {new Date(application.completedAt).toLocaleDateString("en-GB")}</span>
+              )}
+              {(application as any).rejectedAt && (
+                <span className="text-destructive">Rejected: {new Date((application as any).rejectedAt).toLocaleDateString("en-GB")}</span>
+              )}
+            </div>
           </CardContent>
         </Card>
+        )}
+
+        {/* G4: CAC Rejection Banner */}
+        {application.status === "rejected" && (
+          <Card className="border-destructive/40 bg-destructive/5" data-testid="card-rejection-banner">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2 text-destructive">
+                <XCircle className="h-5 w-5" />
+                Application Rejected
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(application as any).rejectionReason && (
+                <div className="rounded-md border border-destructive/20 bg-background p-3">
+                  <p className="text-sm font-medium text-destructive mb-1">Reason</p>
+                  <p className="text-sm">{(application as any).rejectionReason}</p>
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground">
+                Your application was rejected by the Corporate Affairs Commission. Please contact your Cellion One lawyer to discuss next steps — in many cases, a corrected re-submission can be made.
+              </p>
+            </CardContent>
+          </Card>
         )}
 
         {clarifications.filter(c => c.status === "pending").length > 0 && (
@@ -1138,6 +1313,11 @@ export default function ApplicationDetailsPage() {
                         <span>Estimated Total</span>
                         <span>₦{(estimatedTotal / 100).toLocaleString()}</span>
                       </div>
+                      {/* G2: Stamp duty notice */}
+                      <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-2.5 text-xs text-blue-800 dark:text-blue-200 mt-1" data-testid="stamp-duty-notice">
+                        <span className="font-medium">Stamp Duty:</span> The CAC collects stamp duty directly at ₦3,000 (flat) for standard incorporation.
+                        This is paid to the Federal Inland Revenue Service (FIRS) and is not included in the above total — it is settled by your Cellion One lawyer during filing.
+                      </div>
                     </div>
 
                     {payment && (
@@ -1219,6 +1399,27 @@ export default function ApplicationDetailsPage() {
               </Card>
             )}
 
+            {application.status === "draft" && !isKycComplete && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                      Identity Verification Required
+                    </p>
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      You must complete KYC verification before submitting your application. This typically takes 5–10 minutes.
+                    </p>
+                    <Link href="/founder/identity">
+                      <Button size="sm" variant="outline" className="border-amber-400 text-amber-800 hover:bg-amber-100 dark:text-amber-200">
+                        Complete Verification →
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {application.status === "draft" && (
               <Card>
                 <CardHeader>
@@ -1226,6 +1427,16 @@ export default function ApplicationDetailsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      {isKycComplete ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 text-amber-500" />
+                      )}
+                      <span className={isKycComplete ? "text-green-600" : "text-amber-600"}>
+                        Identity verification complete
+                      </span>
+                    </div>
                     <div className="flex items-center gap-2 text-sm">
                       {progress === 100 ? (
                         <CheckCircle2 className="h-4 w-4 text-green-600" />
@@ -1251,6 +1462,7 @@ export default function ApplicationDetailsPage() {
                       disabled={!canSubmit || submitMutation.isPending}
                       onClick={() => submitMutation.mutate()}
                       data-testid="button-submit-application"
+                      title={!isKycComplete ? "Complete identity verification to submit" : undefined}
                     >
                       {submitMutation.isPending ? <LoadingSpinner size="sm" /> : "Submit Application"}
                     </Button>
@@ -1352,6 +1564,9 @@ export default function ApplicationDetailsPage() {
                 </CardContent>
               </Card>
             )}
+
+            <CacDocumentsCard applicationId={applicationId || ""} />
+            <ShareholderConfirmCard applicationId={applicationId || ""} />
 
             <Card>
               <CardHeader>

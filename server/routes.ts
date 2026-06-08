@@ -9,7 +9,7 @@ import { registerObjectStorageRoutes, ObjectStorageService } from "./replit_inte
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
-import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, lawyerDocumentRequests, corporateDocUploadTokens, type CompanyPerson, type InsertCompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
+import { insertCompanyApplicationSchema, insertClarificationRequestSchema, insertLawyerApplicationSchema, legalChatConversations, legalChatMessages, companyProfiles, companyApplications as companyApplicationsTable, kycOrgMembers, postIncorporationTasks, complianceDeadlines, orders as ordersTable, orderItems as orderItemsTable, orderPayments as orderPaymentsTable, serviceRequests as serviceRequestsTable, serviceRequestCompanyProfiles as srProfilesTable, serviceRequestDocuments as srDocumentsTable, users as usersTable, registeredOfficeSubscriptions, serviceAddresses, dataSharingConsents, dataSharingAccessLogs, addDirectorRequests as addDirectorRequestsTable, identityVerifications, verifiedEntities, addressVerificationJobs as addressVerificationJobsTable, profileChecklistItems, directorBiometricInvites, founderProfiles, bankDocumentRequests, bankPartners, bankPortalUsers, companyPeople, kycSupplierProfiles, kybLookups, documentFiles, lawyerDocumentRequests, corporateDocUploadTokens, signatures as signaturesTable, shareholderConfirmations as shareholderConfirmationsTable, type CompanyPerson, type InsertCompanyPerson, type InsertDirectorBiometricInvite, type InsertFounderProfile, type InsertIdentityVerification } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, asc, ne, inArray, sql } from "drizzle-orm";
 import * as services from "./services";
@@ -81,6 +81,7 @@ const statusUpdateSchema = z.object({
     "filed", "pending_originals", "courier_in_transit", "completed", "rejected"
   ]),
   rcNumber: z.string().trim().min(1).optional(),
+  rejectionReason: z.string().trim().optional(), // G4: CAC rejection reason
 });
 
 const aiSuggestSchema = z.object({
@@ -91,7 +92,7 @@ const aiSuggestSchema = z.object({
 
 // New validation schemas for enhancement features
 const executionDeclarationSchema = z.object({
-  declarationType: z.enum(["document_verified", "application_reviewed", "cac_filed", "originals_received"]),
+  declarationType: z.enum(["document_verified", "application_reviewed", "cac_filed", "originals_received", "witness_attestation"]),
 });
 
 const documentQualitySchema = z.object({
@@ -265,7 +266,7 @@ async function syncDirectorVerification(personUserId: string): Promise<void> {
 // Seed default feature flags
 async function seedFeatureFlags() {
   const defaultFlags = [
-    { key: "enable_tin_registration", description: "Enable TIN registration feature", isEnabled: false },
+    { key: "enable_tin_registration", description: "Enable TIN registration feature", isEnabled: true },
     { key: "enable_bank_referrals", description: "Enable bank account opening referrals", isEnabled: false },
     { key: "enable_registered_address_service", description: "Enable virtual registered address service", isEnabled: false },
     { key: "enable_mail_forwarding", description: "Enable mail forwarding for virtual addresses", isEnabled: false },
@@ -3444,7 +3445,9 @@ export async function registerRoutes(
 
       const cryptoMod = await import("crypto");
       const inviteToken = cryptoMod.randomBytes(32).toString('hex');
-      const isDraft = !!deferInvite;
+      // A4: Invites always fire immediately — deferInvite is no longer used.
+      // Post-payment send is a reminder-only (handled in paystackWebhookHandler).
+      const isDraft = false;
 
       // ── Auto-verify cascade for corporate/BN entities ─────────────────────────
       let autoVerified = false;
@@ -5788,6 +5791,65 @@ Status: ${order.status}</div>
     }
   });
 
+  // B3: Founder signature capture — called after KYC biometric step
+  app.post("/api/founder/signature", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { signatureDataUrl, applicationId, consentAccepted, consentText } = req.body;
+
+      if (!signatureDataUrl || typeof signatureDataUrl !== "string") {
+        return res.status(400).json({ message: "signatureDataUrl is required" });
+      }
+      if (!signatureDataUrl.startsWith("data:image/png;base64,")) {
+        return res.status(400).json({ message: "signatureDataUrl must be a PNG data URL" });
+      }
+      // Rough size guard: ~200KB base64 limit
+      if (signatureDataUrl.length > 280_000) {
+        return res.status(400).json({ message: "Signature image too large" });
+      }
+
+      const [record] = await db.insert(signaturesTable).values({
+        userId,
+        applicationId: applicationId ? Number(applicationId) : null,
+        signatureContext: "founder",
+        signatureDataUrl,
+        whiteBackground: true,
+        ipAddress: req.ip?.substring(0, 50) ?? null,
+        userAgent: req.headers["user-agent"]?.substring(0, 500) ?? null,
+        consentAccepted: !!consentAccepted,
+        consentText: consentText ?? null,
+        isVerified: false,
+      }).returning();
+
+      res.status(201).json({ id: record.id, signedAt: record.signedAt });
+    } catch (error) {
+      console.error("Error saving founder signature:", error);
+      res.status(500).json({ message: "Failed to save signature" });
+    }
+  });
+
+  // B3: Retrieve latest founder signature
+  app.get("/api/founder/signature", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const [record] = await db
+        .select({ id: signaturesTable.id, signedAt: signaturesTable.signedAt })
+        .from(signaturesTable)
+        .where(
+          and(
+            eq(signaturesTable.userId, userId),
+            eq(signaturesTable.signatureContext, "founder")
+          )
+        )
+        .orderBy(desc(signaturesTable.signedAt))
+        .limit(1);
+      res.json(record ?? null);
+    } catch (error) {
+      console.error("Error fetching founder signature:", error);
+      res.status(500).json({ message: "Failed to fetch signature" });
+    }
+  });
+
   // Get comprehensive verification status (with expiry info)
   app.get("/api/founder/verification-status", isAuthenticated, async (req: any, res) => {
     try {
@@ -5832,6 +5894,12 @@ Status: ${order.status}</div>
     { key: "tin_cert", label: "TIN Certificate" },
     { key: "proof_address", label: "Proof of Operating Address" },
     { key: "director_id", label: "Director(s) Government-Issued ID" },
+    // H1: Statutory documents for bank dossier
+    { key: "statement_of_capital", label: "Statement of Capital & Shareholdings" },
+    { key: "board_resolution", label: "Board Resolution" },
+    { key: "director_consent", label: "Director Consent to Act Forms" },
+    { key: "specimen_signatures", label: "Specimen Signature Cards" },
+    { key: "share_certificates", label: "Share Certificates" },
   ];
   const VAULT_DOC_LABEL: Record<string, string> = Object.fromEntries(VAULT_DOC_SLOTS.map(s => [s.key, s.label]));
 
@@ -6062,7 +6130,7 @@ Status: ${order.status}</div>
       const userId = getUserId(req);
       const { draftApplicationId, wizardStep: rawWizardStep, ...rest } = req.body;
       const wizardStep = rawWizardStep != null
-        ? Math.min(5, Math.max(1, parseInt(String(rawWizardStep)) || 1))
+        ? Math.min(6, Math.max(1, parseInt(String(rawWizardStep)) || 1))
         : undefined;
 
       if (draftApplicationId) {
@@ -6356,12 +6424,13 @@ Status: ${order.status}</div>
         ...assignFields,
       });
 
-      // Notify the founder
+      // A3: Notify founder that names have been reviewed
+      const reviewedCompanyName = application.companyName1 || `Application #${applicationId}`;
       await storage.createNotification({
         userId: application.founderUserId,
-        type: "info",
-        title: "Name availability results ready",
-        message: `The CAC name availability check for your application is complete. Log in to select your preferred name and continue your application.`,
+        type: "success",
+        title: "Your company name has been reviewed",
+        message: `The CAC name availability check for "${reviewedCompanyName}" is complete. Log in to see which names are available and continue your application.`,
         linkUrl: `/applications/${applicationId}`,
       });
 
@@ -6420,14 +6489,26 @@ Status: ${order.status}</div>
     try {
       const userId = getUserId(req);
       const applicationId = parseInt(req.params.id);
-      
+
       const application = await storage.getApplication(applicationId);
       if (!application || application.founderUserId !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       if (application.status !== "draft") {
         return res.status(400).json({ message: "Application already submitted" });
+      }
+
+      // A2: KYC hard gate — founder must have completed identity verification before submitting
+      const [founderUser] = await db.select({ isIdentityVerified: usersTable.isIdentityVerified })
+        .from(usersTable).where(eq(usersTable.id, userId));
+      if (!founderUser?.isIdentityVerified) {
+        return res.status(403).json({
+          error: "KYC_REQUIRED",
+          message: "You must complete identity verification before submitting your application.",
+          kycStatus: "incomplete",
+          redirectTo: "/founder/identity",
+        });
       }
 
       // Final sync of per-person document requirements before submission
@@ -7345,6 +7426,300 @@ Status: ${order.status}</div>
     }
   });
 
+  // ============== DIRECTOR / SHAREHOLDER CONSENT (B4) ==============
+  // Token-based, no login required.
+  // The inviteToken from companyPeople is reused as the consent token.
+
+  // GET /api/director-consent/:token — return person + application info
+  app.get("/api/director-consent/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const person = await storage.getCompanyPersonByInviteToken(token);
+      if (!person) return res.status(404).json({ message: "Invalid or expired consent link" });
+      if (person.inviteStatus === "accepted") {
+        return res.status(410).json({ message: "Consent has already been submitted" });
+      }
+
+      const application = await storage.getApplication(person.applicationId!);
+      const companyName = application?.companyName1 || "the company";
+
+      res.json({
+        personId: person.id,
+        fullName: person.fullName,
+        role: person.role,
+        companyName,
+        applicationId: person.applicationId,
+      });
+    } catch (error) {
+      console.error("[DirectorConsent] GET error:", error);
+      res.status(500).json({ message: "Failed to validate consent link" });
+    }
+  });
+
+  // POST /api/director-consent/:token — save signature + consent, mark accepted
+  app.post("/api/director-consent/:token", async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      const { signatureDataUrl, consentToAct, consentToDisclosure, consentText } = req.body;
+
+      const person = await storage.getCompanyPersonByInviteToken(token);
+      if (!person) return res.status(404).json({ message: "Invalid or expired consent link" });
+      if (person.inviteStatus === "accepted") {
+        return res.status(410).json({ message: "Consent has already been submitted" });
+      }
+
+      if (!signatureDataUrl || typeof signatureDataUrl !== "string") {
+        return res.status(400).json({ message: "signatureDataUrl is required" });
+      }
+      if (!signatureDataUrl.startsWith("data:image/png;base64,")) {
+        return res.status(400).json({ message: "signatureDataUrl must be a PNG data URL" });
+      }
+      if (signatureDataUrl.length > 280_000) {
+        return res.status(400).json({ message: "Signature image too large" });
+      }
+      if (!consentToAct) {
+        return res.status(400).json({ message: "You must consent to act as director/shareholder" });
+      }
+
+      const ip = req.ip?.substring(0, 50) ?? null;
+      const ua = req.headers["user-agent"]?.substring(0, 500) ?? null;
+
+      const [sig] = await db.insert(signaturesTable).values({
+        companyPersonId: person.id,
+        applicationId: person.applicationId ?? null,
+        signatureContext: "director_consent",
+        signatureDataUrl,
+        whiteBackground: true,
+        ipAddress: ip,
+        userAgent: ua,
+        consentAccepted: true,
+        consentText: consentText ?? "I consent to act as director/shareholder and to disclosure of my personal information to the CAC.",
+        isVerified: false,
+      }).returning();
+
+      // Mark person as accepted
+      await db.update(companyPeople)
+        .set({ inviteStatus: "accepted", updatedAt: new Date() })
+        .where(eq(companyPeople.id, person.id));
+
+      // Fire-and-forget: notify founder
+      (async () => {
+        try {
+          const application = await storage.getApplication(person.applicationId!);
+          if (application?.founderUserId) {
+            await storage.createNotification({
+              userId: application.founderUserId,
+              type: "success",
+              title: "Director consent received",
+              message: `${person.fullName || "A director"} has signed the consent form for ${application.companyName1 || "your company"}.`,
+              linkUrl: `/applications/${person.applicationId}`,
+            });
+          }
+        } catch { /* non-blocking */ }
+      })();
+
+      res.status(201).json({ signatureId: sig.id, signedAt: sig.signedAt });
+    } catch (error) {
+      console.error("[DirectorConsent] POST error:", error);
+      res.status(500).json({ message: "Failed to submit consent" });
+    }
+  });
+
+  // ============== SHAREHOLDER CONFIRMATIONS (D1) ==============
+
+  // POST /api/applications/:id/shareholder-confirmation-invites
+  // Authenticated (founder): creates/refreshes confirmation records with tokens, sends emails
+  app.post("/api/applications/:id/shareholder-confirmation-invites", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      if (application.founderUserId !== userId) return res.status(403).json({ message: "Access denied" });
+
+      const people = await storage.getCompanyPeople(applicationId);
+      const shareholders = people.filter(p =>
+        ["shareholder", "director_shareholder"].includes(p.role) && p.inviteEmail
+      );
+      if (shareholders.length === 0) {
+        return res.status(400).json({ message: "No shareholders with email addresses found" });
+      }
+
+      const crypto = await import("crypto");
+      const { getSiteBaseUrl, getResendClient } = await import("./services/emailService");
+      const baseUrl = getSiteBaseUrl(req);
+      let { client: resend, fromEmail } = await getResendClient();
+      const companyName = application.companyName1 || "the company";
+
+      const results: { personId: number; email: string; sent: boolean }[] = [];
+
+      for (const sh of shareholders) {
+        const token = crypto.default.randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+        // Upsert: one confirmation record per person per application
+        const [existing] = await db
+          .select({ id: shareholderConfirmationsTable.id })
+          .from(shareholderConfirmationsTable)
+          .where(
+            and(
+              eq(shareholderConfirmationsTable.applicationId, applicationId),
+              eq(shareholderConfirmationsTable.companyPersonId, sh.id)
+            )
+          )
+          .limit(1);
+
+        if (existing) {
+          await db.update(shareholderConfirmationsTable)
+            .set({ consentToken: token, tokenExpiresAt: expiresAt, confirmedAt: null })
+            .where(eq(shareholderConfirmationsTable.id, existing.id));
+        } else {
+          await db.insert(shareholderConfirmationsTable).values({
+            applicationId,
+            companyPersonId: sh.id,
+            confirmedSharesAllocated: sh.sharesAllocated,
+            confirmedShareClass: sh.shareClass,
+            confirmedSharePercentage: sh.sharePercentage,
+            consentToken: token,
+            tokenExpiresAt: expiresAt,
+          });
+        }
+
+        let sent = false;
+        try {
+          const confirmUrl = `${baseUrl}/shareholder-confirm/${token}`;
+          await resend.emails.send({
+            from: fromEmail,
+            to: sh.inviteEmail!.toLowerCase().trim(),
+            subject: `Please confirm your shareholding — ${companyName}`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #1a8a5c;">Shareholder Confirmation Required</h2>
+                <p>Dear ${sh.fullName || sh.inviteEmail},</p>
+                <p>You have been allocated shares in <strong>${companyName}</strong> on Cellion One:</p>
+                <ul>
+                  <li><strong>Shares Allocated:</strong> ${sh.sharesAllocated?.toLocaleString() ?? "—"}</li>
+                  <li><strong>Share Class:</strong> ${sh.shareClass || "Ordinary"}</li>
+                  <li><strong>Share Percentage:</strong> ${sh.sharePercentage || "—"}</li>
+                </ul>
+                <p>Please confirm your shareholding and complete your PSC (Persons with Significant Control) declaration by clicking the button below:</p>
+                <p style="margin: 24px 0;">
+                  <a href="${confirmUrl}" style="background: #1a8a5c; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Confirm My Shareholding</a>
+                </p>
+                <p>This link expires in 7 days. If the button doesn't work, paste this URL into your browser:<br/>${confirmUrl}</p>
+                <hr style="margin: 24px 0;" />
+                <p style="color: #666; font-size: 12px;">This email was sent on behalf of the founder via Cellion One. If you did not expect this, please ignore it.</p>
+              </div>
+            `,
+          });
+          sent = true;
+        } catch (emailErr: any) {
+          console.warn("[ShareholderConfirm] Email failed for person", sh.id, emailErr?.message);
+        }
+        results.push({ personId: sh.id, email: sh.inviteEmail!, sent });
+      }
+
+      res.json({ results, totalSent: results.filter(r => r.sent).length });
+    } catch (error) {
+      console.error("[ShareholderConfirm] invite error:", error);
+      res.status(500).json({ message: "Failed to send confirmation invites" });
+    }
+  });
+
+  // GET /api/shareholder-confirm/:token — public: validate token, return confirmation data
+  app.get("/api/shareholder-confirm/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const [record] = await db
+        .select()
+        .from(shareholderConfirmationsTable)
+        .where(eq(shareholderConfirmationsTable.consentToken, token))
+        .limit(1);
+
+      if (!record) return res.status(404).json({ message: "Invalid or expired confirmation link" });
+      if (record.confirmedAt) return res.status(410).json({ message: "This shareholding has already been confirmed" });
+      if (record.tokenExpiresAt && new Date() > record.tokenExpiresAt) {
+        return res.status(410).json({ message: "This confirmation link has expired. Please ask the founder to resend it." });
+      }
+
+      const [person] = await db
+        .select({ fullName: companyPeople.fullName, inviteEmail: companyPeople.inviteEmail, role: companyPeople.role })
+        .from(companyPeople)
+        .where(eq(companyPeople.id, record.companyPersonId))
+        .limit(1);
+
+      const application = await storage.getApplication(record.applicationId);
+
+      res.json({
+        confirmationId: record.id,
+        personName: person?.fullName,
+        role: person?.role,
+        companyName: application?.companyName1,
+        sharesAllocated: record.confirmedSharesAllocated,
+        shareClass: record.confirmedShareClass,
+        sharePercentage: record.confirmedSharePercentage,
+      });
+    } catch (error) {
+      console.error("[ShareholderConfirm] GET error:", error);
+      res.status(500).json({ message: "Failed to validate confirmation link" });
+    }
+  });
+
+  // POST /api/shareholder-confirm/:token — public: save PSC + capital declarations
+  app.post("/api/shareholder-confirm/:token", async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      const { pscDeclarationAccepted, capitalPaidUpDeclarationAccepted } = req.body;
+
+      const [record] = await db
+        .select()
+        .from(shareholderConfirmationsTable)
+        .where(eq(shareholderConfirmationsTable.consentToken, token))
+        .limit(1);
+
+      if (!record) return res.status(404).json({ message: "Invalid or expired confirmation link" });
+      if (record.confirmedAt) return res.status(410).json({ message: "Already confirmed" });
+      if (record.tokenExpiresAt && new Date() > record.tokenExpiresAt) {
+        return res.status(410).json({ message: "Confirmation link expired" });
+      }
+
+      await db.update(shareholderConfirmationsTable)
+        .set({
+          pscDeclarationAccepted: !!pscDeclarationAccepted,
+          capitalPaidUpDeclarationAccepted: !!capitalPaidUpDeclarationAccepted,
+          confirmedAt: new Date(),
+          ipAddress: req.ip?.substring(0, 50) ?? null,
+        })
+        .where(eq(shareholderConfirmationsTable.id, record.id));
+
+      // Fire-and-forget: notify founder
+      (async () => {
+        try {
+          const [person] = await db
+            .select({ fullName: companyPeople.fullName })
+            .from(companyPeople)
+            .where(eq(companyPeople.id, record.companyPersonId))
+            .limit(1);
+          const application = await storage.getApplication(record.applicationId);
+          if (application?.founderUserId) {
+            await storage.createNotification({
+              userId: application.founderUserId,
+              type: "success",
+              title: "Shareholder confirmation received",
+              message: `${person?.fullName || "A shareholder"} has confirmed their shareholding in ${application.companyName1 || "your company"}.`,
+              linkUrl: `/applications/${record.applicationId}`,
+            });
+          }
+        } catch { /* non-blocking */ }
+      })();
+
+      res.json({ confirmed: true });
+    } catch (error) {
+      console.error("[ShareholderConfirm] POST error:", error);
+      res.status(500).json({ message: "Failed to save confirmation" });
+    }
+  });
+
   // ============== LEGAL AI ROUTES ==============
   // AI SAFETY GUARDRAILS:
   // - AI outputs are labeled as suggestions requiring human review
@@ -8144,8 +8519,8 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "Validation failed", errors: parsed.error.flatten() });
       }
       
-      const { status, rcNumber } = parsed.data;
-      
+      const { status, rcNumber, rejectionReason } = parsed.data;
+
       const application = await storage.getApplication(applicationId);
       if (!application || application.assignedLawyerUserId !== userId) {
         return res.status(403).json({ message: "Access denied" });
@@ -8153,10 +8528,10 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
 
       // Server-side stage transition guard — prevents skipping or reversing stages
       const allowedTransitions: Record<string, string[]> = {
-        submitted:               ["under_review"],
-        under_review:            ["filed"],
-        clarification_requested: ["under_review"],
-        filed:                   ["pending_originals"],
+        submitted:               ["under_review", "rejected"],
+        under_review:            ["filed", "rejected"],
+        clarification_requested: ["under_review", "rejected"],
+        filed:                   ["pending_originals", "rejected"],
         pending_originals:       ["courier_in_transit"],
         courier_in_transit:      ["completed"],
       };
@@ -8173,20 +8548,40 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
         return res.status(400).json({ message: "RC Number is required when marking an application as filed or completed." });
       }
 
-      const updateData: { status: string; rcNumber?: string; completedAt?: Date } = { status };
+      const updateData: { status: string; rcNumber?: string; completedAt?: Date; rejectionReason?: string; rejectedAt?: Date } = { status };
       if (rcNumber) updateData.rcNumber = rcNumber;
       if (status === "completed") updateData.completedAt = new Date();
+      if (status === "rejected") {
+        if (!rejectionReason) return res.status(400).json({ message: "rejectionReason is required when rejecting an application" });
+        updateData.rejectionReason = rejectionReason;
+        updateData.rejectedAt = new Date();
+      }
 
       const updated = await storage.updateApplication(applicationId, updateData);
-      
+
       await storage.createAuditLog({
         actorUserId: userId,
         action: "change_status",
         entityType: "company_application",
         entityId: applicationId.toString(),
-        details: { newStatus: status, rcNumber: effectiveRcNumber },
+        details: { newStatus: status, rcNumber: effectiveRcNumber, rejectionReason },
         ipAddress: req.ip,
       });
+
+      // G4: Notify founder on rejection
+      if (status === "rejected" && application.founderUserId) {
+        (async () => {
+          try {
+            await storage.createNotification({
+              userId: application.founderUserId,
+              type: "error",
+              title: "CAC Application Rejected",
+              message: `Your company registration application has been rejected. Reason: ${rejectionReason}. Please contact your Cellion One lawyer for next steps.`,
+              linkUrl: `/applications/${applicationId}`,
+            });
+          } catch { /* non-blocking */ }
+        })();
+      }
 
       // When a company application reaches "completed", auto-populate the Verified Entities Registry
       if (status === "completed") {
@@ -8195,7 +8590,7 @@ Example: {"suggestions": [{"activity": "General trading and merchandise", "categ
           console.error("[Routes] Failed to add company to verified registry:", err)
         );
       }
-      
+
       res.json(updated);
     } catch (error) {
       console.error("Error updating status:", error);
@@ -13056,6 +13451,12 @@ Important guidelines:
         { key: "tin_cert", label: "TIN Certificate", required: true },
         { key: "proof_address", label: "Proof of Business Address", required: true },
         { key: "director_id", label: "Director(s) Government-Issued ID", required: true },
+        // H1: Statutory documents required by banks for account opening
+        { key: "statement_of_capital", label: "Statement of Capital & Shareholdings", required: true },
+        { key: "board_resolution", label: "Board Resolution (to open account)", required: true },
+        { key: "director_consent", label: "Director Consent to Act Forms", required: false },
+        { key: "specimen_signatures", label: "Specimen Signature Cards", required: true },
+        { key: "share_certificates", label: "Share Certificates", required: false },
       ];
       for (const doc of EXISTING_CO_DOCS) {
         await db.insert(profileChecklistItems).values({
@@ -14007,6 +14408,78 @@ Important guidelines:
     } catch (error: any) {
       console.error("Error updating compliance deadline:", error);
       res.status(500).json({ message: error.message || "Failed to update compliance deadline" });
+    }
+  });
+
+  // ============== CAC STATUTORY DOCUMENT GENERATORS (Block C) ==============
+  // GET  /api/applications/:id/cac-documents — list available doc types + readiness
+  // POST /api/applications/:id/cac-documents/:docType — generate + stream PDF
+
+  const CAC_DOC_TYPES = ["statement_of_compliance", "statement_of_capital", "director_consent", "board_resolution", "specimen_signatures", "share_certificates"] as const;
+
+  app.get("/api/applications/:id/cac-documents", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      if (application.founderUserId !== userId) {
+        const isLawyerOrAdmin = ["lawyer", "admin"].includes((req.user as any)?.role);
+        if (!isLawyerOrAdmin) return res.status(403).json({ message: "Access denied" });
+      }
+      const people = await storage.getCompanyPeople(applicationId);
+      const directors = people.filter(p => p.role === "director" || p.role === "director_shareholder");
+      const shareholders = people.filter(p => p.role === "shareholder" || p.role === "director_shareholder");
+
+      const { CAC_DOC_LABELS } = await import("./services/cacDocumentService");
+      const docs = CAC_DOC_TYPES.map(t => ({
+        type: t,
+        label: CAC_DOC_LABELS[t],
+        available: true,
+        warnings:
+          (t === "director_consent" || t === "board_resolution" || t === "specimen_signatures") && directors.length === 0
+            ? ["No directors found"] :
+          (t === "statement_of_capital" || t === "share_certificates") && shareholders.length === 0
+            ? ["No shareholders found"] : [],
+      }));
+      res.json({ docs, companyName: application.companyName1 });
+    } catch (error) {
+      console.error("[CacDocs] list error:", error);
+      res.status(500).json({ message: "Failed to list CAC documents" });
+    }
+  });
+
+  app.post("/api/applications/:id/cac-documents/:docType", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const applicationId = parseInt(req.params.id);
+      const docType = req.params.docType as string;
+
+      if (!(CAC_DOC_TYPES as readonly string[]).includes(docType)) {
+        return res.status(400).json({ message: "Unknown document type" });
+      }
+
+      const application = await storage.getApplication(applicationId);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      if (application.founderUserId !== userId) {
+        const isLawyerOrAdmin = ["lawyer", "admin"].includes((req.user as any)?.role);
+        if (!isLawyerOrAdmin) return res.status(403).json({ message: "Access denied" });
+      }
+
+      const people = await storage.getCompanyPeople(applicationId);
+      const { generateCacDocument, CAC_DOC_LABELS } = await import("./services/cacDocumentService");
+
+      const pdfBuffer = await generateCacDocument(docType as any, application, people);
+      const safeCompanyName = (application.companyName1 || "company").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const filename = `${safeCompanyName}_${docType}_${Date.now()}.pdf`;
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", pdfBuffer.length);
+      res.send(pdfBuffer);
+    } catch (error) {
+      console.error("[CacDocs] generate error:", error);
+      res.status(500).json({ message: "Failed to generate document" });
     }
   });
 

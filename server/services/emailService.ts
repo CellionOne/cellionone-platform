@@ -1189,6 +1189,111 @@ export async function sendLawyerPayoutConfirmationEmail(opts: {
   console.log(`[PayoutEmail] Confirmation sent to ${to} for ref ${providerRef}`);
 }
 
+export async function sendPaymentReceiptEmail(opts: {
+  to: string;
+  founderName: string;
+  receiptNumber: string;
+  applicationRef: string;
+  companyName: string;
+  lineItems: Array<{ description: string; amountKobo: number }>;
+  totalAmountKobo: number;
+  paymentDate: Date;
+  paystackRef: string;
+}): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+  const { to, founderName, receiptNumber, applicationRef, companyName, lineItems, totalAmountKobo, paymentDate, paystackRef } = opts;
+
+  const fmt = (kobo: number) => `₦${(kobo / 100).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formattedDate = paymentDate.toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
+  const year = new Date().getFullYear();
+
+  const lineItemRows = lineItems.map(item => `
+    <tr>
+      <td style="padding:10px 12px;border-bottom:1px solid #e4e4e7;font-size:14px;color:#374151;">${item.description}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e4e4e7;font-size:14px;color:#374151;text-align:right;">${fmt(item.amountKobo)}</td>
+    </tr>`).join('');
+
+  const html = `<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+  <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
+    <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;padding:40px;box-shadow:0 1px 3px rgba(0,0,0,.1);">
+
+      <div style="text-align:center;margin-bottom:32px;">
+        <div style="display:inline-block;background:#16a34a;padding:12px;border-radius:8px;margin-bottom:12px;">
+          <span style="color:#fff;font-size:24px;font-weight:bold;">C</span>
+        </div>
+        <h1 style="color:#18181b;font-size:22px;margin:0;">Cellion One</h1>
+        <p style="color:#6b7280;font-size:13px;margin:4px 0 0 0;">Payment Receipt</p>
+      </div>
+
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:20px;margin-bottom:28px;">
+        <p style="color:#166534;font-size:13px;margin:0 0 4px 0;font-weight:600;text-transform:uppercase;letter-spacing:.05em;">Official Payment Receipt</p>
+        <p style="color:#15803d;font-size:12px;margin:0;">This is your official payment receipt from Cellion One.</p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px;">
+        <div>
+          <p style="color:#9ca3af;font-size:12px;margin:0 0 2px 0;text-transform:uppercase;">Receipt Number</p>
+          <p style="color:#18181b;font-size:14px;margin:0;font-weight:600;">${receiptNumber}</p>
+        </div>
+        <div>
+          <p style="color:#9ca3af;font-size:12px;margin:0 0 2px 0;text-transform:uppercase;">Payment Date</p>
+          <p style="color:#18181b;font-size:14px;margin:0;">${formattedDate}</p>
+        </div>
+        <div>
+          <p style="color:#9ca3af;font-size:12px;margin:0 0 2px 0;text-transform:uppercase;">Application Ref</p>
+          <p style="color:#18181b;font-size:14px;margin:0;">${applicationRef}</p>
+        </div>
+        <div>
+          <p style="color:#9ca3af;font-size:12px;margin:0 0 2px 0;text-transform:uppercase;">Paystack Reference</p>
+          <p style="color:#18181b;font-size:13px;margin:0;font-family:monospace;">${paystackRef}</p>
+        </div>
+      </div>
+
+      <div style="margin-bottom:8px;">
+        <p style="color:#9ca3af;font-size:12px;margin:0 0 2px 0;text-transform:uppercase;">Billed To</p>
+        <p style="color:#18181b;font-size:14px;margin:0;">${founderName}</p>
+        <p style="color:#6b7280;font-size:13px;margin:2px 0 0 0;">${companyName}</p>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;margin:24px 0;">
+        <thead>
+          <tr style="background:#f9fafb;">
+            <th style="padding:10px 12px;text-align:left;font-size:12px;color:#6b7280;text-transform:uppercase;border-bottom:2px solid #e4e4e7;">Description</th>
+            <th style="padding:10px 12px;text-align:right;font-size:12px;color:#6b7280;text-transform:uppercase;border-bottom:2px solid #e4e4e7;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>${lineItemRows}</tbody>
+        <tfoot>
+          <tr>
+            <td style="padding:12px;font-size:15px;font-weight:700;color:#18181b;">Total Paid</td>
+            <td style="padding:12px;font-size:15px;font-weight:700;color:#16a34a;text-align:right;">${fmt(totalAmountKobo)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div style="background:#f8f9fa;border-radius:6px;padding:16px;margin-bottom:24px;">
+        <p style="color:#6b7280;font-size:13px;margin:0;line-height:1.6;">
+          Payment processed securely via <strong>Paystack</strong>. Your company registration is now being processed.
+          You will receive further updates as your application progresses.
+        </p>
+      </div>
+
+      <p style="color:#6b7280;font-size:13px;line-height:1.6;">
+        Questions? Contact us at <a href="mailto:service@cellionone.com" style="color:#16a34a;">service@cellionone.com</a>
+      </p>
+
+      <hr style="border:none;border-top:1px solid #e4e4e7;margin:28px 0;">
+      <p style="color:#9ca3af;font-size:12px;text-align:center;">&copy; ${year} Cellion Platforms Nigeria Limited. All rights reserved.</p>
+    </div>
+  </body>
+</html>`;
+
+  await client.emails.send({ from: fromEmail, to, subject: `Payment Receipt ${receiptNumber} — ${companyName}`, html });
+  console.log(`[Email] Payment receipt ${receiptNumber} sent to ${to}`);
+}
+
 export async function sendPersonAddedNotificationEmail(
   to: string,
   personName: string,

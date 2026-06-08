@@ -40,6 +40,7 @@ const steps = [
   { id: 3, title: "Business Details", description: "Describe your business activities" },
   { id: 4, title: "Directors & Shareholders", description: "Declare your team members" },
   { id: 5, title: "Address", description: "Registered office address" },
+  { id: 6, title: "Company Secretary", description: "Appoint or invite a company secretary" },
 ];
 
 interface DirectorEntry {
@@ -60,9 +61,34 @@ interface DirectorEntry {
 
 const companyTypes = [
   { value: "LTD", label: "Private Limited Company (LTD)", description: "Most common for small to medium businesses" },
+  { value: "SMC", label: "Single Member Company (SMC)", description: "For solo founders — one shareholder, full limited liability" },
   { value: "PLC", label: "Public Limited Company (PLC)", description: "For companies planning to go public" },
   { value: "LLP", label: "Limited Liability Partnership (LLP)", description: "For professional service firms" },
   { value: "Sole_Proprietorship", label: "Business Name (Sole Proprietorship)", description: "For individual business owners" },
+];
+
+// E2: Regulated industry keywords — CAC requires additional licences/approvals
+const REGULATED_KEYWORDS = [
+  "bank", "banking", "microfinance", "mortgage", "finance", "financial", "investment",
+  "insurance", "assurance", "pension", "capital market", "stockbroker", "asset management",
+  "telecoms", "telecom", "telecommunications", "wireless", "spectrum",
+  "petroleum", "oil", "gas", "downstream", "upstream",
+  "pharmaceutical", "pharmacy", "drug", "hospital", "healthcare", "medical",
+  "aviation", "airline", "airport",
+  "casino", "gaming", "lottery", "betting",
+  "mining", "solid mineral",
+];
+
+// E3: Restricted/reserved words in company names per CAC regulations
+const RESTRICTED_NAME_WORDS = [
+  "federal", "national", "government", "state", "municipal", "royal", "imperial",
+  "central", "cooperative society", "building society",
+  "bank", "banking", "savings and loan", "mortgage",
+  "insurance", "assurance", "re-insurance",
+  "trust", "trustee",
+  "stock exchange", "securities",
+  "chartered", "institute", "council", "commission", "authority",
+  "nigeria", "nigerian",
 ];
 
 const nigerianStates = [
@@ -106,6 +132,13 @@ export default function NewApplicationPage() {
   const [online, setOnline] = useState(isOnline());
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [directors, setDirectors] = useState<DirectorEntry[]>([]);
+  // D2/D3: PSC and capital declarations — keyed by director localId
+  const [pscDeclarations, setPscDeclarations] = useState<Record<string, boolean>>({});
+  const [capitalDeclarations, setCapitalDeclarations] = useState<Record<string, boolean>>({});
+  // F1: Company Secretary step
+  const [secretaryMode, setSecretaryMode] = useState<"skip" | "appoint" | "invite">("skip");
+  const [secretaryName, setSecretaryName] = useState("");
+  const [secretaryEmail, setSecretaryEmail] = useState("");
   const [newDirector, setNewDirector] = useState<Omit<DirectorEntry, "localId">>({
     personType: "individual",
     fullName: "",
@@ -529,7 +562,27 @@ export default function NewApplicationPage() {
           await apiRequest("POST", "/api/company-people", dirPayload);
         }
       }
-      
+
+      // F1: Save company secretary if provided
+      if (secretaryMode === "invite" && secretaryEmail) {
+        await apiRequest("POST", "/api/company-people", {
+          inviteEmail: secretaryEmail,
+          role: "secretary",
+          title: secretaryName || null,
+          applicationId: app.id,
+          deferInvite: true,
+        });
+      } else if (secretaryMode === "appoint" && secretaryEmail) {
+        // Appoint an existing member — add them as secretary too
+        await apiRequest("POST", "/api/company-people", {
+          inviteEmail: secretaryEmail,
+          role: "secretary",
+          title: secretaryName || null,
+          applicationId: app.id,
+          deferInvite: true,
+        });
+      }
+
       return app;
     },
     onSuccess: async (app) => {
@@ -668,13 +721,16 @@ export default function NewApplicationPage() {
         }
         return !!formData.registeredAddress.country && !!formData.registeredAddress.line1 && !!formData.registeredAddress.city && !!formData.registeredAddress.state && hasOperatingAddress;
       }
+      case 6:
+        // Secretary is optional for LTD/SMC under CAMA 2020 (required for PLC)
+        return true;
       default:
         return false;
     }
   };
 
   const handleNext = () => {
-    if (currentStep < 5) {
+    if (currentStep < 6) {
       setCurrentStep(currentStep + 1);
     } else if (resumeApplicationId) {
       resumeCreateMutation.mutate(formData);
@@ -937,6 +993,16 @@ export default function NewApplicationPage() {
                       </div>
                     </div>
                   ))}
+                  {/* E1: SMC notice when Single Member Company selected */}
+                  {formData.companyType === "SMC" && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 p-3 mt-2" data-testid="smc-notice">
+                      <p className="text-sm font-medium text-blue-900 dark:text-blue-100">Single Member Company (SMC)</p>
+                      <p className="text-sm text-blue-800 dark:text-blue-200 mt-1">
+                        Under CAMA 2020, a Single Member Company may be incorporated with only one shareholder.
+                        You will be the sole director and shareholder. All shares must be allocated 100% to one person in Step 4.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )
             )}
@@ -1010,6 +1076,25 @@ export default function NewApplicationPage() {
                       data-testid="input-company-name-3"
                     />
                   </div>
+                  {/* E3: Restricted name pre-check */}
+                  {(() => {
+                    const allNames = [formData.companyName1, formData.companyName2, formData.companyName3]
+                      .filter(Boolean).map(n => n!.toLowerCase());
+                    const flagged = RESTRICTED_NAME_WORDS.filter(word =>
+                      allNames.some(name => name.includes(word.toLowerCase()))
+                    );
+                    if (flagged.length === 0) return null;
+                    return (
+                      <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30 p-3" data-testid="restricted-name-warning">
+                        <p className="text-sm font-medium text-red-900 dark:text-red-100">Restricted Name Warning</p>
+                        <p className="text-sm text-red-800 dark:text-red-200 mt-1">
+                          One or more of your proposed names contains a word that is restricted or requires special approval under CAC regulations: <strong>{flagged.join(", ")}</strong>.
+                          CAC may reject names containing these words unless you have the necessary licence or approval. You can still proceed, but consider choosing a different name.
+                        </p>
+                      </div>
+                    );
+                  })()}
+
                   <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3">
                     <p className="text-sm text-amber-800 dark:text-amber-300 font-medium">Two-step Name Process</p>
                     <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
@@ -1073,6 +1158,24 @@ export default function NewApplicationPage() {
                     </CardContent>
                   </Card>
                 )}
+
+                {/* E2: Regulated industry warning */}
+                {(() => {
+                  const desc = formData.businessDescription.toLowerCase();
+                  const matched = REGULATED_KEYWORDS.filter(k => desc.includes(k));
+                  if (matched.length === 0) return null;
+                  return (
+                    <div className="rounded-lg border border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/30 p-3" data-testid="regulated-industry-warning">
+                      <p className="text-sm font-medium text-orange-900 dark:text-orange-100">Regulated Industry Detected</p>
+                      <p className="text-sm text-orange-800 dark:text-orange-200 mt-1">
+                        Your business description suggests activity in a regulated sector (<strong>{matched.slice(0, 3).join(", ")}</strong>
+                        {matched.length > 3 ? `, +${matched.length - 3} more` : ""}).
+                        These industries require additional licences or approvals from sector regulators (CBN, NAICOM, NCC, DPR, etc.) before operations can begin.
+                        Your Cellion One lawyer can advise on the specific requirements.
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1396,6 +1499,57 @@ export default function NewApplicationPage() {
                     No team members added yet. You can add them later from your dashboard if preferred.
                   </p>
                 )}
+
+                {/* D2/D3: PSC and Capital Declarations for shareholders ≥25% */}
+                {(() => {
+                  const pscShareholders = directors.filter(d =>
+                    ["shareholder", "director_shareholder"].includes(d.role) &&
+                    parseFloat(d.sharePercentage || "0") >= 25
+                  );
+                  if (pscShareholders.length === 0) return null;
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-4 space-y-4" data-testid="psc-declarations-section">
+                      <div>
+                        <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">PSC &amp; Capital Declarations Required</p>
+                        <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                          The following shareholders hold ≥25% and must complete PSC and capital declarations before you can proceed to registration.
+                          These will be sent to each shareholder for confirmation; the founder can also complete on their behalf.
+                        </p>
+                      </div>
+                      {pscShareholders.map(sh => (
+                        <div key={sh.localId} className="space-y-2 border-t border-amber-200 dark:border-amber-700 pt-3">
+                          <p className="text-sm font-medium">{sh.personType === "corporate" ? sh.corporateName : (sh.fullName || sh.inviteEmail)} ({sh.sharePercentage}%)</p>
+                          <div className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              id={`psc-${sh.localId}`}
+                              checked={!!pscDeclarations[sh.localId]}
+                              onChange={e => setPscDeclarations(prev => ({ ...prev, [sh.localId]: e.target.checked }))}
+                              className="mt-0.5"
+                              data-testid={`checkbox-psc-${sh.localId}`}
+                            />
+                            <label htmlFor={`psc-${sh.localId}`} className="text-xs leading-snug cursor-pointer text-amber-900 dark:text-amber-100">
+                              I confirm this person is a <strong>Person with Significant Control (PSC)</strong> and consent to their details being entered in the PSC register as required by CAMA 2020.
+                            </label>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              id={`capital-${sh.localId}`}
+                              checked={!!capitalDeclarations[sh.localId]}
+                              onChange={e => setCapitalDeclarations(prev => ({ ...prev, [sh.localId]: e.target.checked }))}
+                              className="mt-0.5"
+                              data-testid={`checkbox-capital-${sh.localId}`}
+                            />
+                            <label htmlFor={`capital-${sh.localId}`} className="text-xs leading-snug cursor-pointer text-amber-900 dark:text-amber-100">
+                              I confirm at least <strong>25% of the nominal share value</strong> allocated to this person has been or will be paid up on allotment (CAMA 2020, s.124).
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1709,6 +1863,107 @@ export default function NewApplicationPage() {
               </div>
             )}
 
+            {/* F1: Company Secretary step */}
+            {currentStep === 6 && (
+              <div className="space-y-6" data-testid="step-secretary">
+                <div className="rounded-lg border bg-muted/30 p-4 flex items-start gap-3 text-sm">
+                  <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-muted-foreground">
+                      Under CAMA 2020, a Public Limited Company (PLC) must have a company secretary.
+                      For Private Limited Companies (LTD/SMC), appointing a secretary is optional but recommended for good governance.
+                    </p>
+                    {formData.companyType === "PLC" && (
+                      <p className="text-destructive text-xs mt-1 font-medium">Required for PLC — you must appoint a company secretary.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  {[
+                    { value: "skip" as const, label: "Skip for now", description: "I'll appoint a company secretary after incorporation." },
+                    { value: "appoint" as const, label: "Appoint an existing member", description: "One of the declared directors will also serve as company secretary." },
+                    { value: "invite" as const, label: "Invite a new person", description: "Send an invitation email to an external company secretary." },
+                  ].map(opt => (
+                    <div
+                      key={opt.value}
+                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                        secretaryMode === opt.value ? "border-primary bg-primary/5" : "border-transparent bg-muted/50"
+                      }`}
+                      onClick={() => setSecretaryMode(opt.value)}
+                      data-testid={`secretary-mode-${opt.value}`}
+                    >
+                      <p className="font-medium text-sm">{opt.label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {secretaryMode === "appoint" && (
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <p className="text-sm font-medium">Select from declared team members</p>
+                    {directors.filter(d => d.role !== "secretary").length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No team members declared yet. Please go back to Step 4 to add directors first.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {directors.filter(d => d.role !== "secretary").map(d => (
+                          <div
+                            key={d.localId}
+                            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${
+                              secretaryName === (d.fullName || d.inviteEmail || "") ? "border-primary bg-primary/5" : ""
+                            }`}
+                            onClick={() => {
+                              setSecretaryName(d.fullName || d.inviteEmail || "");
+                              setSecretaryEmail(d.inviteEmail || "");
+                            }}
+                            data-testid={`appoint-secretary-${d.localId}`}
+                          >
+                            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                              <Users className="h-3.5 w-3.5 text-primary" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium">{d.personType === "corporate" ? d.corporateName : (d.fullName || d.inviteEmail)}</p>
+                              <p className="text-xs text-muted-foreground capitalize">{d.role.replace(/_/g, " ")}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {secretaryMode === "invite" && (
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <p className="text-sm font-medium">Company Secretary Details</p>
+                    <div className="space-y-2">
+                      <Label htmlFor="secretary-name">Full Name</Label>
+                      <Input
+                        id="secretary-name"
+                        placeholder="e.g., Adaeze Okonkwo"
+                        value={secretaryName}
+                        onChange={e => setSecretaryName(e.target.value)}
+                        data-testid="input-secretary-name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="secretary-email">Email Address</Label>
+                      <Input
+                        id="secretary-email"
+                        type="email"
+                        placeholder="secretary@example.com"
+                        value={secretaryEmail}
+                        onChange={e => setSecretaryEmail(e.target.value)}
+                        data-testid="input-secretary-email"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      An invitation email will be sent after incorporation payment is confirmed.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center justify-between pt-4">
               <Button
                 type="button"
@@ -1767,7 +2022,7 @@ export default function NewApplicationPage() {
                         <LoadingSpinner size="sm" className="mr-2" />
                         Saving...
                       </>
-                    ) : currentStep === 5 ? (
+                    ) : currentStep === 6 ? (
                       resumeApplicationId ? "Complete Application" : "Create Application"
                     ) : (
                       <>

@@ -38,6 +38,7 @@ export const users = pgTable("users", {
   // Intent captured on the post-registration welcome screen
   // Values: founder_new_co | founder_existing_co | kyc_service | procurement
   primaryIntent: varchar("primary_intent", { length: 50 }),
+  phone: varchar("phone", { length: 20 }),
   pendingInviteToken: varchar("pending_invite_token"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

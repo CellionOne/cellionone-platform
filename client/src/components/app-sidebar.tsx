@@ -56,6 +56,7 @@ import {
   ChevronDown,
   ChevronRight,
   ArrowLeftRight,
+  TrendingUp,
   Info,
   LayoutGrid,
   MapPin,
@@ -210,6 +211,7 @@ const adminGroups: { label: string; items: NavItem[] }[] = [
     label: "Intelligence",
     items: [
       { title: "CIE Engine", url: "/admin/cie", icon: BarChart3 },
+      { title: "Live Intelligence", url: "/admin/intelligence", icon: TrendingUp },
       { title: "AI Events", url: "/admin/ai-events", icon: Brain },
     ],
   },

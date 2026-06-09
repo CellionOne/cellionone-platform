@@ -11,7 +11,8 @@ import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import multer from "multer";
 import { db } from "../db";
-import { eq, and, gte, count, desc, sql } from "drizzle-orm";
+import { eq, and, gte, count, desc, sql, lt } from "drizzle-orm";
+import { cieEvents, ngxDividends, cieReports, cieSecurities } from "@shared/schema";
 import type { InsertCieSignal } from "../../shared/schema";
 import { cieSubscriptions, ciePartners, kycApiKeys, kycApiUsageLogs, users } from "../../shared/schema";
 import { generatePartnerApiKey } from "../services/kycApiKeyService";
@@ -1466,6 +1467,276 @@ export function registerCieAdminRoutes(app: Express): void {
       if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
       const ctx = await storage.getLatestCieMarketContext();
       res.json(ctx ?? null);
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  // ================================================================
+  // INTELLIGENCE DASHBOARD — ADMIN ROUTES
+  // ================================================================
+
+  /** GET /api/admin/cie/intelligence/pulse — full pulse for admin dashboard */
+  app.get("/api/admin/cie/intelligence/pulse", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const pulse = await storage.getLatestCieMarketPulse();
+      const ctx = await storage.getLatestCieMarketContext();
+      res.json({ pulse: pulse ?? null, context: ctx ?? null });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** GET /api/admin/cie/intelligence/securities — all securities with real-time fields */
+  app.get("/api/admin/cie/intelligence/securities", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const rows = await db.select().from(cieSecurities).where(eq(cieSecurities.isActive, true));
+      res.json({ securities: rows });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** GET /api/admin/cie/intelligence/sectors — sector summary */
+  app.get("/api/admin/cie/intelligence/sectors", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const { getSectorSummary } = await import("../services/cieProcessingService");
+      const sectors = await getSectorSummary();
+      res.json({ sectors });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** GET /api/admin/cie/intelligence/dividends — all NGX dividends (including inactive) */
+  app.get("/api/admin/cie/intelligence/dividends", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const rows = await db.select().from(ngxDividends).orderBy(desc(ngxDividends.qualificationDate));
+      res.json({ dividends: rows });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** POST /api/admin/cie/intelligence/dividends — create new dividend entry */
+  app.post("/api/admin/cie/intelligence/dividends", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const schema = z.object({
+        ticker: z.string().min(1).max(20).toUpperCase(),
+        company_name: z.string().min(1).max(200),
+        dividend_amount_ngn: z.number().positive(),
+        qualification_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      });
+      const body = schema.parse(req.body);
+
+      const [created] = await db.insert(ngxDividends).values({
+        ticker: body.ticker,
+        companyName: body.company_name,
+        dividendAmountKobo: Math.round(body.dividend_amount_ngn * 100),
+        qualificationDate: body.qualification_date,
+        paymentDate: body.payment_date ?? null,
+        source: "manual_admin",
+        isActive: true,
+      }).returning();
+
+      res.status(201).json({ success: true, dividend: created });
+    } catch (e: unknown) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** PUT /api/admin/cie/intelligence/dividends/:id — update dividend entry */
+  app.put("/api/admin/cie/intelligence/dividends/:id", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const id = parseInt(req.params.id as string, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+      const schema = z.object({
+        ticker: z.string().min(1).max(20).toUpperCase().optional(),
+        company_name: z.string().min(1).max(200).optional(),
+        dividend_amount_ngn: z.number().positive().optional(),
+        qualification_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+      });
+      const body = schema.parse(req.body);
+
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      if (body.ticker) updates.ticker = body.ticker;
+      if (body.company_name) updates.companyName = body.company_name;
+      if (body.dividend_amount_ngn != null) updates.dividendAmountKobo = Math.round(body.dividend_amount_ngn * 100);
+      if (body.qualification_date) updates.qualificationDate = body.qualification_date;
+      if ("payment_date" in body) updates.paymentDate = body.payment_date ?? null;
+
+      const [updated] = await db.update(ngxDividends).set(updates as any).where(eq(ngxDividends.id, id)).returning();
+      if (!updated) return res.status(404).json({ error: "Dividend not found" });
+      res.json({ success: true, dividend: updated });
+    } catch (e: unknown) {
+      if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** DELETE /api/admin/cie/intelligence/dividends/:id — soft delete */
+  app.delete("/api/admin/cie/intelligence/dividends/:id", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const id = parseInt(req.params.id as string, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+      await db.update(ngxDividends).set({ isActive: false, updatedAt: new Date() } as any).where(eq(ngxDividends.id, id));
+      res.json({ success: true });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** GET /api/admin/cie/intelligence/reports — list generated reports */
+  app.get("/api/admin/cie/intelligence/reports", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const reports = await db.select().from(cieReports).orderBy(desc(cieReports.generatedAt)).limit(50);
+      res.json({ reports });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** POST /api/admin/cie/intelligence/reports/generate — trigger manual report generation */
+  app.post("/api/admin/cie/intelligence/reports/generate", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const dateParam = typeof req.body?.date === "string" ? req.body.date : new Date().toISOString().slice(0, 10);
+
+      // Insert pending record first
+      const [pending] = await db.insert(cieReports).values({
+        reportDate: dateParam,
+        status: "generating",
+      }).returning();
+
+      // Generate async — return immediately
+      setImmediate(async () => {
+        try {
+          const { generateAprisysReport } = await import("../services/cieReportGenerator");
+          const { invalidateReportCache } = await import("../services/cieReportGenerator");
+          invalidateReportCache(dateParam);
+          await generateAprisysReport(new Date(dateParam));
+        } catch (err) {
+          await db.update(cieReports).set({
+            status: "failed",
+            errorMessage: err instanceof Error ? err.message : "Unknown error",
+          }).where(eq(cieReports.id, pending.id));
+        }
+      });
+
+      res.status(202).json({ success: true, report_id: pending.id, status: "generating" });
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** GET /api/admin/cie/intelligence/reports/:id/download — stream Excel file */
+  app.get("/api/admin/cie/intelligence/reports/:id/download", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+      const id = parseInt(req.params.id as string, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+      const [report] = await db.select().from(cieReports).where(eq(cieReports.id, id)).limit(1);
+      if (!report) return res.status(404).json({ error: "Report not found" });
+      if (report.status !== "complete") return res.status(409).json({ error: `Report status: ${report.status}` });
+
+      const { generateAprisysReport } = await import("../services/cieReportGenerator");
+      const buf = await generateAprisysReport(new Date(report.reportDate));
+      const filename = `APRISYS_NGX100_Report_${report.reportDate}.xlsx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", buf.length);
+      res.send(buf);
+    } catch (e: unknown) {
+      res.status(500).json({ error: errMsg(e) });
+    }
+  });
+
+  /** GET /api/admin/cie/intelligence/data-sources — data freshness metrics */
+  app.get("/api/admin/cie/intelligence/data-sources", isAuthenticated, async (req: Request, res: Response) => {
+    try {
+      if (!await isCieAnalystOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+      const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const today = new Date().toISOString().slice(0, 10);
+
+      // Count events from Icon eTrade today
+      const eventsRows = await db
+        .select()
+        .from(cieEvents)
+        .where(gte(cieEvents.occurredAt, since24h));
+
+      const totalEventsToday = eventsRows.length;
+      const lastEvent = eventsRows.reduce((latest: Date | null, e) => {
+        const d = new Date(e.occurredAt);
+        return !latest || d > latest ? d : latest;
+      }, null);
+
+      const priceUpdates = eventsRows.filter(e => e.eventType === "price_update").length;
+      const volumeEvents = eventsRows.filter(e => e.eventType === "trade_volume").length;
+
+      // Securities with data today
+      const allSecurities = await db
+        .select({ symbol: cieSecurities.symbol, sector: cieSecurities.sector, lastUpdatedAt: cieSecurities.lastUpdatedAt })
+        .from(cieSecurities)
+        .where(eq(cieSecurities.isActive, true));
+
+      const withDataToday = allSecurities.filter(s =>
+        s.lastUpdatedAt && new Date(s.lastUpdatedAt) >= since24h
+      );
+      const staleSecurities = allSecurities.filter(s =>
+        !s.lastUpdatedAt || new Date(s.lastUpdatedAt) < since24h
+      );
+
+      // Overall freshness
+      const overallFreshnessPct = allSecurities.length > 0
+        ? Math.round((withDataToday.length / allSecurities.length) * 100)
+        : 0;
+      const dataFreshness = overallFreshnessPct >= 80 ? "live"
+        : overallFreshnessPct >= 30 ? "delayed"
+        : "stale";
+
+      // Manual dividends
+      const dividendsRows = await db.select({ id: ngxDividends.id, createdAt: ngxDividends.createdAt }).from(ngxDividends);
+      const lastDivUpdate = dividendsRows.reduce((latest: Date | null, d) => {
+        if (!d.createdAt) return latest;
+        const dt = new Date(d.createdAt);
+        return !latest || dt > latest ? dt : latest;
+      }, null);
+
+      res.json({
+        iconEtradeFeed: {
+          lastEventReceived: lastEvent ?? null,
+          eventsToday: totalEventsToday,
+          priceUpdates,
+          volumeEvents,
+        },
+        manualEntry: {
+          dividendsEntered: dividendsRows.length,
+          lastUpdated: lastDivUpdate ?? null,
+        },
+        ngxCoverage: {
+          total: allSecurities.length,
+          withDataToday: withDataToday.length,
+          staleSecurities: staleSecurities.map(s => s.symbol),
+        },
+        dataFreshness: {
+          overall: dataFreshness,
+          coveragePct: overallFreshnessPct,
+        },
+      });
     } catch (e: unknown) {
       res.status(500).json({ error: errMsg(e) });
     }

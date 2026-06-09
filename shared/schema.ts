@@ -2484,6 +2484,20 @@ export const cieSecurities = pgTable("cie_securities", {
   entryZoneLowKobo: integer("entry_zone_low_kobo"),   // analyst entry zone low (kobo)
   entryZoneHighKobo: integer("entry_zone_high_kobo"),  // analyst entry zone high (kobo)
   targetPriceKobo: integer("target_price_kobo"),       // analyst target price (kobo)
+  // Real-time price fields — updated by cieProcessingService on incoming events
+  lastPriceKobo: integer("last_price_kobo"),
+  previousCloseKobo: integer("previous_close_kobo"),
+  dayChangePct: numeric("day_change_pct", { precision: 6, scale: 2 }),
+  weekChangePct: numeric("week_change_pct", { precision: 6, scale: 2 }),
+  monthChangePct: numeric("month_change_pct", { precision: 6, scale: 2 }),
+  ytdChangePct: numeric("ytd_change_pct", { precision: 6, scale: 2 }),
+  latestVolume: integer("latest_volume"),
+  rsi: numeric("rsi", { precision: 5, scale: 2 }),
+  momentum: varchar("momentum", { length: 10 }),       // 'bullish' | 'bearish' | 'neutral'
+  signal: varchar("signal", { length: 5 }),             // '↑' | '↓' | '─'
+  recommendation: varchar("recommendation", { length: 10 }), // 'BUY' | 'HOLD' | 'REDUCE'
+  investmentIntel: text("investment_intel"),
+  lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
@@ -2766,6 +2780,70 @@ export const ciePartners = pgTable("cie_partners", {
 export const insertCiePartnerSchema = createInsertSchema(ciePartners).omit({ id: true, createdAt: true, updatedAt: true });
 export type CiePartner = typeof ciePartners.$inferSelect;
 export type InsertCiePartner = z.infer<typeof insertCiePartnerSchema>;
+
+// ============== CIE EVENTS (incoming events from Icon eTrade / manual admin) ==============
+export const cieEvents = pgTable("cie_events", {
+  id: serial("id").primaryKey(),
+  sourceApp: varchar("source_app", { length: 50 }).notNull(), // 'icon_etrade' | 'manual_admin' | 'naya_direct'
+  eventType: varchar("event_type", { length: 50 }).notNull(), // 'price_update' | 'trade_volume' | 'dividend_declared' | 'corporate_action' | 'index_update'
+  ticker: varchar("ticker", { length: 20 }),
+  payload: jsonb("payload").notNull().default({}),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  isProcessed: boolean("is_processed").default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("idx_cie_events_ticker").on(table.ticker),
+  index("idx_cie_events_type").on(table.eventType),
+  index("idx_cie_events_processed").on(table.isProcessed),
+  index("idx_cie_events_occurred").on(table.occurredAt),
+]);
+
+export const insertCieEventSchema = createInsertSchema(cieEvents).omit({ id: true, createdAt: true, processedAt: true, isProcessed: true });
+export type CieEvent = typeof cieEvents.$inferSelect;
+export type InsertCieEvent = z.infer<typeof insertCieEventSchema>;
+
+// ============== NGX DIVIDENDS (corporate actions from Icon eTrade / manual admin) ==============
+export const ngxDividends = pgTable("ngx_dividends", {
+  id: serial("id").primaryKey(),
+  ticker: varchar("ticker", { length: 20 }).notNull(),
+  companyName: varchar("company_name", { length: 200 }).notNull(),
+  dividendAmountKobo: integer("dividend_amount_kobo").notNull(), // stored in kobo (naira × 100)
+  qualificationDate: varchar("qualification_date", { length: 20 }).notNull(), // YYYY-MM-DD
+  paymentDate: varchar("payment_date", { length: 20 }),          // YYYY-MM-DD
+  declaredAt: timestamp("declared_at", { withTimezone: true }),
+  source: varchar("source", { length: 50 }).default("manual_admin"), // 'manual_admin' | 'naya_corporate_action'
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("idx_ngx_div_ticker").on(table.ticker),
+  index("idx_ngx_div_qual_date").on(table.qualificationDate),
+  index("idx_ngx_div_active").on(table.isActive),
+]);
+
+export const insertNgxDividendSchema = createInsertSchema(ngxDividends).omit({ id: true, createdAt: true, updatedAt: true });
+export type NgxDividend = typeof ngxDividends.$inferSelect;
+export type InsertNgxDividend = z.infer<typeof insertNgxDividendSchema>;
+
+// ============== CIE REPORTS (generated APRISYS NGX100 Excel reports) ==============
+export const cieReports = pgTable("cie_reports", {
+  id: serial("id").primaryKey(),
+  reportDate: varchar("report_date", { length: 20 }).notNull(), // YYYY-MM-DD
+  filePath: varchar("file_path", { length: 500 }),
+  fileSize: integer("file_size"),
+  securitiesCount: integer("securities_count"),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).defaultNow(),
+  status: varchar("status", { length: 20 }).default("pending"), // pending | generating | complete | failed
+  errorMessage: text("error_message"),
+}, (table) => [
+  index("idx_cie_reports_date").on(table.reportDate),
+  index("idx_cie_reports_status").on(table.status),
+]);
+
+export const insertCieReportSchema = createInsertSchema(cieReports).omit({ id: true, generatedAt: true });
+export type CieReport = typeof cieReports.$inferSelect;
+export type InsertCieReport = z.infer<typeof insertCieReportSchema>;
 
 // ============== KYB LOOKUPS (Public KYB API — CAC Registry) ==============
 export const kybLookups = pgTable("kyb_lookups", {

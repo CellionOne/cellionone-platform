@@ -141,6 +141,7 @@ const DeveloperUsage = lazy(() => import("@/pages/developers/usage"));
 const DeveloperDocs = lazy(() => import("@/pages/developers/docs"));
 const DeveloperSettings = lazy(() => import("@/pages/developers/settings"));
 const AdminDevelopers = lazy(() => import("@/pages/admin/developers"));
+const AdminIntelligence = lazy(() => import("@/pages/admin/intelligence"));
 
 const INTENT_EXEMPT_PATHS = ["/welcome", "/settings", "/profile", "/notifications", "/login", "/register"];
 const INTENT_EXEMPT_ROLES = ["admin", "lawyer", "building_manager"];
@@ -540,6 +541,9 @@ function Router() {
         <Route path="/developers" component={DeveloperLanding} />
         <Route path="/admin/developers">
           <ProtectedRoute component={AdminDevelopers} roles={["admin"]} />
+        </Route>
+        <Route path="/admin/intelligence">
+          <ProtectedRoute component={AdminIntelligence} roles={["admin", "cie_analyst"]} />
         </Route>
 
         <Route path="/login" component={LoginPage} />

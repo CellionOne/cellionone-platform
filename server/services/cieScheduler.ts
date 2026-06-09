@@ -186,6 +186,24 @@ async function runScoreComputation(): Promise<void> {
 
     // Generate AI market commentary after scoring
     await runMarketCommentary();
+
+    // Daily processing service update + APRISYS report generation (fire-and-forget)
+    try {
+      const { runDailyScoreUpdate } = await import("./cieProcessingService");
+      await runDailyScoreUpdate();
+      console.log("[CIEScheduler] Daily signal update complete");
+    } catch (err: any) {
+      console.error("[CIEScheduler] Daily signal update failed:", err.message);
+    }
+    try {
+      const { generateAprisysReport, invalidateReportCache } = await import("./cieReportGenerator");
+      const today = new Date();
+      invalidateReportCache(today.toISOString().slice(0, 10));
+      await generateAprisysReport(today);
+      console.log("[CIEScheduler] APRISYS NGX100 report generated successfully");
+    } catch (err: any) {
+      console.error("[CIEScheduler] APRISYS report generation failed:", err.message);
+    }
   } catch (err: any) {
     console.error("[CIEScheduler] Score computation error:", err.message);
   }

@@ -711,5 +711,247 @@ export function registerCieApiRoutes(app: Express): void {
     },
   );
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // GET /api/v1/intelligence/securities
+  // NGX100 with real-time signals and recommendations
+  // Standard+ tier; free tier sees top 20 with no RSI/recommendation
+  // ──────────────────────────────────────────────────────────────────────────
+  app.get(
+    "/api/v1/intelligence/securities",
+    intelligenceAuth,
+    requireCieTier("free"),
+    async (req: ApiKeyRequest, res: Response) => {
+      try {
+        const schema = z.object({
+          tier:   z.enum(["free", "standard"]).optional(),
+          sector: z.string().optional(),
+          limit:  z.coerce.number().int().min(1).max(100).default(100),
+          offset: z.coerce.number().int().min(0).default(0),
+        });
+        const query = schema.parse(req.query);
+
+        const apiTier = (req.apiKeyContext?.cieTier ?? "free") as CieTier;
+        const isStandard = TIER_ORDER[apiTier] >= TIER_ORDER["subscriber"];
+
+        const { db } = await import("../db");
+        const { cieSecurities } = await import("@shared/schema");
+        const { eq } = await import("drizzle-orm");
+
+        let rows = await db
+          .select()
+          .from(cieSecurities)
+          .where(eq(cieSecurities.isActive, true));
+
+        if (query.sector) {
+          rows = rows.filter(s => s.sector.toLowerCase() === query.sector!.toLowerCase());
+        }
+
+        // Freshness: based on lastUpdatedAt
+        const oneHour = 60 * 60 * 1000;
+        const oneDay = 24 * oneHour;
+        const now = Date.now();
+
+        let lastUpdated: Date | null = null;
+        for (const r of rows) {
+          if (r.lastUpdatedAt && (!lastUpdated || r.lastUpdatedAt > lastUpdated)) {
+            lastUpdated = r.lastUpdatedAt;
+          }
+        }
+        const ageMs = lastUpdated ? now - lastUpdated.getTime() : Infinity;
+        const dataFreshness = ageMs < oneHour ? "live" : ageMs < oneDay ? "delayed" : "stale";
+
+        const total = rows.length;
+        const limited = isStandard ? rows : rows.slice(0, 20);
+        const paged = limited.slice(query.offset, query.offset + query.limit);
+
+        const mapped = paged.map(s => {
+          const base = {
+            ticker:          s.symbol,
+            name:            s.name,
+            sector:          s.sector,
+            lastPriceNaira:  s.lastPriceKobo != null ? s.lastPriceKobo / 100 : null,
+            dayChangePct:    s.dayChangePct != null ? parseFloat(String(s.dayChangePct)) : null,
+            weekChangePct:   s.weekChangePct != null ? parseFloat(String(s.weekChangePct)) : null,
+            monthChangePct:  s.monthChangePct != null ? parseFloat(String(s.monthChangePct)) : null,
+            volume:          s.latestVolume ?? null,
+            signal:          s.signal ?? null,
+            momentum:        s.momentum ?? null,
+            lastUpdatedAt:   s.lastUpdatedAt ?? null,
+          };
+          if (!isStandard) return base; // free tier: omit RSI and recommendation
+          return {
+            ...base,
+            rsi:            s.rsi != null ? parseFloat(String(s.rsi)) : null,
+            recommendation: s.recommendation ?? null,
+            investmentIntel: s.investmentIntel ?? null,
+            ytdChangePct:   s.ytdChangePct != null ? parseFloat(String(s.ytdChangePct)) : null,
+          };
+        });
+
+        return res.json({
+          success: true,
+          data: {
+            securities: mapped,
+            total,
+            showing: mapped.length,
+            last_updated: lastUpdated ?? null,
+            data_freshness: dataFreshness,
+            tier_note: !isStandard ? "Free tier shows top 20 securities. Upgrade for full NGX100." : undefined,
+          },
+        });
+      } catch (e: unknown) {
+        if (e instanceof z.ZodError) return res.status(400).json({ error: "Validation error", details: e.errors });
+        const msg = e instanceof Error ? e.message : "Internal error";
+        return res.status(500).json({ error: msg });
+      }
+    }
+  );
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // GET /api/v1/intelligence/sectors
+  // Sector performance summary — free+
+  // ──────────────────────────────────────────────────────────────────────────
+  app.get(
+    "/api/v1/intelligence/sectors",
+    intelligenceAuth,
+    requireCieTier("free"),
+    async (_req: ApiKeyRequest, res: Response) => {
+      try {
+        const { getSectorSummary } = await import("../services/cieProcessingService");
+        const sectors = await getSectorSummary();
+
+        return res.json({
+          success: true,
+          data: {
+            sectors: sectors.map(s => ({
+              name:             s.name,
+              stock_count:      s.stockCount,
+              avg_day_change_pct:  s.avgDayChangePct,
+              avg_week_change_pct: s.avgWeekChangePct,
+              top_performer:    s.topPerformer,
+              bottom_performer: s.bottomPerformer,
+              bullish_count:    s.bullishCount,
+              bearish_count:    s.bearishCount,
+              analyst_note:     s.analystNote,
+            })),
+            generated_at: new Date().toISOString(),
+          },
+        });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Internal error";
+        return res.status(500).json({ error: msg });
+      }
+    }
+  );
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // GET /api/v1/intelligence/dividends
+  // Upcoming dividend calendar — Pro only
+  // ──────────────────────────────────────────────────────────────────────────
+  app.get(
+    "/api/v1/intelligence/dividends",
+    intelligenceAuth,
+    requireCieTier("pro"),
+    async (_req: ApiKeyRequest, res: Response) => {
+      try {
+        const { db } = await import("../db");
+        const { ngxDividends } = await import("@shared/schema");
+        const { eq, gte } = await import("drizzle-orm");
+
+        const today = new Date().toISOString().slice(0, 10);
+        const rows = await db
+          .select()
+          .from(ngxDividends)
+          .where(eq(ngxDividends.isActive, true));
+
+        const upcoming = rows.filter(d => d.qualificationDate >= today);
+
+        const mapped = upcoming.map(d => {
+          const daysToQual = Math.ceil(
+            (new Date(d.qualificationDate).getTime() - Date.now()) / 86400000
+          );
+          const amountNgn = d.dividendAmountKobo / 100;
+          let strategy: string;
+          if (daysToQual <= 7) strategy = "Accumulate before qual";
+          else if (daysToQual <= 0) strategy = "Exit post-qual";
+          else strategy = "Monitor";
+
+          return {
+            ticker:               d.ticker,
+            company_name:         d.companyName,
+            dividend_amount_ngn:  amountNgn,
+            qualification_date:   d.qualificationDate,
+            payment_date:         d.paymentDate ?? null,
+            days_to_qualification: daysToQual,
+            strategy,
+          };
+        }).sort((a, b) => a.days_to_qualification - b.days_to_qualification);
+
+        return res.json({
+          success: true,
+          data: {
+            dividends: mapped,
+            total: mapped.length,
+            note: mapped.length === 0
+              ? "No upcoming dividends in the system. Data will appear when corporate actions are received."
+              : "Dividend data sourced from NGX corporate actions",
+          },
+        });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Internal error";
+        return res.status(500).json({ error: msg });
+      }
+    }
+  );
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // GET /api/v1/intelligence/report
+  // Download latest APRISYS NGX100 Excel report — Pro only
+  // Query: ?date=YYYY-MM-DD (optional, defaults to latest)
+  // ──────────────────────────────────────────────────────────────────────────
+  app.get(
+    "/api/v1/intelligence/report",
+    intelligenceAuth,
+    requireCieTier("pro"),
+    async (req: ApiKeyRequest, res: Response) => {
+      try {
+        const { db } = await import("../db");
+        const { cieReports } = await import("@shared/schema");
+        const { eq, desc, and } = await import("drizzle-orm");
+        const { generateAprisysReport } = await import("../services/cieReportGenerator");
+
+        const dateParam = typeof req.query.date === "string" ? req.query.date : null;
+
+        // Find matching report record
+        let query = db.select().from(cieReports).where(eq(cieReports.status, "complete")).orderBy(desc(cieReports.generatedAt)).limit(1);
+        if (dateParam) {
+          query = db.select().from(cieReports).where(and(eq(cieReports.reportDate, dateParam), eq(cieReports.status, "complete"))).orderBy(desc(cieReports.generatedAt)).limit(1) as typeof query;
+        }
+
+        const [report] = await query;
+
+        if (!report) {
+          return res.status(404).json({
+            success: false,
+            error: {
+              code: "NO_REPORT_AVAILABLE",
+              message: "No report has been generated yet. Reports are generated daily at 19:00 WAT.",
+            },
+          });
+        }
+
+        const buf = await generateAprisysReport(new Date(report.reportDate));
+        const filename = `APRISYS_NGX100_Report_${report.reportDate}.xlsx`;
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        res.setHeader("Content-Length", buf.length);
+        return res.send(buf);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Internal error";
+        return res.status(500).json({ error: msg });
+      }
+    }
+  );
+
   console.log("[CIE] Public API routes registered (/api/v1/cie/*)");
 }

@@ -27,6 +27,7 @@ import { registerCieAdminRoutes } from "./routes/cieAdminRoutes";
 import { registerCieApiRoutes } from "./routes/cieApiRoutes";
 import { registerCieBillingRoutes } from "./routes/cieBillingRoutes";
 import { registerCiePortalRoutes } from "./routes/ciePortalRoutes";
+import { registerCieInternalRoutes } from "./routes/cieInternalRoutes";
 import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
 import { registerPublicApiRoutes } from "./routes/publicApiRoutes";
 import { registerFormationApiRoutes } from "./routes/formationApiRoutes";
@@ -15997,6 +15998,9 @@ For questions, contact: service@cellionone.com
 
   // ============== CIE PORTAL SESSION ROUTES ==============
   registerCiePortalRoutes(app);
+
+  // ============== CIE INTERNAL EVENT INGESTION ROUTES ==============
+  registerCieInternalRoutes(app);
 
   // ============== FORMATION PUBLIC API ROUTES (v1) ==============
   registerFormationApiRoutes(app);

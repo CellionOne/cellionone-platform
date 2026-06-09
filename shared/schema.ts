@@ -2915,3 +2915,49 @@ export const bureauScoreHistory = pgTable('bureau_score_history', {
   dataSources: text('data_sources').array(),
   calculatedAt: timestamp('calculated_at', { withTimezone: true }).defaultNow(),
 });
+
+// ============== DEVELOPER PORTAL ==============
+
+export const developerOrgs = pgTable('developer_orgs', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 200 }).notNull(),
+  email: varchar('email', { length: 200 }).unique().notNull(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  orgType: varchar('org_type', { length: 50 }),
+  website: varchar('website', { length: 300 }),
+  country: varchar('country', { length: 3 }).default('NGA'),
+  isEmailVerified: boolean('is_email_verified').default(false),
+  isApproved: boolean('is_approved').default(false),
+  sandboxOnly: boolean('sandbox_only').default(true),
+  tier: varchar('tier', { length: 20 }).default('starter'),
+  isSuspended: boolean('is_suspended').default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const developerEmailTokens = pgTable('developer_email_tokens', {
+  id: serial('id').primaryKey(),
+  orgId: integer('org_id').notNull().references(() => developerOrgs.id),
+  tokenHash: varchar('token_hash', { length: 64 }).unique().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export type DeveloperOrg = typeof developerOrgs.$inferSelect;
+export type InsertDeveloperOrg = typeof developerOrgs.$inferInsert;
+
+// ============== API USAGE TRACKING ==============
+
+export const apiUsageSummary = pgTable('api_usage_summary', {
+  id: serial('id').primaryKey(),
+  apiKeyId: integer('api_key_id').notNull(),
+  periodYear: integer('period_year').notNull(),
+  periodMonth: integer('period_month').notNull(),
+  module: varchar('module', { length: 20 }).notNull(),
+  endpoint: varchar('endpoint', { length: 100 }),
+  callCount: integer('call_count').default(0),
+  billableCount: integer('billable_count').default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});

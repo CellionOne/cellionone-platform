@@ -20,7 +20,7 @@ import {
 } from "@shared/schema";
 import { requireDevAuth, type DevAuthRequest } from "../middleware/requireDevAuth";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+function getResend() { return new Resend(process.env.RESEND_API_KEY || ""); }
 const BCRYPT_ROUNDS = 12;
 const APP_URL = process.env.APP_URL || "https://cellionone.com";
 const ALLOWED_SCOPES = ["verify:identity", "verify:business", "escrow:read", "escrow:write", "bureau:read", "bureau:write", "formation:read", "formation:write", "intelligence:read"];
@@ -30,7 +30,7 @@ function hashToken(token: string): string {
 }
 
 async function sendVerificationEmail(email: string, name: string, verifyUrl: string): Promise<void> {
-  await resend.emails.send({
+  await getResend().emails.send({
     from: "Cellion One Developers <noreply@cellionone.com>",
     to: email,
     subject: "Verify your Cellion One developer account",

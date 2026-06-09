@@ -1,17 +1,7 @@
-/**
- * Public API Routes — no authentication required
- * Base path: /api/v1
- */
+import type { Express } from "express";
 
-import type { Express, Request, Response } from "express";
-
-export function registerPublicApiRoutes(app: Express): void {
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // GET /api/v1/status
-  // Platform health / module availability snapshot — no auth required
-  // ──────────────────────────────────────────────────────────────────────────
-  app.get("/api/v1/status", (_req: Request, res: Response) => {
+export function registerPublicApiRoutes(app: Express) {
+  app.get("/api/v1/status", (_req, res) => {
     res.json({
       success: true,
       data: {
@@ -19,14 +9,14 @@ export function registerPublicApiRoutes(app: Express): void {
         version: "1.0.0",
         status: "operational",
         modules: {
-          identity: { status: "operational", endpoints: 14 },
-          escrow: { status: "operational", endpoints: 6 },
-          intelligence: { status: "operational", endpoints: 1 },
-          formation: { status: "operational", endpoints: 2 },
-          bureau: { status: "operational", endpoints: 3 },
-        },
+          identity: { status: "operational" },
+          escrow: { status: "operational" },
+          intelligence: { status: "operational" },
+          formation: { status: "operational" },
+          bureau: { status: "operational", endpoints: 3 }
+        }
       },
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toISOString()
     });
   });
 }

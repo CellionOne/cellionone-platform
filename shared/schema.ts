@@ -11,7 +11,7 @@ export const founderProfiles = pgTable("founder_profiles", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").notNull().unique(),
   fullName: varchar("full_name", { length: 255 }),
-  phone: varchar("phone", { length: 50 }),
+  phone: varchar("phone", { length: 20 }),
   dateOfBirth: varchar("date_of_birth"),
   nationality: varchar("nationality", { length: 100 }),
   gender: varchar("gender", { length: 20 }),
@@ -1509,16 +1509,12 @@ export const kycApiKeys = pgTable("kyc_api_keys", {
   userId: varchar("user_id", { length: 255 }),
   /** FK to cie_partners.id — set when this key is a CIE Partner key (lazy ref avoids circular dependency) */
   ciePartnerId: integer("cie_partner_id").references((): AnyPgColumn => ciePartners.id, { onDelete: "set null" }),
-  /** FK to developer_orgs.id — set when this key belongs to a developer portal org */
-  developerOrgId: integer("developer_org_id"),
   keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
   keyHash: varchar("key_hash", { length: 128 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),
-  environment: varchar("environment", { length: 10 }).default("live"),
   permissions: text("permissions").array().default([]).notNull(),
   rateLimitPerMinute: integer("rate_limit_per_minute").default(60).notNull(),
   isActive: boolean("is_active").default(true).notNull(),
-  revokedAt: timestamp("revoked_at"),
   lastUsedAt: timestamp("last_used_at"),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -1526,7 +1522,6 @@ export const kycApiKeys = pgTable("kyc_api_keys", {
   index("idx_kyc_ak_org").on(table.organisationId),
   index("idx_kyc_ak_hash").on(table.keyHash),
   index("idx_kyc_ak_partner").on(table.ciePartnerId),
-  index("idx_kyc_ak_dev_org").on(table.developerOrgId),
 ]);
 
 export const insertKycApiKeySchema = createInsertSchema(kycApiKeys).omit({ id: true, createdAt: true });
@@ -1551,120 +1546,6 @@ export const kycApiUsageLogs = pgTable("kyc_api_usage_logs", {
 
 export const insertKycApiUsageLogSchema = createInsertSchema(kycApiUsageLogs).omit({ id: true, createdAt: true });
 export type KycApiUsageLog = typeof kycApiUsageLogs.$inferSelect;
-
-// ============== API USAGE SUMMARY (monthly rollup per key / module / endpoint) ==============
-export const apiUsageSummary = pgTable("api_usage_summary", {
-  id: serial("id").primaryKey(),
-  apiKeyId: integer("api_key_id").notNull().references(() => kycApiKeys.id, { onDelete: "cascade" }),
-  periodYear: integer("period_year").notNull(),
-  periodMonth: integer("period_month").notNull(),
-  module: varchar("module", { length: 50 }).notNull(),
-  endpoint: varchar("endpoint", { length: 150 }).notNull(),
-  requestCount: integer("request_count").notNull().default(0),
-  errorCount: integer("error_count").notNull().default(0),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [
-  uniqueIndex("uq_api_usage_summary").on(table.apiKeyId, table.periodYear, table.periodMonth, table.module, table.endpoint),
-  index("idx_api_usage_key_period").on(table.apiKeyId, table.periodYear, table.periodMonth),
-]);
-
-export type ApiUsageSummary = typeof apiUsageSummary.$inferSelect;
-
-// ============== BUREAU / CLEARLEDGER — Credit Scoring Engine ==============
-
-export const bureauProfiles = pgTable("bureau_profiles", {
-  id: serial("id").primaryKey(),
-  clearledgerId: varchar("clearledger_id", { length: 20 }).unique().notNull(),
-  bvnHash: varchar("bvn_hash", { length: 64 }).unique(),
-  ninHash: varchar("nin_hash", { length: 64 }),
-  // Composite score + sub-scores
-  score: integer("score"),
-  scoreBand: varchar("score_band", { length: 20 }),
-  scoreCalculatedAt: timestamp("score_calculated_at", { withTimezone: true }),
-  scoreIdentity: integer("score_identity"),
-  scoreCashFlow: integer("score_cash_flow"),
-  scoreInvestment: integer("score_investment"),
-  scoreObligation: integer("score_obligation"),
-  scoreStability: integer("score_stability"),
-  // State
-  profileStage: varchar("profile_stage", { length: 20 }).default("CREATED"),
-  dataRichness: varchar("data_richness", { length: 10 }).default("LOW"),
-  // Data source flags
-  hasKycVerified: boolean("has_kyc_verified").default(false),
-  hasBankData: boolean("has_bank_data").default(false),
-  hasCapitalMarkets: boolean("has_capital_markets").default(false),
-  hasObligationData: boolean("has_obligation_data").default(false),
-  hasCacVerified: boolean("has_cac_verified").default(false),
-  // Flag arrays
-  positiveFlags: text("positive_flags").array().default([]),
-  negativeFlags: text("negative_flags").array().default([]),
-  // Cached recommendation
-  recommendation: jsonb("recommendation"),
-  consentGrantedAt: timestamp("consent_granted_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-}, (table) => [
-  index("idx_bureau_profiles_bvn_hash").on(table.bvnHash),
-  index("idx_bureau_profiles_nin_hash").on(table.ninHash),
-]);
-
-export type BureauProfile = typeof bureauProfiles.$inferSelect;
-
-export const bureauEvents = pgTable("bureau_events", {
-  id: serial("id").primaryKey(),
-  profileId: integer("profile_id").notNull().references(() => bureauProfiles.id, { onDelete: "cascade" }),
-  sourceApiKeyId: integer("source_api_key_id").references(() => kycApiKeys.id, { onDelete: "set null" }),
-  eventType: varchar("event_type", { length: 50 }).notNull(),
-  eventCategory: varchar("event_category", { length: 20 }).notNull(),
-  payload: jsonb("payload").notNull().default({}),
-  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-}, (table) => [
-  index("idx_bureau_events_profile").on(table.profileId),
-  index("idx_bureau_events_category").on(table.profileId, table.eventCategory),
-  index("idx_bureau_events_occurred").on(table.profileId, table.occurredAt),
-]);
-
-export type BureauEvent = typeof bureauEvents.$inferSelect;
-
-export const bureauQueries = pgTable("bureau_queries", {
-  id: serial("id").primaryKey(),
-  apiKeyId: integer("api_key_id").notNull().references(() => kycApiKeys.id, { onDelete: "restrict" }),
-  environment: varchar("environment", { length: 10 }).notNull(),
-  queryType: varchar("query_type", { length: 30 }).notNull(),
-  identifierHash: varchar("identifier_hash", { length: 64 }).notNull(),
-  profileFound: boolean("profile_found").notNull(),
-  scoreReturned: integer("score_returned"),
-  bandReturned: varchar("band_returned", { length: 20 }),
-  billable: boolean("billable").default(true),
-  unitCostNgn: integer("unit_cost_ngn"),
-  consumerReference: varchar("consumer_reference", { length: 200 }),
-  queriedAt: timestamp("queried_at", { withTimezone: true }).defaultNow(),
-}, (table) => [
-  index("idx_bureau_queries_key").on(table.apiKeyId),
-  index("idx_bureau_queries_hash").on(table.identifierHash),
-]);
-
-export type BureauQuery = typeof bureauQueries.$inferSelect;
-
-export const bureauScoreHistory = pgTable("bureau_score_history", {
-  id: serial("id").primaryKey(),
-  profileId: integer("profile_id").notNull().references(() => bureauProfiles.id, { onDelete: "cascade" }),
-  score: integer("score").notNull(),
-  scoreBand: varchar("score_band", { length: 20 }).notNull(),
-  scoreIdentity: integer("score_identity"),
-  scoreCashFlow: integer("score_cash_flow"),
-  scoreInvestment: integer("score_investment"),
-  scoreObligation: integer("score_obligation"),
-  scoreStability: integer("score_stability"),
-  dataSources: text("data_sources").array(),
-  calculatedAt: timestamp("calculated_at", { withTimezone: true }).defaultNow(),
-}, (table) => [
-  index("idx_bureau_score_history_profile").on(table.profileId, table.calculatedAt),
-]);
-
-export type BureauScoreHistory = typeof bureauScoreHistory.$inferSelect;
 
 // ============== KYC WEBHOOK CONFIGS ==============
 export const kycWebhookConfigs = pgTable("kyc_webhook_configs", {
@@ -2965,39 +2846,72 @@ export const insertShareholderConfirmationSchema = createInsertSchema(shareholde
 export type ShareholderConfirmation = typeof shareholderConfirmations.$inferSelect;
 export type InsertShareholderConfirmation = z.infer<typeof insertShareholderConfirmationSchema>;
 
-// ============== DEVELOPER PORTAL ==============
+// ============== BUREAU / CLEARLEDGER MODULE ==============
 
-export const developerOrgs = pgTable("developer_orgs", {
-  id: serial("id").primaryKey(),
-  name: varchar("name", { length: 200 }).notNull(),
-  email: varchar("email", { length: 200 }).unique().notNull(),
-  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
-  orgType: varchar("org_type", { length: 50 }),
-  website: varchar("website", { length: 300 }),
-  country: varchar("country", { length: 3 }).default("NGA"),
-  isEmailVerified: boolean("is_email_verified").default(false),
-  isApproved: boolean("is_approved").default(false),
-  isSuspended: boolean("is_suspended").default(false),
-  sandboxOnly: boolean("sandbox_only").default(true),
-  tier: varchar("tier", { length: 20 }).default("starter"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-}, (table) => [
-  index("idx_developer_orgs_email").on(table.email),
-]);
+export const bureauProfiles = pgTable('bureau_profiles', {
+  id: serial('id').primaryKey(),
+  clearledgerId: varchar('clearledger_id', { length: 20 }).unique().notNull(),
+  bvnHash: varchar('bvn_hash', { length: 64 }).unique(),
+  ninHash: varchar('nin_hash', { length: 64 }),
+  score: integer('score'),
+  scoreBand: varchar('score_band', { length: 20 }),
+  scoreCalculatedAt: timestamp('score_calculated_at', { withTimezone: true }),
+  scoreIdentity: integer('score_identity'),
+  scoreCashFlow: integer('score_cash_flow'),
+  scoreInvestment: integer('score_investment'),
+  scoreObligation: integer('score_obligation'),
+  scoreStability: integer('score_stability'),
+  profileStage: varchar('profile_stage', { length: 20 }).default('CREATED'),
+  dataRichness: varchar('data_richness', { length: 10 }).default('LOW'),
+  hasKycVerified: boolean('has_kyc_verified').default(false),
+  hasBankData: boolean('has_bank_data').default(false),
+  hasCapitalMarkets: boolean('has_capital_markets').default(false),
+  hasObligationData: boolean('has_obligation_data').default(false),
+  hasCacVerified: boolean('has_cac_verified').default(false),
+  positiveFlags: text('positive_flags').array().default([]),
+  negativeFlags: text('negative_flags').array().default([]),
+  recommendation: jsonb('recommendation'),
+  consentGrantedAt: timestamp('consent_granted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
 
-export const insertDeveloperOrgSchema = createInsertSchema(developerOrgs).omit({ id: true, createdAt: true, updatedAt: true });
-export type DeveloperOrg = typeof developerOrgs.$inferSelect;
+export const bureauEvents = pgTable('bureau_events', {
+  id: serial('id').primaryKey(),
+  profileId: integer('profile_id').notNull().references(() => bureauProfiles.id, { onDelete: 'cascade' }),
+  sourceApiKeyId: integer('source_api_key_id'),
+  eventType: varchar('event_type', { length: 50 }).notNull(),
+  eventCategory: varchar('event_category', { length: 20 }).notNull(),
+  payload: jsonb('payload').notNull().default({}),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
 
-export const developerEmailTokens = pgTable("developer_email_tokens", {
-  id: serial("id").primaryKey(),
-  orgId: integer("org_id").notNull().references(() => developerOrgs.id, { onDelete: "cascade" }),
-  tokenHash: varchar("token_hash", { length: 64 }).unique().notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  usedAt: timestamp("used_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-}, (table) => [
-  index("idx_dev_email_tokens_org").on(table.orgId),
-]);
+export const bureauQueries = pgTable('bureau_queries', {
+  id: serial('id').primaryKey(),
+  apiKeyId: integer('api_key_id').notNull(),
+  environment: varchar('environment', { length: 10 }).notNull(),
+  queryType: varchar('query_type', { length: 30 }).notNull(),
+  identifierHash: varchar('identifier_hash', { length: 64 }).notNull(),
+  profileFound: boolean('profile_found').notNull(),
+  scoreReturned: integer('score_returned'),
+  bandReturned: varchar('band_returned', { length: 20 }),
+  billable: boolean('billable').default(true),
+  unitCostNgn: integer('unit_cost_ngn'),
+  consumerReference: varchar('consumer_reference', { length: 200 }),
+  queriedAt: timestamp('queried_at', { withTimezone: true }).defaultNow(),
+});
 
-export type DeveloperEmailToken = typeof developerEmailTokens.$inferSelect;
+export const bureauScoreHistory = pgTable('bureau_score_history', {
+  id: serial('id').primaryKey(),
+  profileId: integer('profile_id').notNull().references(() => bureauProfiles.id),
+  score: integer('score').notNull(),
+  scoreBand: varchar('score_band', { length: 20 }).notNull(),
+  scoreIdentity: integer('score_identity'),
+  scoreCashFlow: integer('score_cash_flow'),
+  scoreInvestment: integer('score_investment'),
+  scoreObligation: integer('score_obligation'),
+  scoreStability: integer('score_stability'),
+  dataSources: text('data_sources').array(),
+  calculatedAt: timestamp('calculated_at', { withTimezone: true }).defaultNow(),
+});

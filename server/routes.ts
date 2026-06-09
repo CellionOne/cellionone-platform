@@ -15964,6 +15964,14 @@ For questions, contact: service@cellionone.com
   });
 
   // ============== PUBLIC API ROUTES (no auth) ==============
+  // ============== STATIC LANDING PAGES ==============
+  app.get("/labs", (_req, res) => {
+    res.sendFile(path.join(process.cwd(), "client/public/labs/index.html"));
+  });
+  app.get("/clearledger", (_req, res) => {
+    res.sendFile(path.join(process.cwd(), "client/public/clearledger/index.html"));
+  });
+
   registerPublicApiRoutes(app);
 
   // ============== API USAGE TRACKER (fire-and-forget rollup for /api/v1/*) ==============

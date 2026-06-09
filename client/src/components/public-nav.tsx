@@ -23,6 +23,8 @@ import {
   Handshake,
   MapPin,
   X,
+  FlaskConical,
+  BarChart3,
 } from "lucide-react";
 import { CelionLogo } from "@/components/celion-logo";
 
@@ -32,6 +34,8 @@ const productsDropdown = [
   { icon: Handshake, label: "Verified Procurement", description: "RFQ marketplace for verified organisations", href: "/procurement/marketplace" },
   { icon: MapPin, label: "Virtual Office", description: "Premium registered address in Lagos", href: "/#solutions" },
   { icon: Code2, label: "API Integration", description: "Programmatic verification via REST API", href: "/api-docs" },
+  { icon: BarChart3, label: "ClearLedger Bureau", description: "Score any individual or business by BVN or NIN", href: "/clearledger" },
+  { icon: FlaskConical, label: "Cellion Labs", description: "We build financial applications for Africa", href: "/labs" },
 ];
 
 const resourcesDropdown = [
@@ -176,6 +180,14 @@ function MobileNav() {
           </div>
 
           <a
+            href="/developers"
+            className="px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-muted transition-colors"
+            data-testid="link-mobile-developers"
+            onClick={() => setSheetOpen(false)}
+          >
+            Developers
+          </a>
+          <a
             href="/contact"
             className="px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-muted transition-colors"
             data-testid="link-mobile-contact"
@@ -212,6 +224,7 @@ export function PublicNav() {
           <div className="hidden md:flex items-center gap-8">
             <NavDropdown label="Products" items={productsDropdown} testId="nav-products" />
             <a href="/#solutions" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-pricing">Solutions</a>
+            <a href="/developers" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-developers">Developers</a>
             <NavDropdown label="Resources" items={resourcesDropdown} testId="nav-resources" />
             <a href="/contact" className="text-sm text-muted-foreground hover:text-foreground transition-colors" data-testid="link-nav-contact">Contact</a>
           </div>

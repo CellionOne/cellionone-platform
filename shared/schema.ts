@@ -2961,3 +2961,42 @@ export const apiUsageSummary = pgTable('api_usage_summary', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
+
+// ============== CIE INTELLIGENCE ENHANCEMENT ==============
+
+export const cieEvents = pgTable('cie_events', {
+  id: serial('id').primaryKey(),
+  sourceApp: varchar('source_app', { length: 50 }).notNull(),
+  eventType: varchar('event_type', { length: 50 }).notNull(),
+  ticker: varchar('ticker', { length: 20 }),
+  payload: jsonb('payload').notNull().default({}),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  isProcessed: boolean('is_processed').default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const ngxDividends = pgTable('ngx_dividends', {
+  id: serial('id').primaryKey(),
+  ticker: varchar('ticker', { length: 20 }).notNull(),
+  companyName: varchar('company_name', { length: 200 }).notNull(),
+  dividendAmount: integer('dividend_amount').notNull(),
+  qualificationDate: varchar('qualification_date', { length: 10 }).notNull(),
+  paymentDate: varchar('payment_date', { length: 10 }),
+  declaredAt: timestamp('declared_at', { withTimezone: true }),
+  source: varchar('source', { length: 50 }).default('manual_admin'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const cieReports = pgTable('cie_reports', {
+  id: serial('id').primaryKey(),
+  reportDate: varchar('report_date', { length: 10 }).notNull(),
+  filePath: varchar('file_path', { length: 500 }),
+  fileSize: integer('file_size'),
+  securitiesCount: integer('securities_count'),
+  generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow(),
+  status: varchar('status', { length: 20 }).default('pending'),
+  errorMessage: text('error_message'),
+});

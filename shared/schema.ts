@@ -2845,3 +2845,73 @@ export const shareholderConfirmations = pgTable("shareholder_confirmations", {
 export const insertShareholderConfirmationSchema = createInsertSchema(shareholderConfirmations).omit({ id: true, createdAt: true });
 export type ShareholderConfirmation = typeof shareholderConfirmations.$inferSelect;
 export type InsertShareholderConfirmation = z.infer<typeof insertShareholderConfirmationSchema>;
+
+// ============== BUREAU / CLEARLEDGER MODULE ==============
+
+export const bureauProfiles = pgTable('bureau_profiles', {
+  id: serial('id').primaryKey(),
+  clearledgerId: varchar('clearledger_id', { length: 20 }).unique().notNull(),
+  bvnHash: varchar('bvn_hash', { length: 64 }).unique(),
+  ninHash: varchar('nin_hash', { length: 64 }),
+  score: integer('score'),
+  scoreBand: varchar('score_band', { length: 20 }),
+  scoreCalculatedAt: timestamp('score_calculated_at', { withTimezone: true }),
+  scoreIdentity: integer('score_identity'),
+  scoreCashFlow: integer('score_cash_flow'),
+  scoreInvestment: integer('score_investment'),
+  scoreObligation: integer('score_obligation'),
+  scoreStability: integer('score_stability'),
+  profileStage: varchar('profile_stage', { length: 20 }).default('CREATED'),
+  dataRichness: varchar('data_richness', { length: 10 }).default('LOW'),
+  hasKycVerified: boolean('has_kyc_verified').default(false),
+  hasBankData: boolean('has_bank_data').default(false),
+  hasCapitalMarkets: boolean('has_capital_markets').default(false),
+  hasObligationData: boolean('has_obligation_data').default(false),
+  hasCacVerified: boolean('has_cac_verified').default(false),
+  positiveFlags: text('positive_flags').array().default([]),
+  negativeFlags: text('negative_flags').array().default([]),
+  recommendation: jsonb('recommendation'),
+  consentGrantedAt: timestamp('consent_granted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const bureauEvents = pgTable('bureau_events', {
+  id: serial('id').primaryKey(),
+  profileId: integer('profile_id').notNull().references(() => bureauProfiles.id, { onDelete: 'cascade' }),
+  sourceApiKeyId: integer('source_api_key_id'),
+  eventType: varchar('event_type', { length: 50 }).notNull(),
+  eventCategory: varchar('event_category', { length: 20 }).notNull(),
+  payload: jsonb('payload').notNull().default({}),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const bureauQueries = pgTable('bureau_queries', {
+  id: serial('id').primaryKey(),
+  apiKeyId: integer('api_key_id').notNull(),
+  environment: varchar('environment', { length: 10 }).notNull(),
+  queryType: varchar('query_type', { length: 30 }).notNull(),
+  identifierHash: varchar('identifier_hash', { length: 64 }).notNull(),
+  profileFound: boolean('profile_found').notNull(),
+  scoreReturned: integer('score_returned'),
+  bandReturned: varchar('band_returned', { length: 20 }),
+  billable: boolean('billable').default(true),
+  unitCostNgn: integer('unit_cost_ngn'),
+  consumerReference: varchar('consumer_reference', { length: 200 }),
+  queriedAt: timestamp('queried_at', { withTimezone: true }).defaultNow(),
+});
+
+export const bureauScoreHistory = pgTable('bureau_score_history', {
+  id: serial('id').primaryKey(),
+  profileId: integer('profile_id').notNull().references(() => bureauProfiles.id),
+  score: integer('score').notNull(),
+  scoreBand: varchar('score_band', { length: 20 }).notNull(),
+  scoreIdentity: integer('score_identity'),
+  scoreCashFlow: integer('score_cash_flow'),
+  scoreInvestment: integer('score_investment'),
+  scoreObligation: integer('score_obligation'),
+  scoreStability: integer('score_stability'),
+  dataSources: text('data_sources').array(),
+  calculatedAt: timestamp('calculated_at', { withTimezone: true }).defaultNow(),
+});

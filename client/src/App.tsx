@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { useAuth } from "@/hooks/use-auth";
+import { useDevAuth } from "@/hooks/use-dev-auth";
 import { LoadingPage } from "@/components/loading-spinner";
 
 // Eagerly loaded — needed for initial render / unauthenticated flows
@@ -129,6 +130,17 @@ const WelcomePage = lazy(() => import("@/pages/welcome"));
 const ExistingCompanyPage = lazy(() => import("@/pages/founder/existing-company"));
 const RegistrationsPage = lazy(() => import("@/pages/founder/registrations"));
 const FounderRegistrationServicesPage = lazy(() => import("@/pages/founder/registration-services"));
+// Developer portal
+const DeveloperLanding = lazy(() => import("@/pages/developers/landing"));
+const DeveloperRegister = lazy(() => import("@/pages/developers/register"));
+const DeveloperLogin = lazy(() => import("@/pages/developers/login"));
+const DeveloperVerifyEmail = lazy(() => import("@/pages/developers/verify-email"));
+const DeveloperDashboard = lazy(() => import("@/pages/developers/dashboard"));
+const DeveloperKeys = lazy(() => import("@/pages/developers/keys"));
+const DeveloperUsage = lazy(() => import("@/pages/developers/usage"));
+const DeveloperDocs = lazy(() => import("@/pages/developers/docs"));
+const DeveloperSettings = lazy(() => import("@/pages/developers/settings"));
+const AdminDevelopers = lazy(() => import("@/pages/admin/developers"));
 
 const INTENT_EXEMPT_PATHS = ["/welcome", "/settings", "/profile", "/notifications", "/login", "/register"];
 const INTENT_EXEMPT_ROLES = ["admin", "lawyer", "building_manager"];
@@ -181,6 +193,16 @@ function ProtectedRoute({
     return <LoadingPage />;
   }
   
+  return <Component />;
+}
+
+function DevProtectedRoute({ component: Component }: { component: React.ComponentType }) {
+  const { isAuthenticated, isLoading } = useDevAuth();
+  if (isLoading) return <LoadingPage />;
+  if (!isAuthenticated) {
+    window.location.href = "/developers/login";
+    return <LoadingPage />;
+  }
   return <Component />;
 }
 
@@ -495,6 +517,30 @@ function Router() {
         <Route path="/bank/companies/:id" component={BankCompanyDetailPage} />
         <Route path="/bank/companies" component={BankCompaniesPage} />
         <Route path="/bank" component={BankPortalLogin} />
+
+        {/* Developer Portal Routes */}
+        <Route path="/developers/register" component={DeveloperRegister} />
+        <Route path="/developers/login" component={DeveloperLogin} />
+        <Route path="/developers/verify-email" component={DeveloperVerifyEmail} />
+        <Route path="/developers/dashboard">
+          <DevProtectedRoute component={DeveloperDashboard} />
+        </Route>
+        <Route path="/developers/keys">
+          <DevProtectedRoute component={DeveloperKeys} />
+        </Route>
+        <Route path="/developers/usage">
+          <DevProtectedRoute component={DeveloperUsage} />
+        </Route>
+        <Route path="/developers/docs">
+          <DevProtectedRoute component={DeveloperDocs} />
+        </Route>
+        <Route path="/developers/settings">
+          <DevProtectedRoute component={DeveloperSettings} />
+        </Route>
+        <Route path="/developers" component={DeveloperLanding} />
+        <Route path="/admin/developers">
+          <ProtectedRoute component={AdminDevelopers} roles={["admin"]} />
+        </Route>
 
         <Route path="/login" component={LoginPage} />
         <Route path="/register" component={RegisterPage} />

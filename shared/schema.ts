@@ -1509,12 +1509,16 @@ export const kycApiKeys = pgTable("kyc_api_keys", {
   userId: varchar("user_id", { length: 255 }),
   /** FK to cie_partners.id — set when this key is a CIE Partner key (lazy ref avoids circular dependency) */
   ciePartnerId: integer("cie_partner_id").references((): AnyPgColumn => ciePartners.id, { onDelete: "set null" }),
+  /** FK to developer_orgs.id — set when this key belongs to a developer portal org */
+  developerOrgId: integer("developer_org_id"),
   keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
   keyHash: varchar("key_hash", { length: 128 }).notNull(),
   name: varchar("name", { length: 255 }).notNull(),
+  environment: varchar("environment", { length: 10 }).default("live"),
   permissions: text("permissions").array().default([]).notNull(),
   rateLimitPerMinute: integer("rate_limit_per_minute").default(60).notNull(),
   isActive: boolean("is_active").default(true).notNull(),
+  revokedAt: timestamp("revoked_at"),
   lastUsedAt: timestamp("last_used_at"),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -1522,6 +1526,7 @@ export const kycApiKeys = pgTable("kyc_api_keys", {
   index("idx_kyc_ak_org").on(table.organisationId),
   index("idx_kyc_ak_hash").on(table.keyHash),
   index("idx_kyc_ak_partner").on(table.ciePartnerId),
+  index("idx_kyc_ak_dev_org").on(table.developerOrgId),
 ]);
 
 export const insertKycApiKeySchema = createInsertSchema(kycApiKeys).omit({ id: true, createdAt: true });
@@ -2959,3 +2964,40 @@ export const shareholderConfirmations = pgTable("shareholder_confirmations", {
 export const insertShareholderConfirmationSchema = createInsertSchema(shareholderConfirmations).omit({ id: true, createdAt: true });
 export type ShareholderConfirmation = typeof shareholderConfirmations.$inferSelect;
 export type InsertShareholderConfirmation = z.infer<typeof insertShareholderConfirmationSchema>;
+
+// ============== DEVELOPER PORTAL ==============
+
+export const developerOrgs = pgTable("developer_orgs", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 200 }).notNull(),
+  email: varchar("email", { length: 200 }).unique().notNull(),
+  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+  orgType: varchar("org_type", { length: 50 }),
+  website: varchar("website", { length: 300 }),
+  country: varchar("country", { length: 3 }).default("NGA"),
+  isEmailVerified: boolean("is_email_verified").default(false),
+  isApproved: boolean("is_approved").default(false),
+  isSuspended: boolean("is_suspended").default(false),
+  sandboxOnly: boolean("sandbox_only").default(true),
+  tier: varchar("tier", { length: 20 }).default("starter"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("idx_developer_orgs_email").on(table.email),
+]);
+
+export const insertDeveloperOrgSchema = createInsertSchema(developerOrgs).omit({ id: true, createdAt: true, updatedAt: true });
+export type DeveloperOrg = typeof developerOrgs.$inferSelect;
+
+export const developerEmailTokens = pgTable("developer_email_tokens", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull().references(() => developerOrgs.id, { onDelete: "cascade" }),
+  tokenHash: varchar("token_hash", { length: 64 }).unique().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("idx_dev_email_tokens_org").on(table.orgId),
+]);
+
+export type DeveloperEmailToken = typeof developerEmailTokens.$inferSelect;

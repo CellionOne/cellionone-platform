@@ -31,6 +31,8 @@ import { registerBankPortalRoutes } from "./routes/bankPortalRoutes";
 import { registerPublicApiRoutes } from "./routes/publicApiRoutes";
 import { registerFormationApiRoutes } from "./routes/formationApiRoutes";
 import { registerBureauApiRoutes } from "./routes/bureauApiRoutes";
+import { registerDeveloperPortalRoutes } from "./routes/developerPortalRoutes";
+import { registerDeveloperAdminRoutes } from "./routes/developerAdminRoutes";
 import { apiUsageTrackerMiddleware } from "./middleware/apiUsageTracker";
 import * as bureauProfileService from "./services/bureauProfileService";
 import { syncChecklistFromVerifications, syncPeopleDocumentRequirements, syncAllApplicationsForVerifiedUser, getDocSlugsForPerson } from "./services/checklistSyncService";
@@ -16001,6 +16003,10 @@ For questions, contact: service@cellionone.com
 
   // ============== BUREAU / CLEARLEDGER API ROUTES (v1 + internal) ==============
   registerBureauApiRoutes(app);
+
+  // ============== DEVELOPER PORTAL ROUTES ==============
+  registerDeveloperPortalRoutes(app);
+  registerDeveloperAdminRoutes(app);
 
   // ============== BANK PORTAL ROUTES ==============
   registerBankPortalRoutes(app);

@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Cellion Labs builds financial applications for Africa — retail brokerage, capital markets platforms, and trade finance tools. Revenue-share partnerships with licensed operators.">
+<meta property="og:title" content="Cellion Labs — We build financial applications for Africa">
+<meta property="og:description" content="Revenue-share partnerships with brokers, banks, and financial institutions. We bring the technology. You bring the licence and the market.">
+<meta name="theme-color" content="#16a34a">
+<title>Cellion Labs — Financial applications for Africa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --green: #16a34a;
+  --green-dark: #15803d;
+  --green-light: #dcfce7;
+  --green-mint: #f0fdf4;
+  --navy: #1A3A5C;
+  --ink: #111827;
+  --body: #374151;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --border-light: #f3f4f6;
+  --surface: #ffffff;
+  --surface-alt: #f9fafb;
+  --font: 'Inter', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --duration-micro: 150ms;
+  --duration-standard: 250ms;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font);
+  color: var(--body);
+  background: var(--surface);
+  line-height: 1.6;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── NAV ── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: 60px;
+  background: rgba(255,255,255,0.95);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border-light);
+  z-index: 100;
+  display: flex; align-items: center;
+  padding: 0 clamp(16px, 5vw, 80px);
+}
+
+.nav-inner {
+  width: 100%; max-width: 1120px; margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+.nav-logo {
+  display: flex; align-items: center; gap: 8px;
+  text-decoration: none;
+}
+
+.nav-mark {
+  width: 28px; height: 28px;
+  background: var(--green);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  color: white; letter-spacing: -0.5px;
+  flex-shrink: 0;
+}
+
+.nav-wordmark {
+  font-size: 15px; font-weight: 600;
+  color: var(--ink); letter-spacing: -0.3px;
+}
+
+.nav-wordmark span { font-weight: 400; color: var(--muted); }
+
+.nav-links {
+  display: flex; align-items: center; gap: 28px;
+  list-style: none;
+}
+
+.nav-links a {
+  font-size: 14px; color: var(--muted);
+  text-decoration: none;
+  transition: color var(--duration-micro);
+}
+
+.nav-links a:hover { color: var(--ink); }
+
+.btn-nav {
+  font-size: 13px; font-weight: 500;
+  color: white; background: var(--green);
+  border: none; border-radius: var(--radius-md);
+  padding: 9px 18px; cursor: pointer;
+  transition: background var(--duration-micro);
+  text-decoration: none; white-space: nowrap;
+}
+
+.btn-nav:hover { background: var(--green-dark); }
+
+/* ── HERO ── */
+.hero {
+  padding: 130px clamp(16px, 5vw, 80px) 80px;
+  background: var(--navy);
+  position: relative; overflow: hidden;
+}
+
+/* Subtle grid overlay */
+.hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 64px 64px;
+  pointer-events: none;
+}
+
+.hero-inner {
+  max-width: 1120px; margin: 0 auto;
+  position: relative;
+}
+
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(240,253,250,0.5);
+  margin-bottom: 28px;
+}
+
+.hero-eyebrow-sep { color: rgba(255,255,255,0.2); }
+
+h1.hero-h1 {
+  font-size: clamp(36px, 6vw, 72px);
+  font-weight: 700; line-height: 1.04;
+  letter-spacing: -0.03em;
+  color: #f0fdf4;
+  margin-bottom: 28px;
+  max-width: 780px;
+}
+
+h1.hero-h1 em {
+  font-style: normal;
+  color: var(--green);
+  /* lighter green on dark */
+  color: #4ade80;
+}
+
+.hero-desc {
+  font-size: 17px; font-weight: 400;
+  color: rgba(240,253,250,0.55);
+  line-height: 1.7; max-width: 520px;
+  margin-bottom: 40px;
+}
+
+.hero-btns {
+  display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-primary {
+  font-size: 15px; font-weight: 500;
+  color: white; background: var(--green);
+  border: none; border-radius: var(--radius-md);
+  padding: 13px 28px; cursor: pointer;
+  transition: background var(--duration-micro);
+  text-decoration: none;
+  min-height: 48px;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+
+.btn-primary:hover { background: var(--green-dark); }
+
+.btn-ghost {
+  font-size: 15px; font-weight: 400;
+  color: rgba(240,253,250,0.65);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius-md);
+  padding: 13px 24px; cursor: pointer;
+  transition: border-color var(--duration-micro), color var(--duration-micro);
+  text-decoration: none;
+  min-height: 48px;
+  display: inline-flex; align-items: center;
+  background: transparent;
+}
+
+.btn-ghost:hover {
+  border-color: rgba(255,255,255,0.35);
+  color: #f0fdf4;
+}
+
+.hero-stats {
+  display: flex; gap: 40px;
+  margin-top: 56px;
+  padding-top: 40px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  flex-wrap: wrap;
+}
+
+.hero-stat-num {
+  font-size: 28px; font-weight: 700;
+  color: #f0fdf4; letter-spacing: -0.02em;
+  margin-bottom: 4px;
+}
+
+.hero-stat-label {
+  font-size: 13px; color: rgba(240,253,250,0.4);
+  line-height: 1.4;
+}
+
+/* ── TICKER BAND ── */
+.band {
+  background: var(--surface-alt);
+  border-top: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
+  padding: 14px 0; overflow: hidden;
+}
+
+.band-track {
+  display: flex; gap: 0;
+  animation: ticker 22s linear infinite;
+  width: max-content;
+}
+
+.band-item {
+  font-size: 12px; font-weight: 500;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 32px;
+  white-space: nowrap;
+  display: flex; align-items: center; gap: 32px;
+}
+
+.band-item::after {
+  content: '·';
+  color: var(--border);
+}
+
+@keyframes ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+/* ── SECTIONS ── */
+section {
+  padding: 80px clamp(16px, 5vw, 80px);
+}
+
+.section-inner { max-width: 1120px; margin: 0 auto; }
+
+.section-eyebrow {
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--green); margin-bottom: 12px;
+}
+
+.section-h2 {
+  font-size: clamp(24px, 3vw, 38px);
+  font-weight: 700; line-height: 1.12;
+  letter-spacing: -0.02em; color: var(--ink);
+  margin-bottom: 16px;
+}
+
+.section-h2 em { font-style: normal; color: var(--green); }
+
+.section-sub {
+  font-size: 16px; color: var(--muted);
+  line-height: 1.65; max-width: 560px;
+  margin-bottom: 48px;
+}
+
+/* ── ABOUT ── */
+.about-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 80px; align-items: start;
+}
+
+.about-body {
+  font-size: 15px; color: var(--body);
+  line-height: 1.8; margin-bottom: 16px;
+}
+
+.about-tags {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 28px;
+}
+
+.about-tag {
+  font-size: 12px; font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--green);
+  background: var(--green-light);
+  padding: 4px 12px; border-radius: var(--radius-sm);
+}
+
+.about-pillars {
+  display: flex; flex-direction: column; gap: 20px;
+}
+
+.pillar {
+  padding: 20px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  display: flex; gap: 16px;
+  transition: border-color var(--duration-standard);
+}
+
+.pillar:hover { border-color: var(--green); }
+
+.pillar-icon {
+  width: 36px; height: 36px;
+  background: var(--green-light);
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0;
+}
+
+.pillar-title {
+  font-size: 14px; font-weight: 600;
+  color: var(--ink); margin-bottom: 4px;
+}
+
+.pillar-desc {
+  font-size: 13px; color: var(--muted); line-height: 1.55;
+}
+
+/* ── HOW WE WORK ── */
+#how { background: var(--surface-alt); }
+
+.steps-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 1px; background: var(--border-light);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 48px;
+}
+
+.step {
+  background: var(--surface);
+  padding: 28px 24px;
+}
+
+.step-num {
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; color: var(--green);
+  font-family: var(--mono);
+  margin-bottom: 12px;
+}
+
+.step-title {
+  font-size: 15px; font-weight: 600;
+  color: var(--ink); margin-bottom: 8px;
+  line-height: 1.3;
+}
+
+.step-desc {
+  font-size: 13px; color: var(--muted); line-height: 1.6;
+}
+
+.how-note {
+  background: var(--green-mint);
+  border: 1px solid var(--green-light);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  font-size: 14px; color: var(--body); line-height: 1.6;
+}
+
+.how-note strong { color: var(--ink); }
+
+/* ── PORTFOLIO ── */
+.port-head {
+  display: flex; align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 40px; flex-wrap: wrap; gap: 12px;
+}
+
+.port-meta {
+  font-family: var(--mono);
+  font-size: 11px; color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+.port-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px; margin-bottom: 20px;
+}
+
+.port-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  transition: border-color var(--duration-standard), box-shadow var(--duration-standard);
+}
+
+.port-card:hover {
+  border-color: var(--green);
+  box-shadow: 0 4px 16px rgba(22,163,74,0.08);
+}
+
+.port-card-top {
+  display: flex; justify-content: space-between;
+  align-items: flex-start; margin-bottom: 16px;
+}
+
+.port-card-mark {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: white;
+}
+
+.port-card-status {
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: var(--radius-sm);
+}
+
+.status-live {
+  background: var(--green-light); color: #166534;
+}
+
+.status-demo {
+  background: #dbeafe; color: #1e40af;
+}
+
+.status-build {
+  background: #fef9c3; color: #854d0e;
+}
+
+.port-card-name {
+  font-size: 20px; font-weight: 700;
+  color: var(--ink); letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+
+.port-card-tagline {
+  font-size: 12px; font-weight: 500;
+  color: var(--green); font-family: var(--mono);
+  margin-bottom: 10px;
+}
+
+.port-card-desc {
+  font-size: 14px; color: var(--muted);
+  line-height: 1.65; margin-bottom: 20px;
+}
+
+.port-card-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+
+.chip {
+  font-size: 11px; font-weight: 500;
+  color: var(--muted);
+  background: var(--surface-alt);
+  border: 1px solid var(--border-light);
+  padding: 3px 10px; border-radius: var(--radius-sm);
+}
+
+.port-side { display: flex; flex-direction: column; gap: 20px; }
+
+/* ── INFRASTRUCTURE ── */
+#infra { background: var(--navy); }
+#infra .section-eyebrow { color: rgba(74,222,128,0.7); }
+#infra .section-h2 { color: #f0fdf4; }
+#infra .section-h2 em { color: #4ade80; }
+#infra .section-sub { color: rgba(240,253,250,0.45); max-width: 560px; }
+
+.infra-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 16px; margin-bottom: 40px;
+}
+
+.infra-module {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  transition: border-color var(--duration-standard);
+}
+
+.infra-module:hover { border-color: rgba(74,222,128,0.3); }
+
+.infra-module-label {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(240,253,250,0.3);
+  font-family: var(--mono); margin-bottom: 8px;
+}
+
+.infra-module-name {
+  font-size: 15px; font-weight: 600;
+  color: #f0fdf4; margin-bottom: 6px;
+}
+
+.infra-module-desc {
+  font-size: 13px;
+  color: rgba(240,253,250,0.4);
+  line-height: 1.55;
+}
+
+.infra-cta {
+  display: flex; align-items: center; gap: 16px;
+  flex-wrap: wrap;
+}
+
+.btn-infra {
+  font-size: 14px; font-weight: 500;
+  color: #f0fdf4;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: var(--radius-md);
+  padding: 11px 22px; cursor: pointer;
+  transition: border-color var(--duration-micro);
+  text-decoration: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  background: transparent;
+}
+
+.btn-infra:hover { border-color: rgba(255,255,255,0.45); }
+
+.infra-link {
+  font-size: 14px; color: #4ade80;
+  text-decoration: none;
+  transition: color var(--duration-micro);
+}
+
+.infra-link:hover { color: #86efac; }
+
+/* ── CONTACT ── */
+#contact { background: var(--green-mint); }
+
+.contact-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 80px; align-items: start;
+}
+
+.contact-body {
+  font-size: 15px; color: var(--body);
+  line-height: 1.8; margin-bottom: 24px;
+}
+
+.contact-details {
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+.contact-detail {
+  display: flex; gap: 12px; align-items: flex-start;
+}
+
+.contact-detail-icon {
+  font-size: 15px; margin-top: 1px; flex-shrink: 0;
+}
+
+.contact-detail-label {
+  font-size: 12px; font-weight: 500;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 2px;
+}
+
+.contact-detail-value {
+  font-size: 14px; color: var(--ink);
+}
+
+.contact-detail-value a {
+  color: var(--green); text-decoration: none;
+  transition: color var(--duration-micro);
+}
+
+.contact-detail-value a:hover { color: var(--green-dark); }
+
+/* Contact form */
+.contact-form {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+}
+
+.form-group {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 16px;
+}
+
+.form-label {
+  font-size: 13px; font-weight: 500; color: var(--ink);
+}
+
+.form-input, .form-select, .form-textarea {
+  font-family: var(--font);
+  font-size: 14px; color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px; width: 100%;
+  transition: border-color var(--duration-micro);
+  outline: none; min-height: 44px;
+  appearance: none;
+}
+
+.form-textarea {
+  min-height: 100px; resize: vertical;
+}
+
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+  border-color: var(--green);
+  border-width: 2px;
+}
+
+.form-input::placeholder,
+.form-textarea::placeholder { color: var(--muted); }
+
+.form-submit {
+  width: 100%; margin-top: 4px;
+  font-size: 15px; font-weight: 500;
+  color: white; background: var(--green);
+  border: none; border-radius: var(--radius-md);
+  padding: 13px; cursor: pointer;
+  transition: background var(--duration-micro);
+  min-height: 48px; font-family: var(--font);
+}
+
+.form-submit:hover { background: var(--green-dark); }
+
+/* ── FOOTER ── */
+footer {
+  padding: 40px clamp(16px, 5vw, 80px);
+  border-top: 1px solid var(--border-light);
+  background: var(--surface);
+}
+
+.footer-inner {
+  max-width: 1120px; margin: 0 auto;
+  display: flex; align-items: center;
+  justify-content: space-between; flex-wrap: wrap; gap: 20px;
+}
+
+.footer-logo-wrap {
+  display: flex; align-items: center; gap: 8px;
+  text-decoration: none;
+}
+
+.footer-mark {
+  width: 24px; height: 24px;
+  background: var(--green); border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: white;
+}
+
+.footer-name {
+  font-size: 14px; font-weight: 600; color: var(--ink);
+}
+
+.footer-name span { font-weight: 400; color: var(--muted); }
+
+.footer-links {
+  display: flex; gap: 24px; list-style: none;
+}
+
+.footer-links a {
+  font-size: 13px; color: var(--muted);
+  text-decoration: none; transition: color var(--duration-micro);
+}
+
+.footer-links a:hover { color: var(--ink); }
+
+.footer-right {
+  font-size: 12px; color: var(--muted);
+  text-align: right; line-height: 1.7;
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 900px) {
+  .about-grid { grid-template-columns: 1fr; gap: 40px; }
+  .steps-grid { grid-template-columns: 1fr 1fr; }
+  .port-grid { grid-template-columns: 1fr; }
+  .port-side { flex-direction: row; }
+  .infra-grid { grid-template-columns: 1fr 1fr; }
+  .contact-grid { grid-template-columns: 1fr; gap: 40px; }
+  .nav-links { display: none; }
+}
+
+@media (max-width: 640px) {
+  .hero { padding-top: 100px; }
+  .hero-h1 { font-size: 32px; }
+  .hero-btns { flex-direction: column; align-items: stretch; }
+  .btn-primary, .btn-ghost { text-align: center; justify-content: center; }
+  .hero-stats { gap: 24px; }
+  section { padding: 60px 16px; }
+  .steps-grid { grid-template-columns: 1fr; }
+  .infra-grid { grid-template-columns: 1fr; }
+  .port-side { flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+  .band-track { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav aria-label="Main navigation">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo" aria-label="Cellion Labs home">
+      <div class="nav-mark" aria-hidden="true">CL</div>
+      <span class="nav-wordmark">Cellion <span>Labs</span></span>
+    </a>
+    <ul class="nav-links" role="list">
+      <li><a href="#about">About</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#portfolio">Portfolio</a></li>
+      <li><a href="https://cellionone.com" target="_blank" rel="noopener">Cellion One</a></li>
+    </ul>
+    <a href="#contact" class="btn-nav">Start a conversation</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero" aria-label="Introduction">
+  <div class="hero-inner">
+    <p class="hero-eyebrow">
+      Cellion Platforms
+      <span class="hero-eyebrow-sep" aria-hidden="true">·</span>
+      Application building arm
+      <span class="hero-eyebrow-sep" aria-hidden="true">·</span>
+      Lagos &amp; London
+    </p>
+    <h1 class="hero-h1">
+      We build <em>financial</em><br>
+      applications for Africa.
+    </h1>
+    <p class="hero-desc">
+      Revenue-share partnerships with brokers, banks, and financial institutions.
+      We bring the technology. You bring the licence and the market.
+    </p>
+    <div class="hero-btns">
+      <a href="#portfolio" class="btn-primary">
+        See our work <span aria-hidden="true">→</span>
+      </a>
+      <a href="#how" class="btn-ghost">How it works</a>
+    </div>
+    <div class="hero-stats" role="list" aria-label="Key statistics">
+      <div role="listitem">
+        <p class="hero-stat-num">2</p>
+        <p class="hero-stat-label">Live applications</p>
+      </div>
+      <div role="listitem">
+        <p class="hero-stat-num">₦0</p>
+        <p class="hero-stat-label">Upfront to partners</p>
+      </div>
+      <div role="listitem">
+        <p class="hero-stat-num">3</p>
+        <p class="hero-stat-label">Regulated markets</p>
+      </div>
+      <div role="listitem">
+        <p class="hero-stat-num">1</p>
+        <p class="hero-stat-label">Infrastructure layer</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TICKER BAND -->
+<div class="band" aria-hidden="true">
+  <div class="band-track">
+    <div class="band-item">Retail brokerage apps</div>
+    <div class="band-item">Capital markets platforms</div>
+    <div class="band-item">Trade finance tools</div>
+    <div class="band-item">KYC infrastructure</div>
+    <div class="band-item">Escrow services</div>
+    <div class="band-item">NGX market data</div>
+    <div class="band-item">Company formation</div>
+    <div class="band-item">Bureau scoring</div>
+    <!-- duplicate for seamless loop -->
+    <div class="band-item">Retail brokerage apps</div>
+    <div class="band-item">Capital markets platforms</div>
+    <div class="band-item">Trade finance tools</div>
+    <div class="band-item">KYC infrastructure</div>
+    <div class="band-item">Escrow services</div>
+    <div class="band-item">NGX market data</div>
+    <div class="band-item">Company formation</div>
+    <div class="band-item">Bureau scoring</div>
+  </div>
+</div>
+
+<!-- ABOUT -->
+<section id="about" aria-labelledby="about-heading">
+  <div class="section-inner">
+    <div class="about-grid">
+      <div>
+        <p class="section-eyebrow">Who we are</p>
+        <h2 class="section-h2" id="about-heading">
+          The technology arm<br>of <em>Cellion Platforms</em>.
+        </h2>
+        <p class="about-body">
+          Cellion Labs is where regulated financial infrastructure meets
+          product execution. We identify operators — brokers, banks, MFBs —
+          who have the licence and market access, and we build the digital
+          product they've been unable to build themselves.
+        </p>
+        <p class="about-body">
+          Every application we build runs on Cellion One — Nigeria's compliance
+          and transaction infrastructure layer. KYC, escrow, company formation,
+          and bureau scoring are all available as API modules, not bolt-on
+          integrations.
+        </p>
+        <div class="about-tags" role="list" aria-label="Sectors">
+          <span class="about-tag" role="listitem">Capital markets</span>
+          <span class="about-tag" role="listitem">Retail brokerage</span>
+          <span class="about-tag" role="listitem">Trade finance</span>
+          <span class="about-tag" role="listitem">Digital banking</span>
+          <span class="about-tag" role="listitem">Insurance tech</span>
+        </div>
+      </div>
+      <div class="about-pillars" role="list" aria-label="Partnership model pillars">
+        <div class="pillar" role="listitem">
+          <div class="pillar-icon" aria-hidden="true">🏗️</div>
+          <div>
+            <p class="pillar-title">We build. You operate.</p>
+            <p class="pillar-desc">We own the technology. Partners own operations, relationships, and regulatory obligations.</p>
+          </div>
+        </div>
+        <div class="pillar" role="listitem">
+          <div class="pillar-icon" aria-hidden="true">💰</div>
+          <div>
+            <p class="pillar-title">Revenue share, not fees.</p>
+            <p class="pillar-desc">No upfront development cost. We take a revenue share once the product is live and generating income.</p>
+          </div>
+        </div>
+        <div class="pillar" role="listitem">
+          <div class="pillar-icon" aria-hidden="true">🔧</div>
+          <div>
+            <p class="pillar-title">Built on real infrastructure.</p>
+            <p class="pillar-desc">Every Labs product runs on Cellion One — no third-party KYC integrations, no stitched-together middleware.</p>
+          </div>
+        </div>
+        <div class="pillar" role="listitem">
+          <div class="pillar-icon" aria-hidden="true">📈</div>
+          <div>
+            <p class="pillar-title">Equity where it makes sense.</p>
+            <p class="pillar-desc">For the right partners, we take equity in the operating entity alongside revenue share.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW WE WORK -->
+<section id="how" aria-labelledby="how-heading">
+  <div class="section-inner">
+    <p class="section-eyebrow">The partnership model</p>
+    <h2 class="section-h2" id="how-heading">
+      Four steps from first conversation<br>
+      to <em>live application</em>.
+    </h2>
+    <div class="steps-grid" role="list" aria-label="Partnership steps">
+      <div class="step" role="listitem">
+        <p class="step-num">01</p>
+        <p class="step-title">Discovery</p>
+        <p class="step-desc">We map your market, your regulatory position, and what your clients actually need. One conversation.</p>
+      </div>
+      <div class="step" role="listitem">
+        <p class="step-num">02</p>
+        <p class="step-title">Scope & terms</p>
+        <p class="step-desc">We propose the product, the revenue model, and the timeline. No ambiguity on who owns what.</p>
+      </div>
+      <div class="step" role="listitem">
+        <p class="step-num">03</p>
+        <p class="step-title">Build</p>
+        <p class="step-desc">We build on Cellion One infrastructure. You review at every milestone. Typically 8–16 weeks to live.</p>
+      </div>
+      <div class="step" role="listitem">
+        <p class="step-num">04</p>
+        <p class="step-title">Launch & grow</p>
+        <p class="step-desc">You take the product to market. We maintain the technology, add features, and share in the upside.</p>
+      </div>
+    </div>
+    <div class="how-note" role="note">
+      <strong>No retainer. No hourly billing.</strong> We only make money when the product makes money.
+      If it doesn't work for you, it doesn't work for us.
+    </div>
+  </div>
+</section>
+
+<!-- PORTFOLIO -->
+<section id="portfolio" aria-labelledby="portfolio-heading">
+  <div class="section-inner">
+    <div class="port-head">
+      <div>
+        <p class="section-eyebrow">What we've built</p>
+        <h2 class="section-h2" id="portfolio-heading">
+          Live products. Real operators.
+        </h2>
+      </div>
+      <span class="port-meta" aria-label="Status: 2 live, 1 in demo, 1 in build">
+        02 live &nbsp;·&nbsp; 01 in demo &nbsp;·&nbsp; 01 in build
+      </span>
+    </div>
+
+    <div class="port-grid">
+      <!-- Featured: Icon eTrade -->
+      <div class="port-card">
+        <div class="port-card-top">
+          <div class="port-card-mark" style="background:#1A3A5C;" aria-hidden="true">IE</div>
+          <span class="port-card-status status-live">Live</span>
+        </div>
+        <h3 class="port-card-name">Icon eTrade</h3>
+        <p class="port-card-tagline">icon-etrade.com</p>
+        <p class="port-card-desc">
+          A regulated retail brokerage platform for Nigerian investors —
+          built for Icon Securities, an NGX and SEC-licensed broker.
+          Full KYC onboarding, NGX equities trading via NaYa Capital OEMS,
+          and portfolio management. Revenue share with Icon Securities Ltd.
+        </p>
+        <div class="port-card-chips" role="list" aria-label="Technologies and integrations">
+          <span class="chip" role="listitem">NGX</span>
+          <span class="chip" role="listitem">SEC licensed</span>
+          <span class="chip" role="listitem">NaYa OEMS</span>
+          <span class="chip" role="listitem">Paystack</span>
+          <span class="chip" role="listitem">Cellion KYC</span>
+          <span class="chip" role="listitem">CSCS</span>
+        </div>
+      </div>
+
+      <!-- Side column -->
+      <div class="port-side">
+        <!-- Aprisys -->
+        <div class="port-card">
+          <div class="port-card-top">
+            <div class="port-card-mark" style="background:#0f766e;" aria-hidden="true">AP</div>
+            <span class="port-card-status status-live">Live</span>
+          </div>
+          <h3 class="port-card-name">Aprisys</h3>
+          <p class="port-card-tagline">aprisys.com</p>
+          <p class="port-card-desc">
+            Capital markets intelligence for Nigerian brokers and institutional investors.
+            NGX100 data, deal flow signals, and OTC execution tools.
+          </p>
+          <div class="port-card-chips" role="list" aria-label="Integrations">
+            <span class="chip" role="listitem">NGX data</span>
+            <span class="chip" role="listitem">FMDQ</span>
+            <span class="chip" role="listitem">CIE engine</span>
+          </div>
+        </div>
+
+        <!-- Gravitas -->
+        <div class="port-card">
+          <div class="port-card-top">
+            <div class="port-card-mark" style="background:#374151;" aria-hidden="true">GR</div>
+            <span class="port-card-status status-demo">In demo</span>
+          </div>
+          <h3 class="port-card-name">Gravitas</h3>
+          <p class="port-card-tagline">Broker intelligence platform</p>
+          <p class="port-card-desc">
+            Broker research distribution — powered by Cellion One intelligence,
+            white-labelled for licensed brokers.
+          </p>
+          <div class="port-card-chips" role="list" aria-label="Status">
+            <span class="chip" role="listitem">White-label</span>
+            <span class="chip" role="listitem">Broker-attributed</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INFRASTRUCTURE -->
+<section id="infra" aria-labelledby="infra-heading">
+  <div class="section-inner">
+    <p class="section-eyebrow">Built on</p>
+    <h2 class="section-h2" id="infra-heading">
+      Every Cellion Labs app runs<br>on <em>Cellion One</em>.
+    </h2>
+    <p class="section-sub">
+      Cellion One is Nigeria's compliance and transaction infrastructure layer.
+      Every Labs product inherits KYC, escrow, bureau scoring, and company
+      formation without rebuilding them.
+    </p>
+    <div class="infra-grid" role="list" aria-label="Cellion One modules">
+      <div class="infra-module" role="listitem">
+        <p class="infra-module-label">/identity</p>
+        <p class="infra-module-name">KYC / KYB</p>
+        <p class="infra-module-desc">BVN, NIN, biometric liveness, AML screening via Smile ID.</p>
+      </div>
+      <div class="infra-module" role="listitem">
+        <p class="infra-module-label">/escrow</p>
+        <p class="infra-module-name">Escrow API</p>
+        <p class="infra-module-desc">Programmable escrow with Paystack settlement and split payments.</p>
+      </div>
+      <div class="infra-module" role="listitem">
+        <p class="infra-module-label">/bureau</p>
+        <p class="infra-module-name">ClearLedger</p>
+        <p class="infra-module-desc">Financial identity bureau — score any individual or business by BVN or NIN.</p>
+      </div>
+      <div class="infra-module" role="listitem">
+        <p class="infra-module-label">/formation</p>
+        <p class="infra-module-name">Company formation</p>
+        <p class="infra-module-desc">CAC registration, CAMA 2020 compliance, statutory document generation.</p>
+      </div>
+      <div class="infra-module" role="listitem">
+        <p class="infra-module-label">/intelligence</p>
+        <p class="infra-module-name">CIE Engine</p>
+        <p class="infra-module-desc">NGX market intelligence — price signals, sector analysis, daily reports.</p>
+      </div>
+      <div class="infra-module" role="listitem">
+        <p class="infra-module-label">/developers</p>
+        <p class="infra-module-name">Developer portal</p>
+        <p class="infra-module-desc">Self-service API keys, usage dashboard, and sandbox environment.</p>
+      </div>
+    </div>
+    <div class="infra-cta">
+      <a href="https://cellionone.com/developers" target="_blank" rel="noopener" class="btn-infra">
+        Explore the API →
+      </a>
+      <a href="https://cellionone.com" target="_blank" rel="noopener" class="infra-link">
+        cellionone.com
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- CONTACT -->
+<section id="contact" aria-labelledby="contact-heading">
+  <div class="section-inner">
+    <div class="contact-grid">
+      <div>
+        <p class="section-eyebrow">Work with us</p>
+        <h2 class="section-h2" id="contact-heading">
+          Have a licence.<br>Need a <em>product</em>?
+        </h2>
+        <p class="contact-body">
+          If you're a regulated operator — broker, bank, MFB, or insurance firm —
+          and you've been unable to build the digital product your clients need,
+          we should talk.
+        </p>
+        <p class="contact-body">
+          We're particularly interested in partnerships in capital markets,
+          digital lending, and insurance. We move fast and we don't charge
+          for discovery.
+        </p>
+        <div class="contact-details" role="list" aria-label="Contact information">
+          <div class="contact-detail" role="listitem">
+            <span class="contact-detail-icon" aria-hidden="true">✉</span>
+            <div>
+              <p class="contact-detail-label">Email</p>
+              <p class="contact-detail-value">
+                <a href="mailto:labs@cellionone.com">labs@cellionone.com</a>
+              </p>
+            </div>
+          </div>
+          <div class="contact-detail" role="listitem">
+            <span class="contact-detail-icon" aria-hidden="true">🌐</span>
+            <div>
+              <p class="contact-detail-label">Platform</p>
+              <p class="contact-detail-value">
+                <a href="https://cellionone.com" target="_blank" rel="noopener">cellionone.com</a>
+              </p>
+            </div>
+          </div>
+          <div class="contact-detail" role="listitem">
+            <span class="contact-detail-icon" aria-hidden="true">📍</span>
+            <div>
+              <p class="contact-detail-label">Locations</p>
+              <p class="contact-detail-value">Lagos, Nigeria &amp; Rugby, United Kingdom</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="contact-form">
+        <form id="contactForm" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="name">Your name</label>
+            <input class="form-input" type="text" id="name" name="name"
+                   placeholder="Chidi Nwosu" autocomplete="name" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="org">Organisation</label>
+            <input class="form-input" type="text" id="org" name="org"
+                   placeholder="Meristem Securities" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="email">Work email</label>
+            <input class="form-input" type="email" id="email" name="email"
+                   placeholder="chidi@meristem.com" autocomplete="email" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="message">What are you trying to build?</label>
+            <textarea class="form-textarea" id="message" name="message"
+                      placeholder="e.g. A digital trading platform for our retail brokerage clients..."
+                      required></textarea>
+          </div>
+          <button type="submit" class="form-submit" id="submitBtn">
+            Send message
+          </button>
+        </form>
+        <div id="formSuccess" style="display:none; text-align:center; padding: 40px 0;">
+          <div style="font-size:36px; margin-bottom:16px;" aria-hidden="true">✓</div>
+          <p style="font-size:17px; font-weight:600; color:var(--ink); margin-bottom:8px;">Message sent</p>
+          <p style="font-size:14px; color:var(--muted);">We'll be in touch within 2 business days.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div>
+      <a href="/" class="footer-logo-wrap" aria-label="Cellion Labs home">
+        <div class="footer-mark" aria-hidden="true">CL</div>
+        <span class="footer-name">Cellion <span>Labs</span></span>
+      </a>
+    </div>
+    <ul class="footer-links" role="list">
+      <li><a href="https://cellionone.com" target="_blank" rel="noopener">Cellion One</a></li>
+      <li><a href="https://clearledger.africa" target="_blank" rel="noopener">ClearLedger</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ul>
+    <div class="footer-right" role="contentinfo">
+      <p>© 2026 Cellion Platforms Ltd</p>
+      <p>The application building arm of Cellion Platforms</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const form = document.getElementById('contactForm');
+  const success = document.getElementById('formSuccess');
+  const submitBtn = document.getElementById('submitBtn');
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    const required = form.querySelectorAll('[required]');
+    let valid = true;
+
+    required.forEach(function(field) {
+      field.style.borderColor = '';
+      field.style.borderWidth = '';
+      if (!field.value.trim()) {
+        field.style.borderColor = '#dc2626';
+        valid = false;
+      }
+    });
+
+    if (!valid) return;
+
+    submitBtn.textContent = 'Sending...';
+    submitBtn.disabled = true;
+
+    setTimeout(function() {
+      form.style.display = 'none';
+      success.style.display = 'block';
+    }, 800);
+  });
+
+  form.querySelectorAll('input, textarea').forEach(function(field) {
+    field.addEventListener('blur', function() {
+      if (field.hasAttribute('required') && !field.value.trim()) {
+        field.style.borderColor = '#dc2626';
+      } else {
+        field.style.borderColor = '';
+        field.style.borderWidth = '';
+      }
+    });
+  });
+</script>
+
+</body>
+</html>

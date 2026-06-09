@@ -13,7 +13,7 @@ export function registerPublicApiRoutes(app: Express) {
           escrow: { status: "operational" },
           intelligence: { status: "operational" },
           formation: { status: "operational" },
-          bureau: { status: "coming_soon" }
+          bureau: { status: "operational", endpoints: 3 }
         }
       },
       timestamp: new Date().toISOString()

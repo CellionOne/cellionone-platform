@@ -1,0 +1,192 @@
+{
+  "receive_tender": {
+    "sales_director": "I",
+    "head_of_sales": "AR",
+    "sales_strategy": "I",
+    "finance_director": "I",
+    "head_of_function": "I",
+    "executive_team": "I",
+    "group": "I",
+    "supporting_functions": "I"
+  },
+  "notify_inner_circle": {
+    "sales_director": "A",
+    "head_of_sales": "R",
+    "sales_strategy": "S",
+    "finance_director": "-",
+    "head_of_function": "-",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "I"
+  },
+  "interpret_requirements": {
+    "sales_director": "-",
+    "head_of_sales": "AR",
+    "sales_strategy": "R",
+    "finance_director": "S",
+    "head_of_function": "-",
+    "executive_team": "-",
+    "group": "I",
+    "supporting_functions": "-"
+  },
+  "initial_financial_view": {
+    "sales_director": "-",
+    "head_of_sales": "S",
+    "sales_strategy": "AR",
+    "finance_director": "AR",
+    "head_of_function": "-",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "-"
+  },
+  "brief_heads_of": {
+    "sales_director": "I",
+    "head_of_sales": "AR",
+    "sales_strategy": "R",
+    "finance_director": "S",
+    "head_of_function": "I",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "I"
+  },
+  "strategy_floor": {
+    "sales_director": "AR",
+    "head_of_sales": "S",
+    "sales_strategy": "R",
+    "finance_director": "R",
+    "head_of_function": "C",
+    "executive_team": "-",
+    "group": "C",
+    "supporting_functions": "C"
+  },
+  "submit_dtp": {
+    "sales_director": "AR",
+    "head_of_sales": "S",
+    "sales_strategy": "R",
+    "finance_director": "S",
+    "head_of_function": "-",
+    "executive_team": "I",
+    "group": "-",
+    "supporting_functions": "-"
+  },
+  "et_go_nogo": {
+    "sales_director": "I",
+    "head_of_sales": "-",
+    "sales_strategy": "-",
+    "finance_director": "-",
+    "head_of_function": "-",
+    "executive_team": "AR",
+    "group": "I",
+    "supporting_functions": "-"
+  },
+  "branch_decision": {
+    "sales_director": "AR",
+    "head_of_sales": "S",
+    "sales_strategy": "-",
+    "finance_director": "-",
+    "head_of_function": "-",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "-"
+  },
+  "communicate_strategy": {
+    "sales_director": "A",
+    "head_of_sales": "R",
+    "sales_strategy": "C",
+    "finance_director": "-",
+    "head_of_function": "I",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "-"
+  },
+  "element_loop": {
+    "sales_director": "A",
+    "head_of_sales": "R",
+    "sales_strategy": "S",
+    "finance_director": "S",
+    "head_of_function": "AR",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "R"
+  },
+  "element_exceptions": {
+    "sales_director": "I",
+    "head_of_sales": "S",
+    "sales_strategy": "S",
+    "finance_director": "A",
+    "head_of_function": "R",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "R"
+  },
+  "finalise_mpl": {
+    "sales_director": "I",
+    "head_of_sales": "S",
+    "sales_strategy": "AR",
+    "finance_director": "A",
+    "head_of_function": "-",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "-"
+  },
+  "collate_proposal": {
+    "sales_director": "I",
+    "head_of_sales": "AR",
+    "sales_strategy": "R",
+    "finance_director": "-",
+    "head_of_function": "R",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "-"
+  },
+  "review_outputs": {
+    "sales_director": "AR",
+    "head_of_sales": "S",
+    "sales_strategy": "R",
+    "finance_director": "R",
+    "head_of_function": "-",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "-"
+  },
+  "co_approve": {
+    "sales_director": "AR",
+    "head_of_sales": "S",
+    "sales_strategy": "S",
+    "finance_director": "AR",
+    "head_of_function": "C",
+    "executive_team": "I",
+    "group": "C",
+    "supporting_functions": "C"
+  },
+  "et_approve_submission": {
+    "sales_director": "I",
+    "head_of_sales": "-",
+    "sales_strategy": "I",
+    "finance_director": "-",
+    "head_of_function": "-",
+    "executive_team": "AR",
+    "group": "C",
+    "supporting_functions": "C"
+  },
+  "submit_to_customer": {
+    "sales_director": "A",
+    "head_of_sales": "R",
+    "sales_strategy": "-",
+    "finance_director": "-",
+    "head_of_function": "-",
+    "executive_team": "-",
+    "group": "-",
+    "supporting_functions": "-"
+  },
+  "post_submission": {
+    "sales_director": "A",
+    "head_of_sales": "R",
+    "sales_strategy": "R",
+    "finance_director": "S",
+    "head_of_function": "-",
+    "executive_team": "I",
+    "group": "I",
+    "supporting_functions": "R"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "description": "Configurable rules for light-path vs full-path branch routing at Day 3.",
+  "light_path_criteria": {
+    "is_renewal_required": true,
+    "max_contract_value_gbp": 500000,
+    "max_working_days_deadline": 5
+  },
+  "note": "ALL three criteria must be met for the system to suggest light path. Sales Director confirms."
+}

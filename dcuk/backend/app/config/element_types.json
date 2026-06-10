@@ -1,0 +1,66 @@
+[
+  {
+    "key": "fb_cost",
+    "name": "F&B Cost",
+    "display_order": 1,
+    "description": "Food and beverage costing using current rate cards and APL pricing.",
+    "primary_persona": "head_of_function",
+    "template_sections": ["scope", "rate_card_reference", "apl_items", "recipe_references", "cost_summary", "assumptions", "exceptions"]
+  },
+  {
+    "key": "culinary_proposition",
+    "name": "Culinary Proposition",
+    "display_order": 2,
+    "description": "Menu design, culinary concept, and food quality proposition for the customer.",
+    "primary_persona": "supporting_functions",
+    "template_sections": ["concept_overview", "menu_structure", "recipe_selection", "dietary_requirements", "presentation_standards", "special_requirements"]
+  },
+  {
+    "key": "price",
+    "name": "Price",
+    "display_order": 3,
+    "description": "Pricing structure, MPL inputs, margin application, and pricing rationale.",
+    "primary_persona": "sales_strategy",
+    "template_sections": ["pricing_approach", "margin_parameters", "price_per_route", "sensitivity_analysis", "floor_compliance", "pricing_rationale"]
+  },
+  {
+    "key": "procurement",
+    "name": "Procurement",
+    "display_order": 4,
+    "description": "Supply chain, supplier selection, APL compliance, and non-F&B cost inputs.",
+    "primary_persona": "head_of_function",
+    "template_sections": ["supplier_list", "apl_compliance", "non_fb_cost_breakdown", "supply_chain_risk", "procurement_exceptions", "lead_times"]
+  },
+  {
+    "key": "business_info",
+    "name": "Business Info",
+    "display_order": 5,
+    "description": "Company background, credentials, certifications, and capacity statements.",
+    "primary_persona": "head_of_sales",
+    "template_sections": ["company_overview", "credentials", "certifications", "capacity_statement", "key_personnel", "case_studies"]
+  },
+  {
+    "key": "contract_legal",
+    "name": "Contract (Legal)",
+    "display_order": 6,
+    "description": "Contract terms, legal clauses, rights review, and deviation flagging.",
+    "primary_persona": "supporting_functions",
+    "template_sections": ["contract_review", "key_terms", "clause_deviations", "rights_analysis", "legal_risks", "recommended_positions"]
+  },
+  {
+    "key": "ops_solution",
+    "name": "Ops Solution",
+    "display_order": 7,
+    "description": "Operational delivery model, staffing, kitchen capacity, and SLA commitments.",
+    "primary_persona": "supporting_functions",
+    "template_sections": ["delivery_model", "kitchen_capacity", "staffing_plan", "sla_commitments", "contingency", "operational_risks"]
+  },
+  {
+    "key": "value_proposition",
+    "name": "Value Proposition",
+    "display_order": 8,
+    "description": "Win strategy narrative, differentiators, and commercial value to the customer.",
+    "primary_persona": "sales_director",
+    "template_sections": ["executive_summary", "key_differentiators", "win_themes", "customer_specific_value", "innovation_highlights", "commitment_statement"]
+  }
+]

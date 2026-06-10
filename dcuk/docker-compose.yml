@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: dcuk
+      POSTGRES_PASSWORD: dcuk2026
+      POSTGRES_DB: dcuk_tender
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dcuk -d dcuk_tender"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql://dcuk:dcuk2026@db:5432/dcuk_tender
+      SECRET_KEY: dcuk-demo-secret-2026
+      UPLOAD_DIR: /uploads
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/uploads
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "cd /app &&
+             alembic upgrade head &&
+             python -m app.seed.run_seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

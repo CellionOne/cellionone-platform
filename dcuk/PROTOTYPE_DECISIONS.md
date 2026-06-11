@@ -1,4 +1,4 @@
-# dCUK Tender Management — Prototype Decisions
+# ACS Tender Management — Prototype Decisions
 
 *Branch: `claude/laughing-bell-9idlo1` | Built: June 2026*
 
@@ -83,20 +83,20 @@ A Phase 2 enhancement note is displayed to users on the upload page.
 
 | Name | Email | Persona |
 |---|---|---|
-| Sarah Mitchell | sarah.mitchell@dcuk.demo | Sales Director |
-| James Patel | james.patel@dcuk.demo | Head of Sales |
-| Priya Sharma | priya.sharma@dcuk.demo | Sales Strategy |
-| David Okafor | david.okafor@dcuk.demo | Sales Strategy |
-| Emma Thornton | emma.thornton@dcuk.demo | Finance Director |
-| Marcus Webb | marcus.webb@dcuk.demo | Head of Function (Culinary) |
-| Aisha Malik | aisha.malik@dcuk.demo | Head of Function (Ops) |
-| Robert Chen | robert.chen@dcuk.demo | Executive Team |
-| Helen Foster | helen.foster@dcuk.demo | Executive Team |
-| Vijay Nair | vijay.nair@dcuk.demo | Group |
-| Claudia Reyes | claudia.reyes@dcuk.demo | Supporting Functions |
-| Tom Barker | tom.barker@dcuk.demo | Supporting Functions |
-| Diane Wu | diane.wu@dcuk.demo | Finance Director |
-| Kwame Asante | kwame.asante@dcuk.demo | Head of Sales |
+| Sarah Mitchell | sarah.mitchell@acs.demo | Sales Director |
+| James Patel | james.patel@acs.demo | Head of Sales |
+| Priya Sharma | priya.sharma@acs.demo | Sales Strategy |
+| David Okafor | david.okafor@acs.demo | Sales Strategy |
+| Emma Thornton | emma.thornton@acs.demo | Finance Director |
+| Marcus Webb | marcus.webb@acs.demo | Head of Function (Culinary) |
+| Aisha Malik | aisha.malik@acs.demo | Head of Function (Ops) |
+| Robert Chen | robert.chen@acs.demo | Executive Team |
+| Helen Foster | helen.foster@acs.demo | Executive Team |
+| Vijay Nair | vijay.nair@acs.demo | Group |
+| Claudia Reyes | claudia.reyes@acs.demo | Supporting Functions |
+| Tom Barker | tom.barker@acs.demo | Supporting Functions |
+| Diane Wu | diane.wu@acs.demo | Finance Director |
+| Kwame Asante | kwame.asante@acs.demo | Head of Sales |
 
 ---
 
@@ -119,4 +119,4 @@ A Phase 2 enhancement note is displayed to users on the upload page.
 - Email / Teams notifications (stage advance events fire no external calls)
 - Document storage (S3 / SharePoint) — uploads go to local `uploads/` volume
 - Row-level security (Postgres RLS) — currently all-or-nothing per persona
-- Multi-tenant (this prototype is single-tenant dCUK)
+- Multi-tenant (this prototype is single-tenant ACS)

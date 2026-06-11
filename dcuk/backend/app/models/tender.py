@@ -7,7 +7,7 @@ class Tender(Base):
     __tablename__ = "tenders"
 
     id = Column(Integer, primary_key=True, index=True)
-    tender_ref = Column(String, unique=True, nullable=False, index=True)  # DCUK-2026-NNNN
+    tender_ref = Column(String, unique=True, nullable=False, index=True)  # ACS-2026-NNNN
     airline_id = Column(Integer, ForeignKey("airlines.id"), nullable=True)
     customer_name = Column(String, nullable=False)
     received_date = Column(DateTime(timezone=True), nullable=False)

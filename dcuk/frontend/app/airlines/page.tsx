@@ -14,7 +14,7 @@ interface Airline {
   uk_airports_served: string[]
   estimated_annual_spend_gbp_m: number | null
   estimated_next_review_date: string | null
-  is_dcuk_customer: boolean
+  is_acs_customer: boolean
 }
 
 export default function AirlinesPage() {
@@ -100,8 +100,8 @@ export default function AirlinesPage() {
                   <td className="px-4 py-3 text-xs text-gray-600">{formatDate(a.estimated_next_review_date)}</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium
-                      ${a.is_dcuk_customer ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                      {a.is_dcuk_customer ? "dCUK customer" : "prospect"}
+                      ${a.is_acs_customer ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                      {a.is_acs_customer ? "ACS customer" : "prospect"}
                     </span>
                   </td>
                 </tr>

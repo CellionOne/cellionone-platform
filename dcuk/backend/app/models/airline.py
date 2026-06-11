@@ -16,7 +16,7 @@ class Airline(Base):
     estimated_next_review_date = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
     is_illustrative = Column(Boolean, default=True)
-    is_dcuk_customer = Column(Boolean, default=False)
+    is_acs_customer = Column(Boolean, default=False)
 
 
 class AirportPresence(Base):
@@ -25,5 +25,5 @@ class AirportPresence(Base):
     id = Column(Integer, primary_key=True)
     airline_id = Column(Integer, nullable=False, index=True)
     airport_code = Column(String, nullable=False)
-    current_caterer = Column(String, nullable=False)  # "dcuk" | competitor name | "unknown"
-    is_dcuk = Column(Boolean, default=False)
+    current_caterer = Column(String, nullable=False)  # "acs" | competitor name | "unknown"
+    is_acs = Column(Boolean, default=False)

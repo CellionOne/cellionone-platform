@@ -2,22 +2,22 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null
-  return localStorage.getItem("dcuk_token")
+  return localStorage.getItem("acs_token")
 }
 
 export function setToken(token: string, user: object) {
-  localStorage.setItem("dcuk_token", token)
-  localStorage.setItem("dcuk_user", JSON.stringify(user))
+  localStorage.setItem("acs_token", token)
+  localStorage.setItem("acs_user", JSON.stringify(user))
 }
 
 export function clearToken() {
-  localStorage.removeItem("dcuk_token")
-  localStorage.removeItem("dcuk_user")
+  localStorage.removeItem("acs_token")
+  localStorage.removeItem("acs_user")
 }
 
 export function getUser(): Record<string, string> | null {
   if (typeof window === "undefined") return null
-  const raw = localStorage.getItem("dcuk_user")
+  const raw = localStorage.getItem("acs_user")
   return raw ? JSON.parse(raw) : null
 }
 

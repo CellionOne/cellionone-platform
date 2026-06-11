@@ -19,10 +19,10 @@ def _airline_dict(a: Airline, presence: list) -> dict:
         "estimated_annual_spend_gbp_m": a.estimated_annual_spend_gbp_m,
         "estimated_next_review_date": a.estimated_next_review_date.isoformat() if a.estimated_next_review_date else None,
         "notes": a.notes,
-        "is_dcuk_customer": a.is_dcuk_customer,
+        "is_acs_customer": a.is_acs_customer,
         "is_illustrative": a.is_illustrative,
         "airport_presence": [
-            {"airport": p.airport_code, "caterer": p.current_caterer, "is_dcuk": p.is_dcuk}
+            {"airport": p.airport_code, "caterer": p.current_caterer, "is_acs": p.is_acs}
             for p in presence
         ],
     }
@@ -31,15 +31,15 @@ def _airline_dict(a: Airline, presence: list) -> dict:
 @router.get("/")
 def list_airlines(
     type: str | None = None,
-    is_dcuk: bool | None = None,
+    is_acs: bool | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     q = db.query(Airline)
     if type:
         q = q.filter(Airline.type == type)
-    if is_dcuk is not None:
-        q = q.filter(Airline.is_dcuk_customer == is_dcuk)
+    if is_acs is not None:
+        q = q.filter(Airline.is_acs_customer == is_acs)
     airlines = q.order_by(Airline.estimated_next_review_date.asc()).all()
     airline_ids = [a.id for a in airlines]
     presence_all = db.query(AirportPresence).filter(AirportPresence.airline_id.in_(airline_ids)).all()
@@ -66,7 +66,7 @@ def contract_pipeline(db: Session = Depends(get_db), current_user=Depends(get_cu
             "type": a.type,
             "review_date": a.estimated_next_review_date.isoformat() if a.estimated_next_review_date else None,
             "spend_gbp_m": a.estimated_annual_spend_gbp_m,
-            "is_dcuk_customer": a.is_dcuk_customer,
+            "is_acs_customer": a.is_acs_customer,
             "uk_airports": a.uk_airports_served,
         }
         for a in airlines
@@ -94,7 +94,7 @@ def competitor_map(db: Session = Depends(get_db), current_user=Depends(get_curre
                 "name": airline.name,
                 "caterer": caterer,
                 "spend_gbp_m": spend,
-                "is_dcuk": p.is_dcuk,
+                "is_acs": p.is_acs,
             })
 
     return list(by_airport.values())
@@ -102,13 +102,13 @@ def competitor_map(db: Session = Depends(get_db), current_user=Depends(get_curre
 
 @router.get("/global-opportunities")
 def global_opportunities(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """For Widget C — airlines not currently dCUK customers but where dnata Group has presence."""
-    dnata_countries = {"UAE", "Singapore", "India", "Australia", "Canada", "USA", "Japan", "Qatar"}
-    airlines = db.query(Airline).filter(Airline.is_dcuk_customer == False).all()  # noqa
+    """For Widget C — airlines not currently ACS customers but where Apex Group has presence."""
+    Apex_countries = {"UAE", "Singapore", "India", "Australia", "Canada", "USA", "Japan", "Qatar"}
+    airlines = db.query(Airline).filter(Airline.is_acs_customer == False).all()  # noqa
     result = []
     for a in airlines:
         other = set(a.other_countries_operated or [])
-        overlap = other & dnata_countries
+        overlap = other & Apex_countries
         if overlap:
             result.append({
                 "id": a.id,
@@ -117,7 +117,7 @@ def global_opportunities(db: Session = Depends(get_db), current_user=Depends(get
                 "hq_country": a.hq_country,
                 "spend_gbp_m": a.estimated_annual_spend_gbp_m,
                 "review_date": a.estimated_next_review_date.isoformat() if a.estimated_next_review_date else None,
-                "dnata_overlap_countries": list(overlap),
+                "Apex_overlap_countries": list(overlap),
                 "uk_airports": a.uk_airports_served,
             })
     result.sort(key=lambda x: x["spend_gbp_m"] or 0, reverse=True)

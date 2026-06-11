@@ -13,20 +13,20 @@ interface Airline {
   type: string
   review_date: string | null
   spend_gbp_m: number | null
-  is_dcuk_customer: boolean
+  is_acs_customer: boolean
   uk_airports: string[]
-  dnata_overlap_countries?: string[]
+  Apex_overlap_countries?: string[]
 }
 
 interface AirportData {
   airport: string
   total_spend: number
   caterers: Record<string, number>
-  airlines: Array<{ name: string; caterer: string; spend_gbp_m: number; is_dcuk: boolean }>
+  airlines: Array<{ name: string; caterer: string; spend_gbp_m: number; is_acs: boolean }>
 }
 
 const CATERER_COLOURS: Record<string, string> = {
-  "dcuk": "#3b5bdb",
+  "acs": "#3b5bdb",
   "Gate Gourmet": "#f03e3e",
   "Alpha LSG": "#f59e0b",
   "Swissport": "#7950f2",
@@ -103,8 +103,8 @@ export default function SalesStrategyDashboard() {
                       <div className={`text-xs ${monthsOut && monthsOut <= 3 ? "text-red-600 font-medium" : monthsOut && monthsOut <= 6 ? "text-amber-600" : "text-gray-500"}`}>
                         {monthsOut != null ? `${monthsOut}m` : ""}
                       </div>
-                      <div className={`text-xs px-1.5 py-0.5 rounded mt-0.5 inline-block ${a.is_dcuk_customer ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-600"}`}>
-                        {a.is_dcuk_customer ? "dCUK" : "competitor"}
+                      <div className={`text-xs px-1.5 py-0.5 rounded mt-0.5 inline-block ${a.is_acs_customer ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-600"}`}>
+                        {a.is_acs_customer ? "ACS" : "competitor"}
                       </div>
                     </div>
                   </Link>
@@ -164,7 +164,7 @@ export default function SalesStrategyDashboard() {
           {/* Widget C — Global Opportunities */}
           <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-gray-700 mb-1">Global opportunity finder</h2>
-            <p className="text-xs text-gray-400 mb-4">Airlines not yet dCUK customers where dnata Group has presence</p>
+            <p className="text-xs text-gray-400 mb-4">Airlines not yet ACS customers where Apex Group has presence</p>
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {opportunities.slice(0, 12).map(a => (
                 <Link key={a.id} href={`/airlines/${a.id}`}
@@ -172,7 +172,7 @@ export default function SalesStrategyDashboard() {
                   <div>
                     <div className="text-sm font-medium text-gray-900">{a.name}</div>
                     <div className="text-xs text-gray-500">
-                      dnata overlap: {a.dnata_overlap_countries?.join(", ")}
+                      Apex overlap: {a.Apex_overlap_countries?.join(", ")}
                     </div>
                   </div>
                   <div className="text-right">

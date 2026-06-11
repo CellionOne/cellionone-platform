@@ -63,7 +63,7 @@ def upgrade() -> None:
         sa.Column("estimated_next_review_date", sa.Date),
         sa.Column("notes", sa.Text),
         sa.Column("is_illustrative", sa.Boolean, default=True),
-        sa.Column("is_dcuk_customer", sa.Boolean, default=False),
+        sa.Column("is_acs_customer", sa.Boolean, default=False),
     )
 
     op.create_table("airport_presence",
@@ -71,7 +71,7 @@ def upgrade() -> None:
         sa.Column("airline_id", sa.Integer, sa.ForeignKey("airlines.id"), nullable=False),
         sa.Column("airport_code", sa.String, nullable=False),
         sa.Column("current_caterer", sa.String, nullable=False),
-        sa.Column("is_dcuk", sa.Boolean, default=False),
+        sa.Column("is_acs", sa.Boolean, default=False),
     )
 
     op.create_table("tenders",

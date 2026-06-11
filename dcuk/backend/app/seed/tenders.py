@@ -16,7 +16,7 @@ def _days_from_now(n):
 
 SAMPLE_TENDERS = [
     {
-        "tender_ref": "DCUK-2026-0001",
+        "tender_ref": "ACS-2026-0001",
         "customer_name": "Emerald Skies",
         "current_stage_key": "receive_tender",
         "branch": "pending",
@@ -29,7 +29,7 @@ SAMPLE_TENDERS = [
         "notes": "Day 0 — just received. Atria extraction complete. Inner Circle to be notified.",
     },
     {
-        "tender_ref": "DCUK-2026-0002",
+        "tender_ref": "ACS-2026-0002",
         "customer_name": "Crescent Air",
         "current_stage_key": "initial_financial_view",
         "branch": "full",
@@ -42,7 +42,7 @@ SAMPLE_TENDERS = [
         "notes": "Day 1–2 — initial financial view in progress. High-value new logo.",
     },
     {
-        "tender_ref": "DCUK-2026-0003",
+        "tender_ref": "ACS-2026-0003",
         "customer_name": "Polar Atlantic",
         "current_stage_key": "strategy_floor",
         "branch": "full",
@@ -55,7 +55,7 @@ SAMPLE_TENDERS = [
         "notes": "Day 2 — strategy meeting just held. Floor set at £2.8m (8% margin). Proceeding to DTP.",
     },
     {
-        "tender_ref": "DCUK-2026-0004",
+        "tender_ref": "ACS-2026-0004",
         "customer_name": "Meridian Express",
         "current_stage_key": "et_go_nogo",
         "branch": "full",
@@ -68,7 +68,7 @@ SAMPLE_TENDERS = [
         "notes": "Day 3 — DTP submitted. ET 24h SLA counting. High-value strategic tender.",
     },
     {
-        "tender_ref": "DCUK-2026-0005",
+        "tender_ref": "ACS-2026-0005",
         "customer_name": "Aurora Air",
         "current_stage_key": "element_loop",
         "branch": "full",
@@ -81,7 +81,7 @@ SAMPLE_TENDERS = [
         "notes": "Day 3–5 — element loop running. 6 of 8 elements in progress.",
     },
     {
-        "tender_ref": "DCUK-2026-0006",
+        "tender_ref": "ACS-2026-0006",
         "customer_name": "Highland Carrier",
         "current_stage_key": "finalise_mpl",
         "branch": "full",
@@ -94,7 +94,7 @@ SAMPLE_TENDERS = [
         "notes": "Day 5 — MPL being finalised. Sales Strategy AR, FD review in progress.",
     },
     {
-        "tender_ref": "DCUK-2026-0007",
+        "tender_ref": "ACS-2026-0007",
         "customer_name": "Cobalt Airlines",
         "current_stage_key": "et_approve_submission",
         "branch": "full",
@@ -107,7 +107,7 @@ SAMPLE_TENDERS = [
         "notes": "Day 11 — ET approval pending. Co-approval complete.",
     },
     {
-        "tender_ref": "DCUK-2026-0008",
+        "tender_ref": "ACS-2026-0008",
         "customer_name": "Saffron Express",
         "current_stage_key": "submit_to_customer",
         "branch": "full",
@@ -120,7 +120,7 @@ SAMPLE_TENDERS = [
         "notes": "Day 12 — ET approved. Ready for customer submission.",
     },
     {
-        "tender_ref": "DCUK-2026-0009",
+        "tender_ref": "ACS-2026-0009",
         "customer_name": "Clover Aviation",
         "current_stage_key": "branch_decision",
         "branch": "light",
@@ -146,11 +146,11 @@ def seed_tenders(db):
     if db.query(Tender).count() > 0:
         return
 
-    head_of_sales = db.query(User).filter_by(email="james.patel@dcuk.demo").first()
-    sales_director = db.query(User).filter_by(email="sarah.mitchell@dcuk.demo").first()
-    sales_strategy = db.query(User).filter_by(email="priya.sharma@dcuk.demo").first()
-    finance_director = db.query(User).filter_by(email="michael.oconnor@dcuk.demo").first()
-    aisha = db.query(User).filter_by(email="aisha.begum@dcuk.demo").first()
+    head_of_sales = db.query(User).filter_by(email="james.patel@acs.demo").first()
+    sales_director = db.query(User).filter_by(email="sarah.mitchell@acs.demo").first()
+    sales_strategy = db.query(User).filter_by(email="priya.sharma@acs.demo").first()
+    finance_director = db.query(User).filter_by(email="michael.oconnor@acs.demo").first()
+    aisha = db.query(User).filter_by(email="aisha.begum@acs.demo").first()
 
     now = _now()
 

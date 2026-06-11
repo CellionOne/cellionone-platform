@@ -21,7 +21,7 @@ export default function AirlineDetailPage() {
   if (loading) return <Layout><div className="p-8 text-gray-500">Loading…</div></Layout>
   if (!airline) return <Layout><div className="p-8 text-red-500">Airline not found</div></Layout>
 
-  const presence = airline.airport_presence as Array<{ airport: string; caterer: string; is_dcuk: boolean }> || []
+  const presence = airline.airport_presence as Array<{ airport: string; caterer: string; is_acs: boolean }> || []
 
   return (
     <Layout>
@@ -54,10 +54,10 @@ export default function AirlineDetailPage() {
                 <dd className="font-medium">{formatDate(airline.estimated_next_review_date as string)}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500">dCUK customer</dt>
+                <dt className="text-gray-500">ACS customer</dt>
                 <dd>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${airline.is_dcuk_customer ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                    {airline.is_dcuk_customer ? "Yes" : "No — prospect"}
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${airline.is_acs_customer ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                    {airline.is_acs_customer ? "Yes" : "No — prospect"}
                   </span>
                 </dd>
               </div>
@@ -78,7 +78,7 @@ export default function AirlineDetailPage() {
                   <div key={p.airport} className="flex items-center justify-between text-sm">
                     <span className="font-medium">{p.airport}</span>
                     <span className={`text-xs px-2 py-0.5 rounded font-medium
-                      ${p.is_dcuk ? "bg-blue-100 text-blue-700" :
+                      ${p.is_acs ? "bg-blue-100 text-blue-700" :
                         p.caterer === "unknown" ? "bg-gray-100 text-gray-400" :
                         "bg-red-50 text-red-700"}`}>
                       {p.caterer}

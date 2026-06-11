@@ -2,8 +2,8 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "dCUK Tender Management",
-  description: "Illustrative prototype — dnata Catering UK tender management system",
+  title: "ACS Tender Management",
+  description: "Illustrative prototype — Apex Catering Services Ltd tender management system",
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

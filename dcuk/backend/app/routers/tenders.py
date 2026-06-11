@@ -122,7 +122,7 @@ def create_tender(body: dict, db: Session = Depends(get_db), current_user=Depend
 
     # Auto-generate tender ref
     count = db.query(Tender).count()
-    tender_ref = f"DCUK-2026-{count + 1:04d}"
+    tender_ref = f"ACS-2026-{count + 1:04d}"
 
     t = Tender(
         tender_ref=tender_ref,

@@ -3,7 +3,7 @@
 demo:
 	@echo "==> Running route audit..."
 	node scripts/route-audit.cjs
-	@echo "==> Starting dCUK Tender Management System..."
+	@echo "==> Starting ACS Tender Management System..."
 	docker compose up --build
 
 seed:
@@ -17,11 +17,11 @@ audit:
 
 dev-backend:
 	cd backend && pip install -r requirements.txt && \
-	DATABASE_URL=postgresql://dcuk:dcuk2026@localhost:5433/dcuk_tender \
+	DATABASE_URL=postgresql://acs:acs2026@localhost:5433/acs_tender \
 	alembic upgrade head && \
-	DATABASE_URL=postgresql://dcuk:dcuk2026@localhost:5433/dcuk_tender \
+	DATABASE_URL=postgresql://acs:acs2026@localhost:5433/acs_tender \
 	python -m app.seed.run_seed && \
-	DATABASE_URL=postgresql://dcuk:dcuk2026@localhost:5433/dcuk_tender \
+	DATABASE_URL=postgresql://acs:acs2026@localhost:5433/acs_tender \
 	uvicorn app.main:app --reload --port 8000
 
 dev-frontend:

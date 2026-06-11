@@ -4,14 +4,14 @@ import { useRouter } from "next/navigation"
 import { api } from "@/lib/api"
 
 const DEMO_USERS = [
-  { name: "Sarah Mitchell", email: "sarah.mitchell@dcuk.demo", role: "Sales Director" },
-  { name: "James Patel", email: "james.patel@dcuk.demo", role: "Head of Sales / BG+P" },
-  { name: "Priya Sharma", email: "priya.sharma@dcuk.demo", role: "Sales Strategy" },
-  { name: "Michael O'Connor", email: "michael.oconnor@dcuk.demo", role: "Finance Director" },
-  { name: "Aisha Begum", email: "aisha.begum@dcuk.demo", role: "Head of F&B Cost" },
-  { name: "Helen Ashworth", email: "helen.ashworth@dcuk.demo", role: "CEO (ET)" },
-  { name: "Vikram Mehta", email: "vikram.mehta@dcuk.demo", role: "Head of Legal" },
-  { name: "Jenny Liu", email: "jenny.liu@dcuk.demo", role: "H&S / Compliance" },
+  { name: "Sarah Mitchell", email: "sarah.mitchell@acs.demo", role: "Sales Director" },
+  { name: "James Patel", email: "james.patel@acs.demo", role: "Head of Sales / BG+P" },
+  { name: "Priya Sharma", email: "priya.sharma@acs.demo", role: "Sales Strategy" },
+  { name: "Michael O'Connor", email: "michael.oconnor@acs.demo", role: "Finance Director" },
+  { name: "Aisha Begum", email: "aisha.begum@acs.demo", role: "Head of F&B Cost" },
+  { name: "Helen Ashworth", email: "helen.ashworth@acs.demo", role: "CEO (ET)" },
+  { name: "Vikram Mehta", email: "vikram.mehta@acs.demo", role: "Head of Legal" },
+  { name: "Jenny Liu", email: "jenny.liu@acs.demo", role: "H&S / Compliance" },
 ]
 
 export default function LoginPage() {
@@ -40,7 +40,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="w-12 h-12 rounded-xl bg-brand-500 flex items-center justify-center text-white text-xl font-bold mx-auto mb-4">dC</div>
-          <h1 className="text-2xl font-semibold text-gray-900">dCUK Tender Management</h1>
+          <h1 className="text-2xl font-semibold text-gray-900">ACS Tender Management</h1>
           <p className="text-sm text-gray-500 mt-1">Illustrative prototype — stakeholder review</p>
         </div>
 
@@ -53,7 +53,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="first.last@dcuk.demo"
+                placeholder="first.last@acs.demo"
                 required
               />
             </div>

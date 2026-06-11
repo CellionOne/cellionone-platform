@@ -39,7 +39,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="max-w-screen-xl mx-auto px-6 flex items-center h-14 gap-6">
           <Link href="/dashboard/portfolio" className="font-semibold text-gray-900 text-sm flex items-center gap-2">
             <span className="w-7 h-7 rounded bg-brand-500 flex items-center justify-center text-white text-xs font-bold">dC</span>
-            dCUK Tender
+            ACS Tender
           </Link>
           <nav className="flex items-center gap-1 flex-1 overflow-x-auto">
             {visibleNav.map(n => (
@@ -73,7 +73,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
       <footer className="border-t border-gray-100 bg-white py-3 px-6 text-center text-xs text-gray-400">
-        dCUK Tender Management System · Illustrative prototype · Not a committed system · {new Date().getFullYear()}
+        ACS Tender Management System · Illustrative prototype · Not a committed system · {new Date().getFullYear()}
       </footer>
     </div>
   )

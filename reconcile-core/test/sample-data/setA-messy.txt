@@ -1,0 +1,11 @@
+ref|entity|date|amount
+TXN-001|Acme Corp|15th March 2024|GBP 5,000.00
+TXN-002|Globex Ltd|02-03-2024|£12,500
+TXN-003|Initech Inc|Mar 05 2024|$3,750.00
+TXN-004|Umbrella Co|07/03/2024|8200
+TXN-005|Soylent Corp|March 10, 2024|GBP 650.00
+TXN-006|Vandelay Ind|12-Mar-2024|£21,000.00
+TXN-007|Hooli Tech|2024-03-15|4,400.00
+TXN-008|Pied Piper|18/03/2024|£9,875
+TXN-009|Dunder Mifflin|20th March 2024|GBP 1,000.00
+TXN-010|Prestige Co|22-03-2024|   £33,000.00
